@@ -1,0 +1,1214 @@
+{
+  "FINAL ASSEMBLY": [
+    {
+      "pn": "046-908",
+      "desc": "VISE AND PIVOT DETAIL"
+    },
+    {
+      "pn": "1009700",
+      "desc": "HEAD FEED CONTROL ASSEM"
+    },
+    {
+      "pn": "333-258-158000",
+      "desc": "SAW BAND 1 X .035 X 158"
+    },
+    {
+      "pn": "1013577",
+      "desc": "WELD'T-SPASH SHIELD"
+    },
+    {
+      "pn": "1008608",
+      "desc": "SHIELD SPLASH WELDT REAR C916"
+    },
+    {
+      "pn": "1009405",
+      "desc": "TRAY SHORT DISCHARGE 400"
+    },
+    {
+      "pn": "199987",
+      "desc": "SCR CAP HEX SOC FLH M6X1.0X10"
+    },
+    {
+      "pn": "012420",
+      "desc": "FOOT CASTING"
+    },
+    {
+      "pn": "1009699",
+      "desc": "HEAD FEED CONTROL ASSEM FULL CYCLE"
+    }
+  ],
+  "HEAD ASSEMBLY": [
+    {
+      "pn": "6000801",
+      "desc": "400S HEAD WELD'T"
+    },
+    {
+      "pn": "225521",
+      "desc": "400 ARM ASSEMBLY"
+    },
+    {
+      "pn": "207716",
+      "desc": "BAND WIPER ASSEMBLY"
+    },
+    {
+      "pn": "1008801",
+      "desc": "BAND COVER WELDT ASSY 400"
+    },
+    {
+      "pn": "198979",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X6"
+    },
+    {
+      "pn": "1008813",
+      "desc": "COVER BAND GUARD"
+    },
+    {
+      "pn": "224156",
+      "desc": "Screw, Bttn, Hd. Cap M8-1.25 x 12"
+    }
+  ],
+  "IDLER WHEEL ASSEMBLY": [
+    {
+      "pn": "513889",
+      "desc": "HEAD SLIDE & SHAFT SUBASSY"
+    },
+    {
+      "pn": "517542",
+      "desc": "HEAD CASTING"
+    },
+    {
+      "pn": "005956",
+      "desc": "ADJUSTMENT SCREW 3/4-16X2.31 0.42DIA."
+    },
+    {
+      "pn": "1008019",
+      "desc": "TENSION HANDWHEEL SUBASSY"
+    },
+    {
+      "pn": "108749",
+      "desc": "BRNG BALL THRST 3/4X1-21/32X35/64"
+    },
+    {
+      "pn": "204138",
+      "desc": "WSHR OD:4.25X.78/THK:.1345 MILD STL"
+    },
+    {
+      "pn": "108750",
+      "desc": "SPR CPRSN 1.124X2.00X2.600 4660LB/IN"
+    },
+    {
+      "pn": "108748",
+      "desc": "TUBE RD 1.00ODX.782IDX1.75 LONG"
+    },
+    {
+      "pn": "199306",
+      "desc": "WASHER-WROUGHT, 3/4"
+    },
+    {
+      "pn": "176858",
+      "desc": "BANDWHEEL IDLER ASSY"
+    },
+    {
+      "pn": "204455",
+      "desc": "RING RTNG EXT 30MM DIA SHAFT"
+    },
+    {
+      "pn": "122652",
+      "desc": "SHIM .010"
+    },
+    {
+      "pn": "122653",
+      "desc": "SHIM .020"
+    },
+    {
+      "pn": "199976",
+      "desc": "NUT HEX JAM M10X1.5"
+    },
+    {
+      "pn": "199582",
+      "desc": "SCR CAP HEX HD M10X1.5X75 FTHD"
+    },
+    {
+      "pn": "199142",
+      "desc": "NUT HEX JAM 3/4-16"
+    },
+    {
+      "pn": "199346",
+      "desc": "WSHR SPR LK MDM M10 ZC PL"
+    },
+    {
+      "pn": "199980",
+      "desc": "SCR CAP HEX SCH M10X1.5X80"
+    }
+  ],
+  "DRIVE WHEEL ASSEMBLY": [
+    {
+      "pn": "320598",
+      "desc": "SHAFT DRIVE WHEEL"
+    },
+    {
+      "pn": "199251",
+      "desc": "SCR SET HEX SOC M10X1.5X12 CONE PT"
+    },
+    {
+      "pn": "204455",
+      "desc": "RING RTNG EXT 30MM DIA SHAFT"
+    },
+    {
+      "pn": "317088",
+      "desc": "BANDWHEEL DRIVER ASSY"
+    },
+    {
+      "pn": "122652",
+      "desc": "SHIM .010"
+    },
+    {
+      "pn": "122653",
+      "desc": "SHIM .020"
+    },
+    {
+      "pn": "320800",
+      "desc": "BAND BRUSH ASSY W/METRIC BRGS"
+    },
+    {
+      "pn": "320802",
+      "desc": "BRKT WELDT ASSY METRIC"
+    },
+    {
+      "pn": "199579",
+      "desc": "WSHR WROUGHT M6 6.4X16X1.6 THK ZC PL"
+    },
+    {
+      "pn": "199347",
+      "desc": "WSHR SPR LK MDM M6 ZC PL"
+    },
+    {
+      "pn": "199188",
+      "desc": "Hex Nut-M10X1.5"
+    },
+    {
+      "pn": "199941",
+      "desc": "B18.2.4.1M - Hex nut, Style 1, M8 x 1.25 - D-N"
+    },
+    {
+      "pn": "199899",
+      "desc": "SCR CAP HEX SOC BTNHD M6X1.0X16"
+    },
+    {
+      "pn": "1009188",
+      "desc": "DOOR SUPPORT 400"
+    },
+    {
+      "pn": "199969",
+      "desc": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "pn": "1008462",
+      "desc": "BRNG BALL 1\" 2 BOLT"
+    },
+    {
+      "pn": "198988",
+      "desc": "SCR CAP HEX HD M8X1.25X30"
+    },
+    {
+      "pn": "199967",
+      "desc": "WSHR FL M8 8.4X16X1.6 THK ZC PL"
+    },
+    {
+      "pn": "199968",
+      "desc": "LW 0.3125"
+    },
+    {
+      "pn": "132475",
+      "desc": "PINION GEAR"
+    },
+    {
+      "pn": "35-008688",
+      "desc": "RING RTNG EXT .750 DIA SHAFT"
+    },
+    {
+      "pn": "1008794",
+      "desc": "SHAFT-PINION, 400"
+    },
+    {
+      "pn": "014214",
+      "desc": "KEY PRL 3/16X3/16X3/4"
+    }
+  ],
+  "MOTOR DRIVE WHEEL ASSEMBLY": [
+    {
+      "pn": "232010",
+      "desc": "MOTOR MOUNT WELDM'T"
+    },
+    {
+      "pn": "231964",
+      "desc": "MTR 2HP 145T 208-230/460V 60HZ"
+    },
+    {
+      "pn": "231983",
+      "desc": "PLATE PULLEY COVER MOUNTING"
+    },
+    {
+      "pn": "1008792",
+      "desc": "PULLEY 1.0 BORE"
+    },
+    {
+      "pn": "004443",
+      "desc": "KEY PRL 1/4X1/4X1-1/4"
+    },
+    {
+      "pn": "232000",
+      "desc": "PULLEY V-BELT 4.75OD 7/8ID"
+    },
+    {
+      "pn": "1009175",
+      "desc": "COVER PULLEY"
+    },
+    {
+      "pn": "199969",
+      "desc": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "pn": "199974",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X10"
+    },
+    {
+      "pn": "199056",
+      "desc": "SHCS LO HD M8X1.25X16"
+    },
+    {
+      "pn": "199239",
+      "desc": "HEX HD CAP SCR M8X1.25X20"
+    },
+    {
+      "pn": "199968",
+      "desc": "LW 0.3125"
+    },
+    {
+      "pn": "198574",
+      "desc": "WSHR WROUGHT M8 8.4X20X2 THK ZC PL"
+    }
+  ],
+  "GUIDE ARM ASSEMBLY": [
+    {
+      "pn": "320590",
+      "desc": "BAR MOUNTING GUIDE ARMS"
+    },
+    {
+      "pn": "517255",
+      "desc": "SAW GUIDE ARM"
+    },
+    {
+      "pn": "011529",
+      "desc": "BRNG BALL 10IDX30ODX9W"
+    },
+    {
+      "pn": "35-004528",
+      "desc": "PLUG BTN"
+    },
+    {
+      "pn": "004269",
+      "desc": "PIN SPR 1/4X3/4"
+    },
+    {
+      "pn": "137158",
+      "desc": "INSERT ASSY (FIXED) 1\""
+    },
+    {
+      "pn": "137155",
+      "desc": "INSERT ASSY (ADJUSTABLE) 1\""
+    },
+    {
+      "pn": "124419",
+      "desc": "ADJUSTING SCREW ASSY (ST)"
+    },
+    {
+      "pn": "175449",
+      "desc": "PLUG FRICT .375X.38 BRS"
+    },
+    {
+      "pn": "1008755",
+      "desc": "KNOB GUIDE ARM"
+    },
+    {
+      "pn": "176077",
+      "desc": "SCR SOC HD SHLD M8X1.25 W/ 10MM DIAX16"
+    },
+    {
+      "pn": "199332",
+      "desc": "WASHER, SPRING LOCK 3/8"
+    },
+    {
+      "pn": "199237",
+      "desc": "B18.3.6M - M12 x 1.75 x 45 Hex Socket Type I Cup Pt. SS --N"
+    },
+    {
+      "pn": "199559",
+      "desc": "SCR SET HEX SOC M12X1.25X20mm CUP PT"
+    },
+    {
+      "pn": "198990",
+      "desc": "SHCS M12-1.75X25"
+    },
+    {
+      "pn": "198976",
+      "desc": "WSHR FL M10 10.5X20X2 THK ZC PL"
+    }
+  ],
+  "LEFT BLADE GUARD ASSEMBLY": [
+    {
+      "pn": "320595",
+      "desc": "WELD'T-LH BAND GUARD"
+    },
+    {
+      "pn": "199258",
+      "desc": "Flat Washer Type B Regular_AI"
+    },
+    {
+      "pn": "199974",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X10"
+    },
+    {
+      "pn": "1008854",
+      "desc": "SHIELD BAND 400"
+    },
+    {
+      "pn": "199332",
+      "desc": "WASHER, SPRING LOCK 3/8"
+    }
+  ],
+  "RIGHT BLADE GUARD ASSEMBLY": [
+    {
+      "pn": "199222",
+      "desc": "NUT HEX JAM M12X1.75 ZC PL"
+    },
+    {
+      "pn": "199258",
+      "desc": "Flat Washer Type B Regular_AI"
+    },
+    {
+      "pn": "199974",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X10"
+    },
+    {
+      "pn": "1009423",
+      "desc": "GUARD BAND 400"
+    },
+    {
+      "pn": "1009187",
+      "desc": "CONTROL PANEL 400"
+    },
+    {
+      "pn": "199332",
+      "desc": "WASHER, SPRING LOCK 3/8"
+    }
+  ],
+  "DOOR ASSEMBLY": [
+    {
+      "pn": "1009128",
+      "desc": "DOOR WELDT IDLER 400"
+    },
+    {
+      "pn": "1009124",
+      "desc": "DOOR WELDT DRIVE 400"
+    },
+    {
+      "pn": "201569",
+      "desc": "POCKET PULL"
+    },
+    {
+      "pn": "199299",
+      "desc": "SCR SELF-TAP, HEX HD M4.8x13"
+    },
+    {
+      "pn": "199899",
+      "desc": "SCR CAP HEX SOC BTNHD M6X1.0X16"
+    },
+    {
+      "pn": "175478",
+      "desc": "DOOR STOP"
+    },
+    {
+      "pn": "199965",
+      "desc": "WSHR WROUGHT M6 6.4X16X1.6 THK ZC PL"
+    },
+    {
+      "pn": "199245",
+      "desc": "LOCKNUT M6"
+    }
+  ],
+  "BASE ASSEMBLY": [
+    {
+      "pn": "6000056",
+      "desc": "BASE WELDT ASSY - 400S"
+    },
+    {
+      "pn": "1008176",
+      "desc": "RACK VISE 400"
+    },
+    {
+      "pn": "1008175",
+      "desc": "PLATE WEAR C916"
+    },
+    {
+      "pn": "199908",
+      "desc": "SCR CAP HEX SCH M16X2.0X50"
+    },
+    {
+      "pn": "199500",
+      "desc": "WSHR SPR LK HI-CLR M16"
+    },
+    {
+      "pn": "199246",
+      "desc": "SBHCS-M6x1.0x12"
+    },
+    {
+      "pn": "1008021",
+      "desc": "HANDLE & SCREW SUBASSY"
+    },
+    {
+      "pn": "199680",
+      "desc": "BT8.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX"
+    }
+  ],
+  "PIVOT ASSEMBLY": [
+    {
+      "pn": "1008178",
+      "desc": "PIVOT 400S"
+    },
+    {
+      "pn": "1009372",
+      "desc": "SHAFT PIVOT 400S"
+    },
+    {
+      "pn": "123156",
+      "desc": "O-RING AS568-T25 1.312X1.500X.103 V 75D"
+    },
+    {
+      "pn": "317664",
+      "desc": "PLATE PIVOT CLAMP"
+    },
+    {
+      "pn": "199969",
+      "desc": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "pn": "207712",
+      "desc": "HANDLE CLAMP M12 TAPPED"
+    },
+    {
+      "pn": "207713",
+      "desc": "STUD M12 X 1.75"
+    },
+    {
+      "pn": "35-005828",
+      "desc": "WASH 1/2 (HDN)"
+    },
+    {
+      "pn": "1008252",
+      "desc": "SPACER CLAMP SUPPORT 400S"
+    },
+    {
+      "pn": "1009378",
+      "desc": "POINTER PIVOT ANGLE 400S"
+    },
+    {
+      "pn": "316914",
+      "desc": "INDICATOR - PIVOT ANGLE"
+    },
+    {
+      "pn": "198722",
+      "desc": "SCR CAP HEX SOC BTNHD M4X0.7X6"
+    },
+    {
+      "pn": "2277",
+      "desc": "RING RTNG EXT 1.500 DIA SHAFT"
+    },
+    {
+      "pn": "199582",
+      "desc": "SCR CAP HEX HD M10X1.5X75 FTHD"
+    },
+    {
+      "pn": "199939",
+      "desc": "NUT HEX FULL M10X1.5 ZC PL"
+    }
+  ],
+  "VISE ASSEMBLY": [
+    {
+      "pn": "199680",
+      "desc": "BT8.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX"
+    },
+    {
+      "pn": "35-009613",
+      "desc": "RING RTNG EXT .500 DIA SHAFT"
+    },
+    {
+      "pn": "179579",
+      "desc": "PIN LOWER SPRING"
+    },
+    {
+      "pn": "226121",
+      "desc": "T-NUT"
+    },
+    {
+      "pn": "199346",
+      "desc": "WSHR SPR LK MDM M10 ZC PL"
+    },
+    {
+      "pn": "314884",
+      "desc": "PAWL"
+    },
+    {
+      "pn": "514117",
+      "desc": "JAW MOVABLE"
+    }
+  ],
+  "BAND TENSION ASSEMBLY": [
+    {
+      "pn": "1008020",
+      "desc": "HANDLE TENSION & VISE"
+    },
+    {
+      "pn": "004261",
+      "desc": "PIN-SPRING, ROLLED"
+    },
+    {
+      "pn": "176759",
+      "desc": "WSHR .75X1.28X.18 THK HDN RC 35-50"
+    },
+    {
+      "pn": "108749",
+      "desc": "BRNG BALL THRST 3/4X1-21/32X35/64"
+    },
+    {
+      "pn": "1008193",
+      "desc": "SCREW VISE LOCK"
+    },
+    {
+      "pn": "1008192",
+      "desc": "VISE BRNG BLK ASSY"
+    }
+  ],
+  "PNEUMATIC VISE ASSEMBLY": [
+    {
+      "pn": "199051",
+      "desc": "M - 6 x 1.0 x 12 Hex SHCS -- 24NHX"
+    },
+    {
+      "pn": "199680",
+      "desc": "BT8.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX"
+    },
+    {
+      "pn": "318130",
+      "desc": "CYL PNEU 4 BORE X 2 STROKE"
+    },
+    {
+      "pn": "1008209",
+      "desc": "SPACER VISE CYL"
+    },
+    {
+      "pn": "200135",
+      "desc": "ELBOW 90DEG MALE SWIVEL 1/4X1/8NPT AIR"
+    },
+    {
+      "pn": "1008204",
+      "desc": "ADAPTOR VISE CLAMP CYL"
+    },
+    {
+      "pn": "109993",
+      "desc": "WSHR .281X1.25X.1345 THK CFS1020"
+    }
+  ],
+  "HEAD PIVOT ASSEMBLY": [
+    {
+      "pn": "326124",
+      "desc": "BLOCK BEARING ASSY"
+    },
+    {
+      "pn": "126535",
+      "desc": "BRG THR BR 1.00X2.00X.13"
+    },
+    {
+      "pn": "201915",
+      "desc": "COLLAR SHAFT"
+    },
+    {
+      "pn": "199251",
+      "desc": "SCR SET HEX SOC M10X1.5X12 CONE PT"
+    },
+    {
+      "pn": "199045",
+      "desc": "B18.3.6M - M10 x 1.5 x 16 Hex Socket Type I Cup Pt. SS --N"
+    },
+    {
+      "pn": "198990",
+      "desc": "SHCS M12-1.75X25"
+    },
+    {
+      "pn": "176476",
+      "desc": "SHIM"
+    },
+    {
+      "pn": "176477",
+      "desc": "SHIM"
+    },
+    {
+      "pn": "176478",
+      "desc": "SHIM"
+    },
+    {
+      "pn": "176727",
+      "desc": "SHAFT"
+    }
+  ],
+  "COUNTERBALANCE SPRING ASSEMBLY": [
+    {
+      "pn": "318127",
+      "desc": "BRACKET SPRING BOTTOM"
+    },
+    {
+      "pn": "318126",
+      "desc": "ROD GUIDE WELDT ASSY"
+    },
+    {
+      "pn": "179577",
+      "desc": "ROD THREADED 3/4-10UNC X 13.50 .03 LG"
+    },
+    {
+      "pn": "178683",
+      "desc": "CLEVIS"
+    },
+    {
+      "pn": "35-009613",
+      "desc": "RING RTNG EXT .500 DIA SHAFT"
+    },
+    {
+      "pn": "004261",
+      "desc": "PIN-SPRING, ROLLED"
+    },
+    {
+      "pn": "198976",
+      "desc": "WSHR FL M10 10.5X20X2 THK ZC PL"
+    },
+    {
+      "pn": "199140",
+      "desc": "NUT HEX JAM 3/4-10"
+    },
+    {
+      "pn": "198161",
+      "desc": "Hex Cap Screw_AM"
+    },
+    {
+      "pn": "178236",
+      "desc": "SPR CPRSN 2.12X2.932X13.00 190LB/IN"
+    },
+    {
+      "pn": "179576",
+      "desc": "WASHER TOP"
+    },
+    {
+      "pn": "326829",
+      "desc": "SCREW AND LUG ASSEMBLY-C'BAL MECHANISM"
+    },
+    {
+      "pn": "35-008688",
+      "desc": "RING RTNG EXT .750 DIA SHAFT"
+    },
+    {
+      "pn": "199346",
+      "desc": "WSHR SPR LK MDM M10 ZC PL"
+    },
+    {
+      "pn": "201366",
+      "desc": "COLLAR-SHAFT, CLAMP-3/4-10 THD"
+    }
+  ],
+  "HEAD FEED CONTROL ASSEMBLY": [
+    {
+      "pn": "320619",
+      "desc": "BRKT LOWER DOWNFEED CYL STD&FULL CY"
+    },
+    {
+      "pn": "198161",
+      "desc": "Hex Cap Screw_AM"
+    },
+    {
+      "pn": "1008305",
+      "desc": "PIN LOWER DOWNFEED CYL-STD&FULL CY"
+    },
+    {
+      "pn": "229081",
+      "desc": "HYDR FEED CYL ASSY"
+    },
+    {
+      "pn": "175279",
+      "desc": "ELB MALE 90DEG BRASS 1/4TX1/4NPT"
+    },
+    {
+      "pn": "219430",
+      "desc": "VALVE SWITCHING 3 WAY 1/4NPT FM"
+    },
+    {
+      "pn": "6-023510",
+      "desc": "ELB MALE 90DEG 1/8NPTX1/4 T BRASS"
+    },
+    {
+      "pn": "203144",
+      "desc": "NIP BRASS 1/8-27NPT X 1.50"
+    },
+    {
+      "pn": "229777",
+      "desc": "BRACKET ACTUATOR"
+    },
+    {
+      "pn": "229778",
+      "desc": "BOLT - ELEVATOR 1/4-20 X 1.5"
+    },
+    {
+      "pn": "199132",
+      "desc": "Hex Jam Nut_AI 1/2-13"
+    },
+    {
+      "pn": "112043",
+      "desc": "TEE STREET 1/8 NPTF"
+    },
+    {
+      "pn": "6-023509",
+      "desc": "CONN MALE 1/4T X 1/8NPT BRASS"
+    },
+    {
+      "pn": "5-027506",
+      "desc": "ELBOW-STREET, MALE X FEMALE 1/8 NPT"
+    },
+    {
+      "pn": "201987",
+      "desc": "VALVE 1/8NPT wo/JAM NUTS"
+    },
+    {
+      "pn": "260426",
+      "desc": "BUSHING 04MNPT 02FNPT"
+    },
+    {
+      "pn": "010923",
+      "desc": "NIP CL 1/8 X 1/4 NPT"
+    },
+    {
+      "pn": "224061",
+      "desc": "SOL-MINI 2 WAY DIRECT ACTING NORM CLOSED"
+    },
+    {
+      "pn": "175144",
+      "desc": "PIN UPPER DOWN FEED CYL"
+    },
+    {
+      "pn": "1002272",
+      "desc": "SPACER-PUSHBUTTON"
+    },
+    {
+      "pn": "35-006426",
+      "desc": "6"
+    },
+    {
+      "pn": "199134",
+      "desc": "NUT HEX JAM 1/2-20"
+    },
+    {
+      "pn": "199346",
+      "desc": "WSHR SPR LK MDM M10 ZC PL"
+    }
+  ],
+  "COOLANT ASSEMBLY": [
+    {
+      "pn": "1008539",
+      "desc": "MODIFICATION-COOLANT TANK"
+    },
+    {
+      "pn": "1007898",
+      "desc": "StakPak-NSO2415-5-G"
+    },
+    {
+      "pn": "1007882",
+      "desc": "SCREEN-FILTER, STAKPAK"
+    },
+    {
+      "pn": "1007883",
+      "desc": "COVER-FILTER SCREEN"
+    },
+    {
+      "pn": "110263",
+      "desc": "PUMPCOOL 1/40HP 3600 1PH 110/120/50/60"
+    },
+    {
+      "pn": "204233",
+      "desc": "COUPLING-PIPE"
+    },
+    {
+      "pn": "103316",
+      "desc": "BRBD INSR 1/4T X 1/4NPT"
+    },
+    {
+      "pn": "016001",
+      "desc": "BRBD INSR 1/4TUBE x 1/8 NPT STRAIGHT"
+    },
+    {
+      "pn": "5-027506",
+      "desc": "ELBOW-STREET, MALE X FEMALE 1/8 NPT"
+    },
+    {
+      "pn": "120241",
+      "desc": "VALVE-SHUT OFF, BRASS 1/8 NPT"
+    },
+    {
+      "pn": "120857",
+      "desc": "TEE SERVICE 1/4NPT BRASS"
+    },
+    {
+      "pn": "002004",
+      "desc": "BRB INSRERT"
+    },
+    {
+      "pn": "017902",
+      "desc": "HOSE CLAMP 5/8 O D"
+    },
+    {
+      "pn": "197094",
+      "desc": "400 FLUSH HOSE"
+    },
+    {
+      "pn": "176420",
+      "desc": "NOZZLE-HOSE"
+    },
+    {
+      "pn": "176827",
+      "desc": "CLAMP-HOSE, NYLON"
+    },
+    {
+      "pn": "176816",
+      "desc": "INSERT-BARBED 3/4MNPTX3/8ID"
+    },
+    {
+      "pn": "167329",
+      "desc": "CLP NYL .61ID #8 SCR NYLOCLIP"
+    },
+    {
+      "pn": "9955",
+      "desc": "047-201"
+    },
+    {
+      "pn": "17430",
+      "desc": "047-202"
+    },
+    {
+      "pn": "016561",
+      "desc": "CLIP NYLON, .95-1.05 ID"
+    },
+    {
+      "pn": "199974",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X10"
+    }
+  ],
+  "ELECTRICAL ASSEMBLY": [
+    {
+      "pn": "047-148",
+      "desc": "BRKT ELECT SUPPORT"
+    },
+    {
+      "pn": "1008451",
+      "desc": "CORD-GRIP, 1/2X90 .50-.62"
+    },
+    {
+      "pn": "016160",
+      "desc": "CORD-GRIP, 1/2X90 .50-.62"
+    },
+    {
+      "pn": "221855",
+      "desc": "BRACKET, INSTELOCK SWITCH KEY 12GA"
+    },
+    {
+      "pn": "215624",
+      "desc": "LIM SW 1NO TNC INTLK W/KEY LONG BODY"
+    },
+    {
+      "pn": "19543",
+      "desc": "BOND NUT .50-14 NPT"
+    },
+    {
+      "pn": "014411",
+      "desc": "WASHER-FLANGE, 1/2-15 NPT"
+    },
+    {
+      "pn": "320597",
+      "desc": "BRACKET LIMIT SWITCH 14GA"
+    },
+    {
+      "pn": "176768",
+      "desc": "LIMIT SWITCH (FOR LAYOUTS)"
+    },
+    {
+      "pn": "199974",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X10"
+    },
+    {
+      "pn": "199439",
+      "desc": "SCREW BT HD SOC M4X25"
+    },
+    {
+      "pn": "215619",
+      "desc": "CORD GRIP PG13 STR .236-.472dia PLSTC"
+    },
+    {
+      "pn": "199728",
+      "desc": "M-4x0.7x 10 SBHCS"
+    },
+    {
+      "pn": "199246",
+      "desc": "SBHCS-M6x1.0x12"
+    },
+    {
+      "pn": "199347",
+      "desc": "WSHR SPR LK MDM M6 ZC PL"
+    },
+    {
+      "pn": "199188",
+      "desc": "Hex Nut-M10X1.5"
+    },
+    {
+      "pn": "199969",
+      "desc": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "pn": "199965",
+      "desc": "WSHR WROUGHT M6 6.4X16X1.6 THK ZC PL"
+    }
+  ],
+  "FULL CYCLE ASSEMBLY": [
+    {
+      "pn": "1013882",
+      "desc": "BRACKET-CYLINDER MOUNTING"
+    },
+    {
+      "pn": "198990",
+      "desc": "SHCS M12-1.75X25"
+    },
+    {
+      "pn": "179584",
+      "desc": "BLOCK MTG WELDT ASSY"
+    },
+    {
+      "pn": "199896",
+      "desc": "SHCS-M10X1.5X25"
+    },
+    {
+      "pn": "6000094",
+      "desc": "047-215"
+    },
+    {
+      "pn": "179586",
+      "desc": "PIN UPPER AIR CYLINDER"
+    },
+    {
+      "pn": "35-007558",
+      "desc": "RING RTNG EXT 1.000 DIA SHAFT"
+    },
+    {
+      "pn": "319536",
+      "desc": "Designed"
+    },
+    {
+      "pn": "1008323",
+      "desc": "SLIDE WELDT LIFT STOP"
+    },
+    {
+      "pn": "1008676",
+      "desc": "ESC OVERLAY 400 HEAD STOP"
+    },
+    {
+      "pn": "1011410",
+      "desc": "PIN RELEASE QUICK 3/8 X 1 1/2 T"
+    },
+    {
+      "pn": "1008308",
+      "desc": "PIN LIFT STOP PIVOT"
+    },
+    {
+      "pn": "35-006426",
+      "desc": "6"
+    },
+    {
+      "pn": "1008311",
+      "desc": "BAR HEAD LIFT STOP"
+    },
+    {
+      "pn": "1008305",
+      "desc": "PIN LOWER DOWNFEED CYL-STD&FULL CY"
+    },
+    {
+      "pn": "320619",
+      "desc": "BRKT LOWER DOWNFEED CYL STD&FULL CY"
+    },
+    {
+      "pn": "6000096",
+      "desc": "VAR VISE GAUGE ASSY - 400"
+    },
+    {
+      "pn": "6000095",
+      "desc": "SOLENOID MTG KIT - FULL CYCLE, 400"
+    },
+    {
+      "pn": "324821",
+      "desc": "BRACKET-FILTER MTG"
+    },
+    {
+      "pn": "217843",
+      "desc": "FILTER-AIR"
+    },
+    {
+      "pn": "206110",
+      "desc": "VALVE DC PNEU"
+    },
+    {
+      "pn": "200135",
+      "desc": "ELBOW 90DEG MALE SWIVEL 1/4X1/8NPT AIR"
+    }
+  ],
+  "ELECTRICAL BOX ASSEMBLY": [
+    {
+      "pn": "6000796",
+      "desc": "ELECT ENCL WELD'T 400S"
+    },
+    {
+      "pn": "1007437",
+      "desc": "DISC HANDLE"
+    },
+    {
+      "pn": "232046",
+      "desc": "DOOR LOCK"
+    }
+  ],
+  "CONTROL PANEL ASSEMBLY": [
+    {
+      "pn": "231993",
+      "desc": "CONTROL PANEL 400S"
+    },
+    {
+      "pn": "178146",
+      "desc": "KNOB .25 SHFT .98dia"
+    },
+    {
+      "pn": "223553",
+      "desc": "POT 1K OHM 2W SINGLE TURN"
+    },
+    {
+      "pn": "231819",
+      "desc": "PUSH BUTTON GREEN WITH FLUSH"
+    },
+    {
+      "pn": "207191",
+      "desc": "PB OPER RED MUSH HD TWIST 40MM P9MER4RN"
+    },
+    {
+      "pn": "207181",
+      "desc": "PB SEL SW 2POS MAINT GE P9MSMD0N"
+    },
+    {
+      "pn": "207182",
+      "desc": "PB SEL SW 3POS MAINT GE"
+    },
+    {
+      "pn": "207184",
+      "desc": "4 POS SWITCH"
+    }
+  ],
+  "LARGE DISCHARGE TABLE ASSEMBLY": [
+    {
+      "pn": "1008600",
+      "desc": "TRAY RECEIVING ASSY C916"
+    },
+    {
+      "pn": "199987",
+      "desc": "SCR CAP HEX SOC FLH M6X1.0X10"
+    },
+    {
+      "pn": "199939",
+      "desc": "NUT HEX FULL M10X1.5 ZC PL"
+    },
+    {
+      "pn": "198161",
+      "desc": "Hex Cap Screw_AM"
+    }
+  ],
+  "MIST LUBER ASSEMBLY": [
+    {
+      "pn": "208833",
+      "desc": "UNIST"
+    },
+    {
+      "pn": "214906",
+      "desc": "BRACKET MOUNT LUBRICATOR"
+    },
+    {
+      "pn": "203219",
+      "desc": "BSHG RDCR HEX BRASS"
+    },
+    {
+      "pn": "200135",
+      "desc": "ELBOW 90DEG MALE SWIVEL 1/4X1/8NPT AIR"
+    },
+    {
+      "pn": "199824",
+      "desc": "SCR CAP HEX SCH M6X1.0X55"
+    },
+    {
+      "pn": "199188",
+      "desc": "Hex Nut-M10X1.5"
+    },
+    {
+      "pn": "199246",
+      "desc": "SBHCS-M6x1.0x12"
+    },
+    {
+      "pn": "1008707",
+      "desc": "BRACKET MIST 400"
+    },
+    {
+      "pn": "199974",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X10"
+    },
+    {
+      "pn": "209458",
+      "desc": "HALF CLIP-HOSE, .12 dia"
+    }
+  ],
+  "WORK LIGHT ASSEMBLY": [
+    {
+      "pn": "221545",
+      "desc": "WORKLIGHT"
+    },
+    {
+      "pn": "199974",
+      "desc": "SCR CAP HEX SOC BTNHD M5X0.8X10"
+    }
+  ],
+  "LASER LINE ASSEMBLY": [
+    {
+      "pn": "1010956",
+      "desc": "LASER LINE GENERATOR CEMARLINE"
+    },
+    {
+      "pn": "1010817",
+      "desc": "BLOCK LASER MOUNT 400"
+    },
+    {
+      "pn": "1010818",
+      "desc": "BLOCK LASER 400"
+    },
+    {
+      "pn": "198990",
+      "desc": "SHCS M12-1.75X25"
+    },
+    {
+      "pn": "199916",
+      "desc": "SCR CAP HEX SCH M5X0.8X10"
+    }
+  ]
+}

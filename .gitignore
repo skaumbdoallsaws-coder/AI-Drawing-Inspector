@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Large files (don't commit these - upload separately to Colab)
+*.pkl
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+# Data files
+*.json
+!400S_file_part_mapping.json
+!400S_detailed_structure_fixed.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

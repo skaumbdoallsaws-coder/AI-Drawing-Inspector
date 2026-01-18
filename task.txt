@@ -1,0 +1,206 @@
+filename: upgrade_instructions.txt
+--------------------------------------------------------------------------------
+TASK: Upgrade Engineering Inspector to "Hybrid Vision Pipeline" (OCR + Tiling)
+
+DESCRIPTION:
+We are upgrading the current `inspect_drawing_rag` function to a "Production" version 
+that solves resolution-induced hallucinations. 
+The new architecture adds:
+1. Deterministic OCR (using PaddleOCR) to read text before the LLM sees it.
+2. Dynamic Tiling (splitting the image into 4 quadrants) to improve resolution.
+3. PyMuPDF (fitz) for high-speed rendering.
+
+Please apply the following changes to the Python notebook/script.
+
+--------------------------------------------------------------------------------
+STEP 1: INSTALL NEW DEPENDENCIES
+Action: Add a new cell at the top or update the installation cell.
+--------------------------------------------------------------------------------
+!pip install -q pymupdf paddleocr paddlepaddle opencv-python-headless
+
+--------------------------------------------------------------------------------
+STEP 2: UPDATE IMPORTS
+Action: Replace or Append to the existing imports block.
+--------------------------------------------------------------------------------
+import fitz  # PyMuPDF
+import numpy as np
+import torch
+from PIL import Image
+from paddleocr import PaddleOCR
+from dataclasses import dataclass
+from typing import List, Tuple, Dict, Any
+
+--------------------------------------------------------------------------------
+STEP 3: ADD HELPER FUNCTIONS (OCR & VISION)
+Action: Insert these functions before the main inspection function.
+--------------------------------------------------------------------------------
+
+print("⚙️ Initializing Production Pipeline...")
+
+# Initialize OCR Engine once (Global)
+# We use 'en' for English and enable angle classification for rotated text
+ocr_engine = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+
+def render_pdf_page(pdf_path: str, dpi: int = 300) -> Image.Image:
+    """
+    Renders the first page of a PDF to a High-Res PIL Image.
+    Replaces pdf2image for better speed and clarity.
+    """
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc.load_page(0) 
+        zoom = dpi / 72.0
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        doc.close()
+        return img
+    except Exception as e:
+        print(f"❌ Rendering Error: {e}")
+        return None
+
+def run_paddleocr(img: Image.Image) -> List[str]:
+    """
+    Runs PaddleOCR on the image and returns a sorted, unique list of text found.
+    Normalizes common engineering symbols (Ø -> DIA).
+    """
+    img_np = np.array(img)
+    result = ocr_engine.ocr(img_np, cls=True)
+    
+    texts = []
+    if result and result[0]:
+        for line in result[0]:
+            text_content, confidence = line[1]
+            if confidence > 0.6:  # Filter low-confidence noise
+                # Normalize symbols
+                clean_text = text_content.replace("Ø", "DIA ").strip()
+                texts.append(clean_text)
+    
+    # Deduplicate and sort
+    return sorted(list(set(texts)))
+
+def make_overlapping_tiles(full_img: Image.Image) -> List[Tuple[str, Image.Image]]:
+    """
+    Splits the image into 4 overlapping quadrants (TL, TR, BL, BR).
+    Allows the model to see small dimensions clearly.
+    """
+    w, h = full_img.size
+    tile_w, tile_h = w // 2, h // 2
+    overlap = int(min(w, h) * 0.15)  # 15% overlap ensures no text is cut in half
+
+    # Define crop boxes: (left, top, right, bottom)
+    boxes = {
+        "Top-Left": (0, 0, tile_w + overlap, tile_h + overlap),
+        "Top-Right": (w - (tile_w + overlap), 0, w, tile_h + overlap),
+        "Bottom-Left": (0, h - (tile_h + overlap), tile_w + overlap, h),
+        "Bottom-Right": (w - (tile_w + overlap), h - (tile_h + overlap), w, h)
+    }
+
+    tiles = []
+    for name, box in boxes.items():
+        tiles.append((name, full_img.crop(box)))
+    return tiles
+
+--------------------------------------------------------------------------------
+STEP 4: REPLACE MAIN INSPECTION FUNCTION
+Action: Replace the existing `inspect_drawing_rag` function with `inspect_drawing_production`.
+--------------------------------------------------------------------------------
+
+def inspect_drawing_production(pdf_path, context_str):
+    print(f"\n{'='*60}\nINSPECTING: {pdf_path}\n{'='*60}")
+    
+    # --- Phase A: Perception ---
+    print("[1/4] Rendering High-Res Image...")
+    full_img = render_pdf_page(pdf_path, dpi=300)
+    if not full_img: return "FAIL: Image Rendering Failed"
+    
+    print("[2/4] Extracting Deterministic OCR Evidence...")
+    ocr_texts = run_paddleocr(full_img)
+    # Create a compact evidence block
+    ocr_block = "\n".join([f"- {t}" for t in ocr_texts[:80]]) 
+    print(f"  > OCR Found {len(ocr_texts)} text elements.")
+
+    print("[3/4] Generating High-Res Tiles...")
+    tiles = make_overlapping_tiles(full_img)
+
+    # --- Phase B: Reasoning ---
+    print("[4/4] Running Strict Logic Inference (Qwen2-VL-72B)...")
+    
+    system_prompt = """
+    You are a Senior Quality Control Engineer.
+    
+    **CORE PROTOCOL:**
+    1. **OCR IS AUTHORITY:** The 'OCR EVIDENCE' list is the ground truth for text.
+    2. **VISUAL VERIFICATION:** Use the 'TILES' to visually confirm geometry (e.g., is that hole threaded?).
+    3. **STRICT COMPARISON:** Compare the 'MATING HYPOTHESIS' against the 'OCR EVIDENCE'.
+    
+    **FAILURE RULES:**
+    - If Hypothesis needs '3/4-16' and Evidence says 'M10', output **FAIL**.
+    - If Evidence is missing for a specific mating part, output **CANNOT VERIFY**.
+    - Do NOT hallucinate a fit. Mismatches must be flagged.
+    """
+
+    user_text = f"""
+    **PART 1: OCR EVIDENCE (FACTS)**
+    {ocr_block}
+
+    **PART 2: MATING HYPOTHESIS (REQUIREMENTS)**
+    {context_str}
+
+    **TASK:**
+    For each Mating Part in the Hypothesis:
+    1. SEARCH the OCR list and Tiles for the matching feature.
+    2. COMPARE the dimensions/threads strictly.
+    3. REPORT: 'Mating Part [Name] -> [PASS/FAIL]: [Evidence]'
+    """
+
+    # Build the Multi-Image Payload
+    # Order: Full Image -> 4 Tiles -> Text Prompt
+    content_payload = []
+    content_payload.append({'type': 'image', 'image': full_img})
+    content_payload.append({'type': 'text', 'text': "FULL DRAWING VIEW"})
+    
+    for name, tile in tiles:
+        content_payload.append({'type': 'image', 'image': tile})
+        content_payload.append({'type': 'text', 'text': f"ZOOMED TILE: {name}"})
+    
+    content_payload.append({'type': 'text', 'text': user_text})
+
+    messages = [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': content_payload}
+    ]
+
+    # Inference
+    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    
+    # Combine all images for the processor
+    image_inputs = [full_img] + [t[1] for t in tiles]
+    
+    inputs = processor(
+        text=[text_input],
+        images=image_inputs,
+        return_tensors="pt",
+        padding=True
+    ).to(model.device)
+
+    generated_ids = model.generate(**inputs, max_new_tokens=1000)
+    output_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    
+    # Clean response
+    response = output_text.split("assistant\n")[-1]
+    
+    print("\n" + response)
+    return response
+
+print("✅ Production Pipeline Loaded. Ready to Inspect.")
+
+--------------------------------------------------------------------------------
+STEP 5: USAGE EXAMPLE
+Action: Use this code to run the inspector.
+--------------------------------------------------------------------------------
+# Get context
+pn, ctx = get_part_context("51754201_03.pdf")
+
+# Run inspection
+result = inspect_drawing_production("51754201_03.pdf", ctx['siblings_str'])

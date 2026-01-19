@@ -1,0 +1,250 @@
+================================================================================
+AI ENGINEERING DRAWING INSPECTOR - PROJECT RECAP
+================================================================================
+Date: January 19, 2026
+Repository: https://github.com/skaumbdoallsaws-coder/AI-Drawing-Inspector
+Main File: ai_inspector_final_fixed.ipynb
+
+================================================================================
+PROJECT OVERVIEW
+================================================================================
+
+This project is an AI-powered engineering drawing inspection system that:
+1. Reads PDF engineering drawings using OCR (Tesseract)
+2. Checks for assembly compatibility issues (Imperial vs Metric mismatches)
+3. Suggests GD&T improvements based on ASME Y14.5 standards
+
+The system uses:
+- Qwen2-VL-72B-Instruct (4-bit quantized, ~40GB VRAM) for vision + reasoning
+- Tesseract OCR for text extraction from drawings
+- CLIP embeddings for RAG retrieval of ASME standard pages
+- Part context from BOM structure (400S machine)
+
+================================================================================
+TWO-STAGE INSPECTION ARCHITECTURE
+================================================================================
+
+STAGE 1: THE GATEKEEPER (Mismatch Detection)
+--------------------------------------------
+- Function: inspect_drawing_universal()
+- Purpose: Strict pass/fail check for physical assembly compatibility
+- Checks: Imperial vs Metric conflicts, missing specifications
+- RAG: DISABLED (for token efficiency)
+- Output: Truth table with YES/NO/NOT FOUND for each mating part
+
+STAGE 2: THE CONSULTANT (Improvement Suggestions)
+-------------------------------------------------
+- Function: suggest_improvements_stage2()
+- Purpose: Qualitative GD&T improvement recommendations
+- Runs: ONLY if Stage 1 passes
+- RAG: ENABLED (retrieves ASME Y14.5 standard pages)
+- Output: Missing tolerances, improvement suggestions, priority ranking
+
+MASTER PIPELINE: run_full_inspection()
+--------------------------------------
+- Runs Stage 1, then Stage 2 (if Stage 1 passes)
+- Returns comprehensive JSON report
+- Final verdicts: PASS_WITH_SUGGESTIONS, FAIL, ERROR
+
+================================================================================
+KEY FUNCTIONS
+================================================================================
+
+1. inspect_drawing_universal(pdf_path)
+   - Stage 1 only (Gatekeeper)
+   - Returns truth table comparing mating parts vs drawing specs
+
+2. suggest_improvements_stage2(pdf_path, context_data, ocr_text_list)
+   - Stage 2 only (Consultant)
+   - Requires context_data dict and OCR text from Stage 1
+   - Uses Smart RAG queries based on part type
+
+3. run_full_inspection(pdf_path)
+   - Master pipeline: Stage 1 + Stage 2
+   - Automatically handles flow control
+
+4. run_full_inspection_batch(drawing_folder, limit=None)
+   - Batch version for multiple files
+   - Saves results to JSON
+
+5. inspect_batch_strict(drawing_folder)
+   - Batch Stage 1 only (faster, no RAG)
+
+6. parse_verdict(response_text)
+   - Parses truth table to determine PASS/FAIL
+   - Counts YES/NO in response
+
+7. generate_smart_rag_queries(part_description, mating_parts)
+   - Creates intelligent ASME search queries
+   - Detects: shafts, bearings, housings, threads, gears
+
+================================================================================
+NOTEBOOK CELL STRUCTURE
+================================================================================
+
+SECTION 1: SETUP
+- Cell 3 (1A): Install Dependencies (transformers, tesseract, pymupdf, etc.)
+- Cell 4 (1B): Import Libraries
+
+SECTION 2: MODEL
+- Cell 6 (2): Load Qwen2-VL-72B (4-bit quantized)
+
+SECTION 3: CONTEXT DATABASES
+- Cell 8 (3A): Upload Configuration Files (JSON mappings)
+- Cell 9 (3B): Load Part Context Databases
+- Cell 10 (3C-PREP): Verify Tesseract Installation
+- Cell 11 (3C): Initialize Tesseract OCR
+- Cell 12 (3E): Load RAG Index & Visual Database
+
+SECTION 4: HELPER FUNCTIONS
+- Cell 14 (4A): Core Helper Functions (get_part_context, etc.)
+- Cell 15 (4B): Model Query Function
+- Cell 16 (4C): RAG Retrieval Function
+- Cell 17 (4D): Production Pipeline Helpers (render_pdf, run_tesseract_ocr)
+
+SECTION 5: INSPECTION FUNCTIONS
+- Cell 19 (5A): inspect_drawing_rag() - Original RAG version
+- Cell 20 (5B): inspect_drawing_universal() - Stage 1 Gatekeeper
+- Cell 21 (5C): suggest_improvements_stage2() - Stage 2 Consultant
+- Cell 22 (5D): run_full_inspection() - Master Pipeline
+
+SECTION 6: BATCH PROCESSING
+- Cell 23 (6): inspect_batch_strict() - Batch Stage 1
+
+SECTION 7: TESTING
+- Cell 24 (7A): Full Inspection Test (Stage 1 + Stage 2) - Upload single file
+- Cell 25 (7B): Recovery - Reload Context
+- Cell 26 (7C): OCR Libraries Backup Install
+- Cell 27 (7D): Verify RAG Database
+- Cell 28 (7E): Batch Test (Upload ZIP)
+
+SECTION 8: RESULTS
+- Cell 30 (8): show_failures() - Display failed inspections
+
+================================================================================
+REQUIRED FILES
+================================================================================
+
+Configuration Files (upload as ZIP or individually):
+1. 400S_file_part_mapping.json - Maps filenames to part numbers
+2. 400S_detailed_structure_fixed.json - Part context and mating relationships
+3. asme_visual_index.pkl - CLIP embeddings for ASME standard pages
+4. rag_visual_db.zip - Folder of ASME standard page images (294 images)
+
+================================================================================
+HOW TO RUN (After Computer Restart)
+================================================================================
+
+1. Open Google Colab
+2. File > Open notebook > GitHub
+3. Select: skaumbdoallsaws-coder/AI-Drawing-Inspector
+4. Open: ai_inspector_final_fixed.ipynb
+
+5. Run cells in order:
+   - Cell 3: Install dependencies
+   - Cell 4: Import libraries
+   - Cell 6: Load model (takes ~5 min, uses ~40GB VRAM)
+   - Cell 8-12: Load context databases (will prompt for file upload)
+   - Cell 14-17: Load helper functions
+   - Cell 20-22: Load inspection functions (Stage 1, Stage 2, Master)
+   - Cell 24: Run test (upload a PDF)
+
+================================================================================
+TYPICAL OUTPUT - STAGE 1 ONLY
+================================================================================
+
+============================================================
+UNIVERSAL INSPECTION: HEAD CASTING
+============================================================
+[1/3] Reading Drawing (Tesseract OCR)...
+  > Evidence: 54 relevant lines found.
+[2/3] Generating Dynamic Truth Table...
+[3/3] Running inference...
+  Token count: 17383
+
+| Mating Part | Found Feature | Compatible? |
+| ADJUSTMENT SCREW 3/4-16 | M10X1.5 | NO |
+| THRUST BEARING | NOT FOUND | NOT FOUND |
+
+FINAL VERDICT: FAIL
+
+================================================================================
+TYPICAL OUTPUT - FULL INSPECTION (STAGE 1 + STAGE 2)
+================================================================================
+
+############################################################
+# FULL ENGINEERING INSPECTION PIPELINE
+############################################################
+
+STAGE 1: THE GATEKEEPER
+[1/3] Reading Drawing...
+[2/3] Generating Truth Table...
+[3/3] Running inference...
+>>> STAGE 1 VERDICT: PASS - 5 specs verified
+
+STAGE 2: THE CONSULTANT
+[1/3] Performing Smart Library Lookup...
+  Search Queries: ['Flatness Parallelism Datum', 'Position Tolerance Holes']
+  RAG Search: 'Flatness Parallelism...'
+    - 11_Profile_Tolerances_P252.png (Score: 29.31)
+  Retrieved 3 ASME reference pages
+[2/3] Preparing Analysis...
+[3/3] Consulting Senior GD&T Engineer...
+
+CONSULTANT RECOMMENDATIONS:
+1. MISSING TOLERANCES: Add Flatness to mating surface...
+2. IMPROVEMENT SUGGESTIONS: Consider Runout for shaft features...
+3. PRIORITY: Critical / Recommended / Nice-to-Have
+
+############################################################
+# FINAL INSPECTION SUMMARY
+############################################################
+Stage 1 (Gatekeeper): PASS
+Stage 2 (Consultant): COMPLETED
+Final Verdict: PASS_WITH_SUGGESTIONS
+
+================================================================================
+KNOWN ISSUES & FIXES
+================================================================================
+
+1. Token Limit Exceeded (>32k tokens)
+   - Reduced DPI from 300 to 200 for Stage 2
+   - Limited OCR elements to 120
+   - Disabled tiles by default
+   - Limited ASME images to 3
+
+2. CUDA Out of Memory
+   - Clear GPU cache: torch.cuda.empty_cache()
+   - Or restart runtime
+
+3. PaddleOCR C++ Errors
+   - Replaced with Tesseract OCR (more stable)
+
+4. GitHub Notebook Rendering Error
+   - Fixed by removing malformed widgets metadata
+
+5. NameError: parse_verdict not defined
+   - Fixed by moving parse_verdict into Cell 5D
+
+================================================================================
+WORKFLOW: CLAUDE CODE <-> GOOGLE COLAB
+================================================================================
+
+1. Claude Code edits notebook locally
+2. Claude pushes to GitHub: git push origin main
+3. User refreshes notebook in Colab from GitHub
+4. User runs updated cells
+5. If errors, user saves notebook to GitHub from Colab
+6. Claude pulls and checks: git fetch && git reset --hard origin/main
+
+================================================================================
+CONTACT & REPOSITORY
+================================================================================
+
+GitHub: https://github.com/skaumbdoallsaws-coder/AI-Drawing-Inspector
+Branch: main
+Last Commit: 0658baf (Fix NameError: add parse_verdict to CELL 5D)
+
+================================================================================
+END OF RECAP
+================================================================================

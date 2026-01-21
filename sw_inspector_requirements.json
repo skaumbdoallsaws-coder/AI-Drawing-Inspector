@@ -1,0 +1,202 @@
+{
+  "046": {
+    "part_number": "046",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: hex cap screw_am (None)",
+      "CONCENTRIC FIT: 018-526 ()",
+      "THREAD HOLE: M10 (for B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX)",
+      "MATING SURFACE: B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX"
+    ],
+    "requirements_str": "CONCENTRIC FIT: hex cap screw_am (None); CONCENTRIC FIT: 018-526 (); THREAD HOLE: M10 (for B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX); MATING SURFACE: B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX"
+  },
+  "hex cap screw_am": {
+    "part_number": "hex cap screw_am",
+    "description": null,
+    "requirements": [
+      "CONCENTRIC FIT: 046 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 046 ()"
+  },
+  "018-526": {
+    "part_number": "018-526",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 046 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 046 ()"
+  },
+  "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX": {
+    "part_number": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+    "description": "SCR CAP HEX SCH M10X1.5X30",
+    "requirements": [
+      "CONCENTRIC FIT: 046 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 046 ()"
+  },
+  "015-009": {
+    "part_number": "015-009",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 024-887 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 024-887 ()"
+  },
+  "024-887": {
+    "part_number": "024-887",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 015-009 ()",
+      "CONCENTRIC FIT: 018-586 (COLLAR SHAFT)",
+      "CONCENTRIC FIT: 022-704 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 015-009 (); CONCENTRIC FIT: 018-586 (COLLAR SHAFT); CONCENTRIC FIT: 022-704 ()"
+  },
+  "018-586": {
+    "part_number": "018-586",
+    "description": "COLLAR SHAFT",
+    "requirements": [
+      "CONCENTRIC FIT: 022-723 ()",
+      "CONCENTRIC FIT: 024-887 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 022-723 (); CONCENTRIC FIT: 024-887 ()"
+  },
+  "022-723": {
+    "part_number": "022-723",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 018-586 (COLLAR SHAFT)"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 018-586 (COLLAR SHAFT)"
+  },
+  "022-704": {
+    "part_number": "022-704",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 024-887 ()",
+      "THREAD HOLE: M10 (for B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N)",
+      "CONCENTRIC FIT: socket set screw cup point_am (None)",
+      "MATING SURFACE: B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 024-887 (); THREAD HOLE: M10 (for B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N); CONCENTRIC FIT: socket set screw cup point_am (None); MATING SURFACE: B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N"
+  },
+  "B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N": {
+    "part_number": "B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 022-704 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 022-704 ()"
+  },
+  "socket set screw cup point_am": {
+    "part_number": "socket set screw cup point_am",
+    "description": null,
+    "requirements": [
+      "CONCENTRIC FIT: 022-704 ()",
+      "CONCENTRIC FIT: 023-798_2 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 022-704 (); CONCENTRIC FIT: 023-798_2 ()"
+  },
+  "009-226": {
+    "part_number": "009-226",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 017-127 (CLEVIS)"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 017-127 (CLEVIS)"
+  },
+  "017-127": {
+    "part_number": "017-127",
+    "description": "CLEVIS",
+    "requirements": [
+      "CONCENTRIC FIT: 009-226 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 009-226 ()"
+  },
+  "009-269": {
+    "part_number": "009-269",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: hex head tapping screw_am ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: hex head tapping screw_am ()"
+  },
+  "023-686_20": {
+    "part_number": "023-686_20",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: hex head tapping screw_am ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: hex head tapping screw_am ()"
+  },
+  "hex head tapping screw_am": {
+    "part_number": "hex head tapping screw_am",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 009-269 ()",
+      "CONCENTRIC FIT: 023-686_20 ()",
+      "CONCENTRIC FIT: 023-686 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 009-269 (); CONCENTRIC FIT: 023-686_20 (); CONCENTRIC FIT: 023-686 ()"
+  },
+  "023-686": {
+    "part_number": "023-686",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: hex head tapping screw_am ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: hex head tapping screw_am ()"
+  },
+  "022-708_1": {
+    "part_number": "022-708_1",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 013-334 ()",
+      "CONCENTRIC FIT: 024-828 ()",
+      "CONCENTRIC FIT: 015-317 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 013-334 (); CONCENTRIC FIT: 024-828 (); CONCENTRIC FIT: 015-317 ()"
+  },
+  "013-334": {
+    "part_number": "013-334",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 022-708_1 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 022-708_1 ()"
+  },
+  "024-828": {
+    "part_number": "024-828",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 022-708_1 ()",
+      "THREAD HOLE: M8 (for B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX)",
+      "MATING SURFACE: B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 022-708_1 (); THREAD HOLE: M8 (for B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX); MATING SURFACE: B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX"
+  },
+  "B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX": {
+    "part_number": "B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 024-828 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 024-828 ()"
+  },
+  "015-317": {
+    "part_number": "015-317",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: 022-708_1 ()"
+    ],
+    "requirements_str": "CONCENTRIC FIT: 022-708_1 ()"
+  },
+  "023-798_2": {
+    "part_number": "023-798_2",
+    "description": "",
+    "requirements": [
+      "CONCENTRIC FIT: socket set screw cup point_am (None)"
+    ],
+    "requirements_str": "CONCENTRIC FIT: socket set screw cup point_am (None)"
+  }
+}

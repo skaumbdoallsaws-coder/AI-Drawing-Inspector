@@ -26,6 +26,8 @@ venv/
 !sw_mating_context.json
 !sw_structure.json
 !sw_components_all.json
+!sw_mate_specs.json
+!sw_inspector_requirements.json
 
 # OS files
 .DS_Store

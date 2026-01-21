@@ -1,0 +1,858 @@
+{
+  "046": {
+    "part_number": "046",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "hex cap screw_am",
+        "description": null,
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "018-526",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+        "description": "SCR CAP HEX SCH M10X1.5X30",
+        "mate_type": "Concentric",
+        "thread": "M10",
+        "pitch": "1.5mm",
+        "length": "30mm"
+      },
+      {
+        "part": "017-134",
+        "description": "BRACKET SPRING BOTTOM",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "018-526",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+        "description": "SCR CAP HEX SCH M10X1.5X30",
+        "mate_type": "Coincident",
+        "thread": "M10",
+        "pitch": "1.5mm",
+        "length": "30mm"
+      },
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "017-134",
+        "description": "BRACKET SPRING BOTTOM",
+        "mate_type": "Parallel"
+      },
+      {
+        "part": "019-676_1",
+        "description": "",
+        "mate_type": "Distance"
+      }
+    ],
+    "mate_count": 9
+  },
+  "017-134": {
+    "part_number": "017-134",
+    "description": "BRACKET SPRING BOTTOM",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Parallel"
+      }
+    ],
+    "mate_count": 2
+  },
+  "hex cap screw_am": {
+    "part_number": "hex cap screw_am",
+    "description": null,
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Concentric"
+      }
+    ],
+    "mate_count": 1
+  },
+  "018-526": {
+    "part_number": "018-526",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "022-723",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 3
+  },
+  "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX": {
+    "part_number": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+    "description": "SCR CAP HEX SCH M10X1.5X30",
+    "own_spec": {
+      "type": "Socket Head Cap Screw",
+      "thread": "M10",
+      "pitch": "1.5mm",
+      "length": "30mm",
+      "raw_name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX"
+    },
+    "mates_with": [
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 2
+  },
+  "015-009": {
+    "part_number": "015-009",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "024-887",
+        "description": "",
+        "mate_type": "Concentric"
+      }
+    ],
+    "mate_count": 1
+  },
+  "024-887": {
+    "part_number": "024-887",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "015-009",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "018-586",
+        "description": "COLLAR SHAFT",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "022-704",
+        "description": "",
+        "mate_type": "Concentric"
+      }
+    ],
+    "mate_count": 3
+  },
+  "018-586": {
+    "part_number": "018-586",
+    "description": "COLLAR SHAFT",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-723",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "024-887",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "022-723",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 3
+  },
+  "022-723": {
+    "part_number": "022-723",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "018-586",
+        "description": "COLLAR SHAFT",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "018-586",
+        "description": "COLLAR SHAFT",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "018-526",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 3
+  },
+  "022-704": {
+    "part_number": "022-704",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "024-887",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N",
+        "description": "",
+        "mate_type": "Concentric",
+        "thread": "M10",
+        "pitch": "1.5mm",
+        "length": "12mm"
+      },
+      {
+        "part": "socket set screw cup point_am",
+        "description": null,
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N",
+        "description": "",
+        "mate_type": "Coincident",
+        "thread": "M10",
+        "pitch": "1.5mm",
+        "length": "12mm"
+      },
+      {
+        "part": "socket set screw cup point_am",
+        "description": null,
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 5
+  },
+  "B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N": {
+    "part_number": "B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N",
+    "description": "",
+    "own_spec": {
+      "type": "Set Screw",
+      "thread": "M10",
+      "pitch": "1.5mm",
+      "length": "12mm",
+      "raw_name": "B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N"
+    },
+    "mates_with": [
+      {
+        "part": "022-704",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "022-704",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 2
+  },
+  "socket set screw cup point_am": {
+    "part_number": "socket set screw cup point_am",
+    "description": null,
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-704",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "023-798_2",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "022-704",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 3
+  },
+  "009-226": {
+    "part_number": "009-226",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "017-127",
+        "description": "CLEVIS",
+        "mate_type": "Concentric"
+      }
+    ],
+    "mate_count": 1
+  },
+  "017-127": {
+    "part_number": "017-127",
+    "description": "CLEVIS",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "009-226",
+        "description": "",
+        "mate_type": "Concentric"
+      }
+    ],
+    "mate_count": 1
+  },
+  "009-269": {
+    "part_number": "009-269",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "hex head tapping screw_am",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "023-686_20",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "hex head tapping screw_am",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-686_20",
+        "description": "",
+        "mate_type": "Type_21"
+      }
+    ],
+    "mate_count": 4
+  },
+  "023-686_20": {
+    "part_number": "023-686_20",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "hex head tapping screw_am",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "009-269",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "hex head tapping screw_am",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "009-269",
+        "description": "",
+        "mate_type": "Type_21"
+      }
+    ],
+    "mate_count": 4
+  },
+  "hex head tapping screw_am": {
+    "part_number": "hex head tapping screw_am",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "009-269",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "023-686_20",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "023-686",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "009-269",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-686_20",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-686",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 6
+  },
+  "023-538_20": {
+    "part_number": "023-538_20",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "017-343",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "017-343": {
+    "part_number": "017-343",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "023-538_20",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-691_21",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 2
+  },
+  "022-757": {
+    "part_number": "022-757",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "023-686",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "023-686": {
+    "part_number": "023-686",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "hex head tapping screw_am",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "022-757",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "hex head tapping screw_am",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 3
+  },
+  "023-441_2": {
+    "part_number": "023-441_2",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "023-692_21",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "023-692_21": {
+    "part_number": "023-692_21",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "023-441_2",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "023-688_20": {
+    "part_number": "023-688_20",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "023-690_21",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "023-690_21": {
+    "part_number": "023-690_21",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "023-688_20",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "022-708_1": {
+    "part_number": "022-708_1",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "013-334",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "024-828",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "015-317",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "013-284",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "013-334",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-457_1",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "024-828",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-457_1",
+        "description": "",
+        "mate_type": "Parallel"
+      },
+      {
+        "part": "013-284",
+        "description": "",
+        "mate_type": "Type_21"
+      },
+      {
+        "part": "023-458_1",
+        "description": "BAND COVER LOWER 400",
+        "mate_type": "Type_21"
+      }
+    ],
+    "mate_count": 11
+  },
+  "013-284": {
+    "part_number": "013-284",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Type_21"
+      }
+    ],
+    "mate_count": 2
+  },
+  "013-334": {
+    "part_number": "013-334",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 2
+  },
+  "023-457_1": {
+    "part_number": "023-457_1",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Parallel"
+      }
+    ],
+    "mate_count": 2
+  },
+  "023-458_1": {
+    "part_number": "023-458_1",
+    "description": "BAND COVER LOWER 400",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Type_21"
+      }
+    ],
+    "mate_count": 1
+  },
+  "024-828": {
+    "part_number": "024-828",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX",
+        "description": "",
+        "mate_type": "Concentric",
+        "thread": "M8",
+        "pitch": "1.25mm",
+        "length": "12mm"
+      },
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX",
+        "description": "",
+        "mate_type": "Coincident",
+        "thread": "M8",
+        "pitch": "1.25mm",
+        "length": "12mm"
+      }
+    ],
+    "mate_count": 4
+  },
+  "B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX": {
+    "part_number": "B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX",
+    "description": "",
+    "own_spec": {
+      "type": "Socket Head Cap Screw",
+      "thread": "M8",
+      "pitch": "1.25mm",
+      "length": "12mm",
+      "raw_name": "B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX"
+    },
+    "mates_with": [
+      {
+        "part": "024-828",
+        "description": "",
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "024-828",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 2
+  },
+  "023-691_21": {
+    "part_number": "023-691_21",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "017-343",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "015-317": {
+    "part_number": "015-317",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "022-708_1",
+        "description": "",
+        "mate_type": "Concentric"
+      }
+    ],
+    "mate_count": 1
+  },
+  "023-059": {
+    "part_number": "023-059",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "023-798_2",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-798_2",
+        "description": "",
+        "mate_type": "Type_21"
+      }
+    ],
+    "mate_count": 2
+  },
+  "023-798_2": {
+    "part_number": "023-798_2",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "socket set screw cup point_am",
+        "description": null,
+        "mate_type": "Concentric"
+      },
+      {
+        "part": "023-059",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "023-059",
+        "description": "",
+        "mate_type": "Type_21"
+      }
+    ],
+    "mate_count": 3
+  },
+  "033-698": {
+    "part_number": "033-698",
+    "description": "PAN-BASE, 400 S/M/A",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "047-129",
+        "description": "",
+        "mate_type": "Coincident"
+      },
+      {
+        "part": "047-152",
+        "description": "",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 2
+  },
+  "047-129": {
+    "part_number": "047-129",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "033-698",
+        "description": "PAN-BASE, 400 S/M/A",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  },
+  "019-676_1": {
+    "part_number": "019-676_1",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "046",
+        "description": "",
+        "mate_type": "Distance"
+      }
+    ],
+    "mate_count": 1
+  },
+  "047-152": {
+    "part_number": "047-152",
+    "description": "",
+    "own_spec": null,
+    "mates_with": [
+      {
+        "part": "033-698",
+        "description": "PAN-BASE, 400 S/M/A",
+        "mate_type": "Coincident"
+      }
+    ],
+    "mate_count": 1
+  }
+}

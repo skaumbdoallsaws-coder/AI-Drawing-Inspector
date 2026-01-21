@@ -1,0 +1,157 @@
+' =====================================================
+' SOLIDWORKS MACRO - Extract Mate Data
+' =====================================================
+' Instructions:
+' 1. Open your assembly in SolidWorks
+' 2. Tools > Macro > New
+' 3. Copy this entire code into the editor
+' 4. Run (F5)
+' 5. Output file will be saved next to your assembly
+' =====================================================
+
+Option Explicit
+
+Sub main()
+    Dim swApp As SldWorks.SldWorks
+    Dim swModel As SldWorks.ModelDoc2
+    Dim swAssy As SldWorks.AssemblyDoc
+    Dim swConfig As SldWorks.Configuration
+    Dim swRootComp As SldWorks.Component2
+    Dim swFeat As SldWorks.Feature
+    Dim swSubFeat As SldWorks.Feature
+    Dim swMate As SldWorks.Mate2
+    Dim swMateEnt As SldWorks.MateEntity2
+    Dim swComp As SldWorks.Component2
+    Dim vComps As Variant
+    Dim i As Long
+    Dim outputPath As String
+    Dim fileNum As Integer
+    Dim compName As String
+    Dim mateName As String
+    Dim mateType As String
+    Dim comp1 As String
+    Dim comp2 As String
+    Dim mateCount As Long
+    Dim entCount As Long
+
+    Set swApp = Application.SldWorks
+    Set swModel = swApp.ActiveDoc
+
+    If swModel Is Nothing Then
+        MsgBox "No document open!", vbExclamation
+        Exit Sub
+    End If
+
+    If swModel.GetType <> swDocASSEMBLY Then
+        MsgBox "Please open an Assembly file!", vbExclamation
+        Exit Sub
+    End If
+
+    Set swAssy = swModel
+
+    ' Output to same folder as assembly
+    outputPath = Left(swModel.GetPathName, InStrRev(swModel.GetPathName, "\")) & _
+                 Replace(swModel.GetTitle, ".SLDASM", "") & "_mates.txt"
+
+    fileNum = FreeFile
+    Open outputPath For Output As #fileNum
+
+    ' Header
+    Print #fileNum, "SOLIDWORKS MATE EXTRACTION"
+    Print #fileNum, "Assembly: " & swModel.GetTitle
+    Print #fileNum, "Path: " & swModel.GetPathName
+    Print #fileNum, "Date: " & Now()
+    Print #fileNum, String(50, "=")
+    Print #fileNum, ""
+
+    ' Components
+    Print #fileNum, "[COMPONENTS]"
+
+    Set swConfig = swModel.GetActiveConfiguration
+    Set swRootComp = swConfig.GetRootComponent3(True)
+    vComps = swRootComp.GetChildren
+
+    If Not IsEmpty(vComps) Then
+        For i = 0 To UBound(vComps)
+            Set swComp = vComps(i)
+            Print #fileNum, swComp.Name2
+        Next i
+        Print #fileNum, ""
+        Print #fileNum, "Total: " & (UBound(vComps) + 1)
+    End If
+
+    Print #fileNum, ""
+    Print #fileNum, "[MATES]"
+    Print #fileNum, "Format: MateName | Type | PartA <-> PartB"
+    Print #fileNum, String(50, "-")
+
+    mateCount = 0
+
+    Set swFeat = swModel.FirstFeature
+    Do While Not swFeat Is Nothing
+        If swFeat.GetTypeName2 = "MateGroup" Then
+            Set swSubFeat = swFeat.GetFirstSubFeature
+            Do While Not swSubFeat Is Nothing
+                If InStr(swSubFeat.GetTypeName2, "Mate") > 0 Then
+                    Set swMate = swSubFeat.GetSpecificFeature2
+                    If Not swMate Is Nothing Then
+                        mateName = swMate.Name
+                        mateType = GetMateTypeName(swMate.Type)
+                        comp1 = ""
+                        comp2 = ""
+
+                        On Error Resume Next
+                        entCount = swMate.GetMateEntityCount
+
+                        If entCount >= 1 Then
+                            Set swMateEnt = swMate.MateEntity(0)
+                            If Not swMateEnt Is Nothing Then
+                                Set swComp = swMateEnt.ReferenceComponent
+                                If Not swComp Is Nothing Then comp1 = swComp.Name2
+                            End If
+                        End If
+
+                        If entCount >= 2 Then
+                            Set swMateEnt = swMate.MateEntity(1)
+                            If Not swMateEnt Is Nothing Then
+                                Set swComp = swMateEnt.ReferenceComponent
+                                If Not swComp Is Nothing Then comp2 = swComp.Name2
+                            End If
+                        End If
+                        On Error GoTo 0
+
+                        Print #fileNum, mateName & " | " & mateType & " | " & comp1 & " <-> " & comp2
+                        mateCount = mateCount + 1
+                    End If
+                End If
+                Set swSubFeat = swSubFeat.GetNextSubFeature
+            Loop
+        End If
+        Set swFeat = swFeat.GetNextFeature
+    Loop
+
+    Print #fileNum, ""
+    Print #fileNum, "Total Mates: " & mateCount
+
+    Close #fileNum
+
+    MsgBox "Exported " & mateCount & " mates to:" & vbCrLf & vbCrLf & outputPath, vbInformation, "Done!"
+
+End Sub
+
+Function GetMateTypeName(mateType As Long) As String
+    Select Case mateType
+        Case 0: GetMateTypeName = "Coincident"
+        Case 1: GetMateTypeName = "Concentric"
+        Case 2: GetMateTypeName = "Perpendicular"
+        Case 3: GetMateTypeName = "Parallel"
+        Case 4: GetMateTypeName = "Tangent"
+        Case 5: GetMateTypeName = "Distance"
+        Case 6: GetMateTypeName = "Angle"
+        Case 8: GetMateTypeName = "Symmetric"
+        Case 10: GetMateTypeName = "Gear"
+        Case 11: GetMateTypeName = "Width"
+        Case 12: GetMateTypeName = "Lock"
+        Case Else: GetMateTypeName = "Type_" & mateType
+    End Select
+End Function

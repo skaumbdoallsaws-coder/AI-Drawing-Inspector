@@ -1,0 +1,262 @@
+' =====================================================
+' SOLIDWORKS MACRO - Extract Full Assembly Tree V2
+' =====================================================
+' Extracts:
+' - Complete assembly/subassembly hierarchy
+' - Custom properties (Description, PartNumber, etc.)
+' - Component configuration names
+' - Old PN -> New PN mapping
+'
+' Instructions:
+' 1. Open your main assembly in SolidWorks
+' 2. Tools > Macro > New
+' 3. Copy this entire code into the editor
+' 4. Run (F5)
+' =====================================================
+
+Option Explicit
+
+Dim swApp As SldWorks.SldWorks
+Dim fileNum As Integer
+Dim indentLevel As Long
+Dim partCount As Long
+Dim assyCount As Long
+
+Sub main()
+    Dim swModel As SldWorks.ModelDoc2
+    Dim swConfig As SldWorks.Configuration
+    Dim swRootComp As SldWorks.Component2
+    Dim outputPath As String
+
+    Set swApp = Application.SldWorks
+    Set swModel = swApp.ActiveDoc
+
+    If swModel Is Nothing Then
+        MsgBox "No document open!", vbExclamation
+        Exit Sub
+    End If
+
+    If swModel.GetType <> swDocASSEMBLY Then
+        MsgBox "Please open an Assembly!", vbExclamation
+        Exit Sub
+    End If
+
+    partCount = 0
+    assyCount = 0
+
+    ' Output path
+    outputPath = Left(swModel.GetPathName, InStrRev(swModel.GetPathName, "\")) & _
+                 Replace(swModel.GetTitle, ".SLDASM", "") & "_full_tree_v2.txt"
+
+    fileNum = FreeFile
+    Open outputPath For Output As #fileNum
+
+    ' Header
+    Print #fileNum, "SOLIDWORKS FULL ASSEMBLY TREE WITH PROPERTIES"
+    Print #fileNum, "Assembly: " & swModel.GetTitle
+    Print #fileNum, "Path: " & swModel.GetPathName
+    Print #fileNum, "Date: " & Now()
+    Print #fileNum, String(80, "=")
+    Print #fileNum, ""
+    Print #fileNum, "FORMAT: [Level] ComponentName | Type | Description | PartNumber | Config"
+    Print #fileNum, String(80, "-")
+    Print #fileNum, ""
+
+    ' Get root component
+    Set swConfig = swModel.GetActiveConfiguration
+    Set swRootComp = swConfig.GetRootComponent3(True)
+
+    ' Print root assembly info
+    Print #fileNum, "[ROOT] " & swModel.GetTitle
+    Print #fileNum, "  Type: ASSEMBLY"
+    Print #fileNum, "  Path: " & swModel.GetPathName
+    PrintCustomProperties swModel, "  "
+    Print #fileNum, ""
+    Print #fileNum, String(80, "-")
+    Print #fileNum, ""
+
+    ' Traverse tree
+    indentLevel = 1
+    TraverseComponent swRootComp
+
+    Print #fileNum, ""
+    Print #fileNum, String(80, "=")
+    Print #fileNum, "SUMMARY"
+    Print #fileNum, "  Subassemblies: " & assyCount
+    Print #fileNum, "  Parts: " & partCount
+    Print #fileNum, "  Total Components: " & (assyCount + partCount)
+
+    Close #fileNum
+
+    MsgBox "Exported " & (assyCount + partCount) & " components to:" & vbCrLf & vbCrLf & outputPath, vbInformation, "Done!"
+
+End Sub
+
+Sub PrintCustomProperties(swModel As SldWorks.ModelDoc2, prefix As String)
+    Dim swCustPropMgr As SldWorks.CustomPropertyManager
+    Dim vPropNames As Variant
+    Dim i As Long
+    Dim valOut As String
+    Dim resolvedValOut As String
+    Dim wasResolved As Boolean
+    Dim propType As Long
+
+    On Error Resume Next
+
+    ' Get custom property manager for active config
+    Set swCustPropMgr = swModel.Extension.CustomPropertyManager("")
+
+    If swCustPropMgr Is Nothing Then Exit Sub
+
+    ' Get all property names
+    vPropNames = swCustPropMgr.GetNames
+
+    If IsEmpty(vPropNames) Then Exit Sub
+
+    For i = 0 To UBound(vPropNames)
+        swCustPropMgr.Get5 vPropNames(i), False, valOut, resolvedValOut, wasResolved
+        If Len(resolvedValOut) > 0 Then
+            Print #fileNum, prefix & vPropNames(i) & ": " & resolvedValOut
+        ElseIf Len(valOut) > 0 Then
+            Print #fileNum, prefix & vPropNames(i) & ": " & valOut
+        End If
+    Next i
+
+    ' Also try configuration-specific properties
+    Dim configName As String
+    configName = swModel.ConfigurationManager.ActiveConfiguration.Name
+
+    Set swCustPropMgr = swModel.Extension.CustomPropertyManager(configName)
+
+    If Not swCustPropMgr Is Nothing Then
+        vPropNames = swCustPropMgr.GetNames
+        If Not IsEmpty(vPropNames) Then
+            For i = 0 To UBound(vPropNames)
+                swCustPropMgr.Get5 vPropNames(i), False, valOut, resolvedValOut, wasResolved
+                If Len(resolvedValOut) > 0 Then
+                    Print #fileNum, prefix & "[Config] " & vPropNames(i) & ": " & resolvedValOut
+                ElseIf Len(valOut) > 0 Then
+                    Print #fileNum, prefix & "[Config] " & vPropNames(i) & ": " & valOut
+                End If
+            Next i
+        End If
+    End If
+
+    On Error GoTo 0
+End Sub
+
+Sub TraverseComponent(swComp As SldWorks.Component2)
+    Dim vChildren As Variant
+    Dim swChildComp As SldWorks.Component2
+    Dim swChildModel As SldWorks.ModelDoc2
+    Dim i As Long
+    Dim compName As String
+    Dim compType As String
+    Dim indent As String
+    Dim configName As String
+    Dim filePath As String
+
+    If swComp Is Nothing Then Exit Sub
+
+    vChildren = swComp.GetChildren
+
+    If IsEmpty(vChildren) Then Exit Sub
+
+    For i = 0 To UBound(vChildren)
+        Set swChildComp = vChildren(i)
+
+        If Not swChildComp Is Nothing Then
+            ' Skip suppressed components
+            If swChildComp.IsSuppressed Then GoTo NextComponent
+
+            compName = swChildComp.Name2
+            configName = swChildComp.ReferencedConfiguration
+            filePath = swChildComp.GetPathName
+
+            ' Determine type and get model
+            Set swChildModel = swChildComp.GetModelDoc2
+
+            If Not swChildModel Is Nothing Then
+                If swChildModel.GetType = swDocASSEMBLY Then
+                    compType = "SUBASSY"
+                    assyCount = assyCount + 1
+                Else
+                    compType = "PART"
+                    partCount = partCount + 1
+                End If
+            Else
+                ' Model not loaded - try to determine from path
+                If Right(LCase(filePath), 7) = ".sldasm" Then
+                    compType = "SUBASSY"
+                    assyCount = assyCount + 1
+                Else
+                    compType = "PART"
+                    partCount = partCount + 1
+                End If
+            End If
+
+            ' Create indent
+            indent = String(indentLevel * 2, " ")
+
+            ' Print component info
+            Print #fileNum, indent & "[" & indentLevel & "] " & CleanComponentName(compName)
+            Print #fileNum, indent & "    Type: " & compType
+            Print #fileNum, indent & "    Config: " & configName
+            Print #fileNum, indent & "    File: " & GetFileName(filePath)
+
+            ' Print custom properties if model is loaded
+            If Not swChildModel Is Nothing Then
+                PrintCustomProperties swChildModel, indent & "    "
+            End If
+
+            Print #fileNum, ""
+
+            ' If it's a subassembly, recurse into it
+            If compType = "SUBASSY" Then
+                indentLevel = indentLevel + 1
+                TraverseComponent swChildComp
+                indentLevel = indentLevel - 1
+            End If
+        End If
+
+NextComponent:
+    Next i
+
+End Sub
+
+Function CleanComponentName(compName As String) As String
+    ' Remove instance numbers and path prefixes for cleaner display
+    Dim result As String
+    Dim slashPos As Long
+
+    result = compName
+
+    ' Get last part after slash (for nested components)
+    slashPos = InStrRev(result, "/")
+    If slashPos > 0 Then
+        result = Mid(result, slashPos + 1)
+    End If
+
+    ' Remove instance number at end (e.g., -1, -2)
+    Dim dashPos As Long
+    dashPos = InStrRev(result, "-")
+    If dashPos > 0 Then
+        Dim afterDash As String
+        afterDash = Mid(result, dashPos + 1)
+        If IsNumeric(afterDash) And Len(afterDash) <= 2 Then
+            result = Left(result, dashPos - 1)
+        End If
+    End If
+
+    CleanComponentName = result
+End Function
+
+Function GetFileName(fullPath As String) As String
+    Dim slashPos As Long
+    slashPos = InStrRev(fullPath, "\")
+    If slashPos > 0 Then
+        GetFileName = Mid(fullPath, slashPos + 1)
+    Else
+        GetFileName = fullPath
+    End If
+End Function

@@ -1,0 +1,1010 @@
+{
+  "ROOT": [
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "046-908",
+      "type": "SUBASSY",
+      "part_number": "046-908",
+      "description": "VISE AND PIVOT DETAIL"
+    },
+    {
+      "name": "022-639_1",
+      "type": "SUBASSY",
+      "part_number": "1009198",
+      "description": "HEAD ASSY 400"
+    },
+    {
+      "name": "017-142_1_1",
+      "type": "SUBASSY",
+      "part_number": "517499",
+      "description": "COUNTERBALANCE SPRINT ASSEM"
+    },
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "018-586",
+      "type": "PART",
+      "part_number": "201915",
+      "description": "COLLAR SHAFT"
+    },
+    {
+      "name": "018-586",
+      "type": "PART",
+      "part_number": "201915",
+      "description": "COLLAR SHAFT"
+    },
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "socket set screw cup point_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "023-459_1",
+      "type": "SUBASSY",
+      "part_number": "1008801",
+      "description": "BAND COVER WELDT ASSY 400"
+    },
+    {
+      "name": "047-148",
+      "type": "SUBASSY",
+      "part_number": null,
+      "description": "047-148"
+    },
+    {
+      "name": "046-877",
+      "type": "SUBASSY",
+      "part_number": null,
+      "description": "400S DRIVE ASSEM"
+    }
+  ],
+  "046-908": [
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "047-263",
+      "type": "SUBASSY",
+      "part_number": null,
+      "description": "CLAMPING VISE"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "6000056",
+      "type": "SUBASSY",
+      "part_number": "6000056",
+      "description": "BASE WELDT ASSY - 400S"
+    },
+    {
+      "name": "022-729_1",
+      "type": "PART",
+      "part_number": "1008176",
+      "description": "RACK VISE 400"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "023-733",
+      "type": "PART",
+      "part_number": "199500",
+      "description": "WSHR SPR LK HI-CLR M16"
+    },
+    {
+      "name": "013-338",
+      "type": "PART",
+      "part_number": "199908",
+      "description": "SCR CAP HEX SCH M16X2.0X50"
+    },
+    {
+      "name": "013-338",
+      "type": "PART",
+      "part_number": "199908",
+      "description": "SCR CAP HEX SCH M16X2.0X50"
+    },
+    {
+      "name": "023-733",
+      "type": "PART",
+      "part_number": "199500",
+      "description": "WSHR SPR LK HI-CLR M16"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "023-147",
+      "type": "PART",
+      "part_number": "1008175",
+      "description": "PLATE WEAR C916"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "023-147",
+      "type": "PART",
+      "part_number": "1008175",
+      "description": "PLATE WEAR C916"
+    },
+    {
+      "name": "022-814",
+      "type": "PART",
+      "part_number": "514121",
+      "description": "JAW FIXED"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "047-262",
+      "type": "SUBASSY",
+      "part_number": null,
+      "description": "Pivot Assem"
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex nut jam_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    },
+    {
+      "name": "M6 X 1.0 X 12 mm BTNHD",
+      "type": "PART",
+      "part_number": "199246",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X12"
+    }
+  ],
+  "047-263": [
+    {
+      "name": "017-133",
+      "type": "PART",
+      "part_number": "179579",
+      "description": "PIN LOWER SPRING"
+    },
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+      "type": "PART",
+      "part_number": "199680",
+      "description": "SCR CAP HEX SCH M10X1.5X30"
+    },
+    {
+      "name": "040-484",
+      "type": "PART",
+      "part_number": "226121",
+      "description": "T-NUT"
+    },
+    {
+      "name": "040-484",
+      "type": "PART",
+      "part_number": "226121",
+      "description": "T-NUT"
+    },
+    {
+      "name": "022-734",
+      "type": "PART",
+      "part_number": "314884",
+      "description": "PAWL"
+    }
+  ],
+  "6000056": [
+    {
+      "name": "023-346_1",
+      "type": "PART",
+      "part_number": "1009245",
+      "description": "PLATE PIVOT 400S"
+    },
+    {
+      "name": "033-698",
+      "type": "PART",
+      "part_number": "1013572",
+      "description": "PAN-BASE, 400 S/M/A"
+    },
+    {
+      "name": "038-892",
+      "type": "PART",
+      "part_number": "1014990",
+      "description": "RAIL VISE FRONT 400S"
+    },
+    {
+      "name": "038-893",
+      "type": "PART",
+      "part_number": "1014991",
+      "description": "RAIL VISE REAR 400S"
+    },
+    {
+      "name": "032-601",
+      "type": "PART",
+      "part_number": "1013064",
+      "description": "PLATE-FIXED JAW MOUNT, 400S"
+    },
+    {
+      "name": "022-807",
+      "type": "PART",
+      "part_number": "1008111",
+      "description": "END VISE BED"
+    }
+  ],
+  "047-262": [
+    {
+      "name": "023-470_1",
+      "type": "PART",
+      "part_number": "1009372",
+      "description": "SHAFT PIVOT 400S"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "023-353_1",
+      "type": "PART",
+      "part_number": "1008178",
+      "description": "PIVOT 400S"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "023-432_1",
+      "type": "PART",
+      "part_number": "1008252",
+      "description": "SPACER CLAMP SUPPORT 400S"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "023-726",
+      "type": "PART",
+      "part_number": "207713",
+      "description": "STUD M12 X 1.75"
+    },
+    {
+      "name": "023-727_1",
+      "type": "PART",
+      "part_number": "1009378",
+      "description": "POINTER PIVOT ANGLE 400S"
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    }
+  ],
+  "022-639_1": [
+    {
+      "name": "006-234",
+      "type": "PART",
+      "part_number": "35-008688",
+      "description": "RING RTNG EXT .750 DIA SHAFT"
+    },
+    {
+      "name": "022-761",
+      "type": "SUBASSY",
+      "part_number": "317088",
+      "description": "BANDWHEEL DRIVER ASSY"
+    },
+    {
+      "name": "005-723",
+      "type": "PART",
+      "part_number": "517542",
+      "description": "HEAD CASTING"
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "225521",
+      "type": "SUBASSY",
+      "part_number": "225521",
+      "description": "400 ARM ASSEMBLY"
+    },
+    {
+      "name": "006-309",
+      "type": "SUBASSY",
+      "part_number": "417836",
+      "description": "POWERED CHIP BRUSH ASSY METRIC"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "006-234",
+      "type": "PART",
+      "part_number": "35-008688",
+      "description": "RING RTNG EXT .750 DIA SHAFT"
+    },
+    {
+      "name": "022-761",
+      "type": "SUBASSY",
+      "part_number": "317088",
+      "description": "BANDWHEEL DRIVER ASSY"
+    },
+    {
+      "name": "005-723",
+      "type": "PART",
+      "part_number": "517542",
+      "description": "HEAD CASTING"
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "225521",
+      "type": "SUBASSY",
+      "part_number": "225521",
+      "description": "400 ARM ASSEMBLY"
+    },
+    {
+      "name": "006-309",
+      "type": "SUBASSY",
+      "part_number": "417836",
+      "description": "POWERED CHIP BRUSH ASSY METRIC"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    }
+  ],
+  "225521": [
+    {
+      "name": "socket set screw cup point_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "017-120",
+      "type": "PART",
+      "part_number": "198976",
+      "description": "Washer, Flat M10"
+    },
+    {
+      "name": "017-120",
+      "type": "PART",
+      "part_number": "198976",
+      "description": "Washer, Flat M10"
+    },
+    {
+      "name": "socket set screw cup point_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "017-120",
+      "type": "PART",
+      "part_number": "198976",
+      "description": "Washer, Flat M10"
+    },
+    {
+      "name": "017-120",
+      "type": "PART",
+      "part_number": "198976",
+      "description": "Washer, Flat M10"
+    }
+  ],
+  "006-309": [
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "006-305",
+      "type": "SUBASSY",
+      "part_number": "320800",
+      "description": "BAND BRUSH ASSY W/METRIC BRGS"
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "006-305",
+      "type": "SUBASSY",
+      "part_number": "320800",
+      "description": "BAND BRUSH ASSY W/METRIC BRGS"
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    }
+  ],
+  "006-305": [
+    {
+      "name": "hex nut jam_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex nut jam_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex nut jam_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "hex nut jam_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    }
+  ],
+  "017-142_1_1": [
+    {
+      "name": "017-133",
+      "type": "PART",
+      "part_number": "179579",
+      "description": "PIN LOWER SPRING"
+    },
+    {
+      "name": "017-134",
+      "type": "PART",
+      "part_number": "318127",
+      "description": "BRACKET SPRING BOTTOM"
+    },
+    {
+      "name": "017-141",
+      "type": "SUBASSY",
+      "part_number": "318126",
+      "description": "ROD GUIDE WELDT ASSY"
+    },
+    {
+      "name": "017-136",
+      "type": "PART",
+      "part_number": "178236",
+      "description": "SPR CPRSN 2.12X2.932X13.00 190LB/IN"
+    },
+    {
+      "name": "019-660",
+      "type": "SUBASSY",
+      "part_number": "326829",
+      "description": "SCREW AND LUG ASSEMBLY-C'BAL MECHANISM"
+    },
+    {
+      "name": "015-051",
+      "type": "PART",
+      "part_number": "179576",
+      "description": "WASHER TOP"
+    },
+    {
+      "name": "017-120",
+      "type": "PART",
+      "part_number": "198976",
+      "description": "Washer, Flat M10"
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "006-234",
+      "type": "PART",
+      "part_number": "35-008688",
+      "description": "RING RTNG EXT .750 DIA SHAFT"
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "lock washer spring regular_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "017-120",
+      "type": "PART",
+      "part_number": "198976",
+      "description": "Washer, Flat M10"
+    },
+    {
+      "name": "hex cap screw_am",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    }
+  ],
+  "017-141": [
+    {
+      "name": "017-132",
+      "type": "PART",
+      "part_number": "318126X",
+      "description": "ROD GUIDE SPRING SEAT"
+    },
+    {
+      "name": "017-131",
+      "type": "PART",
+      "part_number": "318125",
+      "description": "TUBE ROD GUIDE"
+    }
+  ],
+  "019-660": [
+    {
+      "name": "014-915",
+      "type": "PART",
+      "part_number": "201366",
+      "description": "COLLAR-SHAFT, CLAMP-3/4-10 THD"
+    },
+    {
+      "name": "spring pin slotted_ai",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "017-127",
+      "type": "PART",
+      "part_number": "178683",
+      "description": "CLEVIS"
+    },
+    {
+      "name": "017-137",
+      "type": "PART",
+      "part_number": "179577",
+      "description": "ROD THREADED 3/4-10UNC X 13.50 .03 LG"
+    },
+    {
+      "name": "017-138",
+      "type": "PART",
+      "part_number": "199140",
+      "description": "NUT HEX JAM 3/4-10"
+    }
+  ],
+  "023-459_1": [
+    {
+      "name": "023-458_1",
+      "type": "PART",
+      "part_number": "1008804",
+      "description": "BAND COVER LOWER 400"
+    }
+  ],
+  "047-148": [
+    {
+      "name": "047-145",
+      "type": "SUBASSY",
+      "part_number": null,
+      "description": "400S ELECT PANEL VFD"
+    },
+    {
+      "name": "047-268",
+      "type": "SUBASSY",
+      "part_number": null,
+      "description": "CONTROL PANEL"
+    }
+  ],
+  "047-145": [
+    {
+      "name": "028-047",
+      "type": "PART",
+      "part_number": "169674",
+      "description": "ELECTRICAL DIN RAIL"
+    },
+    {
+      "name": "028-047",
+      "type": "PART",
+      "part_number": "169674",
+      "description": "ELECTRICAL DIN RAIL"
+    },
+    {
+      "name": "044-054",
+      "type": "PART",
+      "part_number": "197208",
+      "description": "PNL CHAN 1\"W X 2\" H PSA"
+    },
+    {
+      "name": "028-047",
+      "type": "PART",
+      "part_number": "169674",
+      "description": "ELECTRICAL DIN RAIL"
+    },
+    {
+      "name": "044-054",
+      "type": "PART",
+      "part_number": "197208",
+      "description": "PNL CHAN 1\"W X 2\" H PSA"
+    },
+    {
+      "name": "044-054",
+      "type": "PART",
+      "part_number": "197208",
+      "description": "PNL CHAN 1\"W X 2\" H PSA"
+    }
+  ],
+  "047-268": [
+    {
+      "name": "047-199",
+      "type": "SUBASSY",
+      "part_number": "231993",
+      "description": "CONTROL PANEL 400S"
+    }
+  ],
+  "047-199": [
+    {
+      "name": "flush stud_pmm",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    },
+    {
+      "name": "flush stud_pmm",
+      "type": "PART",
+      "part_number": null,
+      "description": null
+    }
+  ],
+  "046-877": [
+    {
+      "name": "022-639_1",
+      "type": "SUBASSY",
+      "part_number": "1009198",
+      "description": "HEAD ASSY 400"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    },
+    {
+      "name": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+      "type": "PART",
+      "part_number": "199969",
+      "description": "SCR CAP HEX SOC BTNHD M6X1.0X10"
+    }
+  ]
+}

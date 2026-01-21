@@ -1,0 +1,442 @@
+{
+  "199680": {
+    "old_pn": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX",
+    "new_pn": "199680",
+    "description": "SCR CAP HEX SCH M10X1.5X30",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX.SLDPRT",
+    "parent_assembly": "ROOT"
+  },
+  "199246": {
+    "old_pn": "M6 X 1.0 X 12 mm BTNHD",
+    "new_pn": "199246",
+    "description": "SCR CAP HEX SOC BTNHD M6X1.0X12",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "M6 X 1.0 X 12 mm BTNHD.SLDPRT",
+    "parent_assembly": "046-908"
+  },
+  "179579": {
+    "old_pn": "017-133",
+    "new_pn": "179579",
+    "description": "PIN LOWER SPRING",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "017-133.SLDPRT",
+    "parent_assembly": "047-263"
+  },
+  "226121": {
+    "old_pn": "040-484",
+    "new_pn": "226121",
+    "description": "T-NUT",
+    "type": "PART",
+    "material": "AISI 1020",
+    "make_buy": "MAKE",
+    "file": "040-484.SLDPRT",
+    "parent_assembly": "047-263"
+  },
+  "314884": {
+    "old_pn": "022-734",
+    "new_pn": "314884",
+    "description": "PAWL",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "022-734.SLDPRT",
+    "parent_assembly": "047-263"
+  },
+  "1009245": {
+    "old_pn": "023-346_1",
+    "new_pn": "1009245",
+    "description": "PLATE PIVOT 400S",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "023-346_1.SLDPRT",
+    "parent_assembly": "6000056"
+  },
+  "1013572": {
+    "old_pn": "033-698",
+    "new_pn": "1013572",
+    "description": "PAN-BASE, 400 S/M/A",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "033-698.SLDPRT",
+    "parent_assembly": "6000056"
+  },
+  "1014990": {
+    "old_pn": "038-892",
+    "new_pn": "1014990",
+    "description": "RAIL VISE FRONT 400S",
+    "type": "PART",
+    "material": "Plain Carbon Steel",
+    "make_buy": "MAKE",
+    "file": "038-892.SLDPRT",
+    "parent_assembly": "6000056"
+  },
+  "1014991": {
+    "old_pn": "038-893",
+    "new_pn": "1014991",
+    "description": "RAIL VISE REAR 400S",
+    "type": "PART",
+    "material": "Plain Carbon Steel",
+    "make_buy": "MAKE",
+    "file": "038-893.SLDPRT",
+    "parent_assembly": "6000056"
+  },
+  "1013064": {
+    "old_pn": "032-601",
+    "new_pn": "1013064",
+    "description": "PLATE-FIXED JAW MOUNT, 400S",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "032-601.SLDPRT",
+    "parent_assembly": "6000056"
+  },
+  "1008111": {
+    "old_pn": "022-807",
+    "new_pn": "1008111",
+    "description": "END VISE BED",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "022-807.SLDPRT",
+    "parent_assembly": "6000056"
+  },
+  "1008176": {
+    "old_pn": "022-729_1",
+    "new_pn": "1008176",
+    "description": "RACK VISE 400",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "022-729_1.SLDPRT",
+    "parent_assembly": "046-908"
+  },
+  "199500": {
+    "old_pn": "023-733",
+    "new_pn": "199500",
+    "description": "WSHR SPR LK HI-CLR M16",
+    "type": "PART",
+    "material": "",
+    "make_buy": "MAKE",
+    "file": "023-733.SLDPRT",
+    "parent_assembly": "046-908"
+  },
+  "199908": {
+    "old_pn": "013-338",
+    "new_pn": "199908",
+    "description": "SCR CAP HEX SCH M16X2.0X50",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "013-338.SLDPRT",
+    "parent_assembly": "046-908"
+  },
+  "1008175": {
+    "old_pn": "023-147",
+    "new_pn": "1008175",
+    "description": "PLATE WEAR C916",
+    "type": "PART",
+    "material": "Plain Carbon Steel",
+    "make_buy": "MAKE",
+    "file": "023-147.SLDPRT",
+    "parent_assembly": "046-908"
+  },
+  "514121": {
+    "old_pn": "022-814",
+    "new_pn": "514121",
+    "description": "JAW FIXED",
+    "type": "PART",
+    "material": "Ductile Iron",
+    "make_buy": "MAKE",
+    "file": "022-814.SLDPRT",
+    "parent_assembly": "046-908"
+  },
+  "1009372": {
+    "old_pn": "023-470_1",
+    "new_pn": "1009372",
+    "description": "SHAFT PIVOT 400S",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "023-470_1.SLDPRT",
+    "parent_assembly": "047-262"
+  },
+  "199969": {
+    "old_pn": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N",
+    "new_pn": "199969",
+    "description": "SCR CAP HEX SOC BTNHD M6X1.0X10",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "B18.3.4M - 6 x 1.0 x 10 SBHCS --N.SLDPRT",
+    "parent_assembly": "047-262"
+  },
+  "1008178": {
+    "old_pn": "023-353_1",
+    "new_pn": "1008178",
+    "description": "PIVOT 400S",
+    "type": "PART",
+    "material": "Gray Cast Iron",
+    "make_buy": "MAKE",
+    "file": "023-353_1.SLDPRT",
+    "parent_assembly": "047-262"
+  },
+  "1008252": {
+    "old_pn": "023-432_1",
+    "new_pn": "1008252",
+    "description": "SPACER CLAMP SUPPORT 400S",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "023-432_1.SLDPRT",
+    "parent_assembly": "047-262"
+  },
+  "207713": {
+    "old_pn": "023-726",
+    "new_pn": "207713",
+    "description": "STUD M12 X 1.75",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "023-726.SLDPRT",
+    "parent_assembly": "047-262"
+  },
+  "1009378": {
+    "old_pn": "023-727_1",
+    "new_pn": "1009378",
+    "description": "POINTER PIVOT ANGLE 400S",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "023-727_1.SLDPRT",
+    "parent_assembly": "047-262"
+  },
+  "hex cap screw_am": {
+    "old_pn": null,
+    "new_pn": null,
+    "description": null,
+    "type": "PART",
+    "material": null,
+    "make_buy": null,
+    "file": "hex cap screw_am.sldprt",
+    "parent_assembly": "047-262"
+  },
+  "hex nut jam_am": {
+    "old_pn": null,
+    "new_pn": null,
+    "description": null,
+    "type": "PART",
+    "material": null,
+    "make_buy": null,
+    "file": "hex nut jam_am.sldprt",
+    "parent_assembly": "046-908"
+  },
+  "35-008688": {
+    "old_pn": "006-234",
+    "new_pn": "35-008688",
+    "description": "RING RTNG EXT .750 DIA SHAFT",
+    "type": "PART",
+    "material": "Plain Carbon Steel",
+    "make_buy": "MAKE",
+    "file": "006-234.SLDPRT",
+    "parent_assembly": "022-639_1"
+  },
+  "517542": {
+    "old_pn": "005-723",
+    "new_pn": "517542",
+    "description": "HEAD CASTING",
+    "type": "PART",
+    "material": "Ductile Iron",
+    "make_buy": "MAKE",
+    "file": "005-723.SLDPRT",
+    "parent_assembly": "022-639_1"
+  },
+  "lock washer spring regular_ai": {
+    "old_pn": null,
+    "new_pn": null,
+    "description": null,
+    "type": "PART",
+    "material": null,
+    "make_buy": null,
+    "file": "lock washer spring regular_ai.sldprt",
+    "parent_assembly": "022-639_1"
+  },
+  "socket set screw cup point_am": {
+    "old_pn": null,
+    "new_pn": null,
+    "description": null,
+    "type": "PART",
+    "material": null,
+    "make_buy": null,
+    "file": "socket set screw cup point_am.sldprt",
+    "parent_assembly": "225521"
+  },
+  "198976": {
+    "old_pn": "017-120",
+    "new_pn": "198976",
+    "description": "Washer, Flat M10",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "017-120.SLDPRT",
+    "parent_assembly": "225521"
+  },
+  "318127": {
+    "old_pn": "017-134",
+    "new_pn": "318127",
+    "description": "BRACKET SPRING BOTTOM",
+    "type": "PART",
+    "material": "AISI 1020",
+    "make_buy": "MAKE",
+    "file": "017-134.SLDPRT",
+    "parent_assembly": "017-142_1_1"
+  },
+  "318126X": {
+    "old_pn": "017-132",
+    "new_pn": "318126X",
+    "description": "ROD GUIDE SPRING SEAT",
+    "type": "PART",
+    "material": "Plain Carbon Steel",
+    "make_buy": "MAKE",
+    "file": "017-132.SLDPRT",
+    "parent_assembly": "017-141"
+  },
+  "318125": {
+    "old_pn": "017-131",
+    "new_pn": "318125",
+    "description": "TUBE ROD GUIDE",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "017-131.SLDPRT",
+    "parent_assembly": "017-141"
+  },
+  "178236": {
+    "old_pn": "017-136",
+    "new_pn": "178236",
+    "description": "SPR CPRSN 2.12X2.932X13.00 190LB/IN",
+    "type": "PART",
+    "material": "AISI 1020",
+    "make_buy": "MAKE",
+    "file": "017-136.SLDPRT",
+    "parent_assembly": "017-142_1_1"
+  },
+  "201366": {
+    "old_pn": "014-915",
+    "new_pn": "201366",
+    "description": "COLLAR-SHAFT, CLAMP-3/4-10 THD",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "014-915.SLDPRT",
+    "parent_assembly": "019-660"
+  },
+  "spring pin slotted_ai": {
+    "old_pn": null,
+    "new_pn": null,
+    "description": null,
+    "type": "PART",
+    "material": null,
+    "make_buy": null,
+    "file": "spring pin slotted_ai.sldprt",
+    "parent_assembly": "019-660"
+  },
+  "178683": {
+    "old_pn": "017-127",
+    "new_pn": "178683",
+    "description": "CLEVIS",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "017-127.SLDPRT",
+    "parent_assembly": "019-660"
+  },
+  "179577": {
+    "old_pn": "017-137",
+    "new_pn": "179577",
+    "description": "ROD THREADED 3/4-10UNC X 13.50 .03 LG",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "017-137.SLDPRT",
+    "parent_assembly": "019-660"
+  },
+  "199140": {
+    "old_pn": "017-138",
+    "new_pn": "199140",
+    "description": "NUT HEX JAM 3/4-10",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "017-138.SLDPRT",
+    "parent_assembly": "019-660"
+  },
+  "179576": {
+    "old_pn": "015-051",
+    "new_pn": "179576",
+    "description": "WASHER TOP",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "015-051.SLDPRT",
+    "parent_assembly": "017-142_1_1"
+  },
+  "201915": {
+    "old_pn": "018-586",
+    "new_pn": "201915",
+    "description": "COLLAR SHAFT",
+    "type": "PART",
+    "material": "Alloy Steel",
+    "make_buy": "MAKE",
+    "file": "018-586.SLDPRT",
+    "parent_assembly": "ROOT"
+  },
+  "1008804": {
+    "old_pn": "023-458_1",
+    "new_pn": "1008804",
+    "description": "BAND COVER LOWER 400",
+    "type": "PART",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "023-458_1.SLDPRT",
+    "parent_assembly": "023-459_1"
+  },
+  "169674": {
+    "old_pn": "028-047",
+    "new_pn": "169674",
+    "description": "ELECTRICAL DIN RAIL",
+    "type": "PART",
+    "material": "",
+    "make_buy": "MAKE",
+    "file": "028-047.SLDPRT",
+    "parent_assembly": "047-145"
+  },
+  "197208": {
+    "old_pn": "044-054",
+    "new_pn": "197208",
+    "description": "PNL CHAN 1\"W X 2\" H PSA",
+    "type": "PART",
+    "material": "Plain Carbon Steel",
+    "make_buy": "MAKE",
+    "file": "044-054.SLDPRT",
+    "parent_assembly": "047-145"
+  },
+  "flush stud_pmm": {
+    "old_pn": null,
+    "new_pn": null,
+    "description": null,
+    "type": "PART",
+    "material": null,
+    "make_buy": null,
+    "file": "flush stud_pmm.sldprt",
+    "parent_assembly": "047-199"
+  }
+}

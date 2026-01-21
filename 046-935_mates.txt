@@ -1,0 +1,152 @@
+SOLIDWORKS MATE EXTRACTION
+Assembly: 046-935
+Path: C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\400S assembly\046-935.SLDASM
+Date: 1/20/2026 2:15:30 PM
+==================================================
+
+[COMPONENTS]
+B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-3
+046-908-1
+022-639_1-1
+017-142_1_1-1
+018-809-1
+018-809-2
+B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-1
+B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-2
+018-586-2
+022-723-2
+024-887-1
+hex head tapping screw_am-1
+hex head tapping screw_am-6
+023-542_20-1
+hex head tapping screw_am-2
+hex head tapping screw_am-4
+023-548_21-1
+B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N-3
+018-586-1
+B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-4
+022-723-1
+017-343-1
+socket set screw cup point_am-1
+hex head tapping screw_am-3
+013-334-3
+013-334-2
+023-459_1-1
+024-828-1
+B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX-2
+hex head tapping screw_am-8
+013-334-1
+047-148-1
+013-288-1
+hex head tapping screw_am-7
+hex head tapping screw_am-9
+013-334-5
+013-334-4
+013-334-6
+B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX-1
+017-343-2
+023-798_2-1
+046-877-1
+
+Total: 42
+
+[MATES]
+Format: MateName | Type | PartA <-> PartB
+--------------------------------------------------
+Coincident1 | Coincident | 046-935 <-> 017-142_1_1-1/017-134-1
+Concentric1 | Concentric | 046-935 <-> 017-142_1_1-1/hex cap screw_am-2
+Parallel3 | Parallel | 046-935 <-> 017-142_1_1-1/017-134-1
+Coincident4 | Coincident | 046-935 <-> 018-809-1/018-526-1
+Concentric3 | Concentric | 046-935 <-> 018-809-1/018-526-1
+Concentric4 | Concentric | 046-935 <-> 018-809-1/018-526-1
+Concentric5 | Concentric | 046-935 <-> 018-809-2/018-526-1
+Concentric6 | Concentric | 046-935 <-> 018-809-2/018-526-1
+Coincident5 | Coincident | 046-935 <-> 018-809-2/018-526-1
+Concentric71 | Concentric | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-1
+Coincident61 | Coincident | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-1
+Concentric81 | Concentric | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-2
+Coincident71 | Coincident | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-2
+Concentric91 | Concentric | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-3
+Coincident81 | Coincident | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-3
+Concentric101 | Concentric | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-4
+Coincident91 | Coincident | 046-935 <-> B18.3.1M - 10 x 1.5 x 30 Hex SHCS -- 30NHX-4
+Concentric102 | Concentric | 018-809-1/015-009-1 <-> 024-887-1
+Width1 | Width | 024-887-1 <-> 024-887-1
+Concentric103 | Concentric | 018-586-1 <-> 022-723-2
+Concentric104 | Concentric | 018-586-1 <-> 018-586-2
+Concentric105 | Concentric | 018-586-1 <-> 022-723-1
+Coincident92 | Coincident | 018-586-1 <-> 022-723-2
+Coincident93 | Coincident | 018-586-2 <-> 022-723-1
+Coincident94 | Coincident | 018-809-1/018-526-1 <-> 022-723-2
+Coincident95 | Coincident | 018-809-2/018-526-1 <-> 022-723-1
+Concentric106 | Concentric | 024-887-1 <-> 018-586-1
+Concentric107 | Concentric | 022-639_1-1/022-705_2-1/022-704-1 <-> 024-887-1
+Width2 | Width | 022-639_1-1/022-705_2-1/022-704-1 <-> 022-639_1-1/022-705_2-1/022-704-1
+Concentric110 | Concentric | 022-639_1-1/022-705_2-1/022-704-1 <-> B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N-3
+Coincident98 | Coincident | 022-639_1-1/022-705_2-1/022-704-1 <-> B18.3.6M - M10 x 1.5 x 12 Hex Socket Cone Pt. SS --N-3
+Coincident99 | Coincident | 022-639_1-1/022-705_2-1/022-704-1 <-> socket set screw cup point_am-1
+Concentric111 | Concentric | 022-639_1-1/022-705_2-1/022-704-1 <-> socket set screw cup point_am-1
+Concentric114 | Concentric | 022-639_1-1/022-705_2-1/009-226-1 <-> 017-142_1_1-1/019-660-1/017-127-1
+Slot1 | Type_21 | 022-639_1-1/022-705_2-1/009-269-1 <-> 023-542_20-1/023-687_20-1/023-686_20-1
+Coincident100 | Coincident | 022-639_1-1/022-705_2-1/009-269-1 <-> 023-542_20-1/023-687_20-1/023-686_20-1
+Concentric1151 | Concentric | 022-639_1-1/022-705_2-1/009-269-1 <-> hex head tapping screw_am-1
+Coincident1011 | Coincident | 022-639_1-1/022-705_2-1/009-269-1 <-> hex head tapping screw_am-1
+Concentric1161 | Concentric | 022-639_1-1/022-705_2-1/009-269-1 <-> hex head tapping screw_am-2
+Coincident1021 | Coincident | 022-639_1-1/022-705_2-1/009-269-1 <-> hex head tapping screw_am-2
+Concentric1171 | Concentric | 023-542_20-1/023-687_20-1/023-686_20-1 <-> hex head tapping screw_am-3
+Coincident1031 | Coincident | 023-542_20-1/023-687_20-1/023-686_20-1 <-> hex head tapping screw_am-3
+Concentric1181 | Concentric | 023-542_20-1/023-687_20-1/023-686_20-1 <-> hex head tapping screw_am-4
+Coincident1041 | Coincident | 023-542_20-1/023-687_20-1/023-686_20-1 <-> hex head tapping screw_am-4
+Coincident105 | Coincident | 023-542_20-1/023-538_20-1 <-> 017-343-1
+Coincident106 | Coincident | 023-542_20-1/023-538_20-1 <-> 017-343-1
+Coincident107 | Coincident | 023-542_20-1/023-538_20-1 <-> 017-343-1
+Coincident108 | Coincident | 022-639_1-1/022-705_2-1/022-757-1 <-> 023-548_21-1/023-687-1/023-686-1
+Coincident109 | Coincident | 022-639_1-1/023-441_2-1 <-> 023-548_21-1/023-692_21-2
+Coincident110 | Coincident | 023-542_20-1/023-688_20-1 <-> 023-548_21-1/023-690_21-1
+Concentric1191 | Concentric | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-6
+Coincident1111 | Coincident | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-6
+Concentric1201 | Concentric | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-7
+Coincident1121 | Coincident | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-7
+Concentric1211 | Concentric | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-8
+Coincident1131 | Coincident | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-8
+Concentric1221 | Concentric | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-9
+Coincident1141 | Coincident | 023-548_21-1/023-687-1/023-686-1 <-> hex head tapping screw_am-9
+Coincident115 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-288-1/013-284-1
+Slot2 | Type_21 | 013-288-1/013-284-1 <-> 022-639_1-1/022-705_2-1/022-708_1-3
+Slot3 | Type_21 | 013-288-1/013-284-1 <-> 022-639_1-1/022-705_2-1/022-708_1-3
+Concentric1231 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-1
+Coincident1161 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-1
+Concentric1241 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-2
+Coincident1171 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-2
+Coincident118 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 023-459_1-1/023-457_1-1
+Slot4 | Type_21 | 023-459_1-1/023-458_1-1 <-> 022-639_1-1/022-705_2-1/022-708_1-3
+Parallel6 | Parallel | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 023-459_1-1/023-457_1-1
+Concentric1251 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-3
+Coincident1201 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-3
+Concentric1261 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-4
+Coincident1211 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-4
+Concentric1271 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-5
+Coincident1221 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-5
+Concentric1281 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-6
+Coincident1231 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 013-334-6
+Coincident124 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 024-828-1
+Concentric129 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 024-828-1
+Concentric130 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 024-828-1
+Concentric1311 | Concentric | 024-828-1 <-> B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX-1
+Coincident1251 | Coincident | 024-828-1 <-> B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX-1
+Concentric1321 | Concentric | 024-828-1 <-> B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX-2
+Coincident1261 | Coincident | 024-828-1 <-> B18.3.1M - 8 x 1.25 x 12 Hex SHCS -- 12NHX-2
+Coincident127 | Coincident | 023-548_21-1/023-691_21-1 <-> 017-343-2
+Coincident128 | Coincident | 023-548_21-1/023-691_21-1 <-> 017-343-2
+Coincident129 | Coincident | 023-548_21-1/023-691_21-1 <-> 017-343-2
+Concentric1322 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 046-877-1/015-317-3
+Concentric1323 | Concentric | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 046-877-1/015-317-1
+Coincident1264 | Coincident | 022-639_1-1/022-705_2-1/022-708_1-3 <-> 046-935
+Coincident1265 | Coincident | 022-639_1-1/225521-1/023-059-1 <-> 023-798_2-1
+Concentric1324 | Concentric | 022-639_1-1/225521-1/socket set screw cup point_am-1 <-> 023-798_2-1
+Slot5 | Type_21 | 022-639_1-1/225521-1/023-059-1 <-> 023-798_2-1
+Coincident1266 | Coincident | 046-908-1/6000056-1/033-698-1 <-> 047-148-1/047-133-1/047-129-1
+Distance1 | Distance | 046-908-1/6000056-1/019-676_1-2 <-> 046-935
+Coincident1268 | Coincident | 046-908-1/6000056-1/033-698-1 <-> 047-148-1/047-133-1/047-152-1
+
+Total Mates: 95

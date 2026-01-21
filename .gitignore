@@ -20,8 +20,12 @@ venv/
 
 # Data files
 *.json
-!400S_file_part_mapping.json
-!400S_detailed_structure_fixed.json
+# Allow SolidWorks-verified context databases
+!sw_parts_db.json
+!sw_assemblies_db.json
+!sw_mating_context.json
+!sw_structure.json
+!sw_components_all.json
 
 # OS files
 .DS_Store

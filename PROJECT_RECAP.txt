@@ -1,7 +1,7 @@
 ================================================================================
 AI ENGINEERING DRAWING INSPECTOR - PROJECT RECAP
 ================================================================================
-Date: January 19, 2026
+Date: January 20, 2026 (Updated)
 Repository: https://github.com/skaumbdoallsaws-coder/AI-Drawing-Inspector
 Main File: ai_inspector_final_fixed.ipynb
 
@@ -10,15 +10,68 @@ PROJECT OVERVIEW
 ================================================================================
 
 This project is an AI-powered engineering drawing inspection system that:
-1. Reads PDF engineering drawings using OCR (Tesseract)
+1. Reads PDF engineering drawings using VLM-based OCR (LightOnOCR-2)
 2. Checks for assembly compatibility issues (Imperial vs Metric mismatches)
 3. Suggests GD&T improvements based on ASME Y14.5 standards
 
 The system uses:
-- Qwen2-VL-72B-Instruct (4-bit quantized, ~40GB VRAM) for vision + reasoning
-- Tesseract OCR for text extraction from drawings
+- Qwen2-VL-7B-Instruct (4-bit quantized, ~4GB VRAM) for vision + reasoning
+- LightOnOCR-2-1B (~2GB VRAM) for structured text extraction from drawings
 - CLIP embeddings for RAG retrieval of ASME standard pages
-- Part context from BOM structure (400S machine)
+- Part context from SolidWorks CAD assembly (verified mating relationships)
+
+================================================================================
+RECENT CHANGES (January 20, 2026)
+================================================================================
+
+1. REPLACED TESSERACT WITH LIGHTONOCR-2
+   - LightOnOCR-2 is a Vision-Language Model that understands document structure
+   - Outputs clean Markdown with tables (better for title blocks, rotated text)
+   - Requires transformers installed from source
+
+2. SWITCHED FROM QWEN2-VL-72B TO QWEN2-VL-7B
+   - 72B model had quantization issues (loading full precision, 147GB download)
+   - 7B model is more manageable: ~14GB download, ~4GB VRAM in 4-bit
+   - Still capable for drawing inspection tasks
+
+3. ADDED HUGGINGFACE TOKEN SUPPORT
+   - Uses Colab Secrets: userdata.get('HF_TOKEN')
+   - Set HF_TOKEN in Colab Secrets (key icon in left sidebar)
+
+4. EXTRACTED REAL MATING DATA FROM SOLIDWORKS
+   - Created VBA macros to extract assembly tree and mates from CAD
+   - Generated verified context databases from 046-935.SLDASM
+   - 162 components, 44 unique parts, 18 assemblies with real PN mappings
+
+5. REORGANIZED PROJECT DIRECTORY
+   - old_manual_data/    - Previous manual extraction (242 parts)
+   - old_scripts/        - Previous Python scripts
+   - old_notebooks/      - Previous notebook versions
+   - solidworks_tools/   - SW extraction macros
+
+================================================================================
+SOLIDWORKS DATA EXTRACTION
+================================================================================
+
+NEW CONTEXT DATABASES (from CAD, verified):
+- sw_parts_db.json         - 44 unique parts with old/new PN mapping
+- sw_assemblies_db.json    - 18 assemblies
+- sw_mating_context.json   - Part -> sibling relationships
+- sw_structure.json        - Assembly hierarchy
+- 046-935_mates.txt        - Actual CAD mate constraints
+
+SOLIDWORKS EXTRACTION TOOLS (in solidworks_tools/):
+- ExtractMates_code.txt         - VBA macro to extract mates
+- ExtractFullTree_v2_code.txt   - VBA macro to extract full tree + properties
+- parse_sw_tree_v2.py           - Python parser for tree output
+
+HOW TO EXTRACT FROM SOLIDWORKS:
+1. Open assembly in SolidWorks
+2. Tools > Macro > New
+3. Paste code from ExtractFullTree_v2_code.txt
+4. Run (F5)
+5. Output saved next to assembly file
+6. Run parse_sw_tree_v2.py to generate JSON databases
 
 ================================================================================
 TWO-STAGE INSPECTION ARCHITECTURE
@@ -63,73 +116,61 @@ KEY FUNCTIONS
    - Master pipeline: Stage 1 + Stage 2
    - Automatically handles flow control
 
-4. run_full_inspection_batch(drawing_folder, limit=None)
-   - Batch version for multiple files
-   - Saves results to JSON
+4. get_drawing_text_ocr(image_input)
+   - Runs LightOnOCR-2 on drawing
+   - Returns structured text as list of lines
 
-5. inspect_batch_strict(drawing_folder)
-   - Batch Stage 1 only (faster, no RAG)
+5. run_lighton_ocr(img)
+   - Production OCR function
+   - Alias: run_tesseract_ocr (for backwards compatibility)
 
 6. parse_verdict(response_text)
    - Parses truth table to determine PASS/FAIL
    - Counts YES/NO in response
 
-7. generate_smart_rag_queries(part_description, mating_parts)
-   - Creates intelligent ASME search queries
-   - Detects: shafts, bearings, housings, threads, gears
-
 ================================================================================
-NOTEBOOK CELL STRUCTURE
+NOTEBOOK CELL STRUCTURE (Streamlined - 21 cells)
 ================================================================================
 
 SECTION 1: SETUP
-- Cell 3 (1A): Install Dependencies (transformers, tesseract, pymupdf, etc.)
-- Cell 4 (1B): Import Libraries
+- Cell 2 (1A): Install Dependencies + HuggingFace Login
+- Cell 3 (1B): Import Libraries
 
-SECTION 2: MODEL
-- Cell 6 (2): Load Qwen2-VL-72B (4-bit quantized)
+SECTION 2: LOAD MODELS
+- Cell 5 (2A): Load LightOnOCR-2 (OCR model - load first, smaller)
+- Cell 6 (2B): Load Qwen2-VL-7B (Reasoning model - load second)
 
 SECTION 3: CONTEXT DATABASES
-- Cell 8 (3A): Upload Configuration Files (JSON mappings)
-- Cell 9 (3B): Load Part Context Databases
-- Cell 10 (3C-PREP): Verify Tesseract Installation
-- Cell 11 (3C): Initialize Tesseract OCR
-- Cell 12 (3E): Load RAG Index & Visual Database
+- Cell 7 (3A): Upload Configuration Files
+- Cell 8 (3B): Load Part Context Databases
+- Cell 10 (3E): Load RAG Index & Visual Database
 
 SECTION 4: HELPER FUNCTIONS
-- Cell 14 (4A): Core Helper Functions (get_part_context, etc.)
-- Cell 15 (4B): Model Query Function
-- Cell 16 (4C): RAG Retrieval Function
-- Cell 17 (4D): Production Pipeline Helpers (render_pdf, run_tesseract_ocr)
+- Cell 12 (4A): Core Helper Functions
+- Cell 13 (4B): Model Query Function
+- Cell 14 (4C): RAG Retrieval Function
+- Cell 15 (4D): Production Pipeline Helpers (LightOnOCR-2)
 
 SECTION 5: INSPECTION FUNCTIONS
-- Cell 19 (5A): inspect_drawing_rag() - Original RAG version
-- Cell 20 (5B): inspect_drawing_universal() - Stage 1 Gatekeeper
-- Cell 21 (5C): suggest_improvements_stage2() - Stage 2 Consultant
-- Cell 22 (5D): run_full_inspection() - Master Pipeline
+- Cell 17 (5B): inspect_drawing_universal() - Stage 1
+- Cell 18 (5D): run_full_inspection() - Master Pipeline
 
-SECTION 6: BATCH PROCESSING
-- Cell 23 (6): inspect_batch_strict() - Batch Stage 1
-
-SECTION 7: TESTING
-- Cell 24 (7A): Full Inspection Test (Stage 1 + Stage 2) - Upload single file
-- Cell 25 (7B): Recovery - Reload Context
-- Cell 26 (7C): OCR Libraries Backup Install
-- Cell 27 (7D): Verify RAG Database
-- Cell 28 (7E): Batch Test (Upload ZIP)
-
-SECTION 8: RESULTS
-- Cell 30 (8): show_failures() - Display failed inspections
+SECTION 6: RUN INSPECTION
+- Cell 20: Upload and inspect single PDF
 
 ================================================================================
 REQUIRED FILES
 ================================================================================
 
 Configuration Files (upload as ZIP or individually):
-1. 400S_file_part_mapping.json - Maps filenames to part numbers
-2. 400S_detailed_structure_fixed.json - Part context and mating relationships
+1. sw_mating_context.json - Part context from SolidWorks (NEW)
+2. sw_parts_db.json - Part number mappings from SolidWorks (NEW)
 3. asme_visual_index.pkl - CLIP embeddings for ASME standard pages
 4. rag_visual_db.zip - Folder of ASME standard page images (294 images)
+
+Legacy files (in old_manual_data/, still usable):
+- 400S_file_part_mapping.json - Maps filenames to part numbers
+- 400S_detailed_structure_fixed.json - Part context from manual
 
 ================================================================================
 HOW TO RUN (After Computer Restart)
@@ -140,68 +181,39 @@ HOW TO RUN (After Computer Restart)
 3. Select: skaumbdoallsaws-coder/AI-Drawing-Inspector
 4. Open: ai_inspector_final_fixed.ipynb
 
-5. Run cells in order:
-   - Cell 3: Install dependencies
-   - Cell 4: Import libraries
-   - Cell 6: Load model (takes ~5 min, uses ~40GB VRAM)
-   - Cell 8-12: Load context databases (will prompt for file upload)
-   - Cell 14-17: Load helper functions
-   - Cell 20-22: Load inspection functions (Stage 1, Stage 2, Master)
-   - Cell 24: Run test (upload a PDF)
+5. Set HuggingFace Token:
+   - Click key icon (Secrets) in left sidebar
+   - Add: Name = HF_TOKEN, Value = your token
+   - Toggle "Notebook access" ON
+
+6. Run cells in order:
+   - Cell 2: Install dependencies + HF login
+   - Cell 3: Import libraries
+   - Cell 5: Load LightOnOCR-2 (~2GB, fast)
+   - Cell 6: Load Qwen2-VL-7B (~14GB download, ~4GB VRAM)
+   - Cells 7-10: Load context databases
+   - Cells 12-15: Load helper functions
+   - Cells 17-18: Load inspection functions
+   - Cell 20: Run test (upload a PDF)
 
 ================================================================================
-TYPICAL OUTPUT - STAGE 1 ONLY
+TYPICAL OUTPUT
 ================================================================================
 
 ============================================================
 UNIVERSAL INSPECTION: HEAD CASTING
 ============================================================
-[1/3] Reading Drawing (Tesseract OCR)...
+[1/3] Reading Drawing (LightOnOCR-2)...
   > Evidence: 54 relevant lines found.
 [2/3] Generating Dynamic Truth Table...
 [3/3] Running inference...
   Token count: 17383
 
 | Mating Part | Found Feature | Compatible? |
-| ADJUSTMENT SCREW 3/4-16 | M10X1.5 | NO |
-| THRUST BEARING | NOT FOUND | NOT FOUND |
+| M10x1.5 SCREW | M10X1.5 | YES |
+| SHAFT 25mm | 25.00 ±0.02 | YES |
 
-FINAL VERDICT: FAIL
-
-================================================================================
-TYPICAL OUTPUT - FULL INSPECTION (STAGE 1 + STAGE 2)
-================================================================================
-
-############################################################
-# FULL ENGINEERING INSPECTION PIPELINE
-############################################################
-
-STAGE 1: THE GATEKEEPER
-[1/3] Reading Drawing...
-[2/3] Generating Truth Table...
-[3/3] Running inference...
->>> STAGE 1 VERDICT: PASS - 5 specs verified
-
-STAGE 2: THE CONSULTANT
-[1/3] Performing Smart Library Lookup...
-  Search Queries: ['Flatness Parallelism Datum', 'Position Tolerance Holes']
-  RAG Search: 'Flatness Parallelism...'
-    - 11_Profile_Tolerances_P252.png (Score: 29.31)
-  Retrieved 3 ASME reference pages
-[2/3] Preparing Analysis...
-[3/3] Consulting Senior GD&T Engineer...
-
-CONSULTANT RECOMMENDATIONS:
-1. MISSING TOLERANCES: Add Flatness to mating surface...
-2. IMPROVEMENT SUGGESTIONS: Consider Runout for shaft features...
-3. PRIORITY: Critical / Recommended / Nice-to-Have
-
-############################################################
-# FINAL INSPECTION SUMMARY
-############################################################
-Stage 1 (Gatekeeper): PASS
-Stage 2 (Consultant): COMPLETED
-Final Verdict: PASS_WITH_SUGGESTIONS
+FINAL VERDICT: PASS
 
 ================================================================================
 KNOWN ISSUES & FIXES
@@ -210,21 +222,24 @@ KNOWN ISSUES & FIXES
 1. Token Limit Exceeded (>32k tokens)
    - Reduced DPI from 300 to 200 for Stage 2
    - Limited OCR elements to 120
-   - Disabled tiles by default
    - Limited ASME images to 3
 
 2. CUDA Out of Memory
-   - Clear GPU cache: torch.cuda.empty_cache()
-   - Or restart runtime
+   - Use Runtime > Disconnect and delete runtime (not just Restart)
+   - Load LightOnOCR-2 FIRST (smaller), then Qwen (larger)
+   - Total VRAM needed: ~6GB (fits on most GPUs)
 
-3. PaddleOCR C++ Errors
-   - Replaced with Tesseract OCR (more stable)
-
-4. GitHub Notebook Rendering Error
+3. GitHub Notebook Rendering Error
    - Fixed by removing malformed widgets metadata
+   - Run: Clean notebook metadata before commit
 
-5. NameError: parse_verdict not defined
-   - Fixed by moving parse_verdict into Cell 5D
+4. LightOnOCR-2 Warning ("model of type mistral3")
+   - This is normal - transformers fallback behavior
+   - Model works correctly despite warning
+
+5. HuggingFace Authentication
+   - Set HF_TOKEN in Colab Secrets
+   - Required for model downloads
 
 ================================================================================
 WORKFLOW: CLAUDE CODE <-> GOOGLE COLAB
@@ -238,12 +253,42 @@ WORKFLOW: CLAUDE CODE <-> GOOGLE COLAB
 6. Claude pulls and checks: git fetch && git reset --hard origin/main
 
 ================================================================================
+DIRECTORY STRUCTURE
+================================================================================
+
+AI-tool/
+├── ai_inspector_final_fixed.ipynb    # Main notebook (push to GitHub)
+├── PROJECT_RECAP.txt                  # This file
+│
+├── # SolidWorks extracted data (current)
+├── sw_parts_db.json
+├── sw_assemblies_db.json
+├── sw_mating_context.json
+├── sw_structure.json
+├── sw_components_all.json
+├── 046-935_full_tree_v2.txt
+├── 046-935_mates.txt
+│
+├── # RAG resources
+├── asme_visual_index.pkl
+├── rag_visual_db/
+├── ASME-Y14.5-2018-R2024...pdf
+│
+├── # Archived
+├── old_manual_data/                   # Manual extraction (242 parts)
+├── old_scripts/                       # Previous scripts
+├── old_notebooks/                     # Previous notebooks
+├── solidworks_tools/                  # SW macros & parsers
+├── 400S_Sorted_Library/               # Organized drawings
+├── PDF VAULT/                         # Drawing PDFs
+
+================================================================================
 CONTACT & REPOSITORY
 ================================================================================
 
 GitHub: https://github.com/skaumbdoallsaws-coder/AI-Drawing-Inspector
 Branch: main
-Last Commit: 0658baf (Fix NameError: add parse_verdict to CELL 5D)
+Main File: ai_inspector_final_fixed.ipynb
 
 ================================================================================
 END OF RECAP

@@ -1,0 +1,182 @@
+{
+  "046-908": {
+    "old_pn": "046-908",
+    "new_pn": "046-908",
+    "description": "VISE AND PIVOT DETAIL",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "046-908.SLDASM",
+    "parent_assembly": "ROOT"
+  },
+  "047-263": {
+    "old_pn": "047-263",
+    "new_pn": null,
+    "description": "CLAMPING VISE",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "047-263.SLDASM",
+    "parent_assembly": "046-908"
+  },
+  "6000056": {
+    "old_pn": "6000056",
+    "new_pn": "6000056",
+    "description": "BASE WELDT ASSY - 400S",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "6000056.SLDASM",
+    "parent_assembly": "046-908"
+  },
+  "047-262": {
+    "old_pn": "047-262",
+    "new_pn": null,
+    "description": "Pivot Assem",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "047-262.SLDASM",
+    "parent_assembly": "046-908"
+  },
+  "1009198": {
+    "old_pn": "022-639_1",
+    "new_pn": "1009198",
+    "description": "HEAD ASSY 400",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "022-639_1.SLDASM",
+    "parent_assembly": "ROOT"
+  },
+  "317088": {
+    "old_pn": "022-761",
+    "new_pn": "317088",
+    "description": "BANDWHEEL DRIVER ASSY",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "022-761.SLDASM",
+    "parent_assembly": "022-639_1"
+  },
+  "225521": {
+    "old_pn": "225521",
+    "new_pn": "225521",
+    "description": "400 ARM ASSEMBLY",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "225521.SLDASM",
+    "parent_assembly": "022-639_1"
+  },
+  "417836": {
+    "old_pn": "006-309",
+    "new_pn": "417836",
+    "description": "POWERED CHIP BRUSH ASSY METRIC",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "006-309.SLDASM",
+    "parent_assembly": "022-639_1"
+  },
+  "320800": {
+    "old_pn": "006-305",
+    "new_pn": "320800",
+    "description": "BAND BRUSH ASSY W/METRIC BRGS",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "006-305.SLDASM",
+    "parent_assembly": "006-309"
+  },
+  "517499": {
+    "old_pn": "017-142_1_1",
+    "new_pn": "517499",
+    "description": "COUNTERBALANCE SPRINT ASSEM",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "017-142_1_1.SLDASM",
+    "parent_assembly": "ROOT"
+  },
+  "318126": {
+    "old_pn": "017-141",
+    "new_pn": "318126",
+    "description": "ROD GUIDE WELDT ASSY",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "017-141.SLDASM",
+    "parent_assembly": "017-142_1_1"
+  },
+  "326829": {
+    "old_pn": "019-660",
+    "new_pn": "326829",
+    "description": "SCREW AND LUG ASSEMBLY-C'BAL MECHANISM",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "019-660.SLDASM",
+    "parent_assembly": "017-142_1_1"
+  },
+  "1008801": {
+    "old_pn": "023-459_1",
+    "new_pn": "1008801",
+    "description": "BAND COVER WELDT ASSY 400",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "023-459_1.SLDASM",
+    "parent_assembly": "ROOT"
+  },
+  "047-148": {
+    "old_pn": "047-148",
+    "new_pn": null,
+    "description": "047-148",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "047-148.SLDASM",
+    "parent_assembly": "ROOT"
+  },
+  "047-145": {
+    "old_pn": "047-145",
+    "new_pn": null,
+    "description": "400S ELECT PANEL VFD",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "047-145.SLDASM",
+    "parent_assembly": "047-148"
+  },
+  "047-268": {
+    "old_pn": "047-268",
+    "new_pn": null,
+    "description": "CONTROL PANEL",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "047-268.SLDASM",
+    "parent_assembly": "047-148"
+  },
+  "231993": {
+    "old_pn": "047-199",
+    "new_pn": "231993",
+    "description": "CONTROL PANEL 400S",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "047-199.SLDASM",
+    "parent_assembly": "047-268"
+  },
+  "046-877": {
+    "old_pn": "046-877",
+    "new_pn": null,
+    "description": "400S DRIVE ASSEM",
+    "type": "SUBASSY",
+    "material": null,
+    "make_buy": "MAKE",
+    "file": "046-877.SLDASM",
+    "parent_assembly": "ROOT"
+  }
+}

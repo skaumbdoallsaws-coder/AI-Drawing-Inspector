@@ -1,0 +1,455 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continentalmachines.com/schemas/drawing-evidence/v1.1.0",
+  "title": "DrawingEvidence",
+  "description": "Evidence extracted from engineering drawing by vision pipeline. Locked version 1.1.0.",
+  "type": "object",
+
+  "$comment": "LOCKED SCHEMA v1.1.0 - Do not modify without version bump",
+
+  "$defs": {
+    "_metadata": {
+      "description": "Schema metadata - not used in validation",
+      "schemaVersion": "1.1.0",
+      "schemaDate": "2026-01-26",
+      "canonicalFormat": {
+        "diameterSymbol": "\u00f8",
+        "diameterSymbolName": "LATIN SMALL LETTER O WITH STROKE (U+00F8)",
+        "degreeSymbol": "\u00b0",
+        "lengthUnit": "mm",
+        "angleUnit": "deg",
+        "decimalPlaces": {
+          "diameter": 2,
+          "depth": 1,
+          "radius": 2,
+          "angle": 0
+        },
+        "examples": {
+          "hole_thru": "\u00f812.70mm THRU",
+          "hole_blind": "\u00f812.70mm x 25.4mm DEEP",
+          "hole_qty": "\u00f812.70mm THRU (2X)",
+          "thread": "M6x1.0 x 12mm DEEP",
+          "fillet": "Fillet: R0.76mm",
+          "chamfer": "Chamfer: 0.76mm x 45\u00b0"
+        }
+      }
+    },
+
+    "OcrField": {
+      "type": "object",
+      "description": "OCR-extracted field with SW fallback. All properties nullable for OCR resilience.",
+      "properties": {
+        "ocrValue": {
+          "type": ["string", "null"],
+          "description": "Value as read by OCR (null if unreadable or not found)"
+        },
+        "swFallback": {
+          "type": ["string", "null"],
+          "description": "Value from SolidWorks model (authoritative fallback)"
+        },
+        "resolved": {
+          "type": ["string", "null"],
+          "description": "Final resolved value: ocrValue if confident, else swFallback, else null"
+        },
+        "ocrConfidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OCR confidence (null if not extracted)"
+        },
+        "source": {
+          "type": ["string", "null"],
+          "enum": ["ocr", "sw_fallback", "both_match", "ocr_override", "unresolved", null],
+          "description": "Which source provided resolved value (null if completely unresolved)"
+        },
+        "location": {
+          "$ref": "#/$defs/Location",
+          "description": "Where this field was found on drawing (null if not found)"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "Identity": {
+      "type": "object",
+      "description": "Part identity - all fields use OcrField wrapper for OCR tolerance",
+      "properties": {
+        "partNumber": { "$ref": "#/$defs/OcrField" },
+        "revision": { "$ref": "#/$defs/OcrField" },
+        "description": { "$ref": "#/$defs/OcrField" },
+        "material": { "$ref": "#/$defs/OcrField" },
+        "finish": { "$ref": "#/$defs/OcrField" },
+        "drawnBy": { "$ref": "#/$defs/OcrField" },
+        "checkedBy": { "$ref": "#/$defs/OcrField" },
+        "approvedBy": { "$ref": "#/$defs/OcrField" },
+        "date": { "$ref": "#/$defs/OcrField" },
+        "scale": { "$ref": "#/$defs/OcrField" },
+        "sheet": { "$ref": "#/$defs/OcrField" },
+        "units": {
+          "type": ["string", "null"],
+          "enum": ["INCH", "MM", "DUAL", null],
+          "description": "Drawing units detected from title block or dimensions"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "Location": {
+      "type": "object",
+      "description": "Location on drawing with page/view anchoring",
+      "required": ["page"],
+      "properties": {
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed page number"
+        },
+        "sheetName": {
+          "type": ["string", "null"],
+          "description": "Sheet name (e.g., 'SHEET 1 OF 3')"
+        },
+        "viewId": {
+          "type": ["string", "null"],
+          "description": "Unique view identifier assigned by extractor"
+        },
+        "viewName": {
+          "type": ["string", "null"],
+          "description": "View label as shown on drawing (e.g., 'SECTION A-A')"
+        },
+        "viewType": {
+          "type": ["string", "null"],
+          "enum": ["Front", "Top", "Right", "Left", "Bottom", "Back", "Isometric", "Section", "Detail", "Auxiliary", "Unknown", null]
+        },
+        "bbox": { "$ref": "#/$defs/BoundingBox" }
+      },
+      "additionalProperties": false
+    },
+
+    "BoundingBox": {
+      "type": "object",
+      "description": "Normalized bounding box (0-1 coordinates, origin top-left)",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "minimum": 0, "maximum": 1 },
+        "height": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+
+    "ViewInfo": {
+      "type": "object",
+      "description": "Detected drawing view",
+      "required": ["viewId", "page"],
+      "properties": {
+        "viewId": { "type": "string" },
+        "viewName": { "type": ["string", "null"] },
+        "viewType": {
+          "type": ["string", "null"],
+          "enum": ["Front", "Top", "Right", "Left", "Bottom", "Back", "Isometric", "Section", "Detail", "Auxiliary", "Unknown", null]
+        },
+        "page": { "type": "integer", "minimum": 1 },
+        "bbox": { "$ref": "#/$defs/BoundingBox" },
+        "scale": { "type": ["string", "null"] },
+        "parentViewId": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "Callout": {
+      "type": "object",
+      "description": "Unified callout discriminated by calloutType",
+      "required": ["calloutType", "rawText"],
+      "properties": {
+        "calloutType": {
+          "type": "string",
+          "enum": [
+            "Hole", "TappedHole", "Counterbore", "Countersink",
+            "Fillet", "Chamfer",
+            "Slot",
+            "LinearDimension", "RadiusDimension", "DiameterDimension", "AngleDimension",
+            "GdtPosition", "GdtFlatness", "GdtPerpendicularity", "GdtParallelism",
+            "GdtConcentricity", "GdtCircularity", "GdtCylindricity",
+            "GdtProfileLine", "GdtProfileSurface", "GdtRunout", "GdtTotalRunout",
+            "Datum",
+            "SurfaceFinish",
+            "Weld",
+            "BendRadius", "BendAngle",
+            "Note", "Unknown"
+          ]
+        },
+        "rawText": {
+          "type": "string",
+          "description": "Original OCR text exactly as read"
+        },
+        "canonical": {
+          "type": ["string", "null"],
+          "description": "Normalized form for matching. Uses \u00f8 (U+00F8) for diameter. Null if normalization failed."
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "location": { "$ref": "#/$defs/Location" },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "plcs": {
+          "type": ["integer", "null"],
+          "description": "Places count if specified separately from quantity"
+        },
+        "hole": { "$ref": "#/$defs/HoleData" },
+        "fillet": { "$ref": "#/$defs/FilletData" },
+        "chamfer": { "$ref": "#/$defs/ChamferData" },
+        "slot": { "$ref": "#/$defs/SlotData" },
+        "dimension": { "$ref": "#/$defs/DimensionData" },
+        "gdt": { "$ref": "#/$defs/GdtData" },
+        "thread": { "$ref": "#/$defs/ThreadData" },
+        "surfaceFinish": { "$ref": "#/$defs/SurfaceFinishData" },
+        "weld": { "$ref": "#/$defs/WeldData" },
+        "sheetMetal": { "$ref": "#/$defs/SheetMetalData" }
+      },
+      "additionalProperties": false
+    },
+
+    "HoleData": {
+      "type": "object",
+      "properties": {
+        "diameterMm": { "type": ["number", "null"] },
+        "diameterInches": { "type": ["number", "null"] },
+        "diameterRaw": { "type": ["string", "null"], "description": "As written: '.500', '1/2', '12.7'" },
+        "depthMm": { "type": ["number", "null"] },
+        "depthInches": { "type": ["number", "null"] },
+        "depthRaw": { "type": ["string", "null"] },
+        "isThrough": { "type": ["boolean", "null"] },
+        "counterboreDiameterMm": { "type": ["number", "null"] },
+        "counterboreDepthMm": { "type": ["number", "null"] },
+        "countersinkDiameterMm": { "type": ["number", "null"] },
+        "countersinkAngle": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "ThreadData": {
+      "type": "object",
+      "properties": {
+        "rawText": { "type": ["string", "null"] },
+        "standard": {
+          "type": ["string", "null"],
+          "enum": ["Metric", "UNC", "UNF", "NPT", "BSP", "ACME", "Unknown", null]
+        },
+        "nominalMm": { "type": ["number", "null"] },
+        "pitch": { "type": ["number", "null"], "description": "mm for metric" },
+        "tpi": { "type": ["integer", "null"], "description": "Threads per inch" },
+        "class": { "type": ["string", "null"] },
+        "depthMm": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "FilletData": {
+      "type": "object",
+      "properties": {
+        "radiusMm": { "type": ["number", "null"] },
+        "radiusInches": { "type": ["number", "null"] },
+        "radiusRaw": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "ChamferData": {
+      "type": "object",
+      "properties": {
+        "chamferType": {
+          "type": ["string", "null"],
+          "enum": ["AngleDistance", "DistanceDistance", "Unknown", null]
+        },
+        "distance1Mm": { "type": ["number", "null"] },
+        "distance2Mm": { "type": ["number", "null"] },
+        "angleDegrees": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "SlotData": {
+      "type": "object",
+      "properties": {
+        "widthMm": { "type": ["number", "null"] },
+        "lengthMm": { "type": ["number", "null"] },
+        "depthMm": { "type": ["number", "null"] },
+        "isThrough": { "type": ["boolean", "null"] },
+        "endType": {
+          "type": ["string", "null"],
+          "enum": ["Round", "Square", "Mixed", "Unknown", null]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "DimensionData": {
+      "type": "object",
+      "properties": {
+        "valueMm": { "type": ["number", "null"] },
+        "valueInches": { "type": ["number", "null"] },
+        "valueDegrees": { "type": ["number", "null"] },
+        "valueRaw": { "type": ["string", "null"] },
+        "tolerance": {
+          "type": ["object", "null"],
+          "properties": {
+            "type": {
+              "type": ["string", "null"],
+              "enum": ["Bilateral", "Unilateral", "Limit", "Basic", "Reference", null]
+            },
+            "upperMm": { "type": ["number", "null"] },
+            "lowerMm": { "type": ["number", "null"] },
+            "rawText": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "GdtData": {
+      "type": "object",
+      "properties": {
+        "characteristic": {
+          "type": ["string", "null"],
+          "enum": [
+            "Position", "Concentricity", "Symmetry",
+            "Parallelism", "Perpendicularity", "Angularity",
+            "Flatness", "Straightness", "Circularity", "Cylindricity",
+            "ProfileLine", "ProfileSurface",
+            "CircularRunout", "TotalRunout",
+            null
+          ]
+        },
+        "toleranceMm": { "type": ["number", "null"] },
+        "materialCondition": {
+          "type": ["string", "null"],
+          "enum": ["MMC", "LMC", "RFS", null]
+        },
+        "datumRefs": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "datum": { "type": "string" },
+              "materialCondition": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "SurfaceFinishData": {
+      "type": "object",
+      "properties": {
+        "roughnessRa": { "type": ["number", "null"] },
+        "roughnessUnit": {
+          "type": ["string", "null"],
+          "enum": ["microinch", "micrometer", null]
+        },
+        "machiningRequired": { "type": ["boolean", "null"] },
+        "layDirection": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "WeldData": {
+      "type": "object",
+      "properties": {
+        "weldType": {
+          "type": ["string", "null"],
+          "enum": ["Fillet", "Groove", "Plug", "Spot", "Seam", "Unknown", null]
+        },
+        "size": { "type": ["string", "null"] },
+        "length": { "type": ["string", "null"] },
+        "pitch": { "type": ["string", "null"] },
+        "allAround": { "type": ["boolean", "null"] },
+        "fieldWeld": { "type": ["boolean", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "SheetMetalData": {
+      "type": "object",
+      "properties": {
+        "bendRadiusMm": { "type": ["number", "null"] },
+        "bendAngleDegrees": { "type": ["number", "null"] },
+        "kFactor": { "type": ["number", "null"] },
+        "thicknessMm": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "Note": {
+      "type": "object",
+      "required": ["rawText"],
+      "properties": {
+        "rawText": { "type": "string" },
+        "noteType": {
+          "type": ["string", "null"],
+          "enum": ["General", "Material", "Finish", "Process", "Tolerance", "Reference", "Unknown", null]
+        },
+        "location": { "$ref": "#/$defs/Location" },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+
+  "required": ["schemaVersion", "extractionTime", "sourceFile"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.1.0",
+      "description": "Must be exactly '1.1.0' for this schema version"
+    },
+    "extractionTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of extraction"
+    },
+    "sourceFile": {
+      "type": "string",
+      "description": "Path or identifier of source PDF/image"
+    },
+    "pageCount": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    },
+    "overallConfidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Aggregate extraction confidence"
+    },
+    "identity": {
+      "$ref": "#/$defs/Identity",
+      "description": "Part identity - nullable fields with SW fallback"
+    },
+    "foundCallouts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Callout" },
+      "description": "Unified array of all extracted callouts"
+    },
+    "foundNotes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Note" },
+      "description": "General notes and annotations"
+    },
+    "views": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ViewInfo" },
+      "description": "Drawing views detected on each page"
+    }
+  },
+  "additionalProperties": false
+}

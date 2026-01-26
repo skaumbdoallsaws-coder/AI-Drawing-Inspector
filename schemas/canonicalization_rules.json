@@ -1,0 +1,366 @@
+{
+  "version": "1.1.1",
+  "schemaVersion": "1.1.1",
+  "description": "Canonicalization rules for DrawingEvidence schema v1.1.1",
+
+  "outputFormat": {
+    "description": "Canonical form is always metric with specific formatting",
+    "diameterSymbol": "ø",
+    "lengthUnit": "mm",
+    "angleUnit": "deg",
+    "decimalPlaces": {
+      "diameter": 2,
+      "depth": 1,
+      "radius": 2,
+      "angle": 0
+    },
+    "examples": [
+      { "canonical": "ø12.70mm THRU", "pattern": "ø{diameter}mm THRU" },
+      { "canonical": "ø12.70mm x 25.4mm DEEP", "pattern": "ø{diameter}mm x {depth}mm DEEP" },
+      { "canonical": "ø12.70mm THRU (2X)", "pattern": "ø{diameter}mm THRU ({qty}X)" },
+      { "canonical": "M6x1.0 x 12mm DEEP", "pattern": "M{nominal}x{pitch} x {depth}mm DEEP" },
+      { "canonical": "Fillet: R0.76mm", "pattern": "Fillet: R{radius}mm" },
+      { "canonical": "Chamfer: 0.76mm x 45°", "pattern": "Chamfer: {dist}mm x {angle}°" }
+    ]
+  },
+
+  "fractionConversion": {
+    "description": "Convert fractional inches to decimal inches, then to mm",
+    "commonFractions": {
+      "1/64": 0.015625,
+      "1/32": 0.03125,
+      "1/16": 0.0625,
+      "3/32": 0.09375,
+      "1/8": 0.125,
+      "5/32": 0.15625,
+      "3/16": 0.1875,
+      "7/32": 0.21875,
+      "1/4": 0.25,
+      "9/32": 0.28125,
+      "5/16": 0.3125,
+      "11/32": 0.34375,
+      "3/8": 0.375,
+      "13/32": 0.40625,
+      "7/16": 0.4375,
+      "15/32": 0.46875,
+      "1/2": 0.5,
+      "17/32": 0.53125,
+      "9/16": 0.5625,
+      "19/32": 0.59375,
+      "5/8": 0.625,
+      "21/32": 0.65625,
+      "11/16": 0.6875,
+      "23/32": 0.71875,
+      "3/4": 0.75,
+      "25/32": 0.78125,
+      "13/16": 0.8125,
+      "27/32": 0.84375,
+      "7/8": 0.875,
+      "29/32": 0.90625,
+      "15/16": 0.9375,
+      "31/32": 0.96875,
+      "1": 1.0
+    },
+    "conversionFactor": 25.4,
+    "algorithm": [
+      "1. Parse fraction (e.g., '3/8' -> 0.375)",
+      "2. Multiply by 25.4 to get mm (0.375 * 25.4 = 9.525)",
+      "3. Round to canonical decimal places"
+    ],
+    "examples": [
+      { "input": "Ø1/2", "decimal_in": 0.5, "mm": 12.7, "canonical": "ø12.70mm" },
+      { "input": "Ø3/8", "decimal_in": 0.375, "mm": 9.525, "canonical": "ø9.53mm" },
+      { "input": "Ø.500", "decimal_in": 0.5, "mm": 12.7, "canonical": "ø12.70mm" }
+    ]
+  },
+
+  "dualUnitHandling": {
+    "description": "Drawings may show both inch and mm - prefer the primary (larger text or first)",
+    "patterns": [
+      { "pattern": "Ø.500 [12.7]", "primary": "inch", "secondary": "mm" },
+      { "pattern": "Ø12.7 (.500)", "primary": "mm", "secondary": "inch" },
+      { "pattern": "Ø.500/12.7", "primary": "inch", "secondary": "mm" }
+    ],
+    "rules": [
+      "1. If both values present, use mm value directly",
+      "2. If only inch value, convert to mm",
+      "3. Store original unit in diameterRaw/depthRaw for audit"
+    ]
+  },
+
+  "thruDeepNormalization": {
+    "description": "Normalize hole depth indicators",
+    "thruVariants": {
+      "canonical": "THRU",
+      "aliases": ["THRU", "THROUGH", "THRU ALL", "↓"]
+    },
+    "deepVariants": {
+      "canonical": "DEEP",
+      "aliases": ["DEEP", "DP", "DEPTH", "↧"]
+    },
+    "blindImplied": {
+      "description": "If depth specified without keyword, assume DEEP",
+      "example": { "input": "Ø.500 x 1.00", "canonical": "ø12.70mm x 25.4mm DEEP" }
+    }
+  },
+
+  "quantityNormalization": {
+    "description": "Normalize quantity/places indicators (v1.1.1: preserves quantityRaw)",
+    "patterns": [
+      { "input": "2X Ø.500", "qty": 2, "quantityRaw": "2X", "position": "prefix" },
+      { "input": "Ø.500 (2X)", "qty": 2, "quantityRaw": "(2X)", "position": "suffix" },
+      { "input": "Ø.500 2 PLCS", "qty": 2, "quantityRaw": "2 PLCS", "plcs": 2, "position": "suffix" },
+      { "input": "Ø.500 2 PLACES", "qty": 2, "quantityRaw": "2 PLACES", "plcs": 2, "position": "suffix" },
+      { "input": "Ø.500 2 PL", "qty": 2, "quantityRaw": "2 PL", "plcs": 2, "position": "suffix" },
+      { "input": "(4) Ø.500", "qty": 4, "quantityRaw": "(4)", "position": "prefix" },
+      { "input": "4-Ø.500", "qty": 4, "quantityRaw": "4-", "position": "prefix" },
+      { "input": "R.030 TYP", "qty": 1, "quantityRaw": "TYP", "isTypical": true },
+      { "input": "Ø.500 4 HOLES", "qty": 4, "quantityRaw": "4 HOLES", "position": "suffix" }
+    ],
+    "canonicalFormat": "({qty}X)",
+    "canonicalPosition": "suffix",
+    "rules": [
+      "1. Extract quantity from any position/format",
+      "2. Default to 1 if not specified",
+      "3. Output as suffix: 'ø12.70mm THRU (2X)'",
+      "4. Omit suffix if qty=1",
+      "5. (v1.1.1) Preserve original token in quantityRaw field",
+      "6. (v1.1.1) Set plcs field when PLCS/PLACES notation used",
+      "7. (v1.1.1) Set isTypical=true when TYP/TYPICAL detected"
+    ],
+    "plcsVsX": {
+      "description": "PLCS and X are equivalent for matching",
+      "2X": 2,
+      "2 PLCS": 2,
+      "2 PLACES": 2
+    },
+    "typicalHandling": {
+      "description": "TYP/TYPICAL indicates dimension applies to multiple similar features",
+      "isTypical": true,
+      "examples": ["R.030 TYP", "Ø.500 THRU TYPICAL"]
+    }
+  },
+
+  "diameterSymbolNormalization": {
+    "description": "Normalize diameter symbol variations",
+    "canonical": "ø",
+    "aliases": ["Ø", "ø", "⌀", "DIA", "DIA.", "DIAM", "DIAM.", "∅", "O/"],
+    "ocrMisreads": {
+      "description": "Common OCR errors for diameter symbol",
+      "0": "ø",
+      "O": "ø",
+      "Q": "ø",
+      "Φ": "ø"
+    }
+  },
+
+  "threadCalloutNormalization": {
+    "description": "Normalize thread callouts to standard form",
+    "metric": {
+      "pattern": "M{nominal}x{pitch}",
+      "examples": [
+        { "input": "M6X1", "canonical": "M6x1.0" },
+        { "input": "M6 X 1.0", "canonical": "M6x1.0" },
+        { "input": "M6-1.0", "canonical": "M6x1.0" },
+        { "input": "M6x1.0-6H", "canonical": "M6x1.0-6H" }
+      ]
+    },
+    "unc": {
+      "pattern": "{size}-{tpi} UNC",
+      "examples": [
+        { "input": "1/4-20 UNC", "canonical": "1/4-20 UNC" },
+        { "input": ".250-20 UNC", "canonical": "1/4-20 UNC" },
+        { "input": "1/4-20UNC-2B", "canonical": "1/4-20 UNC-2B" }
+      ],
+      "sizeNormalization": {
+        "description": "Normalize decimal sizes to fractions where standard",
+        "#4": 0.112,
+        "#6": 0.138,
+        "#8": 0.164,
+        "#10": 0.190,
+        "1/4": 0.250,
+        "5/16": 0.3125,
+        "3/8": 0.375,
+        "7/16": 0.4375,
+        "1/2": 0.500,
+        "5/8": 0.625,
+        "3/4": 0.750
+      }
+    },
+    "unf": {
+      "pattern": "{size}-{tpi} UNF",
+      "examples": [
+        { "input": "1/4-28 UNF", "canonical": "1/4-28 UNF" }
+      ]
+    },
+    "npt": {
+      "pattern": "{size} NPT",
+      "examples": [
+        { "input": "1/8 NPT", "canonical": "1/8 NPT" },
+        { "input": "1/8-27 NPT", "canonical": "1/8 NPT" }
+      ]
+    }
+  },
+
+  "filletNormalization": {
+    "description": "Normalize fillet callouts",
+    "canonical": "Fillet: R{radius}mm",
+    "inputPatterns": [
+      { "pattern": "R{value}", "examples": ["R.030", "R0.76", "R3"] },
+      { "pattern": "FILLET R{value}", "examples": ["FILLET R.030"] },
+      { "pattern": "TYP R{value}", "examples": ["TYP R.030"] },
+      { "pattern": "{value} R", "examples": [".030 R"] }
+    ],
+    "rules": [
+      "1. Extract radius value",
+      "2. Convert to mm if in inches",
+      "3. Format as 'Fillet: R{radius}mm'"
+    ]
+  },
+
+  "chamferNormalization": {
+    "description": "Normalize chamfer callouts",
+    "canonical": "Chamfer: {dist}mm x {angle}°",
+    "inputPatterns": [
+      { "pattern": "{angle}° x {dist}", "examples": ["45° x .030", "45 X .030"] },
+      { "pattern": "{dist} x {angle}°", "examples": [".030 x 45°", ".030 X 45"] },
+      { "pattern": "C{dist}", "examples": ["C0.5", "C.020"] },
+      { "pattern": "{dist1} x {dist2}", "examples": [".030 x .030"], "type": "DistanceDistance" }
+    ],
+    "defaultAngle": 45,
+    "rules": [
+      "1. If C-notation (C0.5), assume 45° angle",
+      "2. Convert distances to mm",
+      "3. Format as 'Chamfer: {dist}mm x {angle}°'"
+    ]
+  },
+
+  "toleranceHandling": {
+    "description": "How to handle tolerances in matching",
+    "rules": [
+      "1. Tolerances are informational, not used for matching",
+      "2. Extract and store but match on nominal value only",
+      "3. Basic dimensions (boxed) indicate GD&T control"
+    ],
+    "formats": [
+      { "pattern": "12.70 ±0.05", "type": "Bilateral" },
+      { "pattern": "12.70 +0.05/-0.02", "type": "Bilateral" },
+      { "pattern": "12.70 +0.05/-0", "type": "Unilateral" },
+      { "pattern": "[12.70]", "type": "Basic" },
+      { "pattern": "(12.70)", "type": "Reference" },
+      { "pattern": "12.65/12.75", "type": "Limit" }
+    ]
+  },
+
+  "matchingAlgorithm": {
+    "description": "How to match canonical forms",
+    "steps": [
+      "1. Normalize both SW and drawing callouts to canonical form",
+      "2. Compare diameter within tolerance (±0.15mm or ±0.5%)",
+      "3. Compare depth within tolerance (±0.5mm or ±2%)",
+      "4. Compare isThrough exactly",
+      "5. Compare quantity exactly (or sum of multiple callouts)",
+      "6. For threads: compare nominal diameter, pitch/TPI, standard"
+    ],
+    "tolerances": {
+      "diameterMm": { "absolute": 0.15, "percent": 0.5, "note": "Whichever is larger" },
+      "depthMm": { "absolute": 0.5, "percent": 2.0, "note": "Whichever is larger" },
+      "radiusMm": { "absolute": 0.05, "percent": 5.0 },
+      "angleDegrees": { "absolute": 1.0 },
+      "threadPitch": { "exact": true },
+      "threadTpi": { "exact": true },
+      "quantity": { "exact": true, "note": "Can sum multiple callouts" }
+    }
+  },
+
+  "ocrErrorCorrection": {
+    "description": "Common OCR misreads and corrections",
+    "characterSubstitutions": {
+      "0": ["O", "Q", "D"],
+      "1": ["l", "I", "|"],
+      "5": ["S"],
+      "6": ["G", "b"],
+      "8": ["B"],
+      "x": ["X", "×", "*"],
+      "ø": ["0", "O", "Ø", "∅", "Φ"]
+    },
+    "contextualCorrections": [
+      { "context": "after ø or before mm", "likely": "number" },
+      { "context": "X between numbers", "likely": "multiplication/times" },
+      { "context": "THRU or DEEP", "likely": "hole depth indicator" }
+    ]
+  },
+
+  "examples": {
+    "holeCallouts": [
+      {
+        "rawText": "Ø1/2 THRU",
+        "canonical": "ø12.70mm THRU",
+        "steps": [
+          "Parse diameter: 1/2 -> 0.5 inches -> 12.7mm",
+          "Parse depth: THRU -> isThrough=true",
+          "Format: ø12.70mm THRU"
+        ]
+      },
+      {
+        "rawText": "4X Ø.375 x 1.000 DEEP",
+        "canonical": "ø9.53mm x 25.4mm DEEP (4X)",
+        "steps": [
+          "Parse quantity: 4X -> qty=4",
+          "Parse diameter: .375 -> 9.525mm -> 9.53mm (rounded)",
+          "Parse depth: 1.000 DEEP -> 25.4mm",
+          "Format: ø9.53mm x 25.4mm DEEP (4X)"
+        ]
+      },
+      {
+        "rawText": "M6X1.0 X 15 DP",
+        "canonical": "M6x1.0 x 15mm DEEP",
+        "steps": [
+          "Parse thread: M6X1.0 -> M6x1.0",
+          "Parse depth: 15 DP -> 15mm DEEP",
+          "Format: M6x1.0 x 15mm DEEP"
+        ]
+      },
+      {
+        "rawText": "Ø.500 [12.7] THRU (2 PLCS)",
+        "canonical": "ø12.70mm THRU (2X)",
+        "steps": [
+          "Parse diameter: .500 [12.7] -> use 12.7mm directly",
+          "Parse depth: THRU -> isThrough=true",
+          "Parse quantity: 2 PLCS -> qty=2",
+          "Format: ø12.70mm THRU (2X)"
+        ]
+      }
+    ],
+    "filletCallouts": [
+      {
+        "rawText": "R.030 TYP",
+        "canonical": "Fillet: R0.76mm",
+        "steps": [
+          "Parse radius: .030 -> 0.762mm -> 0.76mm (rounded)",
+          "TYP is informational (typical), not quantity",
+          "Format: Fillet: R0.76mm"
+        ]
+      }
+    ],
+    "chamferCallouts": [
+      {
+        "rawText": "45° X .030",
+        "canonical": "Chamfer: 0.76mm x 45°",
+        "steps": [
+          "Parse angle: 45°",
+          "Parse distance: .030 -> 0.762mm -> 0.76mm",
+          "Format: Chamfer: 0.76mm x 45°"
+        ]
+      },
+      {
+        "rawText": "C0.5",
+        "canonical": "Chamfer: 0.50mm x 45°",
+        "steps": [
+          "Parse C-notation: C0.5 -> 0.5mm distance, assume 45°",
+          "Format: Chamfer: 0.50mm x 45°"
+        ]
+      }
+    ]
+  }
+}

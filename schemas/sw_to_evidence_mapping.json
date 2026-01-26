@@ -1,0 +1,150 @@
+{
+  "version": "1.1.1",
+  "schemaVersion": "1.1.1",
+  "description": "Mapping from SolidWorks RequiredCallout types to DrawingEvidence v1.1.1 foundCallouts[]",
+  "mappings": [
+    {
+      "swSource": "comparison.holeGroups[].holeType='Through'",
+      "swExample": "o12.70mm THRU",
+      "evidenceField": "foundCallouts[calloutType=Hole]",
+      "matchCriteria": {
+        "required": ["diameterMm", "isThrough"],
+        "tolerances": {
+          "diameterMm": { "absolute": 0.15, "percent": 0.5 }
+        },
+        "conditions": {
+          "isThrough": true
+        }
+      },
+      "priority": 1,
+      "coverage": "87%"
+    },
+    {
+      "swSource": "comparison.holeGroups[].holeType='Blind'",
+      "swExample": "o12.70mm x 25.4mm DEEP",
+      "evidenceField": "foundCallouts[calloutType=Hole]",
+      "matchCriteria": {
+        "required": ["diameterMm", "depthMm"],
+        "tolerances": {
+          "diameterMm": { "absolute": 0.15, "percent": 0.5 },
+          "depthMm": { "absolute": 0.5, "percent": 2 }
+        },
+        "conditions": {
+          "isThrough": false
+        }
+      },
+      "priority": 1,
+      "coverage": "87%"
+    },
+    {
+      "swSource": "comparison.holeGroups[].holeType='Tapped'",
+      "swExample": "M6x1.0 x 12mm DEEP",
+      "evidenceField": "foundCallouts[calloutType=TappedHole].thread",
+      "matchCriteria": {
+        "required": ["thread.nominalDiameterMm", "thread.pitch"],
+        "tolerances": {
+          "thread.nominalDiameterMm": { "absolute": 0.1 },
+          "thread.pitch": { "exact": true }
+        }
+      },
+      "priority": 1,
+      "coverage": "10%"
+    },
+    {
+      "swSource": "comparison.holeGroups[].count > 1",
+      "swExample": "o12.70mm THRU (2X)",
+      "evidenceField": "foundCallouts[calloutType=Hole].quantity",
+      "matchCriteria": {
+        "required": ["quantity"],
+        "optional": ["quantityRaw", "plcs", "isTypical"],
+        "conditions": {
+          "quantity": "exact_match"
+        }
+      },
+      "note": "Quantity must match exactly or sum of multiple callouts. quantityRaw preserves original token like '(4X)', '2 PLCS', 'TYP'. isTypical=true indicates typical dimension.",
+      "priority": 2,
+      "coverage": "50%"
+    },
+    {
+      "swSource": "features.fillets[].radius",
+      "swExample": "Fillet: R0.76mm",
+      "evidenceField": "foundCallouts[calloutType=Fillet]",
+      "matchCriteria": {
+        "required": ["radiusMm"],
+        "tolerances": {
+          "radiusMm": { "absolute": 0.05, "percent": 5 }
+        }
+      },
+      "priority": 2,
+      "coverage": "32%"
+    },
+    {
+      "swSource": "features.chamfers[]",
+      "swExample": "Chamfer: 0.76mm x 45deg",
+      "evidenceField": "foundCallouts[calloutType=Chamfer]",
+      "matchCriteria": {
+        "required": ["distance1Mm"],
+        "optional": ["angleDegrees", "distance2Mm"],
+        "tolerances": {
+          "distance1Mm": { "absolute": 0.1, "percent": 5 },
+          "angleDegrees": { "absolute": 1 }
+        }
+      },
+      "priority": 2,
+      "coverage": "20%"
+    },
+    {
+      "swSource": "identity.material",
+      "swExample": "AISI 1020",
+      "evidenceField": "foundNotes[] OR identity.material",
+      "matchCriteria": {
+        "type": "text_contains",
+        "normalize": true,
+        "aliases": {
+          "AISI 1020": ["1020", "1020 STEEL", "SAE 1020"],
+          "Plain Carbon Steel": ["CARBON STEEL", "MILD STEEL", "CRS"]
+        }
+      },
+      "priority": 3,
+      "coverage": "65%"
+    },
+    {
+      "swSource": "identity.finish",
+      "swExample": "PAINT BLACK",
+      "evidenceField": "foundNotes[] OR identity.finish",
+      "matchCriteria": {
+        "type": "text_contains",
+        "normalize": true
+      },
+      "priority": 3,
+      "coverage": "34%"
+    },
+    {
+      "swSource": "comparison.slots[]",
+      "swExample": "Slot 10x25mm THRU",
+      "evidenceField": "foundCallouts[calloutType=Slot]",
+      "matchCriteria": {
+        "required": ["widthMm", "lengthMm"],
+        "tolerances": {
+          "widthMm": { "absolute": 0.2 },
+          "lengthMm": { "absolute": 0.2 }
+        }
+      },
+      "priority": 4,
+      "coverage": "5%",
+      "schemaVersion": "V2"
+    }
+  ],
+  "toleranceUnits": {
+    "absolute": "mm",
+    "percent": "%",
+    "exact": "must match exactly"
+  },
+  "matchResultCodes": {
+    "FOUND": "Evidence found matching SolidWorks requirement",
+    "MISSING": "No matching evidence found",
+    "PARTIAL": "Evidence found but incomplete (e.g., diameter matches, depth missing)",
+    "CONFLICT": "Multiple conflicting evidence found",
+    "LOW_CONFIDENCE": "Match found but below confidence threshold"
+  }
+}

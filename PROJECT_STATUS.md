@@ -1,6 +1,6 @@
 # AI Engineering Drawing Inspector - Project Status
 
-**Last Updated:** January 22, 2025
+**Last Updated:** January 27, 2025
 
 ---
 
@@ -10,334 +10,229 @@ Build an AI-powered system that **verifies engineering drawings (PDFs) against C
 
 ---
 
-## Architecture Overview
+## Current Status: Working Pipeline with Dual AI Models
+
+### Architecture (v2.0)
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│  PDF Drawing    │────▶│  AI Inspector        │────▶│  PASS / FAIL    │
-│  (user upload)  │     │  (Colab notebook)    │     │  + details      │
-└─────────────────┘     └──────────────────────┘     └─────────────────┘
-                              │
-                              ▼
-                  ┌──────────────────────┐
-                  │ Part Context JSON    │
-                  │ (from C# Extractor)  │
-                  └──────────────────────┘
+┌─────────────────┐     ┌──────────────────────────────────────┐     ┌─────────────────┐
+│  PDF Drawing    │────▶│  AI Inspector v2 (Colab)             │────▶│  DiffResult     │
+│  (user upload)  │     │  ┌────────────┐  ┌────────────────┐  │     │  PASS / FAIL    │
+└─────────────────┘     │  │LightOnOCR-2│  │ Qwen2.5-VL-7B  │  │     │  + details      │
+                        │  │(Text OCR)  │  │(Visual Under.) │  │     └─────────────────┘
+                        │  └─────┬──────┘  └───────┬────────┘  │
+                        │        │    MERGE        │           │
+                        │        └────────┬────────┘           │
+                        │                 ▼                    │
+                        │        ┌────────────────┐            │
+                        │        │Merged Evidence │            │
+                        │        └───────┬────────┘            │
+                        └────────────────┼─────────────────────┘
+                                         │ COMPARE
+                                         ▼
+                        ┌────────────────────────────────────┐
+                        │  SW JSON Library (C# Extractor)    │
+                        │  comparison.holeGroups             │
+                        └────────────────────────────────────┘
 ```
 
-**Key Components:**
-- **LightOnOCR-2**: Extracts text from drawing images
-- **Qwen2-VL-7B**: Vision-language model for verification reasoning
-- **Part Context Database**: CAD-extracted requirements per part
+### Latest Test Results (Part 320740)
 
----
-
-## Current Status: Migrating to C# Extractor
-
-### Why the Change?
-The VBA macro approach had significant issues:
-- Frequent crashes and instability
-- Hole diameter API returning 0.0
-- Difficult to maintain and debug
-- Inconsistent output requiring complex parsing
-
-### New Approach: C# SolidWorks API
-- More stable and maintainable
-- Proper error handling
-- Typed feature extraction
-- Clean JSON output directly
-- Geometry analysis for ground truth verification
-
----
-
-## What We Have Built
-
-### 1. C# SolidWorks Extractor (NEW - In Progress)
-
-**Location:** `SolidWorksExtractor/`
-
-**Status:** Architecture refined, ready to build and test
-
-**Schema Version:** 1.0.0
-
-| Component | Purpose |
-|-----------|---------|
-| `Program.cs` | CLI entry point |
-| `Services/SolidWorksConnection.cs` | Connect to SW, open documents |
-| `Services/PropertyExtractor.cs` | Custom props, material, mass, bounding box |
-| `Services/FeatureExtractor.cs` | Typed feature extraction with routing table |
-| `Services/FeatureTypeRouter.cs` | **NEW** - Version-tolerant feature type routing |
-| `Services/GeometryAnalyzer.cs` | Cylinder/plane/slot detection from geometry |
-| `Services/HoleReconciler.cs` | **NEW** - Dual-source hole extraction (intent + geometry) |
-| `Services/AssemblyExtractor.cs` | Mates with limits, hierarchy, transforms |
-| `Models/Units.cs` | **NEW** - Explicit units (meters/mm/inches) |
-| `Models/ComparisonData.cs` | **NEW** - LLM-ready comparison structures |
-| `Output/JsonSerializer.cs` | Versioned JSON output |
-
-**Key Design Refinements:**
-
-1. **Dual-Source Hole Extraction**
-   - Source A (Intent): Thread, c'bore/c'sink, depth from IWizardHoleFeatureData2
-   - Source B (Truth): Actual geometry scan - diameter, axis, centers
-   - Reconciliation: Maps feature intent to geometry instances
-
-2. **Feature Type Routing with Fallbacks**
-   - Routing table handles version/locale variations in GetTypeName2()
-   - Graceful fallback when GetDefinition() returns null
-   - Comprehensive sheet metal type handling
-
-3. **Comparison-Ready Output**
-   - Holes grouped logically (patterns, same size)
-   - Slot recognition (width x length vs diameter)
-   - Required callouts with alternatives
-
-4. **Explicit Units Throughout**
-   - All dimensions include: SystemValue (meters), mm, inches
-   - Angles include: radians and degrees
-   - Prevents scaling errors from VBA approach
-
-5. **Assembly Mate Enhancements**
-   - Full MateType enum matching swMateType_e
-   - Mate limits (min/max) for distance/angle mates
-   - Component path + instance for entity identification
-
-**Features:**
-- Hole Wizard: type, diameter, depth, thread info, counterbore/countersink, instance count
-- Extrudes/Cuts: end conditions, depths, draft angles
-- Fillets/Chamfers: radii, distances, angles
-- Patterns: linear, circular, mirror with counts and spacing
-- Sheet Metal: thickness, bend radius, K-factor, bend allowance type, flat pattern
-- Slots: width, length, depth, centerline detection
-- Geometry Ground Truth: cylinder/slot detection independent of features
-- Assembly: full hierarchy, transforms, all mate types with limits
-- Comparison-ready output for LLM drawing inspection
-
-**Session 3 Enhancements:**
-- THRU/BLIND hole classification with axis-extent analysis and confidence levels
-- Entry treatment detection (countersink, counterbore, chamfer) from geometry
-- Pattern instance centers with bolt circle diameter calculation
-- Stable reference frames (part coordinate systems, assembly transforms with Euler/quaternion)
-- Per-configuration suppression tracking for all features
-- Sheet metal bend filtering (exclude bend cylinders from hole detection)
-- Mate entity quality indicators (High/Medium/Low) based on reference type
-- Extraction modes (Fast vs Full) for performance optimization
-- Expanded RequiredCallouts factory with 11 callout types
-
-### 2. VBA Extraction Pipeline (LEGACY)
-
-**Location:** `vba_extraction_legacy/`
-
-**Status:** Deprecated - kept for reference and existing data
-
-```
-vba_extraction_legacy/
-├── macros/              # VBA macro source files
-├── parsers/             # Python scripts that parse VBA output
-├── extracted_data/      # Raw extraction output (.txt files)
-└── json_databases/      # Parsed JSON databases (still usable)
-```
-
-**Existing Data (from VBA pipeline):**
-- `sw_part_context_complete.json` - 202 unique parts (can still be used until C# extractor produces new data)
-
-### 3. Inspector Notebook
-
-**File:** `ai_inspector_unified.ipynb`
-
-**Current state:**
-- Uses unified `sw_part_context_complete.json` (from legacy VBA extraction)
-- Stage 1 only (verification against checklist)
-- RAG and Stage 2 removed (to be added later)
-- Supports single file and batch inspection
-
----
-
-## Data Sources
-
-### Extracted from 400S Assembly (via VBA - legacy)
-
-| Source | Count |
+| Metric | Value |
 |--------|-------|
-| Sub-assemblies processed | 40 |
-| Total mates extracted | 1,114 |
-| Parts with mate relationships | 239 |
-| Unique parts in database | 202 |
+| Match Rate | **100%** |
+| SW Requirements | 3 (M6x1.0, M5x0.8 7X, ø7.10mm THRU 2X) |
+| Found | 3 |
+| Missing | 0 |
+| Extra | 2 (duplicates/notes - see Known Issues) |
 
-### Drawing Files
+### Pipeline Components
 
-| Location | Files | Notes |
-|----------|-------|-------|
-| `400S_Sorted_Library/` | 265 PDFs | Organized by assembly |
-| `400S_Unmatched_Files/` | 16 PDFs | Couldn't match to parts |
-| `PDF VAULT/` | 1,258 PDFs | All company drawings (not just 400S) |
-
----
-
-## Known Issues & Gaps
-
-### Issues to be Resolved by C# Extractor
-
-| Issue | VBA Status | C# Solution |
-|-------|------------|-------------|
-| Hole diameter = 0.0 | Broken | Parses from name + geometry analysis |
-| Empty verification checklists | Limited | Comprehensive auto-generation |
-| Instance count mismatch | Unreliable | Proper instance counting |
-| Unstable extraction | Crashes | Robust error handling |
-
-### Remaining Issues
-
-- **PN Normalization Edge Cases**: Some filename patterns may not match
-- **OCR accuracy**: Dependent on drawing quality
+| Component | Model | Status | Notes |
+|-----------|-------|--------|-------|
+| Text Extraction | LightOnOCR-2-1B | ✓ Working | 64 lines extracted, 2.02 GB |
+| Visual Understanding | Qwen2.5-VL-7B-Instruct | ✓ Working | Features, views, material, 16.58 GB |
+| Evidence Merge | Custom Python | ✓ Working | Links OCR dims with Qwen context |
+| SW Comparison | Custom Python | ✓ Working | Uses `comparison.holeGroups` |
 
 ---
 
-## File Inventory
+## Comparison Capabilities & Limitations
 
-### C# Extractor (NEW)
+### What CAN Be Compared
+
+| Feature Type | SW JSON Source | OCR Detection | Status |
+|--------------|----------------|---------------|--------|
+| Tapped Holes | `comparison.holeGroups[holeType=Tapped]` | M6x1.0 pattern | ✓ Full support |
+| Through Holes | `comparison.holeGroups[holeType=Through]` | ø.281 THRU pattern | ✓ Full support |
+| Blind Holes | `comparison.holeGroups[holeType=Blind]` | ø.500 x .25 DEEP | ✓ Full support |
+| Fillets | `features.fillets[].radius` | R0.125 pattern | ✓ Supported |
+| Chamfers | `features.chamfers[]` | .030 x 45° pattern | ✓ Supported |
+
+### What CANNOT Be Compared (Limitations)
+
+| Feature Type | Why Not Supported | Impact |
+|--------------|-------------------|--------|
+| **Linear Dimensions** | Not stored in SW JSON (only bounding box) | Cannot verify 4.00±.03 type callouts |
+| **Curves/Splines** | Only edge counts in SW JSON, no specific dims | Cannot verify curve radii |
+| **General Notes** | Not CAD features (e.g., "REMOVE ALL BURRS") | Filtered out - not relevant |
+| **Surface Finish** | Text-based, no structured SW data | Future: text matching |
+| **GD&T Symbols** | Complex - requires specialized parsing | Future enhancement |
+
+### Parts with No Extractable Features
+
+For parts with **only linear dimensions and curves** (no holes, fillets, or chamfers):
+- SW requirements list will be **empty**
+- Match rate will be **N/A**
+- Part will **pass by default** (nothing to fail)
+
+**Affected part types:** Simple plates, spacers, brackets without holes
+
+---
+
+## Known Issues (Current)
+
+### 1. Duplicate Detection (Imperial/Metric)
+**Problem:** Same hole detected twice when OCR finds imperial (.281") and Qwen finds metric (7.10mm).
+
+**Example:**
+- OCR: `ø.281 THRU` → matched to SW requirement
+- Qwen: `2X .281 THRU (d)` → reported as "Extra"
+
+**Impact:** False "Extra" items in report
+
+**Fix needed:** Improve merge logic to deduplicate imperial/metric versions
+
+### 2. Qwen Note Misclassification
+**Problem:** Qwen classifies general notes as feature types.
+
+**Example:** `"REMOVE ALL BURRS AND BREAK SHARP EDGES"` classified as `Chamfer`
+
+**Impact:** False "Extra" chamfer in report
+
+**Fix needed:** Filter notes from Qwen features or improve prompt
+
+### 3. Low Feature Count Warning
+**Problem:** Parts with 0 requirements silently pass.
+
+**Impact:** No visibility into parts that couldn't be verified
+
+**Fix needed:** Add warning for low-feature parts
+
+---
+
+## File Structure
+
+### Active Files
+```
+├── ai_inspector_v2.ipynb          # CURRENT - Dual AI pipeline
+├── PROJECT_STATUS.md              # This file
+├── Json library/                  # SW JSON files from C# extractor
+│   └── 320740.json               # Example part
+├── schemas/
+│   └── sw_to_evidence_mapping.json # Mapping schema v1.1.1
+└── sw_json_library/               # Uploaded to Colab
+```
+
+### C# Extractor (Generates SW JSON)
 ```
 SolidWorksExtractor/
-├── Program.cs                    # CLI entry point
-├── SolidWorksExtractor.csproj    # .NET 4.8 project
-├── README.md                     # Documentation
+├── Program.cs
 ├── Services/
-│   ├── SolidWorksConnection.cs   # SW connection handling
-│   ├── PropertyExtractor.cs      # Custom props, material
-│   ├── FeatureExtractor.cs       # Feature tree traversal
-│   ├── FeatureTypeRouter.cs      # Version-tolerant routing
-│   ├── GeometryAnalyzer.cs       # Cylinder/slot detection
-│   ├── HoleReconciler.cs         # Intent + geometry reconciliation
-│   └── AssemblyExtractor.cs      # Mates, hierarchy, transforms
-├── Models/
-│   ├── PartData.cs               # Part output with schema version
-│   ├── FeatureData.cs            # Typed features + config suppression
-│   ├── GeometryData.cs           # Ground truth + THRU/BLIND analysis
-│   ├── AssemblyData.cs           # Assembly + mate quality indicators
-│   ├── Units.cs                  # Explicit units (m/mm/in)
-│   ├── ComparisonData.cs         # LLM-ready + RequiredCalloutFactory
-│   └── ExtractionOptions.cs      # Fast/Full extraction modes
-└── Output/
-    └── JsonSerializer.cs         # Versioned JSON output
+│   ├── HoleReconciler.cs          # Creates comparison.holeGroups
+│   ├── GeometryAnalyzer.cs
+│   └── ...
+└── Models/
+    └── ComparisonData.cs
 ```
 
-### Legacy VBA Pipeline
+### Legacy (Reference Only)
 ```
-vba_extraction_legacy/
-├── macros/                       # VBA source (.txt, .swp)
-├── parsers/                      # Python parsers
-├── extracted_data/               # Raw .txt output
-│   └── 40 sub-assemblies mates/  # Mate files
-└── json_databases/               # Parsed JSON (still usable)
-    └── sw_part_context_complete.json
+vba_extraction_legacy/             # Old VBA approach - deprecated
+old_notebooks/                     # Previous notebook versions
 ```
 
-### Notebooks
-```
-├── ai_inspector_unified.ipynb     # CURRENT - Stage 1 only
-├── ai_inspector_final_fixed.ipynb # Previous version
-└── ai_inspector_rag.ipynb         # Earlier experiments
-```
+---
+
+## Output Files (per inspection)
+
+| File | Contents |
+|------|----------|
+| `ResolvedPartIdentity.json` | Part number, confidence, SW JSON path |
+| `QwenUnderstanding.json` | Qwen's visual analysis (views, features, material) |
+| `DrawingEvidence.json` | Merged OCR + Qwen callouts |
+| `DiffResult.json` | Comparison results (found/missing/extra) |
 
 ---
 
 ## Next Steps
 
-### Immediate
-1. **Build C# Extractor** in Visual Studio
-2. **Test with single part** - verify feature extraction works
-3. **Test with 400S assembly** - extract all components and mates
+### Immediate Fixes
+1. ~~Fix Qwen import error~~ ✓ Done (Qwen2_5_VLForConditionalGeneration)
+2. Improve merge logic for imperial/metric deduplication
+3. Filter general notes from Qwen features
+4. Add warning for parts with zero requirements
 
 ### Short Term
-4. **Generate new JSON database** using C# extractor
-5. **Update inspector notebook** to use new JSON format
-6. **Compare results** - verify C# output matches/improves on VBA data
+5. Test with more parts from library
+6. Batch processing mode
+7. Generate QC report markdown
 
-### Future
-7. **Re-add RAG system** - ASME Y14.5 reference lookup
-8. **Re-add Stage 2** - GD&T improvement suggestions
-9. **Build visual index** - for drawing similarity search
+### Future Enhancements
+8. GD&T symbol detection
+9. Surface finish text matching
+10. RAG for ASME Y14.5 reference
+11. Visual similarity search
 
 ---
 
-## Quick Start for Next Session
+## Quick Start
 
-### To build and test C# Extractor:
-1. Open `SolidWorksExtractor/SolidWorksExtractor.csproj` in Visual Studio
-2. Verify Interop DLL paths match your SolidWorks 2023 installation
-3. Build solution (F6)
-4. Open a part in SolidWorks
-5. Run: `bin\Debug\SolidWorksExtractor.exe`
+### Run Inspector (Colab)
+1. Open `ai_inspector_v2.ipynb` in Google Colab
+2. Upload `sw_json_library.zip` when prompted
+3. Upload PDF drawing when prompted
+4. Run all cells
+5. Check `DiffResult.json` for results
 
-### To extract from 400S assembly:
-```bash
-SolidWorksExtractor.exe "path\to\400S.sldasm" --resolve
-```
-
-### To use existing data with inspector (legacy):
-```python
-import json
-with open('vba_extraction_legacy/json_databases/sw_part_context_complete.json') as f:
-    db = json.load(f)
-print(db.get('318127'))  # Lookup by NEW PN
-```
+### Test Part
+- **Part:** 320740 (GROUNDING BUS 8 POINT)
+- **Expected:** 3 requirements (M6x1.0, M5x0.8 7X, ø7.10mm THRU 2X)
+- **Result:** 100% match rate
 
 ---
 
 ## Change Log
 
-### January 22, 2025 (Session 3) - QC-Ready Refinements
-Implemented 9 "must-have" items to prevent real-world inspection failures:
+### January 27, 2025 - Working Dual AI Pipeline
+- **Built ai_inspector_v2.ipynb** with LightOnOCR-2 + Qwen2.5-VL-7B
+- **Achieved 100% match rate** on test part 320740
+- **Implemented evidence merge** combining OCR precision with Qwen visual context
+- **Fixed Qwen import error** (Qwen2_5_VLForConditionalGeneration)
+- **Added json-repair** for handling malformed LLM JSON output
+- **Documented limitations:**
+  - Linear dimensions not in SW JSON
+  - Curves/splines not supported
+  - General notes filtered (not CAD features)
+  - Parts with no holes pass by default
 
-1. **THRU vs BLIND Classification**: Axis-extent analysis projects boundary edges onto cylinder axis to determine if hole opens at both ends. Includes confidence levels (High/Medium/Low) and classification reasoning.
+### January 22, 2025 - C# Extractor Refinements
+- Added THRU vs BLIND classification
+- Added entry treatment detection
+- Added pattern instance centers
+- Added mate quality indicators
+- Added extraction modes (Fast/Full)
 
-2. **Entry Treatment Detection**: Analyzes faces adjacent to hole entry for counterbore (larger cylinder), countersink (cone), or chamfer (small angled face). Extracts diameter, depth, and angle.
-
-3. **Pattern Output Enhancement**: Explicit instance centers with X/Y/Z coordinates, axis direction vectors, bolt circle diameter calculation from instance positions, angle per instance for circular patterns.
-
-4. **Stable Reference Frames**: Extracts part coordinate systems (origin planes, axes) and assembly transforms with Euler angles (XYZ rotation) and quaternions for unambiguous orientation.
-
-5. **Configuration Support**: Tracks suppression state per configuration for all features. `SuppressionByConfig` dictionary shows which configs have feature active/suppressed.
-
-6. **Sheet Metal Bend Filtering**: Detects sheet metal parts, collects bend radii, marks cylinders matching bend radii as `IsSheetMetalBend=true` to exclude from hole detection.
-
-7. **Mate Entity Quality Indicators**: Rates mate references as High (named planes/axes), Medium (named with issues), or Low (anonymous faces). Helps identify fragile mate references.
-
-8. **Extraction Modes**: `--fast` skips expensive operations (geometry analysis, per-config suppression, pattern locations). `--full` (default) does complete extraction.
-
-9. **Expanded RequiredCallouts**: Factory methods for 11 callout types: Hole, Thread, SheetMetalThickness, BendRadius, Material, SurfaceFinish, BreakEdges, Fillet, Chamfer, Pattern, GDT.
-
-New file: `Models/ExtractionOptions.cs` - Controls extraction depth and performance.
-
-### January 22, 2025 (Session 2) - Architecture Refinements
-Based on user feedback for QC-ready extraction:
-
-- **Added FeatureTypeRouter**: Version-tolerant routing with aliases and fallbacks
-- **Added HoleReconciler**: Dual-source extraction (intent + geometry reconciliation)
-- **Added slot detection**: GeometryAnalyzer now detects slots (width x length)
-- **Added Units model**: Explicit meters/mm/inches throughout to prevent scaling errors
-- **Added ComparisonData model**: LLM-ready structures with hole groups, patterns, callouts
-- **Enhanced MateData**: Full enum types, mate limits, component paths with instances
-- **Added schema versioning**: JSON output includes version for compatibility
-
-Key design decisions:
-- Treat GetTypeName2() as routing hint, not guarantee
-- Always provide both feature intent AND geometry ground truth for holes
-- Group holes logically for pattern/instance comparison
-- Include alternative callout formats for fuzzy matching
-
-### January 22, 2025 (Session 1)
-- **Reorganized project structure**: Moved all VBA-related files to `vba_extraction_legacy/`
-- **Created C# SolidWorksExtractor**: Full scaffold with typed feature extraction
-  - Services: Connection, Property, Feature, Geometry, Assembly extractors
-  - Models: Part, Feature, Geometry, Assembly data structures
-  - Output: Custom JSON serializer
-- **Decision**: Migrate from VBA to C# for more reliable extraction
+### January 22, 2025 - Migration to C# Extractor
+- Deprecated VBA approach
+- Built C# SolidWorksExtractor scaffold
+- Designed comparison.holeGroups schema
 
 ---
 
 ## Contact / Notes
 
 - Assembly: **400S** (band saw machine)
-- Parts use **OLD PN** in CAD filenames (e.g., `017-134.SLDPRT`)
-- Drawings use **NEW PN** on title block (e.g., `318127`)
-- Database supports lookup by both OLD and NEW PN
 - SolidWorks version: **2023**
+- Colab GPU: Required (for Qwen2.5-VL)
+- Total GPU memory needed: ~19 GB (LightOnOCR + Qwen)

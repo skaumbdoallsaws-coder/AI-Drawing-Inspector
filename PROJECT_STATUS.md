@@ -171,11 +171,11 @@ AI-tool/
 | 5 | `utils/sw_library.py` | ✓ DONE | SolidWorks JSON library manager |
 | 6 | `extractors/ocr.py` | ✓ DONE | LightOnOCR-2 wrapper + callout parsing |
 | 7 | `extractors/vlm.py` | ✓ DONE | Qwen2.5-VL wrapper + all prompts |
-| 8 | `analyzers/base.py` | PENDING | Shared extraction logic |
-| 9 | `analyzers/machined_part.py` | PENDING | First type-specific analyzer |
-| 10 | `comparison/` | PENDING | Matcher + DiffResult |
+| 8 | `analyzers/base.py` | ✓ DONE | Part identity, evidence merge, base analyzer |
+| 9 | `analyzers/machined_part.py` | ✓ DONE | Full analyzer + lazy version for Colab |
+| 10 | `comparison/matcher.py` | ✓ DONE | SW extraction, mate requirements, comparison |
 | 11 | `report/qc_report.py` | PENDING | Type-aware report |
-| 12 | Other analyzers | PENDING | One at a time |
+| 12 | Other analyzers | ✓ DONE | Placeholder classes inheriting from base |
 | 13 | `notebooks/ai_inspector_v4.ipynb` | PENDING | Slim orchestrator |
 
 ---

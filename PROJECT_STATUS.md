@@ -10,7 +10,7 @@ Build an AI-powered system that **verifies engineering drawings (PDFs) against C
 
 ---
 
-## Current Status: v4.0 Complete - Modular Type-Aware Architecture
+## Current Status: v4.0 In Progress - Modular Type-Aware Architecture
 
 ### What's New in v4.0
 
@@ -172,11 +172,11 @@ AI-tool/
 | 6 | `extractors/ocr.py` | ✓ DONE | LightOnOCR-2 wrapper + callout parsing |
 | 7 | `extractors/vlm.py` | ✓ DONE | Qwen2.5-VL wrapper + all prompts |
 | 8 | `analyzers/base.py` | ✓ DONE | Part identity, evidence merge, base analyzer |
-| 9 | `analyzers/machined_part.py` | ✓ DONE | Full analyzer + lazy version for Colab |
+| 9 | `analyzers/machined_part.py` | PENDING | Awaiting user review/approval |
 | 10 | `comparison/matcher.py` | ✓ DONE | SW extraction, mate requirements, comparison |
-| 11 | `report/qc_report.py` | ✓ DONE | GPT-4o-mini report generator |
-| 12 | Other analyzers | ✓ DONE | Placeholder classes inheriting from base |
-| 13 | `notebooks/ai_inspector_v4.ipynb` | ✓ DONE | Slim orchestrator (~80 lines) |
+| 11 | `report/qc_report.py` | PENDING | Will add after analyzer testing |
+| 12 | Other analyzers | PENDING | One at a time, after machined_part validated |
+| 13 | `notebooks/ai_inspector_v4.ipynb` | PENDING | Will create for testing each type |
 
 ---
 

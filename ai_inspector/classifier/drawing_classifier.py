@@ -303,26 +303,19 @@ def get_analyzer_for_type(drawing_type: DrawingType):
     Get the appropriate analyzer class for a drawing type.
 
     Returns the analyzer class (not instance) to be instantiated by caller.
+    Raises NotImplementedError for types not yet implemented.
     """
-    # Lazy import to avoid circular dependencies
-    from ..analyzers import (
-        MachinedPartAnalyzer,
-        SheetMetalAnalyzer,
-        WeldmentAnalyzer,
-        AssemblyAnalyzer,
-        CastingAnalyzer,
-        PurchasedPartAnalyzer,
-        GearAnalyzer,
-    )
+    # Import implemented analyzers only
+    # Add imports here as each type is implemented
 
-    analyzers = {
-        DrawingType.MACHINED_PART: MachinedPartAnalyzer,
-        DrawingType.SHEET_METAL: SheetMetalAnalyzer,
-        DrawingType.WELDMENT: WeldmentAnalyzer,
-        DrawingType.ASSEMBLY: AssemblyAnalyzer,
-        DrawingType.CASTING: CastingAnalyzer,
-        DrawingType.PURCHASED_PART: PurchasedPartAnalyzer,
-        DrawingType.GEAR: GearAnalyzer,
+    implemented = {
+        # DrawingType.MACHINED_PART: MachinedPartAnalyzer,  # TODO: implement first
     }
 
-    return analyzers.get(drawing_type, MachinedPartAnalyzer)
+    if drawing_type not in implemented:
+        raise NotImplementedError(
+            f"Analyzer for {drawing_type.value} not yet implemented. "
+            f"Implemented types: {list(implemented.keys())}"
+        )
+
+    return implemented[drawing_type]

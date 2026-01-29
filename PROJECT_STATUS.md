@@ -167,10 +167,10 @@ AI-tool/
 | 1 | `classifier/drawing_classifier.py` | ✓ DONE | Classification logic from 258 drawing analysis |
 | 2 | `setup.py` + `pyproject.toml` | ✓ DONE | Editable install support |
 | 3 | Package skeleton (`__init__.py` files) | ✓ DONE | All directories created |
-| 4 | `utils/pdf_render.py` | PENDING | Extract from v3 notebook |
-| 5 | `utils/sw_library.py` | PENDING | Extract from v3 notebook |
-| 6 | `extractors/ocr.py` | PENDING | LightOnOCR wrapper |
-| 7 | `extractors/vlm.py` | PENDING | Qwen wrapper |
+| 4 | `utils/pdf_render.py` | ✓ DONE | PDF rendering with PyMuPDF |
+| 5 | `utils/sw_library.py` | ✓ DONE | SolidWorks JSON library manager |
+| 6 | `extractors/ocr.py` | ✓ DONE | LightOnOCR-2 wrapper + callout parsing |
+| 7 | `extractors/vlm.py` | ✓ DONE | Qwen2.5-VL wrapper + all prompts |
 | 8 | `analyzers/base.py` | PENDING | Shared extraction logic |
 | 9 | `analyzers/machined_part.py` | PENDING | First type-specific analyzer |
 | 10 | `comparison/` | PENDING | Matcher + DiffResult |

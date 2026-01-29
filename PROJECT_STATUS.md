@@ -10,7 +10,7 @@ Build an AI-powered system that **verifies engineering drawings (PDFs) against C
 
 ---
 
-## Current Status: v4.0 In Development - Modular Type-Aware Architecture
+## Current Status: v4.0 Complete - Modular Type-Aware Architecture
 
 ### What's New in v4.0
 
@@ -176,7 +176,7 @@ AI-tool/
 | 10 | `comparison/matcher.py` | ✓ DONE | SW extraction, mate requirements, comparison |
 | 11 | `report/qc_report.py` | ✓ DONE | GPT-4o-mini report generator |
 | 12 | Other analyzers | ✓ DONE | Placeholder classes inheriting from base |
-| 13 | `notebooks/ai_inspector_v4.ipynb` | PENDING | Slim orchestrator |
+| 13 | `notebooks/ai_inspector_v4.ipynb` | ✓ DONE | Slim orchestrator (~80 lines) |
 
 ---
 

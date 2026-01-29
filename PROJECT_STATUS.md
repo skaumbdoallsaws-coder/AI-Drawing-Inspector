@@ -174,7 +174,7 @@ AI-tool/
 | 8 | `analyzers/base.py` | ✓ DONE | Part identity, evidence merge, base analyzer |
 | 9 | `analyzers/machined_part.py` | ✓ DONE | Full analyzer + lazy version for Colab |
 | 10 | `comparison/matcher.py` | ✓ DONE | SW extraction, mate requirements, comparison |
-| 11 | `report/qc_report.py` | PENDING | Type-aware report |
+| 11 | `report/qc_report.py` | ✓ DONE | GPT-4o-mini report generator |
 | 12 | Other analyzers | ✓ DONE | Placeholder classes inheriting from base |
 | 13 | `notebooks/ai_inspector_v4.ipynb` | PENDING | Slim orchestrator |
 

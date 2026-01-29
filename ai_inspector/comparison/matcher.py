@@ -82,10 +82,23 @@ def extract_sw_requirements(sw_data: Dict, filter_sheet_metal: bool = True) -> L
             })
         elif hole_type == 'Through':
             # Plain through hole - use INCHES for comparison
-            diameter_inches = diameters.get('pilotOrTapDrillDiameterInches')
+            diameter_inches = diameters.get('pilotOrTapDrillDiameterInches', 0)
+            diameter_mm = diameters.get('pilotOrTapDrillDiameterMm', 0)
+            # FILTER: Skip zero-diameter holes (bad SW data)
+            if diameter_inches == 0 and diameter_mm > 0:
+                diameter_inches = diameter_mm / 25.4  # Fallback conversion
+            # Fallback: parse diameter from canonical string (e.g., "ø10.00mm (3X)")
+            if diameter_inches <= 0.001 and diameter_mm <= 0.001 and canonical:
+                m = re.search(r'[oO\u00d8\u2205]?\s*(\d+\.?\d*)\s*mm', canonical)
+                if m:
+                    diameter_mm = float(m.group(1))
+                    diameter_inches = diameter_mm / 25.4
+            if diameter_inches <= 0.001 and diameter_mm <= 0.001:
+                continue  # Skip invalid holes
             requirements.append({
                 'type': 'Hole',
                 'diameterInches': diameter_inches,
+                'diameterMm': diameter_mm,
                 'isThrough': True,
                 'count': count,
                 'canonical': canonical,
@@ -94,10 +107,23 @@ def extract_sw_requirements(sw_data: Dict, filter_sheet_metal: bool = True) -> L
             })
         elif hole_type == 'Blind':
             # Blind hole - use INCHES
-            diameter_inches = diameters.get('pilotOrTapDrillDiameterInches')
+            diameter_inches = diameters.get('pilotOrTapDrillDiameterInches', 0)
+            diameter_mm = diameters.get('pilotOrTapDrillDiameterMm', 0)
+            # FILTER: Skip zero-diameter holes (bad SW data)
+            if diameter_inches == 0 and diameter_mm > 0:
+                diameter_inches = diameter_mm / 25.4  # Fallback conversion
+            # Fallback: parse diameter from canonical string (e.g., "ø15.90mm x 22.1mm DEEP")
+            if diameter_inches <= 0.001 and diameter_mm <= 0.001 and canonical:
+                m = re.search(r'[oO\u00d8\u2205]?\s*(\d+\.?\d*)\s*mm', canonical)
+                if m:
+                    diameter_mm = float(m.group(1))
+                    diameter_inches = diameter_mm / 25.4
+            if diameter_inches <= 0.001 and diameter_mm <= 0.001:
+                continue  # Skip invalid holes
             requirements.append({
                 'type': 'Hole',
                 'diameterInches': diameter_inches,
+                'diameterMm': diameter_mm,
                 'isThrough': False,
                 'count': count,
                 'canonical': canonical,
@@ -270,6 +296,10 @@ def compare_callout_to_requirement(
     ctype = callout.get('calloutType')
     rtype = req.get('type')
 
+    # Normalize Diameter -> Hole for comparison
+    if ctype == 'Diameter':
+        ctype = 'Hole'
+
     if ctype != rtype:
         return False
 
@@ -278,6 +308,11 @@ def compare_callout_to_requirement(
         d1 = callout.get('diameterInches', 0)
         d2 = req.get('diameterInches', 0)
         if d1 and d2 and abs(d1 - d2) <= tolerance_inches:
+            return True
+        # Fallback: compare metric diameters directly (mm)
+        d1_mm = callout.get('diameterMm', 0)
+        d2_mm = req.get('diameterMm', 0)
+        if d1_mm and d2_mm and abs(d1_mm - d2_mm) <= tolerance_inches * 25.4:
             return True
 
     elif ctype == 'TappedHole':

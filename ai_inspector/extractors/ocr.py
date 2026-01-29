@@ -153,8 +153,14 @@ PATTERNS = {
     'imperial_thread_unf': r'(\d+/\d+|\d+)\s*-\s*(\d+)\s*UNF',
     'imperial_thread': r'(\d+/\d+)\s*[-]\s*(\d+)',
     'acme_thread': r'(\d+/\d+|\d+(?:\.\d+)?)\s*-\s*(\d+)\s*ACME',
+    # Imperial holes (decimal inch without unit suffix)
     'thru_hole': r'[oO\u00d8\u2205\u03c6\u2300]?\s*\.?(\d+\.?\d*)\s*(?:THRU|THR)',
     'blind_hole': r'[oO\u00d8\u2205\u03c6\u2300]?\s*\.?(\d+\.?\d*)\s*[xX]\s*(\d+\.?\d*)\s*(?:DEEP|DP)',
+    # Metric holes (with mm suffix) - convert to inches
+    'metric_thru_hole': r'[oO\u00d8\u2205\u03c6\u2300]\s*(\d+\.?\d*)\s*mm\s*(?:THRU|THR)',
+    'metric_blind_hole': r'[oO\u00d8\u2205\u03c6\u2300]\s*(\d+\.?\d*)\s*mm\s*[xX]\s*(\d+\.?\d*)\s*mm?\s*(?:DEEP|DP)',
+    'metric_diameter': r'[oO\u00d8\u2205\u03c6\u2300]\s*(\d+\.?\d*)\s*mm',
+    # Imperial diameter (decimal inch, no suffix)
     'diameter': r'[oO\u00d8\u2205\u03c6\u2300]\s*\.?(\d+\.?\d*)',
     'major_minor_dia': r'(?:MAJOR|MINOR|MAJ|MIN)\s*[oO\u00d8\u2205\u03c6\u2300]?\s*\.?(\d+\.?\d+)(?:\s*/\s*\.?(\d+\.?\d+))?',
     'fillet': r'(?<![A-Za-z])R\s*\.?(\d+\.?\d*)(?!\w)',
@@ -305,6 +311,43 @@ def parse_ocr_callouts(ocr_lines: List[str], verbose: bool = False) -> List[Dict
             'source': 'ocr'
         })
 
+    # --- Metric through holes (with mm suffix) - convert to inches ---
+    for match in re.finditer(PATTERNS['metric_thru_hole'], raw_text, re.IGNORECASE):
+        raw = match.group(0)
+        if raw in seen_raws:
+            continue
+        seen_raws.add(raw)
+        dia_mm = float(match.group(1))
+        callouts.append({
+            'calloutType': 'Hole',
+            'diameterInches': dia_mm / 25.4,
+            'diameterMm': dia_mm,
+            'isThrough': True,
+            'raw': raw,
+            'source': 'ocr',
+            'units': 'metric'
+        })
+
+    # --- Metric blind holes (with mm suffix) - convert to inches ---
+    for match in re.finditer(PATTERNS['metric_blind_hole'], raw_text, re.IGNORECASE):
+        raw = match.group(0)
+        if raw in seen_raws:
+            continue
+        seen_raws.add(raw)
+        dia_mm = float(match.group(1))
+        depth_mm = float(match.group(2))
+        callouts.append({
+            'calloutType': 'Hole',
+            'diameterInches': dia_mm / 25.4,
+            'diameterMm': dia_mm,
+            'depthInches': depth_mm / 25.4,
+            'depthMm': depth_mm,
+            'isThrough': False,
+            'raw': raw,
+            'source': 'ocr',
+            'units': 'metric'
+        })
+
     # --- Through holes ---
     for match in re.finditer(PATTERNS['thru_hole'], raw_text, re.IGNORECASE):
         raw = match.group(0)
@@ -387,6 +430,26 @@ def parse_ocr_callouts(ocr_lines: List[str], verbose: bool = False) -> List[Dict
             'source': 'ocr'
         })
 
+    # --- Metric diameters (with mm suffix) - convert to inches ---
+    for match in re.finditer(PATTERNS['metric_diameter'], raw_text, re.IGNORECASE):
+        raw = match.group(0)
+        if raw in seen_raws:
+            continue
+        # Skip if already matched as hole
+        if any(raw in c.get('raw', '') for c in callouts):
+            continue
+        seen_raws.add(raw)
+        dia_mm = float(match.group(1))
+        callouts.append({
+            'calloutType': 'Hole',  # Treat as hole for comparison
+            'diameterInches': dia_mm / 25.4,
+            'diameterMm': dia_mm,
+            'isThrough': None,  # Unknown depth
+            'raw': raw,
+            'source': 'ocr',
+            'units': 'metric'
+        })
+
     # --- Plain diameters (not caught by other patterns) ---
     for match in re.finditer(PATTERNS['diameter'], raw_text):
         raw = match.group(0)
@@ -394,6 +457,11 @@ def parse_ocr_callouts(ocr_lines: List[str], verbose: bool = False) -> List[Dict
             continue
         # Skip if this looks like part of another callout
         if any(raw in c.get('raw', '') for c in callouts):
+            continue
+        # Skip if followed by 'mm' (already caught by metric_diameter)
+        start_pos = match.start()
+        end_pos = match.end()
+        if end_pos < len(raw_text) and raw_text[end_pos:end_pos+2].lower() == 'mm':
             continue
         seen_raws.add(raw)
         callouts.append({

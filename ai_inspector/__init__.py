@@ -27,3 +27,13 @@ from .classifier import (
     DrawingClassifier,
     classify_drawing,
 )
+
+# Comparison exports
+from .comparison import (
+    SwFeatureExtractor,
+    SwFeature,
+    FeatureMatcher,
+    MatchResult,
+    DiffResult,
+    compare_drawing,
+)

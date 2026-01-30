@@ -37,3 +37,10 @@ from .comparison import (
     DiffResult,
     compare_drawing,
 )
+
+# Report exports
+from .report import (
+    QCReportGenerator,
+    QCReport,
+    generate_report,
+)

@@ -61,8 +61,12 @@ class LightOnOCR:
         Load model and processor into GPU memory.
 
         Clears GPU cache before loading to maximize available memory.
+        Requires transformers installed from git (pip install git+https://github.com/huggingface/transformers)
         """
-        from transformers import AutoModelForVision2Seq, AutoProcessor
+        from transformers import (
+            LightOnOcrForConditionalGeneration,
+            LightOnOcrProcessor,
+        )
 
         # Clear memory first
         gc.collect()
@@ -72,17 +76,15 @@ class LightOnOCR:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
 
-        self.processor = AutoProcessor.from_pretrained(
+        self.processor = LightOnOcrProcessor.from_pretrained(
             self.model_id,
             token=self.hf_token,
-            trust_remote_code=True,
         )
 
-        self.model = AutoModelForVision2Seq.from_pretrained(
+        self.model = LightOnOcrForConditionalGeneration.from_pretrained(
             self.model_id,
             torch_dtype=self.dtype,
             token=self.hf_token,
-            trust_remote_code=True,
         ).to(self.device)
 
     def unload(self) -> None:

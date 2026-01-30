@@ -61,7 +61,7 @@ class Config:
     min_hole_diameter_inches: float = 0.01  # Filter noise
 
     # === Classification ===
-    classification_confidence_threshold: float = 0.5  # Default to PART_DETAIL if below
+    classification_confidence_threshold: float = 0.5  # Default to MACHINED_PART if below
 
     # === Output Files ===
     identity_output_file: str = "ResolvedPartIdentity.json"

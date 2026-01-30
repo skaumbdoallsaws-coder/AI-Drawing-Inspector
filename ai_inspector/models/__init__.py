@@ -3,13 +3,12 @@
 from .page import PageArtifact
 from .identity import ResolvedPartIdentity
 from .solidworks import SwPartEntry
-from .classification import PageType, PageClassification, DrawingClassification
+from .classification import DrawingType, ClassificationResult
 
 __all__ = [
     "PageArtifact",
     "ResolvedPartIdentity",
     "SwPartEntry",
-    "PageType",
-    "PageClassification",
-    "DrawingClassification",
+    "DrawingType",
+    "ClassificationResult",
 ]

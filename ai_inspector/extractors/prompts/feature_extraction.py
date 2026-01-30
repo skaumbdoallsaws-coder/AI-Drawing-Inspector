@@ -73,39 +73,17 @@ Recognize these thread formats:
 - UNIFIED INCH: 3/4-10 UNC-2A, .750-16UNF-2A, 1/4-20 UNC
 - ACME (lead screws): 1.00-5 ACME-2G-LH, 1"-5 ACME-2G
 
-=== SHEET METAL RECOGNITION ===
+=== SHEET METAL FEATURES ===
 
-If you see ANY of these, classify drawing as SHEET_METAL:
-- "FLAT PATTERN" view label
+For sheet metal parts, extract bend information:
 - Bend callouts: "UP 90° R .03" or "DOWN 90° R .03"
-- Multiple (F) suffix dimensions
-- Material like "10GA MILD STEEL" or "14GA"
+- Extract as: {"direction": "UP/DOWN", "angle": 90, "radius": 0.03}
+- (F) suffix dimensions are flat pattern dimensions
 
-Extract bend info: {"direction": "UP/DOWN", "angle": 90, "radius": 0.03}
+=== GEAR DATA ===
 
-=== SPECIAL DRAWING TYPES ===
-
-WELDMENT signals:
-- Title/description contains "WELDT" or "WELDMENT"
-- Has BOM table (lists multiple parts to be welded together)
-- Exploded or assembly view showing component arrangement
-- May show weld symbols or ".### WELD LINE" callouts
-- Action: Classify as WELDMENT_ASSEMBLY, extract BOM and weld specs
-
-CASTING signals:
-- Material contains "DUCTILE IRON", "CASTING"
-- "MFG ITEM #: XXX OR EQUIVALENT"
-- "ALL DIMENSIONS ARE REFERENCE" note
-- Action: Most dims are reference-only, identify critical features
-
-PURCHASED PART signals:
-- Manufacturer cross-reference table (NSK, SKF, AST, etc.)
-- "ALL DIMENSIONS FOR REFERENCE ONLY"
-- Action: Classify as PURCHASED_PART, dims are reference only
-
-GEAR signals:
-- Gear data table with NUMBER OF TEETH, DIAMETRAL PITCH, PRESSURE ANGLE
-- Action: Extract gear parameters into separate "gearData" object
+For gear drawings, extract gear parameters into "gearData" object:
+- NUMBER OF TEETH, DIAMETRAL PITCH, PRESSURE ANGLE, MODULE
 
 === GD&T FEATURE CONTROL FRAMES ===
 

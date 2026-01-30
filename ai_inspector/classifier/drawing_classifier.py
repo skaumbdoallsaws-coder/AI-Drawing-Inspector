@@ -176,7 +176,7 @@ class DrawingClassifier:
         r"\bBEND\b.*\b(?:UP|DOWN)\b",
         r"\bUP\s*\d+(?:\.\d+)?",       # UP 90 R.03
         r"\bDOWN\s*\d+(?:\.\d+)?",     # DOWN 90 R.03
-        r"\b\(F\)\b",                   # (F) suffix for flat pattern dims
+        r"\(F\)",                       # (F) suffix for flat pattern dims
         r"\bGA(?:UGE)?\s*(?:STEEL|ALUM)",
     ]
 

@@ -44,3 +44,10 @@ from .report import (
     QCReport,
     generate_report,
 )
+
+# Pipeline exports
+from .pipeline import (
+    InspectorPipeline,
+    InspectionResult,
+    run_inspection,
+)

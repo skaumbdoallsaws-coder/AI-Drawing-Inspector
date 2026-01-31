@@ -120,12 +120,14 @@ class DrawingClassifier:
     and determines the drawing type based on specific text patterns.
 
     Classification Priority (highest to lowest):
-        1. WELDMENT - "WELDT" in title
+        0. ASSEMBLY - "ASSY" in title + BOM table (prevents misclassifying
+           assemblies that contain weldment components)
+        1. WELDMENT - "WELDT" in title (without ASSY in title)
         2. GEAR - Gear data keywords (TEETH, PITCH, PRESSURE ANGLE)
         3. PURCHASED_PART - Manufacturer cross-reference table
         4. CASTING - Casting signals (DUCTILE IRON, MFG ITEM #)
         5. SHEET_METAL - Flat pattern, bend callouts
-        6. ASSEMBLY - BOM table without weldment signals
+        6. ASSEMBLY - BOM table (fallback if no ASSY in title)
         7. MACHINED_PART - Default (no specific signals)
 
     Usage:
@@ -141,6 +143,14 @@ class DrawingClassifier:
         r"\bWELDT\b",           # "WELDT" in title
         r"\bWELDMENT\b",        # Full word
         r"\bWELD\s*ASSY\b",     # Weld assembly
+    ]
+
+    # Assembly title patterns - indicates drawing IS an assembly (not a component)
+    ASSEMBLY_TITLE_PATTERNS = [
+        r"\bASSY\b",            # "ASSY" in description
+        r"\bASSEMBLY\b",        # Full word
+        r"\bASSEM\b",           # Abbreviation
+        r"\bSUBASSEM\b",        # Sub-assembly
     ]
 
     GEAR_PATTERNS = [
@@ -208,6 +218,7 @@ class DrawingClassifier:
         self._casting_re = [re.compile(p, re.IGNORECASE) for p in self.CASTING_PATTERNS]
         self._sheet_metal_re = [re.compile(p, re.IGNORECASE) for p in self.SHEET_METAL_PATTERNS]
         self._assembly_re = [re.compile(p, re.IGNORECASE) for p in self.ASSEMBLY_PATTERNS]
+        self._assembly_title_re = [re.compile(p, re.IGNORECASE) for p in self.ASSEMBLY_TITLE_PATTERNS]
         self._bom_re = [re.compile(p, re.IGNORECASE) for p in self.BOM_TABLE_PATTERNS]
 
     def _count_matches(self, text: str, patterns: List[re.Pattern]) -> tuple:
@@ -224,6 +235,25 @@ class DrawingClassifier:
         count, _ = self._count_matches(text, self._bom_re)
         return count >= 2  # Need at least ITEM NO + QTY or similar
 
+    def _is_assembly_drawing(self, text: str) -> tuple:
+        """Check if this is an assembly drawing based on title and BOM.
+
+        Returns (is_assembly, signals) tuple.
+        An assembly drawing has "ASSY" in the title AND a BOM table.
+        """
+        # Check for ASSY in title/description
+        title_count, title_signals = self._count_matches(text, self._assembly_title_re)
+        has_assy_title = title_count > 0
+
+        # Check for BOM table
+        has_bom = self._has_bom_table(text)
+
+        if has_assy_title and has_bom:
+            _, bom_signals = self._count_matches(text, self._assembly_re)
+            return True, title_signals + bom_signals
+
+        return False, []
+
     def classify(self, text: str) -> ClassificationResult:
         """Classify a drawing based on its text content.
 
@@ -239,7 +269,17 @@ class DrawingClassifier:
                 "No text available, defaulting to machined part"
             )
 
-        # Priority 1: Check for WELDMENT
+        # Priority 0: Check for ASSEMBLY with "ASSY" in title + BOM table
+        # This takes priority over WELDMENT because a component in the BOM
+        # might have "WELDT" in its description (e.g., "BRKT WELDT")
+        is_assembly, assy_signals = self._is_assembly_drawing(text)
+        if is_assembly:
+            return self._make_result(
+                DrawingType.ASSEMBLY, 0.90, assy_signals,
+                "Assembly drawing: ASSY in title with BOM table"
+            )
+
+        # Priority 1: Check for WELDMENT (only if not an assembly)
         count, signals = self._count_matches(text, self._weldment_re)
         if count > 0:
             return self._make_result(

@@ -117,10 +117,14 @@ def parse_ocr_callouts(ocr_lines: List[str]) -> List[Dict]:
         raw = match.group(0)
         if raw in seen_raws:
             continue
+        val = float(match.group(1))
+        # Skip unreasonable values
+        if val > default_config.max_hole_diameter_inches:
+            continue
         seen_raws.add(raw)
         callouts.append({
             "calloutType": "Hole",
-            "diameterInches": float(match.group(1)),
+            "diameterInches": val,
             "isThrough": True,
             "raw": raw,
             "source": "ocr",
@@ -131,10 +135,14 @@ def parse_ocr_callouts(ocr_lines: List[str]) -> List[Dict]:
         raw = match.group(0)
         if raw in seen_raws:
             continue
+        val = float(match.group(1))
+        # Skip unreasonable values
+        if val > default_config.max_hole_diameter_inches:
+            continue
         seen_raws.add(raw)
         callouts.append({
             "calloutType": "Hole",
-            "diameterInches": float(match.group(1)),
+            "diameterInches": val,
             "depthInches": float(match.group(2)),
             "isThrough": False,
             "raw": raw,
@@ -192,8 +200,10 @@ def parse_ocr_callouts(ocr_lines: List[str]) -> List[Dict]:
         if raw in seen_raws:
             continue
         val = float(match.group(1))
-        # Skip very small values (likely noise)
+        # Skip values outside reasonable range (likely OCR noise/garbage)
         if val < default_config.min_hole_diameter_inches:
+            continue
+        if val > default_config.max_hole_diameter_inches:
             continue
         seen_raws.add(raw)
         callouts.append({
@@ -210,7 +220,10 @@ def parse_ocr_callouts(ocr_lines: List[str]) -> List[Dict]:
         if raw in seen_raws:
             continue
         val = float(match.group(1))
+        # Skip values outside reasonable range
         if val < 0.001:
+            continue
+        if val > default_config.max_fillet_radius_inches:
             continue
         seen_raws.add(raw)
         callouts.append({

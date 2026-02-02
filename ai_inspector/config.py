@@ -59,6 +59,8 @@ class Config:
     # === OCR Preprocessing ===
     min_ocr_line_length: int = 1  # Skip empty lines
     min_hole_diameter_inches: float = 0.01  # Filter noise
+    max_hole_diameter_inches: float = 3.0   # Filter OCR garbage (>3" unlikely)
+    max_fillet_radius_inches: float = 2.0   # Filter OCR garbage (>2" unlikely)
 
     # === Classification ===
     classification_confidence_threshold: float = 0.5  # Default to MACHINED_PART if below

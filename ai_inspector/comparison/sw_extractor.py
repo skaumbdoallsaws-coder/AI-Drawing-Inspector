@@ -128,20 +128,26 @@ class SwFeatureExtractor:
 
         # Handle nested structure (from VBA extractor)
         if isinstance(features_section, dict):
-            # Extract from holeWizardHoles array
+            # Extract from holeWizardHoles array (skip suppressed)
             for hole in features_section.get("holeWizardHoles", []):
+                if hole.get("isSuppressed", False):
+                    continue
                 extracted = self._extract_hole_wizard(hole, is_si_units)
                 if extracted:
                     features.append(extracted)
 
-            # Extract from fillets array
+            # Extract from fillets array (skip suppressed)
             for fillet in features_section.get("fillets", []):
+                if fillet.get("isSuppressed", False):
+                    continue
                 extracted = self._extract_fillet(fillet, is_si_units)
                 if extracted:
                     features.append(extracted)
 
-            # Extract from chamfers array
+            # Extract from chamfers array (skip suppressed)
             for chamfer in features_section.get("chamfers", []):
+                if chamfer.get("isSuppressed", False):
+                    continue
                 extracted = self._extract_chamfer(chamfer, is_si_units)
                 if extracted:
                     features.append(extracted)

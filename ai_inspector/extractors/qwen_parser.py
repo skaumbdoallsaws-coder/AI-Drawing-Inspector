@@ -20,6 +20,9 @@ FEATURE_TYPE_MAP = {
 # Keywords indicating general notes, not features
 NOTE_KEYWORDS = ["REMOVE ALL BURRS", "BREAK SHARP EDGES", "DEBURR", "CLEAN"]
 
+# Common surface finish Ra values (microinches) - should not be parsed as features
+SURFACE_FINISH_VALUES = {"4", "8", "16", "32", "63", "125", "250", "500"}
+
 
 def parse_qwen_features(qwen_data: Dict) -> List[Dict]:
     """
@@ -63,6 +66,17 @@ def parse_qwen_features(qwen_data: Dict) -> List[Dict]:
 
         # Skip general notes misclassified as features
         if any(kw in callout_upper for kw in NOTE_KEYWORDS):
+            continue
+
+        # Skip surface finish values misidentified as features (e.g., "63" or "63°")
+        # Surface finish is typically shown as Ra value: 4, 8, 16, 32, 63, 125, 250, 500
+        callout_digits = re.sub(r"[°\s]", "", callout).strip()
+        if callout_digits in SURFACE_FINISH_VALUES:
+            continue
+
+        # Skip standalone angle callouts that aren't chamfers (e.g., "63°", "45°")
+        # These are often surface finish or projection angle indicators
+        if re.match(r"^\d+°?$", callout.strip()):
             continue
 
         callout_type = FEATURE_TYPE_MAP.get(ftype, ftype)

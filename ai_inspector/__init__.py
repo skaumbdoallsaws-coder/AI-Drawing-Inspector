@@ -20,34 +20,36 @@ Drawing Types:
 
 __version__ = "4.0.0"
 
-# Classifier exports
-from .classifier import (
-    DrawingType,
-    ClassificationResult,
-    DrawingClassifier,
-    classify_drawing,
-)
 
-# Comparison exports
-from .comparison import (
-    SwFeatureExtractor,
-    SwFeature,
-    FeatureMatcher,
-    MatchResult,
-    DiffResult,
-    compare_drawing,
-)
+def __getattr__(name):
+    """Lazy imports to avoid pulling in heavy dependencies (fitz, torch, etc.)
+    when only a submodule like comparison or extractors is needed."""
 
-# Report exports
-from .report import (
-    QCReportGenerator,
-    QCReport,
-    generate_report,
-)
+    _classifier_names = {
+        "DrawingType", "ClassificationResult", "DrawingClassifier", "classify_drawing",
+    }
+    _comparison_names = {
+        "SwFeatureExtractor", "SwFeature", "FeatureMatcher", "MatchResult",
+        "DiffResult", "compare_drawing",
+    }
+    _report_names = {
+        "QCReportGenerator", "QCReport", "generate_report",
+    }
+    _pipeline_names = {
+        "InspectorPipeline", "InspectionResult", "run_inspection",
+    }
 
-# Pipeline exports
-from .pipeline import (
-    InspectorPipeline,
-    InspectionResult,
-    run_inspection,
-)
+    if name in _classifier_names:
+        from . import classifier
+        return getattr(classifier, name)
+    elif name in _comparison_names:
+        from . import comparison
+        return getattr(comparison, name)
+    elif name in _report_names:
+        from . import report
+        return getattr(report, name)
+    elif name in _pipeline_names:
+        from . import pipeline
+        return getattr(pipeline, name)
+
+    raise AttributeError(f"module 'ai_inspector' has no attribute {name!r}")

@@ -228,10 +228,10 @@ def _match_result_to_entry(mr: MatchResult) -> DiffEntry:
                     drawing_val = f"M{t['nominalDiameterMm']}x{t.get('pitch', '?')}"
                 elif "fraction" in t:
                     drawing_val = f"{t['fraction']}-{t.get('tpi', '?')}"
-            elif "diameterInches" in mr.drawing_callout:
-                drawing_val = f"{mr.drawing_callout['diameterInches']:.4f}\""
-            elif "radiusInches" in mr.drawing_callout:
-                drawing_val = f"R{mr.drawing_callout['radiusInches']:.3f}\""
+            elif "diameter" in mr.drawing_callout:
+                drawing_val = f"{mr.drawing_callout['diameter']:.4f}\""
+            elif "radius" in mr.drawing_callout:
+                drawing_val = f"R{mr.drawing_callout['radius']:.3f}\""
 
     if mr.sw_feature:
         if mr.sw_feature.thread:

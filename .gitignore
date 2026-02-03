@@ -36,3 +36,20 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Test / notebook checkpoints
+tests/notebooks/.ipynb_checkpoints/
+
+# Pipeline output
+debug/
+qc_output/
+
+# Model exports
+*.onnx
+
+# Local SolidWorks data
+sw_json_library/
+
+# Dataset configs (allow callouts.yaml placeholder)
+datasets/*.yaml
+!datasets/callouts.yaml

@@ -1,0 +1,14 @@
+# ai_inspector - YOLO-OBB GD&T Callout Detection Pipeline
+# Core dependencies
+
+ultralytics               # YOLO11-OBB detection
+transformers>=5.0.0       # LightOnOCR-2-1B support
+torch                     # PyTorch for model inference
+Pillow                    # Image processing
+numpy                     # Array operations
+pyyaml                    # YAML parsing for datasets
+shapely                   # Polygon IoU in evaluation
+
+# ---------- Optional / Development ----------
+# matplotlib              # Visualization in notebooks
+# jupyter                 # Notebook support

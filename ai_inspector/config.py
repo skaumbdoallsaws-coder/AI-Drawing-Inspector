@@ -14,8 +14,7 @@ Usage:
     my_config = Config(render_dpi=150, output_dir="my_output")
 """
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 @dataclass
@@ -61,6 +60,20 @@ class Config:
     min_hole_diameter_inches: float = 0.01  # Filter noise
     max_hole_diameter_inches: float = 3.0   # Filter OCR garbage (>3" unlikely)
     max_fillet_radius_inches: float = 2.0   # Filter OCR garbage (>2" unlikely)
+
+    # === YOLO Detection ===
+    yolo_confidence_threshold: float = 0.25    # YOLO detection confidence threshold
+
+    # === OBB Cropping ===
+    crop_pad_ratio: float = 0.15               # Padding ratio around OBB crop
+    min_crop_width: int = 64                   # Minimum crop width in pixels
+    min_crop_height: int = 32                  # Minimum crop height in pixels
+
+    # === OCR / Rotation ===
+    ocr_confidence_threshold: float = 0.4      # Below this, trigger VLM fallback
+
+    # === Evaluation ===
+    eval_iou_threshold: float = 0.3            # IoU threshold for detection pairing
 
     # === Classification ===
     classification_confidence_threshold: float = 0.5  # Default to MACHINED_PART if below

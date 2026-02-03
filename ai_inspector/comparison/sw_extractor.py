@@ -56,18 +56,23 @@ class SwFeature:
     source: str = "solidworks"
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to dictionary for JSON serialization.
+
+        Uses unified field names matching the drawing-side convention:
+        'diameter', 'depth', 'radius' (not 'diameterInches' etc.)
+        All values are already in inches after extraction.
+        """
         d = {
-            "featureType": self.feature_type,
+            "calloutType": self.feature_type,
             "quantity": self.quantity,
             "source": self.source,
         }
         if self.diameter_inches is not None:
-            d["diameterInches"] = self.diameter_inches
+            d["diameter"] = self.diameter_inches
         if self.depth_inches is not None:
-            d["depthInches"] = self.depth_inches
+            d["depth"] = self.depth_inches
         if self.radius_inches is not None:
-            d["radiusInches"] = self.radius_inches
+            d["radius"] = self.radius_inches
         if self.thread:
             d["thread"] = self.thread
         if self.location:

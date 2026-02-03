@@ -12,6 +12,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
 from ..config import default_config
+from ..detection.classes import FUTURE_TYPES
 from .sw_extractor import SwFeature
 
 
@@ -21,6 +22,7 @@ class MatchStatus(Enum):
     MISSING = "missing"           # SW feature not found on drawing
     EXTRA = "extra"               # Drawing callout not in SW model
     TOLERANCE_FAIL = "tolerance"  # Match found but outside tolerance
+    SKIPPED = "skipped"           # Future type, excluded from scoring
 
 
 @dataclass
@@ -75,10 +77,11 @@ class FeatureMatcher:
 
     def __init__(
         self,
-        hole_tolerance: float = None,
-        thread_tolerance_mm: float = None,
-        fillet_tolerance: float = None,
-        chamfer_tolerance: float = None,
+        hole_tolerance: Optional[float] = None,
+        thread_tolerance_mm: Optional[float] = None,
+        fillet_tolerance: Optional[float] = None,
+        chamfer_tolerance: Optional[float] = None,
+        pitch_tolerance: Optional[float] = None,
     ):
         """
         Initialize matcher with tolerances.
@@ -88,11 +91,13 @@ class FeatureMatcher:
             thread_tolerance_mm: Thread nominal diameter tolerance in mm
             fillet_tolerance: Fillet radius tolerance in inches
             chamfer_tolerance: Chamfer distance tolerance in inches
+            pitch_tolerance: Thread pitch tolerance
         """
         self.hole_tolerance = hole_tolerance or default_config.hole_tolerance_inches
         self.thread_tolerance_mm = thread_tolerance_mm or default_config.thread_tolerance_mm
         self.fillet_tolerance = fillet_tolerance or default_config.fillet_tolerance_inches
         self.chamfer_tolerance = chamfer_tolerance or default_config.chamfer_tolerance_inches
+        self.pitch_tolerance = pitch_tolerance or default_config.pitch_tolerance
 
     def match_all(
         self,
@@ -126,6 +131,25 @@ class FeatureMatcher:
             used_sw_indices.update(sw_used)
             used_callout_indices.update(callout_used)
 
+        # Skip future types before marking unmatched as MISSING/EXTRA
+        for i, callout in enumerate(drawing_callouts):
+            if i not in used_callout_indices and callout.get("calloutType") in FUTURE_TYPES:
+                results.append(MatchResult(
+                    status=MatchStatus.SKIPPED,
+                    drawing_callout=callout,
+                    notes=f"Future type skipped: {callout.get('calloutType')}",
+                ))
+                used_callout_indices.add(i)
+
+        for i, sw_feat in enumerate(sw_features):
+            if i not in used_sw_indices and sw_feat.feature_type in FUTURE_TYPES:
+                results.append(MatchResult(
+                    status=MatchStatus.SKIPPED,
+                    sw_feature=sw_feat,
+                    notes=f"Future type skipped: {sw_feat.feature_type}",
+                ))
+                used_sw_indices.add(i)
+
         # Add unmatched SW features as MISSING
         for i, sw_feat in enumerate(sw_features):
             if i not in used_sw_indices:
@@ -148,7 +172,7 @@ class FeatureMatcher:
 
     def _match_by_type(
         self,
-        drawing_callouts: List[Dict],
+        drawing_callouts: List[Dict[str, Any]],
         sw_features: List[SwFeature],
         callout_type: str,
         exclude_sw: set,
@@ -230,7 +254,7 @@ class FeatureMatcher:
                 # Also check pitch if available
                 callout_pitch = callout_thread.get("pitch")
                 sw_pitch = sw_thread.get("pitch")
-                if callout_pitch and sw_pitch and abs(callout_pitch - sw_pitch) > 0.01:
+                if callout_pitch and sw_pitch and abs(callout_pitch - sw_pitch) > self.pitch_tolerance:
                     return MatchResult(
                         status=MatchStatus.TOLERANCE_FAIL,
                         drawing_callout=callout,
@@ -275,14 +299,28 @@ class FeatureMatcher:
         callout: Dict[str, Any],
         sw_feat: SwFeature,
     ) -> Tuple[Optional[MatchResult], float]:
-        """Match plain hole features."""
-        callout_dia = callout.get("diameterInches")
+        """Match plain hole features.
+
+        Uses depth as a tie-breaking penalty when multiple SW holes match
+        by diameter. Depth delta is weighted lower than diameter delta so
+        it only affects ranking, never causes a reject.
+        """
+        callout_dia = self._get_callout_diameter(callout)
         sw_dia = sw_feat.diameter_inches
 
         if callout_dia is None or sw_dia is None:
             return None, float("inf")
 
         delta = callout_dia - sw_dia
+
+        # Depth-aware tie-breaking: add a small penalty based on depth mismatch
+        depth_penalty = 0.0
+        callout_depth = self._get_callout_depth(callout)
+        sw_depth = sw_feat.depth_inches
+        if callout_depth is not None and sw_depth is not None:
+            depth_penalty = abs(callout_depth - sw_depth) * 0.01  # weighted low
+
+        sort_key = abs(delta) + depth_penalty
 
         if abs(delta) <= self.hole_tolerance:
             return MatchResult(
@@ -291,7 +329,7 @@ class FeatureMatcher:
                 sw_feature=sw_feat,
                 delta=delta,
                 notes=f"Hole match: {callout_dia:.4f}\" (delta={delta:+.4f}\")",
-            ), delta
+            ), sort_key
         else:
             # Close but outside tolerance
             if abs(delta) <= self.hole_tolerance * 3:
@@ -301,7 +339,7 @@ class FeatureMatcher:
                     sw_feature=sw_feat,
                     delta=delta,
                     notes=f"Hole size mismatch: drawing={callout_dia:.4f}\", SW={sw_dia:.4f}\"",
-                ), delta
+                ), sort_key
 
         return None, float("inf")
 
@@ -311,7 +349,7 @@ class FeatureMatcher:
         sw_feat: SwFeature,
     ) -> Tuple[Optional[MatchResult], float]:
         """Match fillet features."""
-        callout_radius = callout.get("radiusInches")
+        callout_radius = self._get_callout_radius(callout)
         sw_radius = sw_feat.radius_inches
 
         if callout_radius is None or sw_radius is None:
@@ -336,7 +374,7 @@ class FeatureMatcher:
         sw_feat: SwFeature,
     ) -> Tuple[Optional[MatchResult], float]:
         """Match chamfer features."""
-        callout_dist = callout.get("distance1Inches")
+        callout_dist = self._get_callout_chamfer_distance(callout)
         sw_dist = sw_feat.radius_inches  # Stored in radius field
 
         if callout_dist is None or sw_dist is None:
@@ -354,3 +392,74 @@ class FeatureMatcher:
             ), delta
 
         return None, float("inf")
+
+    # ------------------------------------------------------------------
+    # Field accessors for drawing callout dicts
+    # ------------------------------------------------------------------
+
+    def _get_callout_diameter(self, callout: Dict[str, Any]) -> Optional[float]:
+        """Get diameter from callout dict."""
+        d = callout.get("diameter")
+        if isinstance(d, (int, float)):
+            return float(d)
+        return None
+
+    def _get_callout_depth(self, callout: Dict[str, Any]) -> Optional[float]:
+        """Get depth from callout dict."""
+        d = callout.get("depth")
+        if isinstance(d, (int, float)):
+            return float(d)
+        return None
+
+    def _get_callout_radius(self, callout: Dict[str, Any]) -> Optional[float]:
+        """Get radius from callout dict."""
+        r = callout.get("radius")
+        if isinstance(r, (int, float)):
+            return float(r)
+        return None
+
+    def _get_callout_chamfer_distance(self, callout: Dict[str, Any]) -> Optional[float]:
+        """Get chamfer distance from callout dict."""
+        d = callout.get("size")
+        if isinstance(d, (int, float)):
+            return float(d)
+        return None
+
+    # ------------------------------------------------------------------
+    # Scoring
+    # ------------------------------------------------------------------
+
+    def compute_scores(self, results: List[MatchResult]) -> Dict[str, Any]:
+        """
+        Compute match scores from results.
+
+        SKIPPED excluded from all denominators.
+        EXTRA included (penalized).
+        TOLERANCE_FAIL included in denominators.
+
+        Returns dict with:
+            - matched, missing, extra, skipped, tolerance_fail counts
+            - instance_match_rate (matched / (matched + missing + tolerance_fail))
+            - total_rate (matched / (matched + missing + extra + tolerance_fail))
+        """
+        matched = sum(1 for r in results if r.status == MatchStatus.MATCHED)
+        missing = sum(1 for r in results if r.status == MatchStatus.MISSING)
+        extra = sum(1 for r in results if r.status == MatchStatus.EXTRA)
+        skipped = sum(1 for r in results if r.status == MatchStatus.SKIPPED)
+        tolerance_fail = sum(1 for r in results if r.status == MatchStatus.TOLERANCE_FAIL)
+
+        instance_denom = matched + missing + tolerance_fail
+        total_denom = matched + missing + extra + tolerance_fail
+
+        instance_match_rate = (matched / instance_denom) if instance_denom > 0 else 1.0
+        total_rate = (matched / total_denom) if total_denom > 0 else 1.0
+
+        return {
+            "matched": matched,
+            "missing": missing,
+            "extra": extra,
+            "skipped": skipped,
+            "tolerance_fail": tolerance_fail,
+            "instance_match_rate": round(instance_match_rate, 4),
+            "total_rate": round(total_rate, 4),
+        }

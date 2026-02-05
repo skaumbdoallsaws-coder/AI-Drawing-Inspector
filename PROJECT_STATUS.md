@@ -1,6 +1,6 @@
 # AI Engineering Drawing Inspector - Project Status
 
-**Last Updated:** January 29, 2026
+**Last Updated:** February 5, 2026
 
 ---
 
@@ -10,7 +10,15 @@ Build an AI-powered system that **verifies engineering drawings (PDFs) against C
 
 ---
 
-## Current Status: v4.0 In Progress - Modular Type-Aware Architecture
+## Current Status: YOLO-OBB Pipeline Complete — Ready for Integration Testing
+
+### Latest Milestone (February 5, 2026)
+
+**YOLO-OBB Finetuning Complete:**
+- Trained YOLO11s-OBB on 224 annotated drawings (550 annotations)
+- 4 callout classes: Hole, TappedHole, Fillet, Chamfer
+- **mAP50 = 0.729** (target was 0.5) — all classes above 0.70
+- Model uploaded to HuggingFace: `hf://shadrack20s/ai-inspector-callout-detection/callout_v2_yolo11s-obb_best.pt`
 
 ### What's New in v4.0
 
@@ -162,21 +170,91 @@ AI-tool/
 
 ## v4.0 Implementation Progress
 
+### Core Infrastructure
 | Phase | Module | Status | Notes |
 |-------|--------|--------|-------|
-| 1 | `classifier/drawing_classifier.py` | ✓ DONE | Classification logic from 258 drawing analysis |
-| 2 | `setup.py` + `pyproject.toml` | ✓ DONE | Editable install support |
-| 3 | Package skeleton (`__init__.py` files) | ✓ DONE | All directories created |
-| 4 | `utils/pdf_render.py` | ✓ DONE | PDF rendering with PyMuPDF |
-| 5 | `utils/sw_library.py` | ✓ DONE | SolidWorks JSON library manager |
-| 6 | `extractors/ocr.py` | ✓ DONE | LightOnOCR-2 wrapper + callout parsing |
-| 7 | `extractors/vlm.py` | ✓ DONE | Qwen2.5-VL wrapper + all prompts |
-| 8 | `analyzers/base.py` | ✓ DONE | Part identity, evidence merge, base analyzer |
-| 9 | `analyzers/machined_part.py` | PENDING | Awaiting user review/approval |
-| 10 | `comparison/matcher.py` | ✓ DONE | SW extraction, mate requirements, comparison |
-| 11 | `report/qc_report.py` | PENDING | Will add after analyzer testing |
-| 12 | Other analyzers | PENDING | One at a time, after machined_part validated |
-| 13 | `notebooks/ai_inspector_v4.ipynb` | PENDING | Will create for testing each type |
+| 1 | `classifier/drawing_classifier.py` | ✅ DONE | Classification logic from 258 drawing analysis |
+| 2 | `setup.py` + `pyproject.toml` | ✅ DONE | Editable install support |
+| 3 | Package skeleton (`__init__.py` files) | ✅ DONE | All directories created |
+| 4 | `utils/pdf_render.py` | ✅ DONE | PDF rendering with PyMuPDF |
+| 5 | `utils/sw_library.py` | ✅ DONE | SolidWorks JSON library manager |
+| 6 | `extractors/ocr.py` | ✅ DONE | LightOnOCR-2 wrapper + callout parsing |
+| 7 | `extractors/vlm.py` | ✅ DONE | Qwen2.5-VL wrapper + all prompts |
+| 8 | `config.py` | ✅ DONE | Central configuration dataclass |
+
+### YOLO-OBB Detection Pipeline (M0-M12)
+| Module | Component | Status | Notes |
+|--------|-----------|--------|-------|
+| M1 | `detection/yolo_detector.py` | ✅ DONE | YOLO11-OBB inference wrapper |
+| M2 | `extractors/cropper.py` | ✅ DONE | OBB crop extraction with padding |
+| M3 | `extractors/rotation.py` | ✅ DONE | 4-rotation OCR quality selector |
+| M4 | `extractors/ocr_adapter.py` | ✅ DONE | LightOnOCR-2 with confidence |
+| M5 | `extractors/crop_reader.py` | ✅ DONE | OCR → parse → VLM fallback |
+| M6 | `schemas/callout_packet.py` | ✅ DONE | Provenance tracking dataclass |
+| M7 | `extractors/unit_normalizer.py` | ✅ DONE | Inch/mm detection + conversion |
+| M8 | `extractors/validator.py` | ✅ DONE | Schema validation + repair |
+| M9 | `comparison/quantity_expander.py` | ✅ DONE | 4X → 4 instances expansion |
+| M10 | `comparison/matcher.py` | ✅ DONE | Type-aware feature matching |
+| M11 | `pipeline/yolo_pipeline.py` | ✅ DONE | Full pipeline orchestrator |
+| M12 | `fine_tuning/evaluate.py` | ✅ DONE | Evaluation harness |
+
+### YOLO Finetuning
+| Step | Status | Notes |
+|------|--------|-------|
+| Image selection | ✅ DONE | 224 images from PDF VAULT + machined parts |
+| Roboflow annotation | ✅ DONE | 550 annotations across 4 classes |
+| Training notebook | ✅ DONE | `notebooks/train_yolo_obb.ipynb` with TensorBoard |
+| Model training | ✅ DONE | yolo11s-obb, mAP50=0.729, early stop at epoch 81 |
+| HuggingFace upload | ✅ DONE | `shadrack20s/ai-inspector-callout-detection` |
+| Config update | ✅ DONE | Default model points to HuggingFace |
+
+### Test Notebooks
+| Notebook | Tests | Status |
+|----------|-------|--------|
+| `test_detection.ipynb` | M1 + M2 (YOLO + Cropping) | ✅ Created, ⏳ Not validated |
+| `test_ocr_pipeline.ipynb` | M3 + M4 + M5 (Rotation + OCR + Parse) | ✅ Created, ⏳ Not validated |
+| `test_normalize_validate.ipynb` | M7 + M8 (Units + Validation) | ✅ Created, ⏳ Not validated |
+| `test_matching.ipynb` | M9 + M10 (Expansion + Matching) | ✅ Created, ⏳ Not validated |
+| `test_full_pipeline.ipynb` | Full end-to-end | ✅ Created, ⏳ Not validated |
+
+### Remaining Work
+| Phase | Module | Status | Notes |
+|-------|--------|--------|-------|
+| 9 | `analyzers/machined_part.py` | ⏳ PENDING | Awaiting pipeline validation |
+| 10 | `report/qc_report.py` | ⏳ PENDING | Will integrate after testing |
+| 11 | Other analyzers | ⏳ PENDING | One at a time after machined_part |
+
+---
+
+## Next Steps (Priority Order)
+
+### 1. Set Up Test Data on Google Drive
+Create folders and upload test files:
+```
+/content/drive/MyDrive/ai_inspector_data/
+├── sample_pages/
+│   ├── 100227201_01.png      # Machined part drawing
+│   ├── 1008176_01.png        # Machined part drawing
+│   └── 1008178_02.png        # Machined part drawing
+└── sw_json/
+    ├── 100227201.json        # Matching SW export
+    ├── 1008176.json
+    └── 1008178.json
+```
+
+### 2. Run Test Notebooks in Sequence
+Open each notebook in Colab (GPU runtime) and run all cells:
+1. `tests/notebooks/test_detection.ipynb` — Verify YOLO detects callouts
+2. `tests/notebooks/test_ocr_pipeline.ipynb` — Verify OCR reads text
+3. `tests/notebooks/test_normalize_validate.ipynb` — Verify unit conversion
+4. `tests/notebooks/test_matching.ipynb` — Verify feature matching
+5. `tests/notebooks/test_full_pipeline.ipynb` — End-to-end validation
+
+### 3. Fix Any Issues Found
+Debug and fix any failures discovered during testing.
+
+### 4. Integrate with QC Report
+Connect the YOLO pipeline output to the existing `report/qc_report.py` for final QC reports.
 
 ---
 
@@ -295,6 +373,27 @@ result.display()
 ---
 
 ## Change Log
+
+### February 5, 2026 - YOLO-OBB Finetuning Complete
+
+**Model Training:**
+- Collected 224 training images from PDF VAULT and machined parts folders
+- Annotated 550 callouts in Roboflow (Hole, TappedHole, Fillet, Chamfer)
+- Trained yolo11s-obb with drawing-safe augmentation (no flip, no color shift)
+- Achieved **mAP50 = 0.729** (per-class: Hole 0.78, TappedHole 0.72, Fillet 0.70, Chamfer 0.71)
+- Early stopping triggered at epoch 111 (best at epoch 81)
+
+**Infrastructure Updates:**
+- Training notebook updated to use TensorBoard instead of W&B
+- Model saved to HuggingFace Hub: `shadrack20s/ai-inspector-callout-detection`
+- `config.py` updated to default to HuggingFace model path
+- Test notebooks updated to load model from HuggingFace
+
+**Files Changed:**
+- `notebooks/train_yolo_obb.ipynb` — v2 with TensorBoard + HuggingFace
+- `ai_inspector/config.py` — Default yolo_model_path to HF
+- `tests/notebooks/test_detection.ipynb` — Use HF model
+- `tests/notebooks/test_full_pipeline.ipynb` — Use HF model
 
 ### January 29, 2026 - v4.0 Development Started (Modular Architecture)
 

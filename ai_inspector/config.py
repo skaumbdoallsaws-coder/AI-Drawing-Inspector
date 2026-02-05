@@ -62,7 +62,7 @@ class Config:
     max_fillet_radius_inches: float = 2.0   # Filter OCR garbage (>2" unlikely)
 
     # === YOLO Detection ===
-    yolo_model_path: str = "yolo11n-obb.pt"    # Path to YOLO-OBB model weights
+    yolo_model_path: str = "hf://skaumbdoallsaws-coder/ai-inspector-callout-detection/callout_v2_yolo11s-obb_best.pt"
     yolo_confidence_threshold: float = 0.25    # YOLO detection confidence threshold
 
     # === OBB Cropping ===

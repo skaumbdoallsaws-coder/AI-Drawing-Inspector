@@ -376,6 +376,23 @@ result.display()
 
 ### February 5, 2026 - YOLO-OBB Finetuning Complete
 
+### February 6, 2026 - Detection Threshold Calibration Note
+
+**Test Result Recorded:**
+- Ran `test_detection.ipynb` on `00595601_04.png` with finetuned HF model.
+- Detections: 5 total (`Fillet` 1, `Hole` 3, `Chamfer` 1, `TappedHole` 0).
+- Observed likely false-positive `Fillet` on this page; no `TappedHole` expected from visible callouts.
+
+**Calibration Decision (to revisit):**
+- Add class-specific confidence gating for post-processing, with stricter threshold on `Fillet`.
+- Proposed starting thresholds for next tuning pass:
+  - `Hole`: 0.40
+  - `Chamfer`: 0.35
+  - `TappedHole`: 0.40
+  - `Fillet`: 0.88
+
+**Status:** Deferred for dedicated threshold tuning pass after OCR pipeline validation.
+
 **Model Training:**
 - Collected 224 training images from PDF VAULT and machined parts folders
 - Annotated 550 callouts in Roboflow (Hole, TappedHole, Fillet, Chamfer)

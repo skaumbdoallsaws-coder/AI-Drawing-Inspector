@@ -94,6 +94,7 @@ class YOLOPipeline:
             model_path=self.model_path,
             confidence_threshold=self.confidence_threshold,
             device=self.device,
+            hf_token=self.hf_token,
         )
         self._detector.load()
 
@@ -235,7 +236,7 @@ class YOLOPipeline:
         # --- Stage 8: Load SW data + expand both sides ---
         sw_features = []
         if sw_json_path:
-            with open(sw_json_path, "r") as f:
+            with open(sw_json_path, "r", encoding="utf-8-sig") as f:
                 sw_data = json.load(f)
         if sw_data:
             sw_features = self._sw_extractor.extract(sw_data)

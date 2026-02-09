@@ -66,14 +66,14 @@ class YOLOPipeline:
 
     def __init__(
         self,
-        model_path: str = "yolo11n-obb.pt",
+        model_path: Optional[str] = None,
         hf_token: Optional[str] = None,
         confidence_threshold: Optional[float] = None,
         device: Optional[str] = None,
         config: Optional[Config] = None,
     ):
         self.config = config or default_config
-        self.model_path = model_path
+        self.model_path = model_path or self.config.yolo_model_path
         self.hf_token = hf_token
         self.confidence_threshold = confidence_threshold or self.config.yolo_confidence_threshold
         self.device = device
@@ -153,7 +153,7 @@ class YOLOPipeline:
         from ..schemas.callout_packet import (
             create_packets, attach_crop, attach_rotation,
             attach_reader, attach_normalization, attach_validation,
-            attach_match, packets_to_dicts, save_packets, summarize_packets,
+            attach_match, save_packets, summarize_packets,
         )
 
         if not self.is_loaded:
@@ -252,9 +252,18 @@ class YOLOPipeline:
         # --- Stage 10: Score ---
         scores = self._matcher.compute_scores(match_results)
 
-        # --- Attach match status to packets (best effort, original packets) ---
-        # Note: packets correspond to pre-expansion callouts
-        # We attach overall match info, not per-instance
+        # --- Attach match status to packets (best effort) ---
+        # Map expanded match results back to original packets by callout type
+        for pkt in packets:
+            if pkt.reader and pkt.reader.callout_type:
+                pkt_type = pkt.reader.callout_type
+                # Find any match result for this type
+                for mr in match_results:
+                    if mr.drawing_callout and mr.drawing_callout.get("calloutType") == pkt_type:
+                        from ..comparison.matcher import MatchStatus
+                        attach_match(pkt, matched=(mr.status == MatchStatus.MATCHED),
+                                     status=mr.status.value)
+                        break
 
         # --- Stage 11: Debug output ---
         if output_dir:

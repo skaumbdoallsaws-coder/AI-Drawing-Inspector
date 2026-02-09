@@ -34,6 +34,8 @@ METRIC_PATTERNS = [
 ]
 
 # Callout-level unit hints
+METRIC_THREAD_PATTERN = re.compile(r'\bM\d+(?:[xX]\d+(?:\.\d+)?)?\b')
+IMPERIAL_THREAD_PATTERN = re.compile(r'(?:\d+/\d+|#\d+)-\d+\s*(?:UNC|UNF|UN)\b', re.IGNORECASE)
 CALLOUT_MM_HINT = re.compile(r'(\d+\.?\d*)\s*mm\b', re.IGNORECASE)
 CALLOUT_INCH_HINT = re.compile(r'(\d+\.?\d*)\s*(?:"|in\.?)\b')
 
@@ -56,11 +58,12 @@ DIMENSION_FIELDS = {
     "diameter", "radius", "size", "depth",
     "cboreDiameter", "cboreDepth", "csinkDiameter",
     "nominal", "tolerance", "bilateral", "plus", "minus",
+    "threadSize",
 }
 
 # Fields that should NOT be converted (angles, counts, etc.)
 SKIP_FIELDS = {
-    "quantity", "calloutType", "threadSize", "pitch",
+    "quantity", "calloutType", "pitch",
     "threadClass", "csinkAngle", "angle", "roughness",
     "gdtType", "toleranceValue",
 }
@@ -102,6 +105,13 @@ def detect_callout_units(raw_text: str) -> Optional[str]:
     """
     if not raw_text:
         return None
+
+    # Metric thread specs (M10, M10x1.5, etc.) are always metric
+    if METRIC_THREAD_PATTERN.search(raw_text):
+        return "mm"
+    # Imperial thread specs (1/4-20 UNC, #10-32 UNF, etc.) are always imperial
+    if IMPERIAL_THREAD_PATTERN.search(raw_text):
+        return "inch"
 
     if CALLOUT_MM_HINT.search(raw_text):
         return "mm"
@@ -181,8 +191,15 @@ def normalize_callout(
         New dict with normalized values and provenance fields:
         - _detected_units: what was detected
         - _drawing_units: drawing-level setting
-        - _normalization_method: "callout_hint", "drawing_level", "dual_hypothesis", or "assumed_inch"
+        - _normalization_method: "callout_hint", "drawing_hint", "dual_hypothesis", or "dual_hypothesis_ambiguous"
     """
+    if not parsed:
+        return {
+            "_detected_units": None,
+            "_drawing_units": drawing_units,
+            "_normalization_method": None,
+        }
+
     result = dict(parsed)  # shallow copy
 
     # Detect callout-level units
@@ -194,7 +211,7 @@ def normalize_callout(
         method = "callout_hint"
     elif drawing_units:
         effective_units = drawing_units
-        method = "drawing_level"
+        method = "drawing_hint"
     else:
         # Dual hypothesis: try both, pick plausible
         effective_units, method = _dual_hypothesis(parsed)
@@ -215,7 +232,7 @@ def normalize_callout(
             result[field_name] = round(converted, 6)
 
     # Add provenance
-    result["_detected_units"] = callout_units
+    result["_detected_units"] = effective_units
     result["_drawing_units"] = drawing_units
     result["_normalization_method"] = method
 
@@ -255,12 +272,15 @@ def _dual_hypothesis(parsed: Dict[str, Any]) -> Tuple[str, str]:
             mm_plausible += 1
 
     if total_checked == 0:
-        return "inch", "assumed_inch"
+        return "inch", "dual_hypothesis_ambiguous"
 
     if mm_plausible > inch_plausible:
         return "mm", "dual_hypothesis"
-    else:
+    elif inch_plausible > mm_plausible:
         return "inch", "dual_hypothesis"
+    else:
+        # Both equally plausible (or neither plausible); prefer inches (SW native)
+        return "inch", "dual_hypothesis_ambiguous"
 
 
 def normalize_callouts(

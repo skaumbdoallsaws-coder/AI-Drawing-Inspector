@@ -23,8 +23,16 @@ YOLO_CLASSES = [
 IDX_TO_CLASS = {i: name for i, name in enumerate(YOLO_CLASSES)}
 CLASS_TO_IDX = {name: i for i, name in enumerate(YOLO_CLASSES)}
 
-# Number of classes
+# Number of classes (full 14-class list)
 NUM_CLASSES = len(YOLO_CLASSES)
+
+# --- Finetuned 4-class model ---
+# The finetuned YOLO11s-OBB model was trained on only these 4 classes.
+# When using model.names from ultralytics, the runtime mapping is
+# authoritative. This constant is provided as a reference / fallback.
+FINETUNED_CLASSES = ["Hole", "TappedHole", "Fillet", "Chamfer"]
+FINETUNED_IDX_TO_CLASS = {i: name for i, name in enumerate(FINETUNED_CLASSES)}
+FINETUNED_NUM_CLASSES = len(FINETUNED_CLASSES)
 
 # Classes that map to specific callout types for the parser
 CLASS_TO_CALLOUT_TYPE = {

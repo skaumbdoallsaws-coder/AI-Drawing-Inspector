@@ -37,6 +37,7 @@ def __getattr__(name):
     }
     _pipeline_names = {
         "InspectorPipeline", "InspectionResult", "run_inspection",
+        "YOLOPipeline", "PipelineResult",
     }
 
     if name in _classifier_names:

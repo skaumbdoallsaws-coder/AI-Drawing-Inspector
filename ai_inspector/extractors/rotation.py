@@ -159,6 +159,7 @@ def select_best_rotation(
             raw="",
             rotation_used=0,
             quality_score=0.0,
+            ocr_result=OCRResult(text="", confidence=0.0, meta={"rotation": 0}),
         )
 
     return best_result

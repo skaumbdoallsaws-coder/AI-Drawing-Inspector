@@ -1,10 +1,14 @@
 """YOLO11-OBB detector for engineering drawing callouts."""
 
+import logging
+import os
 from pathlib import Path
 from typing import List, Optional, Union
 
 from ..contracts import DetectionResult
-from .classes import IDX_TO_CLASS
+from .classes import IDX_TO_CLASS, FINETUNED_IDX_TO_CLASS
+
+logger = logging.getLogger(__name__)
 
 
 class YOLODetector:
@@ -25,18 +29,55 @@ class YOLODetector:
         model_path: Union[str, Path] = "yolo11n-obb.pt",
         confidence_threshold: float = 0.25,
         device: Optional[str] = None,
+        hf_token: Optional[str] = None,
     ):
-        self.model_path = Path(model_path)
+        # Preserve URI schemes (e.g. hf://) as raw strings.
+        # Path() on Windows would corrupt "hf://user/repo" into "hf:/user/repo".
+        path_str = str(model_path)
+        if "://" in path_str:
+            self.model_path: Union[str, Path] = path_str
+        else:
+            self.model_path = Path(model_path)
+
         self.confidence_threshold = confidence_threshold
         self.device = device
+        self.hf_token = hf_token
         self.model = None
 
     def load(self) -> None:
-        """Load the YOLO model."""
+        """Load the YOLO model.
+
+        If *hf_token* was provided, it is injected into the ``HF_TOKEN``
+        environment variable before loading so that ``ultralytics`` can
+        authenticate with HuggingFace Hub.
+
+        Raises:
+            RuntimeError: If the model cannot be loaded (file not found,
+                download failure, etc.).
+        """
         from ultralytics import YOLO
-        self.model = YOLO(str(self.model_path))
+
+        # Set HF_TOKEN for authenticated HuggingFace downloads.
+        if self.hf_token:
+            os.environ["HF_TOKEN"] = self.hf_token
+            logger.debug("HF_TOKEN set from hf_token parameter.")
+
+        try:
+            self.model = YOLO(str(self.model_path))
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load YOLO model from '{self.model_path}': {exc}"
+            ) from exc
+
         if self.device:
             self.model.to(self.device)
+
+        logger.info(
+            "YOLO model loaded from '%s' with %d classes: %s",
+            self.model_path,
+            len(self.model.names),
+            self.model.names,
+        )
 
     def unload(self) -> None:
         """Release model from memory."""
@@ -70,6 +111,18 @@ class YOLODetector:
 
         conf = confidence_threshold or self.confidence_threshold
 
+        # Build the class-index-to-name mapping.
+        # Prefer the authoritative model.names dict that ultralytics exposes
+        # (it reflects the exact classes the model was trained on).  Fall back
+        # to the hardcoded IDX_TO_CLASS only if model.names is unavailable.
+        if hasattr(self.model, "names") and self.model.names:
+            idx_to_name = self.model.names  # dict {int: str}
+        else:
+            logger.warning(
+                "model.names unavailable; falling back to hardcoded IDX_TO_CLASS"
+            )
+            idx_to_name = IDX_TO_CLASS
+
         results = self.model(image, conf=conf, verbose=False)
 
         detections = []
@@ -80,7 +133,7 @@ class YOLODetector:
             obb = result.obb
 
             for i in range(len(obb)):
-                # Use named attributes — NOT hardcoded indices
+                # Use named attributes -- NOT hardcoded indices
                 cls_id = int(obb.cls[i].item())
                 confidence = float(obb.conf[i].item())
 
@@ -91,8 +144,8 @@ class YOLODetector:
                 # xywhr format if available
                 xywhr = obb.xywhr[i].cpu().numpy().tolist() if obb.xywhr is not None else None
 
-                # Map class ID to name
-                class_name = IDX_TO_CLASS.get(cls_id, f"Unknown_{cls_id}")
+                # Map class ID to name using the runtime mapping
+                class_name = idx_to_name.get(cls_id, f"Unknown_{cls_id}")
 
                 det = DetectionResult(
                     class_name=class_name,

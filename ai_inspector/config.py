@@ -14,7 +14,8 @@ Usage:
     my_config = Config(render_dpi=150, output_dir="my_output")
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict
 
 
 @dataclass
@@ -41,7 +42,7 @@ class Config:
     # === Model Settings ===
     vlm_max_tokens: int = 4096
     vlm_temperature: float = 0.1
-    ocr_max_tokens: int = 2048
+    ocr_max_tokens: int = 128
     report_max_tokens: int = 2500
     report_temperature: float = 0.3
 
@@ -64,6 +65,16 @@ class Config:
     # === YOLO Detection ===
     yolo_model_path: str = "hf://shadrack20s/ai-inspector-callout-detection/callout_v2_yolo11s-obb_best.pt"
     yolo_confidence_threshold: float = 0.25    # YOLO detection confidence threshold
+    # Optional per-class post-filter thresholds. Used after global threshold.
+    # Keep Fillet stricter to suppress common false positives.
+    yolo_class_confidence_thresholds: Dict[str, float] = field(
+        default_factory=lambda: {
+            "Hole": 0.40,
+            "TappedHole": 0.40,
+            "Chamfer": 0.35,
+            "Fillet": 0.88,
+        }
+    )
 
     # === OBB Cropping ===
     crop_pad_ratio: float = 0.15               # Padding ratio around OBB crop
@@ -72,9 +83,31 @@ class Config:
 
     # === OCR / Rotation ===
     ocr_confidence_threshold: float = 0.4      # Below this, trigger VLM fallback
+    ocr_max_crop_dimension: int = 384          # Max pixel dimension for crop resizing before OCR
+    ocr_retry_enabled: bool = True             # Run second OCR pass on low confidence
+    ocr_retry_confidence_threshold: float = 0.55
+    ocr_retry_max_tokens: int = 96
+    ocr_retry_max_crop_dimension: int = 512
+    ocr_crop_max_chars: int = 180              # Trim long hallucinated continuations
+    ocr_crop_max_lines: int = 6                # Keep callout-focused content only
+    ocr_strip_hallucination_lines: bool = True
+
+    # === Matching heuristics ===
+    match_hole_tapped_equivalence: bool = True
+    hole_tapped_equivalence_tolerance_inches: float = 0.02
+    match_extra_missing_correlation_tolerance_inches: float = 0.02
 
     # === Evaluation ===
     eval_iou_threshold: float = 0.3            # IoU threshold for detection pairing
+
+    # === Vision Extraction (GPT-4o) ===
+    vision_extraction_model: str = "gpt-4o"
+    vision_extraction_max_tokens: int = 4096
+    vision_extraction_temperature: float = 0.1
+    vision_extraction_detail: str = "high"  # OpenAI image detail level ("low", "high", "auto")
+
+    # === VLM (page understanding) ===
+    use_vlm: bool = True  # Enable Qwen VLM for holistic page understanding
 
     # === Classification ===
     classification_confidence_threshold: float = 0.5  # Default to MACHINED_PART if below

@@ -10,6 +10,7 @@ Matching strategy:
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
+import re
 
 from ..config import default_config
 from ..detection.classes import FUTURE_TYPES
@@ -131,6 +132,20 @@ class FeatureMatcher:
             used_sw_indices.update(sw_used)
             used_callout_indices.update(callout_used)
 
+        # Cross-type equivalent matching for hole/tapped-hole semantics.
+        # This captures callouts like "⌀.52 33/64 DRILL" that represent a tap drill
+        # requirement but may not be parsed as explicit thread notation.
+        if default_config.match_hole_tapped_equivalence:
+            eq_results, sw_used, callout_used = self._match_hole_tapped_equivalents(
+                drawing_callouts,
+                sw_features,
+                used_sw_indices,
+                used_callout_indices,
+            )
+            results.extend(eq_results)
+            used_sw_indices.update(sw_used)
+            used_callout_indices.update(callout_used)
+
         # Skip future types before marking unmatched as MISSING/EXTRA
         for i, callout in enumerate(drawing_callouts):
             if i not in used_callout_indices and callout.get("calloutType") in FUTURE_TYPES:
@@ -153,10 +168,18 @@ class FeatureMatcher:
         # Add unmatched SW features as MISSING
         for i, sw_feat in enumerate(sw_features):
             if i not in used_sw_indices:
+                note = f"SW {sw_feat.feature_type} not found on drawing"
+                corr = self._find_correlated_extra_callout(
+                    sw_feat,
+                    drawing_callouts,
+                    used_callout_indices,
+                )
+                if corr:
+                    note += f"; probable correlation with extra drawing callout: {corr}"
                 results.append(MatchResult(
                     status=MatchStatus.MISSING,
                     sw_feature=sw_feat,
-                    notes=f"SW {sw_feat.feature_type} not found on drawing",
+                    notes=note,
                 ))
 
         # Add unmatched drawing callouts as EXTRA
@@ -169,6 +192,128 @@ class FeatureMatcher:
                 ))
 
         return results
+
+    def _match_hole_tapped_equivalents(
+        self,
+        drawing_callouts: List[Dict[str, Any]],
+        sw_features: List[SwFeature],
+        exclude_sw: set,
+        exclude_callout: set,
+    ) -> Tuple[List[MatchResult], set, set]:
+        """
+        Match cross-type hole/tapped-hole pairs by diameter proximity.
+
+        This is a fallback stage after strict same-type matching.
+        """
+        results: List[MatchResult] = []
+        sw_used = set()
+        callout_used = set()
+
+        candidate_callouts = [
+            (i, c) for i, c in enumerate(drawing_callouts)
+            if i not in exclude_callout and c.get("calloutType") in {"Hole", "TappedHole"}
+        ]
+        candidate_sw = [
+            (i, f) for i, f in enumerate(sw_features)
+            if i not in exclude_sw and f.feature_type in {"Hole", "TappedHole"}
+        ]
+
+        for callout_idx, callout in candidate_callouts:
+            best_match: Optional[MatchResult] = None
+            best_score = float("inf")
+            best_sw_idx: Optional[int] = None
+
+            for sw_idx, sw_feat in candidate_sw:
+                if sw_idx in sw_used:
+                    continue
+                # only cross-type pairs here
+                if callout.get("calloutType") == sw_feat.feature_type:
+                    continue
+
+                m, score = self._try_equivalent_hole_tapped(callout, sw_feat)
+                if m and score < best_score:
+                    best_match = m
+                    best_score = score
+                    best_sw_idx = sw_idx
+
+            if best_match and best_sw_idx is not None:
+                results.append(best_match)
+                sw_used.add(best_sw_idx)
+                callout_used.add(callout_idx)
+
+        return results, sw_used, callout_used
+
+    def _try_equivalent_hole_tapped(
+        self,
+        callout: Dict[str, Any],
+        sw_feat: SwFeature,
+    ) -> Tuple[Optional[MatchResult], float]:
+        """Try a semantic-equivalent hole/tapped-hole match."""
+        callout_dia = self._get_callout_diameter(callout)
+        sw_dia = sw_feat.diameter_inches
+        if callout_dia is None or sw_dia is None:
+            return None, float("inf")
+
+        tol = default_config.hole_tapped_equivalence_tolerance_inches
+        delta = callout_dia - sw_dia
+        if abs(delta) > tol:
+            return None, float("inf")
+
+        raw = str(callout.get("raw", "") or "")
+        raw_upper = raw.upper()
+        bonus = 0.0
+        if "DRILL" in raw_upper:
+            bonus += 0.003
+        sw_thread_raw = str((sw_feat.thread or {}).get("raw", "") or "").upper()
+        if sw_thread_raw and sw_thread_raw in raw_upper:
+            bonus += 0.003
+
+        score = max(0.0, abs(delta) - bonus)
+        note = (
+            f"Equivalent match ({callout.get('calloutType')}<->{sw_feat.feature_type}) "
+            f"by diameter: {callout_dia:.4f}\" (delta={delta:+.4f}\")"
+        )
+        return MatchResult(
+            status=MatchStatus.MATCHED,
+            drawing_callout=callout,
+            sw_feature=sw_feat,
+            delta=delta,
+            notes=note,
+        ), score
+
+    def _find_correlated_extra_callout(
+        self,
+        sw_feat: SwFeature,
+        drawing_callouts: List[Dict[str, Any]],
+        used_callout_indices: set,
+    ) -> Optional[str]:
+        """
+        Find an unmatched drawing callout that is numerically close to an SW feature.
+        """
+        if sw_feat.feature_type not in {"Hole", "TappedHole"}:
+            return None
+        sw_dia = sw_feat.diameter_inches
+        if sw_dia is None:
+            return None
+
+        tol = default_config.match_extra_missing_correlation_tolerance_inches
+        best = None
+        best_delta = float("inf")
+        for i, callout in enumerate(drawing_callouts):
+            if i in used_callout_indices:
+                continue
+            ctype = callout.get("calloutType")
+            if ctype not in {"Hole", "TappedHole"}:
+                continue
+            c_dia = self._get_callout_diameter(callout)
+            if c_dia is None:
+                continue
+            d = abs(c_dia - sw_dia)
+            if d <= tol and d < best_delta:
+                best_delta = d
+                raw = str(callout.get("raw", "") or "").replace("\n", " ")
+                best = f"{ctype} dia={c_dia:.4f}\" (delta={d:.4f}\") raw='{raw[:80]}'"
+        return best
 
     def _match_by_type(
         self,
@@ -241,7 +386,24 @@ class FeatureMatcher:
         sw_feat: SwFeature,
     ) -> Tuple[Optional[MatchResult], float]:
         """Match tapped hole / thread features."""
-        callout_thread = callout.get("thread", {})
+        callout_thread = dict(callout.get("thread", {}) or {})
+        # Backward compatibility: many regex paths emit threadSize/pitch at top-level.
+        # Build a minimal thread object so matcher can still compare nominal diameter.
+        if not callout_thread:
+            thread_size = str(callout.get("threadSize", "") or "")
+            pitch_val = callout.get("pitch")
+            m = re.search(r"M(\d+(?:\.\d+)?)", thread_size, re.IGNORECASE)
+            if m:
+                callout_thread = {
+                    "standard": "Metric",
+                    "nominalDiameterMm": float(m.group(1)),
+                    "raw": thread_size,
+                }
+                if pitch_val is not None:
+                    try:
+                        callout_thread["pitch"] = float(pitch_val)
+                    except (TypeError, ValueError):
+                        pass
         sw_thread = sw_feat.thread or {}
 
         # Compare nominal diameter (metric)
@@ -254,14 +416,17 @@ class FeatureMatcher:
                 # Also check pitch if available
                 callout_pitch = callout_thread.get("pitch")
                 sw_pitch = sw_thread.get("pitch")
-                if callout_pitch and sw_pitch and abs(callout_pitch - sw_pitch) > self.pitch_tolerance:
-                    return MatchResult(
-                        status=MatchStatus.TOLERANCE_FAIL,
-                        drawing_callout=callout,
-                        sw_feature=sw_feat,
-                        delta=callout_pitch - sw_pitch,
-                        notes=f"Thread pitch mismatch: drawing={callout_pitch}, SW={sw_pitch}",
-                    ), delta
+                if callout_pitch and sw_pitch:
+                    # Ignore clearly implausible OCR pitch values (e.g. "55" from "1.5").
+                    metric_pitch_plausible = 0.2 <= float(callout_pitch) <= 6.0
+                    if metric_pitch_plausible and abs(callout_pitch - sw_pitch) > self.pitch_tolerance:
+                        return MatchResult(
+                            status=MatchStatus.TOLERANCE_FAIL,
+                            drawing_callout=callout,
+                            sw_feature=sw_feat,
+                            delta=callout_pitch - sw_pitch,
+                            notes=f"Thread pitch mismatch: drawing={callout_pitch}, SW={sw_pitch}",
+                        ), delta
 
                 return MatchResult(
                     status=MatchStatus.MATCHED,

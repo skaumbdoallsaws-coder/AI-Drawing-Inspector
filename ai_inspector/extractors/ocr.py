@@ -112,12 +112,49 @@ class LightOnOCR:
             return self.model.get_memory_footprint() / 1e9
         return 0.0
 
-    def extract(self, image: Image.Image) -> List[str]:
+    @staticmethod
+    def _resize_for_ocr(image: Image.Image, max_dim: int) -> Image.Image:
+        """
+        Resize image if it exceeds max_dim on the longest side.
+
+        LightOnOCR's vision encoder uses variable tiling - large images
+        create many tiles, dramatically slowing inference. Engineering
+        callout crops at 300 DPI can be 500-2000px, but OCR accuracy
+        remains excellent at 384px.
+
+        Args:
+            image: PIL Image to resize
+            max_dim: Maximum dimension (width or height) in pixels
+
+        Returns:
+            Resized image (or original if already smaller than max_dim)
+        """
+        w, h = image.size
+        longest = max(w, h)
+
+        if longest <= max_dim:
+            return image
+
+        # Calculate scale factor
+        scale = max_dim / longest
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+
+        return image.resize((new_w, new_h), Image.LANCZOS)
+
+    def extract(
+        self,
+        image: Image.Image,
+        max_tokens: Optional[int] = None,
+        max_crop_dimension: Optional[int] = None,
+    ) -> List[str]:
         """
         Extract text lines from image.
 
         Args:
             image: PIL Image to process
+            max_tokens: Override max_new_tokens for this call (default: use self.max_tokens)
+            max_crop_dimension: Override crop resize max dimension for this call
 
         Returns:
             List of text lines (stripped, non-empty)
@@ -128,7 +165,10 @@ class LightOnOCR:
         if not self.is_loaded:
             raise RuntimeError("Model not loaded. Call load() first.")
 
-        img = image.convert("RGB")
+        # Resize image to prevent vision encoder from creating too many tiles
+        resize_dim = max_crop_dimension or default_config.ocr_max_crop_dimension
+        img = self._resize_for_ocr(image, resize_dim)
+        img = img.convert("RGB")
         conversation = [{"role": "user", "content": [{"type": "image", "image": img}]}]
 
         inputs = self.processor.apply_chat_template(
@@ -147,8 +187,15 @@ class LightOnOCR:
             for k, v in inputs.items()
         }
 
+        # Use override max_tokens if provided, otherwise use instance default
+        max_new_tokens = max_tokens if max_tokens is not None else self.max_tokens
+
         with torch.no_grad():
-            output_ids = self.model.generate(**inputs, max_new_tokens=self.max_tokens)
+            output_ids = self.model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                repetition_penalty=1.2,
+            )
 
         generated_ids = output_ids[0, inputs["input_ids"].shape[1] :]
         output_text = self.processor.decode(generated_ids, skip_special_tokens=True)

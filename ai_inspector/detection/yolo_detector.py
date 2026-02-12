@@ -47,9 +47,16 @@ class YOLODetector:
     def load(self) -> None:
         """Load the YOLO model.
 
+        If the model path is an ``hf://`` URI, the weights file is first
+        downloaded via :func:`huggingface_hub.hf_hub_download` so that the
+        local path (not the URI) is handed to ``ultralytics.YOLO``.  This
+        avoids a Windows-specific bug where ``ultralytics`` internally
+        converts ``://`` to ``:\\``, producing an invalid path like
+        ``hf:\\user\\repo\\file.pt``.
+
         If *hf_token* was provided, it is injected into the ``HF_TOKEN``
-        environment variable before loading so that ``ultralytics`` can
-        authenticate with HuggingFace Hub.
+        environment variable **and** forwarded to ``hf_hub_download`` for
+        authenticated access.
 
         Raises:
             RuntimeError: If the model cannot be loaded (file not found,
@@ -62,8 +69,15 @@ class YOLODetector:
             os.environ["HF_TOKEN"] = self.hf_token
             logger.debug("HF_TOKEN set from hf_token parameter.")
 
+        # Resolve hf:// URIs to local cached paths before passing to YOLO.
+        # On Windows, ultralytics mangles "hf://user/repo/file" into
+        # "hf:\\user\\repo\\file" which triggers OSError: [Errno 22].
+        resolved_path = str(self.model_path)
+        if resolved_path.startswith("hf://"):
+            resolved_path = self._download_hf_model(resolved_path)
+
         try:
-            self.model = YOLO(str(self.model_path))
+            self.model = YOLO(resolved_path)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load YOLO model from '{self.model_path}': {exc}"
@@ -78,6 +92,61 @@ class YOLODetector:
             len(self.model.names),
             self.model.names,
         )
+
+    def _download_hf_model(self, hf_uri: str) -> str:
+        """Download a model from HuggingFace Hub and return the local path.
+
+        Parses a URI of the form ``hf://user/repo/filename`` into
+        ``repo_id="user/repo"`` and ``filename="filename"``, then delegates
+        to :func:`huggingface_hub.hf_hub_download`.
+
+        Args:
+            hf_uri: A HuggingFace Hub URI (e.g.
+                ``"hf://shadrack20s/ai-inspector-callout-detection/best.pt"``).
+
+        Returns:
+            Absolute path to the locally cached weights file.
+
+        Raises:
+            RuntimeError: If the URI cannot be parsed or the download fails.
+        """
+        from huggingface_hub import hf_hub_download  # lazy import
+
+        # Strip the "hf://" prefix and split into components.
+        # Expected format after stripping: "user/repo/filename"
+        # which may also be "user/repo/sub/dir/filename".
+        stripped = hf_uri[len("hf://"):]
+        parts = stripped.split("/")
+
+        if len(parts) < 3:
+            raise RuntimeError(
+                f"Invalid hf:// URI '{hf_uri}'. "
+                "Expected format: hf://user/repo/filename"
+            )
+
+        repo_id = f"{parts[0]}/{parts[1]}"
+        filename = "/".join(parts[2:])
+
+        logger.info(
+            "Downloading HuggingFace model: repo_id='%s', filename='%s'",
+            repo_id,
+            filename,
+        )
+
+        try:
+            local_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                token=self.hf_token,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to download model from HuggingFace Hub "
+                f"(repo='{repo_id}', file='{filename}'): {exc}"
+            ) from exc
+
+        logger.info("Model downloaded to local cache: '%s'", local_path)
+        return local_path
 
     def unload(self) -> None:
         """Release model from memory."""

@@ -10,10 +10,11 @@ The adapter wraps the existing LightOnOCR class and adds:
 """
 
 import re
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from PIL import Image
 
+from ..config import default_config
 from ..contracts import OCRResult
 from .canonicalize import canonicalize
 
@@ -128,6 +129,30 @@ class OCRAdapter:
     def is_loaded(self) -> bool:
         return self._ocr is not None and self._ocr.is_loaded
 
+    def _run_ocr_pass(
+        self,
+        image: Image.Image,
+        max_tokens: int,
+        max_crop_dimension: int,
+    ) -> Dict[str, object]:
+        """Run one OCR pass and return text + confidence bundle."""
+        raw_lines = self._ocr.extract(
+            image,
+            max_tokens=max_tokens,
+            max_crop_dimension=max_crop_dimension,
+        )
+        raw_text = "\n".join(raw_lines)
+        canon_text = canonicalize(raw_text)
+        confidence = _estimate_confidence(raw_text, canon_text)
+        return {
+            "raw_lines": raw_lines,
+            "raw_text": raw_text,
+            "canon_text": canon_text,
+            "confidence": confidence,
+            "max_tokens": max_tokens,
+            "max_crop_dimension": max_crop_dimension,
+        }
+
     def read(self, image: Image.Image) -> OCRResult:
         """
         Read text from image with confidence estimation.
@@ -141,24 +166,57 @@ class OCRAdapter:
         if not self.is_loaded:
             raise RuntimeError("OCR model not loaded. Call load() first.")
 
-        # Get raw lines from LightOnOCR
-        raw_lines = self._ocr.extract(image)
-        raw_text = "\n".join(raw_lines)
+        # First pass: fast crop OCR tuned for short engineering callouts
+        first = self._run_ocr_pass(
+            image=image,
+            max_tokens=64,
+            max_crop_dimension=default_config.ocr_max_crop_dimension,
+        )
+        best = first
+        retry = None
 
-        # Canonicalize
-        canon_text = canonicalize(raw_text)
+        # Second pass on weak reads: slightly larger crop and token budget
+        if (
+            default_config.ocr_retry_enabled
+            and float(first["confidence"]) < default_config.ocr_retry_confidence_threshold
+        ):
+            retry = self._run_ocr_pass(
+                image=image,
+                max_tokens=default_config.ocr_retry_max_tokens,
+                max_crop_dimension=default_config.ocr_retry_max_crop_dimension,
+            )
 
-        # Estimate confidence
-        confidence = _estimate_confidence(raw_text, canon_text)
+            first_conf = float(first["confidence"])
+            retry_conf = float(retry["confidence"])
+            if retry_conf > first_conf:
+                best = retry
+            elif retry_conf == first_conf:
+                # Tie-breaker: prefer richer canonical text
+                if len(str(retry["canon_text"])) > len(str(first["canon_text"])):
+                    best = retry
 
         return OCRResult(
-            text=canon_text,
-            confidence=confidence,
+            text=str(best["canon_text"]),
+            confidence=float(best["confidence"]),
             meta={
-                "raw_text": raw_text,
-                "raw_lines": raw_lines,
-                "line_count": len(raw_lines),
+                "raw_text": str(best["raw_text"]),
+                "raw_lines": list(best["raw_lines"]),
+                "line_count": len(best["raw_lines"]),
                 "engine": "LightOnOCR-2",
+                "ocr_retry_enabled": default_config.ocr_retry_enabled,
+                "ocr_retry_triggered": retry is not None,
+                "ocr_passes": {
+                    "first": {
+                        "confidence": float(first["confidence"]),
+                        "max_tokens": int(first["max_tokens"]),
+                        "max_crop_dimension": int(first["max_crop_dimension"]),
+                    },
+                    "retry": None if retry is None else {
+                        "confidence": float(retry["confidence"]),
+                        "max_tokens": int(retry["max_tokens"]),
+                        "max_crop_dimension": int(retry["max_crop_dimension"]),
+                    },
+                },
             },
         )
 

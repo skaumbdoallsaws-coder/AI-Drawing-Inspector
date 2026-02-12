@@ -182,7 +182,54 @@ class SwFeatureExtractor:
             if extracted:
                 features.append(extracted)
 
+        # Fallback: extract from comparison section if no hole features found
+        hole_count = sum(1 for f in features if f.feature_type in ("Hole", "TappedHole"))
+        if hole_count == 0:
+            comparison_features = self._extract_from_comparison(sw_data)
+            features.extend(comparison_features)
+
         return features
+
+    def _extract_from_comparison(self, sw_data: Dict[str, Any]) -> List[SwFeature]:
+        """Extract features from the comparison.holeGroups section.
+
+        The C# SolidWorks Extractor places reconciled hole data in the
+        comparison section. This is used as a fallback when the features
+        section has no HoleWizard holes.
+        """
+        results: List[SwFeature] = []
+        comparison = sw_data.get("comparison", {})
+        hole_groups = comparison.get("holeGroups", [])
+
+        for group in hole_groups:
+            diameters = group.get("diameters", {})
+            diameter_inches = diameters.get("pilotOrTapDrillDiameterInches")
+            if diameter_inches is None:
+                diameter_mm = diameters.get("pilotOrTapDrillDiameterMm")
+                if diameter_mm is not None:
+                    diameter_inches = diameter_mm / 25.4
+            if diameter_inches is None:
+                continue
+
+            canonical = group.get("canonical", "")
+            is_through = group.get("holeType", "").lower() == "through"
+
+            # Check if tapped
+            thread = self._parse_thread_spec(canonical)
+            if thread and thread.get("standard") == "Unknown":
+                thread = None
+
+            results.append(SwFeature(
+                feature_type="TappedHole" if thread else "Hole",
+                diameter_inches=diameter_inches,
+                depth_inches=None if is_through else None,
+                thread=thread,
+                quantity=group.get("count", 1),
+                location=group.get("groupId", ""),
+                raw_data=group,
+            ))
+
+        return results
 
     def _detect_si_units(self, sw_data: Dict[str, Any]) -> bool:
         """

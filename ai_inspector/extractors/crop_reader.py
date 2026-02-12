@@ -24,6 +24,44 @@ from ..detection.classes import CLASS_TO_CALLOUT_TYPE
 OCR_CONFIDENCE_THRESHOLD = default_config.ocr_confidence_threshold
 
 
+def _strip_hallucinated_tail(text: str) -> str:
+    """
+    Remove common OCR continuation noise from callout crops.
+
+    The OCR model occasionally appends explanatory prose or markdown after
+    the first valid callout line. This keeps the callout-focused prefix.
+    """
+    if not text:
+        return ""
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+
+    cleaned: List[str] = []
+    for ln in lines:
+        low = ln.lower()
+        if (
+            low.startswith("note:")
+            or "the image contains" in low
+            or low.startswith("**")
+            or low.startswith("---")
+            or low.startswith("solution")
+        ):
+            break
+        cleaned.append(ln)
+        if len(cleaned) >= default_config.ocr_crop_max_lines:
+            break
+
+    if not cleaned:
+        cleaned = lines[:1]
+
+    out = "\n".join(cleaned).strip()
+    if len(out) > default_config.ocr_crop_max_chars:
+        out = out[: default_config.ocr_crop_max_chars].rstrip()
+    return out
+
+
 def read_crop(
     image: Image.Image,
     ocr_fn: Callable[[Image.Image], Tuple[str, float]],
@@ -60,8 +98,10 @@ def read_crop(
     else:
         raw_text, confidence = ocr_fn(image)
 
-    # Step 2: Canonicalize
+    # Step 2: Canonicalize + strip long hallucinated continuations
     canon_text = canonicalize(raw_text)
+    if default_config.ocr_strip_hallucination_lines:
+        canon_text = _strip_hallucinated_tail(canon_text)
 
     # Step 3: Map YOLO class to callout type
     callout_type = CLASS_TO_CALLOUT_TYPE.get(yolo_class, "Unknown")

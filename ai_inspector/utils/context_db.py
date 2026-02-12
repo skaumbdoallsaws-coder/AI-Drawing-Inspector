@@ -31,6 +31,8 @@ class ContextDatabase:
     def __init__(self):
         self.part_context: Dict = {}
         self.inspector_requirements: Dict = {}
+        self.mating_context: Dict = {}
+        self.mate_specs: Dict = {}
 
     def load(self, search_paths: List[str]) -> None:
         """
@@ -49,6 +51,155 @@ class ContextDatabase:
         self.inspector_requirements = (
             self._try_load("sw_inspector_requirements.json", search_paths) or {}
         )
+
+    def load_part_context(self, path: str) -> None:
+        """
+        Load part context from a specific JSON file.
+
+        The file maps part numbers to identity (old_pn, new_pn),
+        hierarchy, and mating information.
+
+        Args:
+            path: Path to the sw_part_context_complete.json file
+        """
+        p = Path(path)
+        if p.exists():
+            data, err = load_json_robust(p)
+            self.part_context = data or {}
+
+    def load_mating_context(self, path: str) -> None:
+        """
+        Load mating context from a specific JSON file.
+
+        The file maps part numbers to their parent assembly and sibling
+        components (e.g., sw_mating_context.json).
+
+        Args:
+            path: Path to the mating context JSON file
+        """
+        p = Path(path)
+        if p.exists():
+            data, err = load_json_robust(p)
+            self.mating_context = data or {}
+
+    def load_mate_specs(self, path: str) -> None:
+        """
+        Load mate specifications from a specific JSON file.
+
+        The file maps part numbers to their SolidWorks mate constraints
+        (Concentric, Coincident, etc.) with thread specs where applicable.
+
+        Args:
+            path: Path to the mate specs JSON file
+        """
+        p = Path(path)
+        if p.exists():
+            data, err = load_json_robust(p)
+            self.mate_specs = data or {}
+
+    def get_mate_specs(self, part_number: str) -> Optional[Dict]:
+        """
+        Look up mate specifications by part number.
+
+        Returns mate constraints including Concentric/Coincident mates
+        and thread specifications for fastener interfaces.
+
+        Also searches by sibling part numbers from mating_context,
+        since mate specs may be keyed by old-style part numbers.
+
+        Args:
+            part_number: Part number to look up
+
+        Returns:
+            Mate specs dict if found, None otherwise
+        """
+        if not self.mate_specs:
+            return None
+
+        candidates = self._normalize_candidates(part_number)
+
+        for key in candidates:
+            if key in self.mate_specs:
+                return self.mate_specs[key]
+
+        # Search by part_number field inside entries
+        for entry in self.mate_specs.values():
+            if entry.get("part_number") == part_number:
+                return entry
+
+        # Try via part_context old_pn mapping
+        ctx = self.get_part_context(part_number)
+        if ctx:
+            old_pn = ctx.get("identity", {}).get("old_pn", "")
+            if old_pn:
+                for key in self._normalize_candidates(old_pn):
+                    if key in self.mate_specs:
+                        return self.mate_specs[key]
+
+        return None
+
+    def get_mate_specs_for_siblings(self, part_number: str) -> List[Dict]:
+        """
+        Collect mate specs for all sibling parts from mating context.
+
+        This is useful when the inspected part itself isn't in mate_specs
+        but its siblings are — their concentric/thread mates imply
+        features that must exist on the inspected part.
+
+        Args:
+            part_number: Part number to look up siblings for
+
+        Returns:
+            List of mate spec entries for sibling parts
+        """
+        if not self.mate_specs or not self.mating_context:
+            return []
+
+        mc = self.get_mating_context(part_number)
+        if not mc:
+            return []
+
+        sibling_specs = []
+        seen = set()
+        for sib in mc.get("siblings", []):
+            sib_pn = sib.get("pn", "")
+            if not sib_pn or sib_pn in seen:
+                continue
+            seen.add(sib_pn)
+            spec = self.get_mate_specs(sib_pn)
+            if spec:
+                sibling_specs.append(spec)
+
+        return sibling_specs
+
+    def get_mating_context(self, part_number: str) -> Optional[Dict]:
+        """
+        Look up mating context by part number.
+
+        Returns assembly info including parent assembly and sibling
+        components that mate with this part.
+
+        Args:
+            part_number: Part number to look up
+
+        Returns:
+            Mating context dict if found, None otherwise
+        """
+        if not self.mating_context:
+            return None
+
+        candidates = self._normalize_candidates(part_number)
+
+        for key in candidates:
+            if key in self.mating_context:
+                return self.mating_context[key]
+
+        # Search by part_number field inside entries
+        for entry in self.mating_context.values():
+            if entry.get("part_number") == part_number:
+                return entry
+
+        return None
 
     def _try_load(self, name: str, search_paths: List[str]) -> Optional[Dict]:
         """Try loading JSON from multiple paths."""
@@ -154,3 +305,13 @@ class ContextDatabase:
     def inspector_requirements_count(self) -> int:
         """Number of entries in inspector requirements database."""
         return len(self.inspector_requirements)
+
+    @property
+    def mating_context_count(self) -> int:
+        """Number of entries in mating context database."""
+        return len(self.mating_context)
+
+    @property
+    def mate_specs_count(self) -> int:
+        """Number of entries in mate specs database."""
+        return len(self.mate_specs)

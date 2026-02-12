@@ -32,7 +32,15 @@ HOLE_PATTERNS = [
         r'[\u2300]\s*'               # diameter symbol
         r'(\d*\.?\d+|\d+/\d+)'      # diameter value (decimal or fraction)
         r'(?:\s*")?'                 # optional inch mark
-        r'(?:\s+(THRU|DEEP\s+\d*\.?\d+|DEEP))?',  # depth
+        r'(?:\s+(THRU(?:\s+ALL)?|DEEP\s+\d*\.?\d+|DEEP))?',  # depth
+        re.IGNORECASE
+    ),
+    # Drill callouts without explicit diameter symbol: "33/64 DRILL", ".500 DRILL THRU"
+    re.compile(
+        r'(?:(\d+)X\s+)?'
+        r'(\d+/\d+|\d*\.?\d+)'
+        r'\s*DRILL'
+        r'(?:\s+(THRU(?:\s+ALL)?|DEEP\s+\d*\.?\d+|DEEP))?',
         re.IGNORECASE
     ),
     # Without diameter symbol: ".500 DIA", "12.7 DIA"
@@ -47,14 +55,14 @@ HOLE_PATTERNS = [
 # --- Tapped Hole patterns ---
 # Examples: "M6x1.0 THRU", "M8x1.25 DEEP 15", "1/4-20 UNC THRU", "3/8-16 UNC-2B"
 TAPPED_HOLE_PATTERNS = [
-    # Metric: M{d}x{pitch}
+    # Metric: M{d}x{pitch}, tolerant to OCR noise such as "M10 - 55"
     re.compile(
         r'(?:(\d+)X\s+)?'           # optional quantity
         r'(M\d+\.?\d*)'             # thread size (M6, M8, M10)
-        r'[xX\u00d7]\s*'            # separator
-        r'(\d+\.?\d*)'              # pitch
+        r'(?:\s*[xX\u00d7\-]\s*'    # separator (x or OCR-noisy dash)
+        r'(\d+\.?\d*))?'            # optional pitch
         r'(?:\s*-\s*(\w+))?'        # optional class (6H, 6g)
-        r'(?:\s+(THRU|DEEP\s+\d+\.?\d*|DEEP))?',
+        r'(?:\s+(THRU(?:\s+ALL)?|DEEP\s+\d+\.?\d*|DEEP))?',
         re.IGNORECASE
     ),
     # Unified: d-tpi UNC/UNF
@@ -63,7 +71,7 @@ TAPPED_HOLE_PATTERNS = [
         r'(\d+/?\d*-\d+)'           # size-tpi (1/4-20, 3/8-16)
         r'\s*(UNC|UNF|UNEF|UN)'      # thread series
         r'(?:\s*-\s*(\w+))?'         # optional class (2B)
-        r'(?:\s+(THRU|DEEP\s+\d+\.?\d*|DEEP))?',
+        r'(?:\s+(THRU(?:\s+ALL)?|DEEP\s+\d+\.?\d*|DEEP))?',
         re.IGNORECASE
     ),
 ]

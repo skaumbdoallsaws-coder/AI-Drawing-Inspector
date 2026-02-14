@@ -336,6 +336,7 @@
             min-width: 8px;
             border-radius: 50%;
             background: var(--text-secondary);
+            transition: background-color 0.6s ease;
         }
         .feature-dot.present { background: var(--present); }
         .feature-dot.missing { background: var(--missing); }
@@ -1687,32 +1688,70 @@
 
         function renderFeatureTree(features) {
             const tree = featureTree;
-            tree.innerHTML = '';
-            features.forEach((f, i) => {
-                const statusClass = (f.status || '').toLowerCase();
-                const statusLabel = f.status === 'PRESENT' ? 'OK'
-                    : f.status === 'MISSING' ? 'MISS'
-                    : f.status === 'PARTIAL' ? `${f.found_count || 0}/${f.expected_count || '?'}`
-                    : f.status || '---';
+            const existingItems = tree.querySelectorAll('.feature-item');
+            const canTransition = existingItems.length === features.length;
 
-                // Build display name with type and expected count
-                const typeStr = f.type ? ` (${f.type})` : '';
-                const countStr = f.expected_count ? ` ×${f.expected_count}` : '';
-                const displayName = f.name + typeStr + countStr;
+            if (canTransition) {
+                // Update existing items in-place for smooth dot color transition
+                features.forEach((f, i) => {
+                    const item = existingItems[i];
+                    const dot = item.querySelector('.feature-dot');
+                    const nameEl = item.querySelector('.feature-name');
+                    const statusEl = item.querySelector('.feature-status');
 
-                const item = document.createElement('div');
-                item.className = 'feature-item';
-                item.innerHTML = `
-                    <div class="feature-dot ${statusClass}"></div>
-                    <span class="feature-name" title="${displayName}">${displayName}</span>
-                    <span class="feature-status">${statusLabel}</span>
-                `;
-                item.addEventListener('click', () => {
-                    tree.querySelectorAll('.feature-item').forEach(fi => fi.classList.remove('selected'));
-                    item.classList.add('selected');
+                    const statusClass = (f.status || '').toLowerCase();
+                    const statusLabel = f.status === 'PRESENT' ? 'OK'
+                        : f.status === 'MISSING' ? 'MISS'
+                        : f.status === 'PARTIAL' ? `${f.found_count || 0}/${f.expected_count || '?'}`
+                        : f.status || '---';
+
+                    const typeStr = f.type ? ` (${f.type})` : '';
+                    const countStr = f.expected_count ? ` ×${f.expected_count}` : '';
+                    const displayName = f.name + typeStr + countStr;
+
+                    // Update dot class (triggers CSS transition)
+                    dot.className = `feature-dot ${statusClass}`;
+                    nameEl.textContent = displayName;
+                    nameEl.title = displayName;
+                    statusEl.textContent = statusLabel;
+
+                    // Add click handler if not already present
+                    if (!item._hasClickHandler) {
+                        item.addEventListener('click', () => {
+                            tree.querySelectorAll('.feature-item').forEach(fi => fi.classList.remove('selected'));
+                            item.classList.add('selected');
+                        });
+                        item._hasClickHandler = true;
+                    }
                 });
-                tree.appendChild(item);
-            });
+            } else {
+                // Fallback: rebuild tree entirely
+                tree.innerHTML = '';
+                features.forEach((f, i) => {
+                    const statusClass = (f.status || '').toLowerCase();
+                    const statusLabel = f.status === 'PRESENT' ? 'OK'
+                        : f.status === 'MISSING' ? 'MISS'
+                        : f.status === 'PARTIAL' ? `${f.found_count || 0}/${f.expected_count || '?'}`
+                        : f.status || '---';
+
+                    const typeStr = f.type ? ` (${f.type})` : '';
+                    const countStr = f.expected_count ? ` ×${f.expected_count}` : '';
+                    const displayName = f.name + typeStr + countStr;
+
+                    const item = document.createElement('div');
+                    item.className = 'feature-item';
+                    item.innerHTML = `
+                        <div class="feature-dot ${statusClass}"></div>
+                        <span class="feature-name" title="${displayName}">${displayName}</span>
+                        <span class="feature-status">${statusLabel}</span>
+                    `;
+                    item.addEventListener('click', () => {
+                        tree.querySelectorAll('.feature-item').forEach(fi => fi.classList.remove('selected'));
+                        item.classList.add('selected');
+                    });
+                    tree.appendChild(item);
+                });
+            }
         }
 
         // ---- Export ----

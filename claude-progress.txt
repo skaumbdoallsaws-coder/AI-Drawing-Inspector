@@ -1,5 +1,26 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 22 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #47: Export QC report as markdown file (PASSING)
+  - Completed inspection, clicked Export button in toolbar
+  - Export dropdown shows two options: Report (.md) and Results (.json)
+  - Selected "Export Report (.md)" → downloads InspectorPro_Report_1008176.md
+  - File is 2169 bytes of real markdown content
+  - Content starts with "# QC Inspection Report for Part 1008176 (RACK VISE 400)"
+  - Content matches report_markdown from inspection results
+  - Zero console errors
+- Feature #48: Export inspection results as JSON (PASSING)
+  - Clicked Export → selected "Export Results (.json)"
+  - Downloads InspectorPro_Results_1008176.json (9976 bytes)
+  - Valid JSON with all required fields: part_number, features, gap_summary, report_markdown
+  - Also includes: part_name, findings, view_assessment, tokens, elapsed_seconds, profile_used, reference_views_sent, drawing_pages
+  - 7 features, gap_summary with all expected keys
+  - Zero console errors, no mock data patterns
+
+**Current Status: 56/80 features passing (70.0%)**
+
 ### Session 21 - 2026-02-14
 
 **Features Completed This Session:**

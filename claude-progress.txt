@@ -1,5 +1,30 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 16 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #17: File upload via click-to-browse works (PASSING)
+  - Clicked upload zone, file picker dialog opened
+  - Selected a PNG file (1008794_view_front.png), filename displayed
+  - Upload zone shows green border "File loaded" state
+  - Auto-detection triggered, part info populated
+  - Zero console errors
+- Feature #20: Manual dropdown overrides auto-detection removes AUTO badge (PASSING)
+  - Uploaded file with auto-detected part 1008794 showing AUTO badge
+  - Opened searchable dropdown, selected different part 1008176
+  - AUTO badge removed, part info updated to RACK VISE 400
+  - CAD views updated to show new part's views
+  - Zero console errors
+- Feature #44: CAD reference views checkbox toggle works (PASSING)
+  - Checkbox exists and is checked by default on fresh page load
+  - With checkbox checked: POST /api/inspect includes send_reference_views=true
+  - After uncheck: POST /api/inspect includes send_reference_views=false
+  - Verified via fetch interceptor capturing FormData entries
+  - Reset correctly restores checkbox to checked state
+  - Zero console errors
+
+**Current Status: 42/80 features passing (52.5%)**
+
 ### Session 15 - 2026-02-14
 
 **Features Completed This Session:**

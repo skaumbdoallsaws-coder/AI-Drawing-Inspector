@@ -986,6 +986,8 @@
             elapsedSeconds: 0,
             drawingPages: 1,
             currentPage: 1,
+            cadViewsRequestId: 0,
+            detectPnRequestId: 0,
         };
 
         // DOM Elements
@@ -1138,10 +1140,12 @@
         }
 
         async function detectPartNumber(filename) {
+            const requestId = ++state.detectPnRequestId;
             try {
                 const res = await fetch(`/api/detect-pn?filename=${encodeURIComponent(filename)}`);
                 const data = await res.json();
-                if (data.part_number) {
+                // Only process if this is still the latest detection request
+                if (requestId === state.detectPnRequestId && data.part_number) {
                     selectPartNumber(data.part_number, true);
                 }
             } catch (e) {
@@ -1221,13 +1225,21 @@
         }
 
         async function loadReferenceViews(pn) {
+            // Increment request ID to handle race conditions when rapidly switching parts
+            const requestId = ++state.cadViewsRequestId;
             try {
                 const res = await fetch(`/api/reference-views/${pn}`);
-                state.cadViews = await res.json();
-                renderViewport();
+                const data = await res.json();
+                // Only update if this is still the latest request (prevents stale data)
+                if (requestId === state.cadViewsRequestId) {
+                    state.cadViews = data;
+                    renderViewport();
+                }
             } catch (e) {
                 console.error('Failed to load reference views:', e);
-                state.cadViews = {};
+                if (requestId === state.cadViewsRequestId) {
+                    state.cadViews = {};
+                }
             }
         }
 
@@ -1676,11 +1688,16 @@
                     : f.status === 'PARTIAL' ? `${f.found_count || 0}/${f.expected_count || '?'}`
                     : f.status || '---';
 
+                // Build display name with type and expected count
+                const typeStr = f.type ? ` (${f.type})` : '';
+                const countStr = f.expected_count ? ` ×${f.expected_count}` : '';
+                const displayName = f.name + typeStr + countStr;
+
                 const item = document.createElement('div');
                 item.className = 'feature-item';
                 item.innerHTML = `
                     <div class="feature-dot ${statusClass}"></div>
-                    <span class="feature-name" title="${f.name}">${f.name}</span>
+                    <span class="feature-name" title="${displayName}">${displayName}</span>
                     <span class="feature-status">${statusLabel}</span>
                 `;
                 item.addEventListener('click', () => {

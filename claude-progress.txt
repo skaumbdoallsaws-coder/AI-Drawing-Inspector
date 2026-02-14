@@ -1,5 +1,23 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 12 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #37: Feature tree items have correct color-coded status dots (PASSING)
+  - PRESENT features show green #00E676 dots with "OK" label
+  - MISSING features show red #FF1744 dots with "MISS" label
+  - PARTIAL features show yellow #FFD600 dots with fraction label (e.g., "0/34")
+  - Each item shows name, type (in parentheses), and expected count (×N)
+- Feature #43: Feature tree click-to-highlight works (PASSING)
+  - Clicking a feature item adds left border accent #4fc3f7 and darker background rgba(79,195,247,0.08)
+  - Clicking a different feature removes previous highlight, highlights new one
+  - Only one item highlighted at a time
+- Feature #32: Dark theme color palette matches spec exactly (PASSING)
+  - All 9 color values verified via computed CSS: bg-main, bg-panel, bg-toolbar, borders, primary text, secondary text, accent, primary button
+  - Both CSS variable definitions and computed element styles match spec exactly
+
+**Current Status: 31/80 features passing (38.8%)**
+
 ### Session 11 - 2026-02-14
 
 **Features Completed This Session:**

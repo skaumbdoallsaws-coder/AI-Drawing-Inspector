@@ -1,6 +1,6 @@
 # AI Engineering Drawing Inspector - Project Status
 
-**Last Updated:** February 11, 2026
+**Last Updated:** February 14, 2026
 
 ---
 
@@ -10,9 +10,35 @@ Build an AI-powered system that **verifies engineering drawings (PDFs) against C
 
 ---
 
-## Current Status: 4-Model Pipeline with Assembly Context + OCR Quick Wins + Severity-Tiered Reports
+## Current Status: Dual-Approach Inspection (YOLO+OCR Pipeline + Spatial Vision Inspection)
 
-### Latest Milestone (February 11, 2026)
+### Latest Milestone (February 14, 2026)
+
+**Spatial Inspection Notebook — Multi-Page Drawing Support:**
+- Reviewed and validated `spatial_inspection.ipynb` end-to-end
+- **Multi-page drawing support implemented**: `DRAWING_PATH` now accepts three input formats:
+  - Single file path (backward compatible): `"drawing.png"` or `"drawing.pdf"`
+  - List of paths: `["sheet1.png", "sheet2.png"]`
+  - Glob pattern: `"drawing_samples_batch/*_1008176_*.png"`
+  - PDFs automatically extract all pages (previously only rendered page 1)
+- **Page-labeled API calls**: Each page sent as `[PAGE X of Y]` labeled image blocks in a single Claude Vision request
+- **Cross-page inspection**: Prompt updated to instruct Claude to check ALL sheets before marking a feature MISSING
+- **`found_on_page` tracking**: Findings JSON now records which page(s) each feature was found on; display table includes Page column
+- Tested on 3 parts:
+  - **178683 (CLEVIS)**: 2/2 features present, 100% completeness (prior run, single page)
+  - **1008175 (PLATE WEAR)**: 2/2 features present, 85% completeness (single page, dinged for missing views)
+  - **1008176 (RACK VISE)**: 4/7 features present, 57% completeness — tested both single-page and multi-page (machining + casting sheets); multi-page correctly identified "Two-page drawing set" and reported features found across both pages
+
+**Spatial Inspection Pipeline Summary (not new, but now documented):**
+- Pre-built spatial profiles exist for 100+ parts in `400S_Sorted_Library` (generated once via `generate_inspection_profiles.py`)
+- Profile generation: 4 rendered CAD views + SW JSON → Claude Vision → spatial feature descriptions (no dimensions, spatial understanding only)
+- Inspection: Profile primes Claude Vision with what to look for → drawing image(s) sent → structured findings JSON → GPT-4o-mini QC report
+- No GPU required — runs entirely on API calls (Claude + OpenAI)
+
+**Files Changed:**
+- `spatial_inspection.ipynb` — Cells 2 (config docs), 3 (load logic), 4 (multi-image API call), 5 (page column in display)
+
+### Previous Milestone (February 11, 2026)
 
 **Assembly Context + Improved Reporting:**
 - **Mating context** wired: `sw_mating_context.json` (62 parts) provides parent assembly + sibling components
@@ -560,6 +586,17 @@ result.display()
 ---
 
 ## Change Log
+
+### February 14, 2026 - Spatial Inspection: Multi-Page Drawing Support
+
+- Reviewed `spatial_inspection.ipynb` pipeline and validated on multiple parts
+- Implemented multi-page drawing input: single path, list of paths, glob pattern, and multi-page PDF extraction
+- Updated Claude Vision API call to send all pages as labeled `[PAGE X of Y]` image blocks
+- Updated inspection prompt to require cross-page checking before marking features MISSING
+- Added `found_on_page` field to findings JSON schema and Page column to display output
+- Tested backward compatibility (single image) and multi-page mode (2-page list for part 1008176)
+- Updated config cell docs with multi-page usage examples
+- Updated `PROJECT_STATUS.md` to reflect dual-approach architecture (YOLO+OCR pipeline + spatial vision inspection)
 
 ### February 11, 2026 - OCR Quick Wins Integrated into Full Pipeline
 

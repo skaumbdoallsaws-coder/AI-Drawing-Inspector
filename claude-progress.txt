@@ -1,5 +1,21 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 10 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #9: Center viewport tabs switch correctly (PASSING)
+  - All 4 tabs (Split View, Drawing Only, CAD Views Only, Report) switch content correctly
+  - Active tab has cyan accent visual indicator
+  - Split View is default selected tab
+  - Tested with both empty state and uploaded content
+- Feature #78: Drawing view label shows sheet info (PASSING)
+  - Single-page PNG shows "Engineering Drawing — Sheet 1 of 1"
+  - Multi-page PDF shows correct count (e.g., "Sheet 1 of 2" for a 2-page PDF)
+  - Added PDF page count detection from binary data on upload
+  - Added drawingPages/currentPage state tracking
+
+**Current Status: 25/80 features passing (31.2%)**
+
 ### Session 9 - 2026-02-14
 
 **Features Completed This Session:**

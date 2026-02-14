@@ -1,5 +1,26 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 14 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #28: Run Inspection without file shows error (PASSING)
+  - Clicking Run Inspection without uploading a file shows red error toast
+  - "Please upload a drawing file first." message displayed
+  - No API request sent, app does not crash, zero console errors
+- Feature #62: Error feedback displayed as visible message not just console (PASSING)
+  - Error toast is a red fixed-position UI element (not console-only)
+  - Text is readable white-on-red with clear explanation
+  - Auto-dismisses after 5 seconds
+  - Zero console errors
+- Feature #27: Invalid file type rejected with error message (PASSING)
+  - Uploading .txt file shows "Only PNG, JPEG, and PDF files are accepted."
+  - Upload zone does NOT change to loaded state
+  - No file stored/displayed after rejection
+  - Same behavior for .docx files
+  - Zero console errors, no mock data
+
+**Current Status: 37/80 features passing (46.2%)**
+
 ### Session 13 - 2026-02-14
 
 **Features Completed This Session:**

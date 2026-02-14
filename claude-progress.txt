@@ -1,5 +1,29 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 9 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #18: Auto part number detection triggers on file upload (PASSING)
+  - Upload triggers /api/detect-pn call with filename
+  - Part number 1008176 displayed with AUTO badge
+  - Part name RACK VISE 400 and feature count 7 shown
+  - Zero console errors, no mock data patterns
+- Feature #22: Run Inspection triggers full inspection pipeline (PASSING)
+  - POST /api/inspect called with multipart form data (200 OK)
+  - Loading state: spinning logo, 7 chain-of-thought steps, progress bar
+  - Results: 45% completeness gauge, 4 present, 2 missing, 1 partial
+  - Feature tree updated with colored dots and status labels
+  - Toolbar shows "Complete · 27.8s" with green dot
+  - Status bar shows "Elapsed: 27.8s" and "Tokens: 12,123"
+- Feature #23: New Inspection button resets all state (PASSING)
+  - Upload zone cleared to dashed border "Drag & drop or click to upload"
+  - Part info cleared, search box empty
+  - Results panel returns to "Upload a drawing and run inspection to see results"
+  - Feature tree cleared, center viewport shows empty state
+  - Toolbar reset to "Ready" with gray dot, button back to "Run Inspection"
+
+**Current Status: 23/80 features passing (28.7%)**
+
 ### Session 8 - 2026-02-14
 
 **Features Completed This Session:**

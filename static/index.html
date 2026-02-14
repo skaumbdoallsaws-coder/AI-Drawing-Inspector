@@ -984,6 +984,8 @@
             panStartY: 0,
             elapsedTimer: null,
             elapsedSeconds: 0,
+            drawingPages: 1,
+            currentPage: 1,
         };
 
         // DOM Elements
@@ -1099,6 +1101,8 @@
             }
 
             state.file = file;
+            state.drawingPages = 1;
+            state.currentPage = 1;
 
             // Read file for display
             const reader = new FileReader();
@@ -1107,6 +1111,21 @@
                 renderViewport();
             };
             reader.readAsDataURL(file);
+
+            // For PDFs, detect page count from binary data
+            if (file.type === 'application/pdf' || ext === '.pdf') {
+                const binaryReader = new FileReader();
+                binaryReader.onload = (e) => {
+                    const text = new TextDecoder('latin1').decode(e.target.result);
+                    // Count /Type /Page (but not /Type /Pages) occurrences
+                    const matches = text.match(/\/Type\s*\/Page(?!s)/g);
+                    if (matches && matches.length > 0) {
+                        state.drawingPages = matches.length;
+                    }
+                    renderViewport();
+                };
+                binaryReader.readAsArrayBuffer(file);
+            }
 
             // Update UI
             uploadZone.classList.add('loaded');
@@ -1250,7 +1269,8 @@
 
                 const label = document.createElement('div');
                 label.className = 'drawing-label';
-                label.textContent = `Engineering Drawing \u2014 Sheet 1 of ${state.results?.drawing_pages || 1}`;
+                const totalPages = state.results?.drawing_pages || state.drawingPages || 1;
+                label.textContent = `Engineering Drawing \u2014 Sheet ${state.currentPage} of ${totalPages}`;
 
                 if (state.fileDataUrl.startsWith('data:application/pdf')) {
                     const embed = document.createElement('embed');
@@ -1402,6 +1422,8 @@
             state.drawingZoom = 1;
             state.drawingPanX = 0;
             state.drawingPanY = 0;
+            state.drawingPages = 1;
+            state.currentPage = 1;
 
             // Reset UI
             uploadZone.classList.remove('loaded');

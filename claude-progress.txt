@@ -1,5 +1,26 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 6 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #11: GET /api/profiles returns correct JSON structure (PASSING)
+  - Returns 185 profiles as JSON array
+  - Each has: part_number, part_name, feature_count, has_views
+  - Profile 1008176 = "RACK VISE 400" with 7 features
+  - UI dropdown populates correctly from endpoint
+- Feature #14: POST /api/inspect accepts multipart form and returns results (PASSING)
+  - Sent real drawing file (1008176) via multipart form
+  - Response contains all required fields: part_number, part_name, findings, report_markdown, gap_summary, features, view_assessment, tokens, elapsed_seconds
+  - gap_summary has: total_features, present, missing, partial, discrepant, completeness, critical_issues
+  - features array items have: name, type, expected_count, status (PRESENT/MISSING)
+  - Full UI flow works end-to-end: upload → detect → inspect → results in 28.4s
+- Feature #12: GET /api/detect-pn auto-detects part number from filename (PASSING)
+  - 1008176_drawing.pdf → part_number=1008176, match_type=exact
+  - random_file.pdf → graceful null response (no crash)
+  - UI shows AUTO badge on auto-detected part numbers
+
+**Current Status: 14/80 features passing (17.5%)**
+
 ### Session 5 - 2026-02-14
 
 **Features Completed This Session:**

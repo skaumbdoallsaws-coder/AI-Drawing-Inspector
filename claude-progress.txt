@@ -1,5 +1,26 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 17 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #36: Metric rows show correct colors for status types (PASSING)
+  - Present row: green dot #00E676 rgb(0,230,118) with count "4"
+  - Missing row: red dot #FF1744 rgb(255,23,68) with count "3"
+  - Partial row: yellow dot #FFD600 rgb(255,214,0) with count "0"
+  - Discrepant row: orange dot #FF6D00 rgb(255,109,0) with count "0"
+  - Both dot background and count text color match spec exactly
+  - Counts match gap_summary from API response
+  - Zero console errors
+- Feature #79: Drawing views assessment tags show found vs missing views (PASSING)
+  - Drawing Views section visible in results panel
+  - "Front view" shown as green tag (found class, color #00E676)
+  - "Top view", "right/side view" shown as red tags (missing-view class, color #FF1744)
+  - Tag backgrounds use rgba with 0.15 opacity, borders with 0.3 opacity
+  - Tag text matches view_assessment from API response
+  - Zero console errors
+
+**Current Status: 44/80 features passing (55%)**
+
 ### Session 16 - 2026-02-14
 
 **Features Completed This Session:**

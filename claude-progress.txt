@@ -1,5 +1,24 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 18 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #29: Run Inspection without part number shows error (PASSING)
+  - Uploading file with unrecognizable filename, no auto-detect, no manual selection
+  - Clicking Run Inspection shows red error toast: "Please select or detect a part number."
+  - App remains functional, zero console errors
+- Feature #30: API error during inspection shows user-friendly message (PASSING)
+  - Triggered real API error by sending invalid part number to /api/inspect
+  - Error toast shows: "Inspection failed: No inspection profile found for part INVALID_PART_XYZ"
+  - Loading state exits gracefully, right panel returns to empty state
+  - Button changes to "New Inspection", app not stuck, user can try again
+- Feature #31: Invalid part number in reference views returns graceful response (PASSING)
+  - GET /api/reference-views/NONEXISTENT_PART returns {} (empty dict) with HTTP 200
+  - Special characters handled gracefully
+  - Server does not crash, app remains fully operational after invalid requests
+
+**Current Status: 47/80 features passing (58.8%)**
+
 ### Session 17 - 2026-02-14
 
 **Features Completed This Session:**

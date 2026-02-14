@@ -996,6 +996,8 @@
             currentPage: 1,
             cadViewsRequestId: 0,
             detectPnRequestId: 0,
+            inspectionAbortController: null,
+            inspectionRequestId: 0,
         };
 
         // DOM Elements
@@ -1392,6 +1394,14 @@
             runBtn.disabled = true;
             runBtn.textContent = 'Analyzing...';
 
+            // Create abort controller for this inspection
+            if (state.inspectionAbortController) {
+                state.inspectionAbortController.abort();
+            }
+            const abortController = new AbortController();
+            state.inspectionAbortController = abortController;
+            const currentRequestId = ++state.inspectionRequestId;
+
             // Show loading state
             showLoadingState();
 
@@ -1408,7 +1418,14 @@
                 formData.append('part_number', state.partNumber);
                 formData.append('send_reference_views', $('cadToggle').checked);
 
-                const res = await fetch('/api/inspect', { method: 'POST', body: formData });
+                const res = await fetch('/api/inspect', {
+                    method: 'POST',
+                    body: formData,
+                    signal: abortController.signal,
+                });
+
+                // If this request was cancelled/superseded, ignore the result
+                if (currentRequestId !== state.inspectionRequestId) return;
 
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({ detail: 'Inspection failed' }));
@@ -1418,15 +1435,26 @@
                 state.results = await res.json();
                 showResults();
             } catch (e) {
+                // If aborted (user clicked New Inspection), don't show error
+                if (e.name === 'AbortError') {
+                    console.log('Inspection cancelled by user.');
+                    return;
+                }
+                // If this request was superseded, ignore errors
+                if (currentRequestId !== state.inspectionRequestId) return;
                 console.error('Inspection error:', e);
                 showError(`Inspection failed: ${e.message}`);
                 hideLoadingState();
             } finally {
-                clearInterval(state.elapsedTimer);
-                state.inspecting = false;
-                runBtn.disabled = false;
-                runBtn.textContent = 'New Inspection';
-                runBtn.onclick = resetInspection;
+                // Only update button state if this is still the current request
+                if (currentRequestId === state.inspectionRequestId) {
+                    clearInterval(state.elapsedTimer);
+                    state.inspecting = false;
+                    state.inspectionAbortController = null;
+                    runBtn.disabled = false;
+                    runBtn.textContent = 'New Inspection';
+                    runBtn.onclick = resetInspection;
+                }
             }
         }
 

@@ -1,5 +1,30 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 21 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #40: Toolbar status indicator transitions correctly (PASSING)
+  - Initial state: gray dot (#888888) + "Ready" text
+  - During inspection: pulsing blue dot (#4fc3f7) with 1.5s pulse animation + "Analyzing..."
+  - After results: green dot (#00E676) + "Complete · 25.3s" text
+  - CSS transition: background-color 0.3s ease for smooth dot color changes
+  - Zero console errors
+- Feature #41: Feature tree transitions from gray pending to colored results (PASSING)
+  - During loading: 7 gray dots (rgb(136,136,136)) with "---" labels
+  - After results: dots transition to green (#00E676) for PRESENT and red (#FF1744) for MISSING
+  - Added 0.6s CSS transition on background-color for smooth animation
+  - Modified renderFeatureTree to update existing DOM elements in-place (canTransition path)
+  - Same DOM refs maintained across state change (verified via Playwright snapshot)
+  - Zero console errors
+- Feature #42: Page refresh preserves no stale state (PASSING)
+  - After inspection, browser refresh returns to clean initial state
+  - All verified clean: status "Ready", empty upload zone (dashed border), no part info,
+    empty feature tree, empty right panel, export hidden, run button enabled
+  - Stateless app design (no localStorage/sessionStorage) ensures clean refresh
+  - Zero console errors
+
+**Current Status: 56/80 features passing (70.0%)**
+
 ### Session 20 - 2026-02-14
 
 **Features Completed This Session:**

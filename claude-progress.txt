@@ -1,5 +1,25 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 20 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #45: CAD view lightbox opens on click (PASSING)
+  - Clicked FRONT view → lightbox overlay opens with larger image
+  - Dark background overlay (rgba(0,0,0,0.85))
+  - Clicked to close → lightbox closes, returns to normal view
+  - Clicked ISOMETRIC view → different view opens in lightbox
+  - Zero console errors
+- Feature #46: Drawing zoom and pan functionality works (PASSING)
+  - Uploaded drawing appears in center viewport left half
+  - Mouse wheel zoom in: scale 1.0 → 1.5 (verified via transform)
+  - Mouse wheel zoom out: scale 1.5 → 0.5 (verified via transform)
+  - Click-drag pan: translate(0,0) → translate(100px, 50px) (verified via transform)
+  - Smooth transitions: CSS transition: transform 0.1s applied
+  - Cursor: grab (normal) → grabbing (during drag)
+  - Zero console errors, no mock data patterns
+
+**Current Status: 52/80 features passing (65.0%)**
+
 ### Session 19 - 2026-02-14
 
 **Features Completed This Session:**

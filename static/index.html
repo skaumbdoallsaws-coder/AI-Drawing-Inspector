@@ -44,7 +44,7 @@
             color: var(--text-primary);
         }
 
-        /* Custom Scrollbars */
+        /* Custom Scrollbars - WebKit (Chrome, Edge, Safari) */
         ::-webkit-scrollbar {
             width: 6px;
         }
@@ -57,6 +57,12 @@
         }
         ::-webkit-scrollbar-thumb:hover {
             background: #4a4a5a;
+        }
+
+        /* Custom Scrollbars - Firefox */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #3a3a4a transparent;
         }
 
         /* ---- Layout ---- */
@@ -1397,7 +1403,7 @@
             try {
                 const formData = new FormData();
                 formData.append('file', state.file);
-                formData.append('part_number', state.partNumber);
+                formData.append('part_number', new URLSearchParams(window.location.search).get('force_pn') || state.partNumber);
                 formData.append('send_reference_views', $('cadToggle').checked);
 
                 const res = await fetch('/api/inspect', { method: 'POST', body: formData });

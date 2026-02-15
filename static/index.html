@@ -1448,6 +1448,7 @@
     <div id="exportDropdown" style="display:none; position:fixed; background:var(--bg-toolbar); border:1px solid var(--border); border-radius:6px; z-index:200; min-width:180px;">
         <div style="padding:8px 14px; cursor:pointer; font-size:13px; color:var(--text-primary);" id="exportMd">&#128196; Export Report (.md)</div>
         <div style="padding:8px 14px; cursor:pointer; font-size:13px; color:var(--text-primary); border-top:1px solid var(--border);" id="exportJson">&#128196; Export Results (.json)</div>
+        <div style="padding:8px 14px; cursor:pointer; font-size:13px; color:var(--text-primary); border-top:1px solid var(--border);" id="exportAnnotatedPng">&#128248; Export Annotated Drawing (.png)</div>
     </div>
 
     <script>
@@ -1590,6 +1591,7 @@
             exportBtn.addEventListener('click', showExportMenu);
             $('exportMd').addEventListener('click', exportMarkdown);
             $('exportJson').addEventListener('click', exportJSON);
+            $('exportAnnotatedPng').addEventListener('click', exportAnnotatedPng);
             document.addEventListener('click', (e) => {
                 if (!e.target.closest('#exportBtn') && !e.target.closest('#exportDropdown')) {
                     $('exportDropdown').style.display = 'none';
@@ -2356,6 +2358,102 @@
             if (!state.results) return;
             downloadFile(`InspectorPro_Results_${state.partNumber}.json`, JSON.stringify(state.results, null, 2), 'application/json');
             $('exportDropdown').style.display = 'none';
+        }
+
+        function exportAnnotatedPng() {
+            $('exportDropdown').style.display = 'none';
+
+            // Get the drawing image
+            const drawingImg = document.querySelector('#drawingArea img');
+            if (!drawingImg) {
+                showError('No drawing loaded to export');
+                return;
+            }
+
+            // Get the SVG annotation layer
+            const svgLayer = document.getElementById('annotationLayer');
+
+            // Create a canvas to composite drawing + annotations
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Use the natural image dimensions for high quality export
+            const imgW = drawingImg.naturalWidth || drawingImg.width;
+            const imgH = drawingImg.naturalHeight || drawingImg.height;
+            canvas.width = imgW;
+            canvas.height = imgH;
+
+            // Draw the base image
+            ctx.drawImage(drawingImg, 0, 0, imgW, imgH);
+
+            // If there are SVG annotations, composite them
+            if (svgLayer && svgLayer.children.length > 0) {
+                // Clone the SVG and set explicit dimensions
+                const svgClone = svgLayer.cloneNode(true);
+                const layerRect = svgLayer.getBoundingClientRect();
+                const layerW = layerRect.width || svgLayer.clientWidth;
+                const layerH = layerRect.height || svgLayer.clientHeight;
+                svgClone.setAttribute('width', layerW);
+                svgClone.setAttribute('height', layerH);
+                svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+                // Remove selection handles (dashed rectangles and handle squares)
+                svgClone.querySelectorAll('[data-anno-handle]').forEach(el => el.remove());
+                // Remove selection dashed rect (pointer-events:none rect with stroke-dasharray)
+                svgClone.querySelectorAll('rect[stroke-dasharray]').forEach(el => {
+                    if (el.getAttribute('fill') === 'none' && el.getAttribute('stroke') === '#4fc3f7') {
+                        el.remove();
+                    }
+                });
+
+                // Serialize SVG to string
+                const svgString = new XMLSerializer().serializeToString(svgClone);
+                const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+                const svgUrl = URL.createObjectURL(svgBlob);
+
+                const svgImg = new Image();
+                svgImg.onload = function() {
+                    // Scale SVG to match canvas dimensions
+                    ctx.drawImage(svgImg, 0, 0, imgW, imgH);
+                    URL.revokeObjectURL(svgUrl);
+
+                    // Download the composited image
+                    canvas.toBlob(function(blob) {
+                        if (!blob) return;
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `InspectorPro_Annotated_${state.partNumber || 'drawing'}.png`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    }, 'image/png');
+                };
+                svgImg.onerror = function() {
+                    URL.revokeObjectURL(svgUrl);
+                    // Fallback: export without annotations
+                    canvas.toBlob(function(blob) {
+                        if (!blob) return;
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `InspectorPro_Annotated_${state.partNumber || 'drawing'}.png`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    }, 'image/png');
+                };
+                svgImg.src = svgUrl;
+            } else {
+                // No annotations, just export the drawing
+                canvas.toBlob(function(blob) {
+                    if (!blob) return;
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `InspectorPro_Annotated_${state.partNumber || 'drawing'}.png`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }, 'image/png');
+            }
         }
 
         function downloadFile(filename, content, mimeType) {

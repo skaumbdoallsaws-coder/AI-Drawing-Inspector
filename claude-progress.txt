@@ -1,5 +1,21 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 33 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #81: Widen CAD Reference Views Panel in Split View (PASSING)
+  - Changed .viewport-cad from fixed 340px width to flex: 0 0 45% with min-width: 400px
+  - CAD views are now large enough for engineers to compare against drawings
+  - CAD Views Only tab correctly overrides to flex: 1 1 100% for full-width display
+  - Drawing Only tab unaffected (CAD panel hidden)
+  - Tested at 1920px, 1440px, and 1280px - all layouts render correctly
+  - Lightbox click-to-enlarge works on all CAD cells
+  - Zero console errors
+
+**Current Status: 81/81 features passing (100%) 🎉**
+
+**All features complete!** The InspectorPro web application is fully implemented.
+
 ### Session 32 - 2026-02-14
 
 **Features Completed This Session:**

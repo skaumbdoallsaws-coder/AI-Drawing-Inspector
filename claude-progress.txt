@@ -1,5 +1,19 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 24 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #51: New Inspection during active inspection cancels gracefully (PASSING)
+  - Showed "New Inspection" cancel button (cancelBtn) during active inspection
+  - Clicking it during analysis aborts the fetch via AbortController
+  - App resets to clean initial state: upload zone dashed, status "Ready", run button enabled
+  - No lingering loading state, no stale results, no console errors
+  - After cancel, user can upload a new file and run a fresh inspection successfully
+  - Full end-to-end verified: upload → run → cancel → clean state → re-upload → run → results complete
+  - Zero console errors throughout
+
+**Current Status: 63/80 features passing (78.8%)**
+
 ### Session 23 - 2026-02-14
 
 **Features Completed This Session:**

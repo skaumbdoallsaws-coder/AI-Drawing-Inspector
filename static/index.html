@@ -854,6 +854,7 @@
                     <span id="statusText">Ready</span>
                 </div>
                 <button class="btn btn-secondary" id="exportBtn" style="display:none;">Export</button>
+                <button class="btn btn-secondary" id="cancelBtn" style="display:none;">New Inspection</button>
                 <button class="btn btn-primary" id="runBtn">Run Inspection</button>
             </div>
         </div>
@@ -1015,6 +1016,7 @@
         const resultsState = $('resultsState');
         const rightPanelEmpty = $('rightPanelEmpty');
         const runBtn = $('runBtn');
+        const cancelBtn = $('cancelBtn');
         const exportBtn = $('exportBtn');
         const statusDot = $('statusDot');
         const statusText = $('statusText');
@@ -1064,6 +1066,9 @@
             // Run button
             runBtn.addEventListener('click', handleRunInspection);
 
+            // Cancel/New Inspection button (visible during active inspection)
+            cancelBtn.addEventListener('click', resetInspection);
+
             // Tabs
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -1112,9 +1117,14 @@
                 return;
             }
 
+            // Replace current file state - clear previous file data
             state.file = file;
+            state.fileDataUrl = null;
             state.drawingPages = 1;
             state.currentPage = 1;
+            state.drawingZoom = 1;
+            state.drawingPanX = 0;
+            state.drawingPanY = 0;
 
             // Read file for display
             const reader = new FileReader();
@@ -1144,6 +1154,18 @@
             uploadZone.innerHTML = `<div class="upload-zone-icon">&#128196;</div><div class="upload-zone-text">File loaded</div>`;
             uploadFilename.textContent = file.name;
             uploadFilename.style.display = 'block';
+
+            // If there were previous results, reset the Run button to allow a new inspection
+            if (state.results) {
+                state.results = null;
+                resultsState.classList.remove('active');
+                rightPanelEmpty.style.display = 'flex';
+                exportBtn.style.display = 'none';
+                featureTree.innerHTML = '';
+                runBtn.textContent = 'Run Inspection';
+                runBtn.disabled = false;
+                runBtn.onclick = handleRunInspection;
+            }
 
             // Auto-detect part number
             detectPartNumber(file.name);
@@ -1394,6 +1416,9 @@
             runBtn.disabled = true;
             runBtn.textContent = 'Analyzing...';
 
+            // Show "New Inspection" cancel button during active inspection
+            cancelBtn.style.display = '';
+
             // Create abort controller for this inspection
             if (state.inspectionAbortController) {
                 state.inspectionAbortController.abort();
@@ -1454,11 +1479,24 @@
                     runBtn.disabled = false;
                     runBtn.textContent = 'New Inspection';
                     runBtn.onclick = resetInspection;
+                    cancelBtn.style.display = 'none';
                 }
             }
         }
 
         function resetInspection() {
+            // Cancel any in-progress inspection
+            if (state.inspecting) {
+                if (state.inspectionAbortController) {
+                    state.inspectionAbortController.abort();
+                    state.inspectionAbortController = null;
+                }
+                clearInterval(state.elapsedTimer);
+                state.inspecting = false;
+                // Increment request ID to invalidate any pending response handlers
+                state.inspectionRequestId++;
+            }
+
             state.file = null;
             state.fileDataUrl = null;
             state.partNumber = null;
@@ -1472,6 +1510,7 @@
             state.drawingPanY = 0;
             state.drawingPages = 1;
             state.currentPage = 1;
+            state.elapsedSeconds = 0;
 
             // Reset UI
             uploadZone.classList.remove('loaded');
@@ -1485,6 +1524,7 @@
             statusDot.className = 'status-dot';
             statusText.textContent = 'Ready';
             exportBtn.style.display = 'none';
+            cancelBtn.style.display = 'none';
             loadingState.classList.remove('active');
             resultsState.classList.remove('active');
             rightPanelEmpty.style.display = 'flex';

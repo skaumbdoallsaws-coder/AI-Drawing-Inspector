@@ -1,5 +1,23 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 26 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #66: Panel internal scrolling works when content overflows (PASSING)
+  - Left panel feature tree: scrollHeight 197 > clientHeight 105, overflow-y: auto → scrolls internally
+  - Right panel results: scrollHeight 791 > clientHeight 648, overflow-y: auto → scrolls internally
+  - Page body: overflow: hidden, scrollTop always 0 → does NOT scroll
+  - Added scroll-behavior: smooth to left-panel, right-panel, and feature-tree
+  - Zero console errors, no mock data patterns
+- Feature #67: Long filename display with word-break (PASSING)
+  - Uploaded file with very long name (120+ chars)
+  - Filename wraps correctly with word-break: break-all CSS property
+  - Filename width 247px stays within 280px panel boundary (doesNotOverflow: true)
+  - Multi-line display confirmed (height 48px > single line 20px)
+  - Zero console errors, no mock data patterns
+
+**Current Status: 67/80 features passing (83.8%)**
+
 ### Session 25 - 2026-02-14
 
 **Features Completed This Session:**

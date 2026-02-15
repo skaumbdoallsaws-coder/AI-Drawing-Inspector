@@ -2,6 +2,7 @@
 InspectorPro - FastAPI Web Server
 Thin wrapper around the SpatialInspector engine for engineering drawing QC inspection.
 """
+# Updated: proper HTTP error codes for malformed requests
 
 import os
 import logging
@@ -59,6 +60,9 @@ async def list_profiles():
     try:
         profiles = inspector.list_profiles()
         return profiles
+    except FileNotFoundError as e:
+        logger.error(f"Library directory not found: {e}")
+        raise HTTPException(status_code=500, detail="Inspection library not available")
     except Exception as e:
         logger.error(f"Error listing profiles: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -70,6 +74,9 @@ async def detect_part_number(filename: str = Query(..., description="Filename to
     try:
         result = inspector.detect_part_number(filename)
         return result
+    except ValueError as e:
+        logger.warning(f"Invalid filename for detection: '{filename}': {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error detecting part number from '{filename}': {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -81,9 +88,15 @@ async def get_reference_views(part_number: str):
     try:
         views = inspector.get_reference_views(part_number)
         return views
+    except FileNotFoundError as e:
+        logger.warning(f"No reference views for '{part_number}': {e}")
+        raise HTTPException(status_code=404, detail=f"No reference views found for part number '{part_number}'")
+    except ValueError as e:
+        logger.warning(f"Invalid part number for reference views: '{part_number}': {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error getting reference views for '{part_number}': {e}")
-        raise HTTPException(status_code=404, detail=f"No reference views found for part number '{part_number}'")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/inspect")
@@ -93,9 +106,17 @@ async def run_inspection(
     send_reference_views: bool = Form(True),
 ):
     """Run a full inspection on an uploaded drawing."""
+    # Validate part_number is not empty or whitespace
+    if not part_number or not part_number.strip():
+        raise HTTPException(status_code=422, detail="part_number is required and cannot be empty")
+
     try:
         drawing_bytes = await file.read()
         filename = file.filename or "unknown"
+
+        # Validate file is not empty
+        if len(drawing_bytes) == 0:
+            raise HTTPException(status_code=422, detail="Uploaded file is empty")
 
         logger.info(f"Running inspection: part={part_number}, file={filename}, ref_views={send_reference_views}")
 
@@ -108,6 +129,14 @@ async def run_inspection(
 
         logger.info(f"Inspection complete for {part_number}: {result.get('gap_summary', {}).get('completeness', 'N/A')}")
         return result
+    except HTTPException:
+        raise  # Re-raise HTTPExceptions as-is
+    except FileNotFoundError as e:
+        logger.warning(f"Profile not found for part '{part_number}': {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        logger.warning(f"Invalid input for inspection: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error during inspection: {e}")
         raise HTTPException(status_code=500, detail=str(e))

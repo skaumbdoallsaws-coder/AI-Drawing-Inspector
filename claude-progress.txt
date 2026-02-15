@@ -1,5 +1,26 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 37 - 2026-02-15
+
+**Features Completed This Session:**
+- Feature #93: Fix PDF viewer built-in tools frozen by annotation overlay (PASSING)
+  - Skip SVG annotation layer creation for PDF files (embed[type="application/pdf"])
+  - PDF viewer's native pen, highlighter, text tools now accessible
+  - Custom annotation toolbar hidden when PDF is loaded
+  - Both createAnnotationLayer() in index.html and annotations.js override check for PDFs
+- Feature #94: Show annotation toolbar only on Drawing Only tab (PASSING)
+  - Changed updateAnnotationToolbarVisibility() to only show on 'drawing' tab, not 'split'
+  - Toolbar hidden on Split View, CAD Views Only, and Report tabs
+  - Annotation toolbar only visible on Drawing Only tab with image files
+- Feature #95: Annotation overlay does not block drawing pan/zoom when no tool active (PASSING)
+  - Renamed CSS class from 'interactive' to 'drawing-active' for clarity
+  - When select tool active: SVG layer has pointer-events:none (pan/zoom works through it)
+  - When drawing tool active: SVG layer has pointer-events:all (captures drawing events)
+  - Individual shape groups have pointer-events:all so they remain clickable/draggable
+  - Resize handles also have pointer-events:all for selection interaction
+
+**Current Status: 95/95 features passing (100%)**
+
 ### Session 36 - 2026-02-15
 
 **Features Completed This Session:**

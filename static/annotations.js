@@ -68,6 +68,11 @@
     // ---- Override createAnnotationLayer to use our event handlers ----
     const origCreateAnnotationLayer = window.createAnnotationLayer;
     window.createAnnotationLayer = function(drawingDiv) {
+        // Feature #93: Skip annotation layer for PDF files (they have their own tools)
+        if (drawingDiv.querySelector('embed[type="application/pdf"]')) {
+            return null;
+        }
+
         let layer = drawingDiv.querySelector('#annotationLayer');
         if (layer) {
             // Remove old handlers and add ours
@@ -98,9 +103,13 @@
         const layer = document.getElementById('annotationLayer');
         if (!layer) return;
         if (annoState.activeTool === 'select') {
-            layer.classList.add('interactive', 'selecting');
+            // Feature #95: In select mode, layer itself is pointer-events:none
+            // so pan/zoom works. Individual shapes get pointer-events via renderAllShapes.
+            layer.classList.remove('drawing-active');
+            layer.classList.add('selecting');
         } else if (annoState.activeTool) {
-            layer.classList.add('interactive');
+            // Drawing tool active: layer captures all events
+            layer.classList.add('drawing-active');
             layer.classList.remove('selecting');
         }
     }
@@ -376,6 +385,9 @@
         annoState.shapes.forEach(shape => {
             const g = document.createElementNS(svgNS, 'g');
             g.dataset.shapeId = shape.id;
+            // Feature #95: Make individual shapes clickable even when layer is pointer-events:none
+            g.style.pointerEvents = 'all';
+            g.style.cursor = annoState.activeTool === 'select' ? 'move' : 'crosshair';
 
             const fill = getAnnoFill(shape.fillMode, shape.color);
             const x = Math.min(shape.x, shape.x + shape.w);
@@ -665,6 +677,7 @@
             r.setAttribute('fill', '#4fc3f7'); r.setAttribute('stroke', '#fff');
             r.setAttribute('stroke-width', '1');
             r.style.cursor = (hd.p === 'nw' || hd.p === 'se') ? 'nwse-resize' : 'nesw-resize';
+            r.style.pointerEvents = 'all';
             r.dataset.annoHandle = hd.p;
             layer.appendChild(r);
         });

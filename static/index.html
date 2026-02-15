@@ -1123,11 +1123,15 @@
             z-index: 10;
             pointer-events: none;
         }
-        .annotation-layer.interactive {
+        .annotation-layer.drawing-active {
+            /* When a drawing tool (not select) is active, capture all mouse events */
             pointer-events: all;
             cursor: crosshair;
         }
         .annotation-layer.selecting {
+            /* When select tool is active, layer itself is transparent to events
+               but individual shapes inside have pointer-events: all (set in JS) */
+            pointer-events: none;
             cursor: default;
         }
 
@@ -1859,8 +1863,12 @@
                 drawingDiv.appendChild(label);
                 viewportContent.appendChild(drawingDiv);
 
-                // Create SVG annotation layer on top of drawing
-                createAnnotationLayer(drawingDiv);
+                // Create SVG annotation layer on top of drawing (only for image files, not PDFs)
+                // PDFs have their own built-in annotation tools (pen, highlighter, text, etc.)
+                const isPdf = state.fileDataUrl && state.fileDataUrl.startsWith('data:application/pdf');
+                if (!isPdf) {
+                    createAnnotationLayer(drawingDiv);
+                }
             }
 
             if (showCad && Object.keys(state.cadViews).length > 0) {
@@ -2506,9 +2514,12 @@
         const annotationToolbar = $('annotationToolbar');
 
         // Show/hide annotation toolbar based on whether a drawing is loaded
+        // Feature #93: Hide for PDF files (PDF viewer has its own annotation tools)
+        // Feature #94: Only show on Drawing Only tab (not Split View)
         function updateAnnotationToolbarVisibility() {
-            const showDrawing = state.activeTab === 'split' || state.activeTab === 'drawing';
-            if (state.fileDataUrl && showDrawing) {
+            const isPdf = state.fileDataUrl && state.fileDataUrl.startsWith('data:application/pdf');
+            const isDrawingOnlyTab = state.activeTab === 'drawing';
+            if (state.fileDataUrl && isDrawingOnlyTab && !isPdf) {
                 annotationToolbar.classList.add('visible');
             } else {
                 annotationToolbar.classList.remove('visible');
@@ -2583,14 +2594,16 @@
         }
 
         // Update annotation layer cursor/pointer-events
+        // Feature #95: When select tool is active, layer is pointer-events:none
+        // so pan/zoom works through it. Individual shapes get pointer-events:all via JS.
         function updateAnnotationLayerInteractivity() {
             const layer = document.getElementById('annotationLayer');
             if (!layer) return;
             if (annoState.activeTool !== 'select') {
-                layer.classList.add('interactive');
+                layer.classList.add('drawing-active');
                 layer.classList.remove('selecting');
             } else {
-                layer.classList.remove('interactive');
+                layer.classList.remove('drawing-active');
                 layer.classList.add('selecting');
             }
         }

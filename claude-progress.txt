@@ -1,8 +1,33 @@
 ## InspectorPro - Autonomous Coding Progress
 
-### Session 26 - 2026-02-14
+### Session 25 - 2026-02-14
 
 **Features Completed This Session:**
+- Feature #59: File upload validates file extension strictly (PASSING)
+  - .txt file rejected with error toast "Only PNG, JPEG, and PDF files are accepted."
+  - .bmp file rejected with same error message
+  - .gif file rejected with same error message
+  - .png file accepted (shows "File loaded" state)
+  - .jpg file accepted (shows "File loaded" state)
+  - .jpeg file accepted (shows "File loaded" state)
+  - .pdf file accepted (shows "File loaded" state)
+  - HTML input accept attribute correctly set to .png,.jpg,.jpeg,.pdf
+  - Validation checks both MIME type and file extension
+  - Zero console errors
+- Feature #60: Multipart form sends correct content type and fields (PASSING)
+  - POST /api/inspect sends FormData (multipart/form-data Content-Type auto-set by browser)
+  - file field: File object with name, size (20MB), mimeType (image/png) - real file bytes
+  - part_number field: string value "1008176"
+  - send_reference_views field: string value "true" (parsed as bool by FastAPI)
+  - Backend uses UploadFile, Form(str), Form(bool) to receive all fields correctly
+  - Inspection completed successfully: 27.3s, 12,037 tokens, real AI analysis
+  - Zero console errors
+
+**Current Status: 65/80 features passing (81.3%)**
+
+### Session 24 - 2026-02-14
+
+**Features Completed This Session:
 - Feature #61: Success feedback after inspection completes (PASSING)
   - Ran full inspection on part 1008176 (28.0s, real AI analysis)
   - Toolbar shows green dot (#00E676) + "Complete · 28.0s" status text

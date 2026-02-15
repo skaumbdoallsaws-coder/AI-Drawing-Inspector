@@ -1,5 +1,20 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 29 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #74: File upload during API call does not corrupt state (PASSING)
+  - Installed fetch interceptor to delay first detect-pn response by 2 seconds
+  - Uploaded file_A (1008176_view_front.png), then immediately uploaded file_B (1008794_view_front.png) before first detection completed
+  - Delayed detect-pn #1 response arrived but was discarded (requestId !== state.detectPnRequestId)
+  - Final state correctly reflects file_B: filename=1008794_view_front.png, Part #1008794, SHAFT-PINION 400, AUTO badge
+  - CAD views show 1008794 views (RIGHT, ISOMETRIC, FRONT, TOP) not 1008176 views
+  - Also verified natural flow (no interceptor): rapid file_A → file_B, final state = file_B
+  - Race condition protection via detectPnRequestId counter (line 1228) and cadViewsRequestId counter (line 1314)
+  - Zero console errors, no mock data patterns
+
+**Current Status: 77/80 features passing (96.2%)**
+
 ### Session 28 - 2026-02-14
 
 **Features Completed This Session:**

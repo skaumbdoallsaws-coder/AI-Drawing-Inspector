@@ -1081,6 +1081,37 @@
             border-color: var(--accent);
             color: var(--accent);
         }
+        /* Undo / Clear All action buttons */
+        .anno-action-btn {
+            height: 28px;
+            padding: 0 10px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-family: inherit;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            white-space: nowrap;
+        }
+        .anno-action-btn:hover {
+            background: rgba(79, 195, 247, 0.1);
+            border-color: var(--border);
+            color: var(--text-primary);
+        }
+        .anno-action-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .anno-action-btn.anno-action-danger:hover {
+            background: rgba(255, 23, 68, 0.15);
+            border-color: #FF1744;
+            color: #FF1744;
+        }
 
         /* ---- Annotation SVG Layer ---- */
         .annotation-layer {
@@ -1346,6 +1377,17 @@
                         <button class="anno-fill-btn active" data-fill="none" title="No Fill">&#8709;</button>
                         <button class="anno-fill-btn" data-fill="semi" title="Semi-transparent">&#9685;</button>
                         <button class="anno-fill-btn" data-fill="solid" title="Solid Fill">&#9679;</button>
+                    </div>
+                    <!-- Undo / Clear All Group -->
+                    <div class="anno-tool-group" id="annoActionsGroup">
+                        <button class="anno-action-btn" id="annoUndoBtn" title="Undo last shape (Ctrl+Z)">
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h7a3 3 0 0 1 0 6H8"/><polyline points="6 4 3 7 6 10"/></svg>
+                            Undo
+                        </button>
+                        <button class="anno-action-btn anno-action-danger" id="annoClearAllBtn" title="Clear all annotations">
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>
+                            Clear All
+                        </button>
                     </div>
                 </div>
                 <div class="viewport-content" id="viewportContent">
@@ -2784,5 +2826,6 @@
         setupAnnotationToolbar();
         init();
     </script>
+    <script src="/static/annotations.js"></script>
 </body>
 </html>

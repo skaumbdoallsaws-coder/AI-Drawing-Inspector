@@ -1863,10 +1863,10 @@
                 drawingDiv.appendChild(label);
                 viewportContent.appendChild(drawingDiv);
 
-                // Create SVG annotation layer on top of drawing (only for image files, not PDFs)
-                // PDFs have their own built-in annotation tools (pen, highlighter, text, etc.)
-                const isPdf = state.fileDataUrl && state.fileDataUrl.startsWith('data:application/pdf');
-                if (!isPdf) {
+                // Create SVG annotation layer on top of drawing on Drawing Only tab
+                // Feature #97: Enable for ALL file types including PDFs (custom shapes coexist with PDF native tools)
+                // The SVG overlay uses pointer-events:none by default, so PDF native tools remain accessible
+                if (state.activeTab === 'drawing') {
                     createAnnotationLayer(drawingDiv);
                 }
             }
@@ -2514,12 +2514,11 @@
         const annotationToolbar = $('annotationToolbar');
 
         // Show/hide annotation toolbar based on whether a drawing is loaded
-        // Feature #93: Hide for PDF files (PDF viewer has its own annotation tools)
         // Feature #94: Only show on Drawing Only tab (not Split View)
+        // Feature #97: Show for ALL file types including PDFs (custom shapes coexist with PDF native tools)
         function updateAnnotationToolbarVisibility() {
-            const isPdf = state.fileDataUrl && state.fileDataUrl.startsWith('data:application/pdf');
             const isDrawingOnlyTab = state.activeTab === 'drawing';
-            if (state.fileDataUrl && isDrawingOnlyTab && !isPdf) {
+            if (state.fileDataUrl && isDrawingOnlyTab) {
                 annotationToolbar.classList.add('visible');
             } else {
                 annotationToolbar.classList.remove('visible');

@@ -68,10 +68,9 @@
     // ---- Override createAnnotationLayer to use our event handlers ----
     const origCreateAnnotationLayer = window.createAnnotationLayer;
     window.createAnnotationLayer = function(drawingDiv) {
-        // Feature #93: Skip annotation layer for PDF files (they have their own tools)
-        if (drawingDiv.querySelector('embed[type="application/pdf"]')) {
-            return null;
-        }
+        // Feature #97: Allow annotation layer for ALL file types including PDFs
+        // Custom annotation shapes (rectangles, arrows, callouts) coexist with PDF native tools
+        // The SVG overlay uses pointer-events:none by default so PDF native tools remain accessible
 
         let layer = drawingDiv.querySelector('#annotationLayer');
         if (layer) {

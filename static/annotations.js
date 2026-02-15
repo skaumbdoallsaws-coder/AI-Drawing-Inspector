@@ -687,8 +687,9 @@
     window.renderViewport = function() {
         origRenderViewport();
         window.updateAnnotationToolbarVisibility();
+        // Feature #98: Only create annotation layer on Drawing Only tab, not Split View
         const drawingArea = document.getElementById('drawingArea');
-        if (drawingArea) {
+        if (drawingArea && state.activeTab === 'drawing') {
             window.createAnnotationLayer(drawingArea);
             setTimeout(() => renderAllShapes(), 30);
         }

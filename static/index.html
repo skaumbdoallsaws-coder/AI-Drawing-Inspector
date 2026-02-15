@@ -186,6 +186,7 @@
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            scroll-behavior: smooth;
         }
 
         .panel-section {
@@ -312,6 +313,7 @@
         .feature-tree {
             flex: 1;
             overflow-y: auto;
+            scroll-behavior: smooth;
         }
         .feature-item {
             display: flex;
@@ -490,6 +492,7 @@
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            scroll-behavior: smooth;
         }
 
         /* Loading State */
@@ -830,6 +833,42 @@
         .checkbox-row input[type="checkbox"] {
             accent-color: var(--accent);
         }
+
+        /* ---- Focus States (Accessibility) ---- */
+        .btn:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+        .tab:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+            color: var(--text-primary);
+        }
+        .search-dropdown input:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -1px;
+            border-color: var(--accent);
+        }
+        .upload-zone:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            border-color: var(--accent);
+            background: rgba(79, 195, 247, 0.05);
+        }
+        .feature-item:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+            background: rgba(79, 195, 247, 0.08);
+        }
+        .checkbox-row:focus-within {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+        .cad-cell:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+        }
     </style>
 </head>
 <body>
@@ -866,7 +905,7 @@
                 <!-- Upload Section -->
                 <div class="panel-section">
                     <div class="panel-section-title">Drawing Upload</div>
-                    <div class="upload-zone" id="uploadZone">
+                    <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="Upload drawing file">
                         <div class="upload-zone-icon">&#128196;</div>
                         <div class="upload-zone-text">Drag &amp; drop or click to upload<br><small>PNG, JPEG, PDF</small></div>
                     </div>
@@ -901,11 +940,11 @@
 
             <!-- Center Viewport -->
             <div class="center-viewport">
-                <div class="tab-bar">
-                    <div class="tab active" data-tab="split">Split View</div>
-                    <div class="tab" data-tab="drawing">Drawing Only</div>
-                    <div class="tab" data-tab="cad">CAD Views Only</div>
-                    <div class="tab" data-tab="report">Report</div>
+                <div class="tab-bar" role="tablist">
+                    <div class="tab active" data-tab="split" tabindex="0" role="tab" aria-selected="true">Split View</div>
+                    <div class="tab" data-tab="drawing" tabindex="0" role="tab" aria-selected="false">Drawing Only</div>
+                    <div class="tab" data-tab="cad" tabindex="0" role="tab" aria-selected="false">CAD Views Only</div>
+                    <div class="tab" data-tab="report" tabindex="0" role="tab" aria-selected="false">Report</div>
                 </div>
                 <div class="viewport-content" id="viewportContent">
                     <div class="viewport-empty" id="viewportEmpty">Upload a drawing to begin inspection</div>
@@ -1063,6 +1102,14 @@
                 }
             });
 
+            // Upload zone keyboard support
+            uploadZone.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    fileInput.click();
+                }
+            });
+
             // Run button
             runBtn.addEventListener('click', handleRunInspection);
 
@@ -1072,6 +1119,12 @@
             // Tabs
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+                tab.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        switchTab(tab.dataset.tab);
+                    }
+                });
             });
 
             // Part search dropdown
@@ -1279,7 +1332,9 @@
         function switchTab(tab) {
             state.activeTab = tab;
             document.querySelectorAll('.tab').forEach(t => {
-                t.classList.toggle('active', t.dataset.tab === tab);
+                const isActive = t.dataset.tab === tab;
+                t.classList.toggle('active', isActive);
+                t.setAttribute('aria-selected', isActive ? 'true' : 'false');
             });
             renderViewport();
         }

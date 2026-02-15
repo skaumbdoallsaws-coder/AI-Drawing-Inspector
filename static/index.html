@@ -871,6 +871,258 @@
             outline: 2px solid var(--accent);
             outline-offset: -2px;
         }
+
+        /* ---- Annotation Toolbar ---- */
+        .annotation-toolbar {
+            display: none;
+            height: 36px;
+            min-height: 36px;
+            background: var(--bg-toolbar);
+            border-bottom: 1px solid var(--border);
+            align-items: center;
+            padding: 0 8px;
+            gap: 2px;
+        }
+        .annotation-toolbar.visible {
+            display: flex;
+        }
+        .anno-tool-group {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 0 6px;
+            border-right: 1px solid var(--border);
+            position: relative;
+        }
+        .anno-tool-group:last-child {
+            border-right: none;
+        }
+        .anno-tool-group-label {
+            font-size: 9px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-right: 4px;
+            letter-spacing: 0.3px;
+        }
+        .anno-tool-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            transition: background 0.15s, border-color 0.15s;
+            padding: 0;
+        }
+        .anno-tool-btn:hover {
+            background: rgba(79, 195, 247, 0.1);
+            border-color: var(--border);
+        }
+        .anno-tool-btn.active {
+            background: rgba(79, 195, 247, 0.2);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .anno-tool-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+        /* Category button (opens dropdown) */
+        .anno-category-btn {
+            height: 28px;
+            padding: 0 10px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-family: inherit;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            white-space: nowrap;
+        }
+        .anno-category-btn:hover {
+            background: rgba(79, 195, 247, 0.1);
+            border-color: var(--border);
+            color: var(--text-primary);
+        }
+        .anno-category-btn.active {
+            background: rgba(79, 195, 247, 0.15);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .anno-category-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .anno-category-btn .caret {
+            font-size: 8px;
+            margin-left: 2px;
+        }
+        /* Category dropdown panel */
+        .anno-category-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 4px;
+            background: var(--bg-toolbar);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px;
+            z-index: 300;
+            min-width: 160px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .anno-category-dropdown.open {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .anno-shape-option {
+            width: 44px;
+            height: 40px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-panel);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            padding: 2px;
+        }
+        .anno-shape-option:hover {
+            background: rgba(79, 195, 247, 0.1);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .anno-shape-option.active {
+            background: rgba(79, 195, 247, 0.2);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .anno-shape-option svg {
+            width: 20px;
+            height: 20px;
+        }
+        .anno-shape-option span {
+            font-size: 8px;
+            text-align: center;
+            line-height: 1;
+        }
+        .anno-color-swatch {
+            width: 18px;
+            height: 18px;
+            border-radius: 3px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: border-color 0.15s, transform 0.1s;
+        }
+        .anno-color-swatch:hover {
+            transform: scale(1.15);
+        }
+        .anno-color-swatch.active {
+            border-color: var(--accent);
+        }
+        .anno-stroke-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, border-color 0.15s;
+            padding: 0;
+        }
+        .anno-stroke-btn:hover {
+            background: rgba(79, 195, 247, 0.1);
+            border-color: var(--border);
+        }
+        .anno-stroke-btn.active {
+            background: rgba(79, 195, 247, 0.2);
+            border-color: var(--accent);
+        }
+        .anno-fill-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: var(--text-secondary);
+            transition: background 0.15s, border-color 0.15s;
+            padding: 0;
+        }
+        .anno-fill-btn:hover {
+            background: rgba(79, 195, 247, 0.1);
+            border-color: var(--border);
+        }
+        .anno-fill-btn.active {
+            background: rgba(79, 195, 247, 0.2);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* ---- Annotation SVG Layer ---- */
+        .annotation-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .annotation-layer.interactive {
+            pointer-events: all;
+            cursor: crosshair;
+        }
+        .annotation-layer.selecting {
+            cursor: default;
+        }
+
+        /* Annotation shape text editing */
+        .anno-text-editor {
+            position: absolute;
+            z-index: 20;
+            background: transparent;
+            border: 1px dashed var(--accent);
+            color: #fff;
+            font-family: inherit;
+            font-size: 12px;
+            padding: 2px 4px;
+            outline: none;
+            resize: none;
+            min-width: 40px;
+            min-height: 20px;
+        }
+
+        /* Resize handles */
+        .anno-handle {
+            fill: var(--accent);
+            stroke: #fff;
+            stroke-width: 1;
+            cursor: nwse-resize;
+        }
     </style>
 </head>
 <body>
@@ -947,6 +1199,154 @@
                     <div class="tab" data-tab="drawing" tabindex="0" role="tab" aria-selected="false">Drawing Only</div>
                     <div class="tab" data-tab="cad" tabindex="0" role="tab" aria-selected="false">CAD Views Only</div>
                     <div class="tab" data-tab="report" tabindex="0" role="tab" aria-selected="false">Report</div>
+                </div>
+                <!-- Annotation Toolbar -->
+                <div class="annotation-toolbar" id="annotationToolbar">
+                    <!-- Tool Selection Group -->
+                    <div class="anno-tool-group">
+                        <button class="anno-tool-btn active" data-tool="select" title="Select / Move (V)">
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2l3 12 2.5-4.5L13 7z"/></svg>
+                        </button>
+                    </div>
+                    <!-- Lines Category -->
+                    <div class="anno-tool-group" data-category="lines">
+                        <button class="anno-category-btn" data-category-toggle="lines" title="Lines">
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="2" y1="14" x2="14" y2="2"/></svg>
+                            Lines <span class="caret">&#9662;</span>
+                        </button>
+                        <div class="anno-category-dropdown" id="dropdown-lines">
+                            <button class="anno-shape-option" data-tool="line" title="Straight Line">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="2" y1="18" x2="18" y2="2"/></svg>
+                                <span>Line</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="arrow" title="Arrow (single head)">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="2" y1="18" x2="18" y2="2"/><polyline points="12,2 18,2 18,8"/></svg>
+                                <span>Arrow</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="double-arrow" title="Double Arrow">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="4" y1="16" x2="16" y2="4"/><polyline points="11,4 16,4 16,9"/><polyline points="9,16 4,16 4,11"/></svg>
+                                <span>Dbl Arrow</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Rectangles Category -->
+                    <div class="anno-tool-group" data-category="rectangles">
+                        <button class="anno-category-btn" data-category-toggle="rectangles" title="Rectangles">
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10"/></svg>
+                            Rectangles <span class="caret">&#9662;</span>
+                        </button>
+                        <div class="anno-category-dropdown" id="dropdown-rectangles">
+                            <button class="anno-shape-option" data-tool="rectangle" title="Rectangle">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="16" height="12"/></svg>
+                                <span>Rect</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="rounded-rectangle" title="Rounded Rectangle">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="16" height="12" rx="4"/></svg>
+                                <span>Rounded</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Basic Shapes Category -->
+                    <div class="anno-tool-group" data-category="basic-shapes">
+                        <button class="anno-category-btn" data-category-toggle="basic-shapes" title="Basic Shapes">
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="8" cy="8" rx="6" ry="5"/></svg>
+                            Basic Shapes <span class="caret">&#9662;</span>
+                        </button>
+                        <div class="anno-category-dropdown" id="dropdown-basic-shapes">
+                            <button class="anno-shape-option" data-tool="circle" title="Circle / Ellipse">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="10" cy="10" rx="8" ry="7"/></svg>
+                                <span>Ellipse</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="triangle" title="Triangle">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="10,2 18,18 2,18"/></svg>
+                                <span>Triangle</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="diamond" title="Diamond">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="10,1 19,10 10,19 1,10"/></svg>
+                                <span>Diamond</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Block Arrows Category -->
+                    <div class="anno-tool-group" data-category="block-arrows">
+                        <button class="anno-category-btn" data-category-toggle="block-arrows" title="Block Arrows">
+                            <svg viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="0.5"><polygon points="10,1 16,8 10,15 10,11 0,11 0,5 10,5"/></svg>
+                            Block Arrows <span class="caret">&#9662;</span>
+                        </button>
+                        <div class="anno-category-dropdown" id="dropdown-block-arrows">
+                            <button class="anno-shape-option" data-tool="block-arrow-right" title="Right Arrow">
+                                <svg viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="0.5"><polygon points="12,2 20,10 12,18 12,14 0,14 0,6 12,6"/></svg>
+                                <span>Right</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="block-arrow-left" title="Left Arrow">
+                                <svg viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="0.5"><polygon points="8,2 0,10 8,18 8,14 20,14 20,6 8,6"/></svg>
+                                <span>Left</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="block-arrow-up" title="Up Arrow">
+                                <svg viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="0.5"><polygon points="10,0 18,8 14,8 14,20 6,20 6,8 2,8"/></svg>
+                                <span>Up</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="block-arrow-down" title="Down Arrow">
+                                <svg viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="0.5"><polygon points="10,20 18,12 14,12 14,0 6,0 6,12 2,12"/></svg>
+                                <span>Down</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="block-arrow-chevron" title="Chevron">
+                                <svg viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="0.5"><polygon points="0,0 12,0 20,10 12,20 0,20 8,10"/></svg>
+                                <span>Chevron</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Callouts Category -->
+                    <div class="anno-tool-group" data-category="callouts">
+                        <button class="anno-category-btn" data-category-toggle="callouts" title="Callouts">
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="14" height="10" rx="3"/><path d="M4 11l-1 4 3-2"/></svg>
+                            Callouts <span class="caret">&#9662;</span>
+                        </button>
+                        <div class="anno-category-dropdown" id="dropdown-callouts">
+                            <button class="anno-shape-option" data-tool="speech-bubble" title="Speech Bubble">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1" width="18" height="12" rx="3"/><path d="M5 13l-2 6 4-3"/></svg>
+                                <span>Speech</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="line-callout" title="Line Callout">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="5" y="1" width="14" height="10" rx="1.5"/><line x1="5" y1="6" x2="1" y2="18"/><circle cx="1" cy="18" r="1.2" fill="currentColor"/></svg>
+                                <span>Line</span>
+                            </button>
+                            <button class="anno-shape-option" data-tool="cloud-callout" title="Cloud Callout">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 12a4 4 0 01-.5-7A5 5 0 0112 3.5a3.5 3.5 0 014 3.5 3 3 0 01-1 6H4z"/><path d="M6 13l-3 6 4-3"/></svg>
+                                <span>Cloud</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Color Swatches Group -->
+                    <div class="anno-tool-group" id="annoColorGroup">
+                        <span class="anno-tool-group-label">Color</span>
+                        <div class="anno-color-swatch active" data-color="#FF1744" style="background:#FF1744;" title="Red"></div>
+                        <div class="anno-color-swatch" data-color="#FFD600" style="background:#FFD600;" title="Yellow"></div>
+                        <div class="anno-color-swatch" data-color="#00E676" style="background:#00E676;" title="Green"></div>
+                        <div class="anno-color-swatch" data-color="#4fc3f7" style="background:#4fc3f7;" title="Blue"></div>
+                        <div class="anno-color-swatch" data-color="#FFFFFF" style="background:#FFFFFF;" title="White"></div>
+                        <div class="anno-color-swatch" data-color="#000000" style="background:#000000; border: 1px solid #555;" title="Black"></div>
+                    </div>
+                    <!-- Stroke Width Group -->
+                    <div class="anno-tool-group" id="annoStrokeGroup">
+                        <span class="anno-tool-group-label">Stroke</span>
+                        <button class="anno-stroke-btn" data-stroke="1" title="Thin">
+                            <svg viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1"/></svg>
+                        </button>
+                        <button class="anno-stroke-btn active" data-stroke="2" title="Medium">
+                            <svg viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="2.5"/></svg>
+                        </button>
+                        <button class="anno-stroke-btn" data-stroke="4" title="Thick">
+                            <svg viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="4.5"/></svg>
+                        </button>
+                    </div>
+                    <!-- Fill Group -->
+                    <div class="anno-tool-group" id="annoFillGroup">
+                        <span class="anno-tool-group-label">Fill</span>
+                        <button class="anno-fill-btn active" data-fill="none" title="No Fill">&#8709;</button>
+                        <button class="anno-fill-btn" data-fill="semi" title="Semi-transparent">&#9685;</button>
+                        <button class="anno-fill-btn" data-fill="solid" title="Solid Fill">&#9679;</button>
+                    </div>
                 </div>
                 <div class="viewport-content" id="viewportContent">
                     <div class="viewport-empty" id="viewportEmpty">Upload a drawing to begin inspection</div>
@@ -1344,6 +1744,9 @@
         function renderViewport() {
             viewportContent.innerHTML = '';
 
+            // Update annotation toolbar visibility
+            updateAnnotationToolbarVisibility();
+
             if (state.activeTab === 'report' && state.results) {
                 const reportDiv = document.createElement('div');
                 reportDiv.className = 'report-content';
@@ -1393,8 +1796,9 @@
                         img.style.transform = `scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px)`;
                     });
 
-                    // Pan
+                    // Pan (only when select tool is active, not drawing annotation)
                     drawingDiv.addEventListener('mousedown', (e) => {
+                        if (annoState.activeTool !== 'select') return;
                         state.isPanning = true;
                         state.panStartX = e.clientX - state.drawingPanX;
                         state.panStartY = e.clientY - state.drawingPanY;
@@ -1410,6 +1814,9 @@
 
                 drawingDiv.appendChild(label);
                 viewportContent.appendChild(drawingDiv);
+
+                // Create SVG annotation layer on top of drawing
+                createAnnotationLayer(drawingDiv);
             }
 
             if (showCad && Object.keys(state.cadViews).length > 0) {
@@ -1590,6 +1997,13 @@
             tokenUsageEl.textContent = '';
             fileInput.value = '';
             $('cadToggle').checked = true;
+
+            // Reset annotation state
+            annoState.activeTool = 'select';
+            annoState.shapes = [];
+            annoState.isDrawing = false;
+            annoState.currentShapeEl = null;
+            selectAnnoTool('select');
 
             runBtn.textContent = 'Run Inspection';
             runBtn.disabled = false;
@@ -1935,7 +2349,439 @@
                 ;
         }
 
+        // ---- Annotation System ----
+        const annoState = {
+            activeTool: 'select',      // current tool ('select', 'line', 'arrow', 'double-arrow', etc.)
+            activeCategory: null,      // currently open category dropdown
+            strokeColor: '#FF1744',    // default red
+            strokeWidth: 2,
+            fillMode: 'none',          // 'none', 'semi', 'solid'
+            shapes: [],                // array of drawn SVG shape data
+            isDrawing: false,
+            drawStartX: 0,
+            drawStartY: 0,
+            currentShapeEl: null,
+        };
+
+        const annotationToolbar = $('annotationToolbar');
+
+        // Show/hide annotation toolbar based on whether a drawing is loaded
+        function updateAnnotationToolbarVisibility() {
+            const showDrawing = state.activeTab === 'split' || state.activeTab === 'drawing';
+            if (state.fileDataUrl && showDrawing) {
+                annotationToolbar.classList.add('visible');
+            } else {
+                annotationToolbar.classList.remove('visible');
+                closeAllCategoryDropdowns();
+            }
+        }
+
+        // Close all category dropdowns
+        function closeAllCategoryDropdowns() {
+            document.querySelectorAll('.anno-category-dropdown').forEach(d => d.classList.remove('open'));
+            document.querySelectorAll('.anno-category-btn').forEach(b => {
+                // Only remove active if the active tool isn't in this category
+                const group = b.closest('.anno-tool-group');
+                const hasActiveTool = group && group.querySelector(`.anno-shape-option[data-tool="${annoState.activeTool}"]`);
+                if (!hasActiveTool) {
+                    b.classList.remove('active');
+                }
+            });
+            annoState.activeCategory = null;
+        }
+
+        // Toggle category dropdown
+        function toggleCategoryDropdown(categoryName) {
+            const dropdown = document.getElementById(`dropdown-${categoryName}`);
+            if (!dropdown) return;
+
+            const isOpen = dropdown.classList.contains('open');
+            closeAllCategoryDropdowns();
+
+            if (!isOpen) {
+                dropdown.classList.add('open');
+                const btn = document.querySelector(`[data-category-toggle="${categoryName}"]`);
+                if (btn) btn.classList.add('active');
+                annoState.activeCategory = categoryName;
+            }
+        }
+
+        // Select a shape tool
+        function selectAnnoTool(toolName) {
+            annoState.activeTool = toolName;
+
+            // Update select button state
+            const selectBtn = document.querySelector('[data-tool="select"]');
+            if (selectBtn) selectBtn.classList.toggle('active', toolName === 'select');
+
+            // Update category button active states
+            document.querySelectorAll('.anno-category-btn').forEach(btn => {
+                const group = btn.closest('.anno-tool-group');
+                const hasActiveTool = group && group.querySelector(`.anno-shape-option[data-tool="${toolName}"]`);
+                btn.classList.toggle('active', !!hasActiveTool);
+            });
+
+            // Update shape option active states
+            document.querySelectorAll('.anno-shape-option').forEach(opt => {
+                opt.classList.toggle('active', opt.dataset.tool === toolName);
+            });
+
+            // Close dropdown after selection
+            closeAllCategoryDropdowns();
+
+            // Re-highlight the category button for the active tool
+            if (toolName !== 'select') {
+                document.querySelectorAll('.anno-category-btn').forEach(btn => {
+                    const group = btn.closest('.anno-tool-group');
+                    const hasActiveTool = group && group.querySelector(`.anno-shape-option[data-tool="${toolName}"]`);
+                    if (hasActiveTool) btn.classList.add('active');
+                });
+            }
+
+            // Update SVG overlay interactivity
+            updateAnnotationLayerInteractivity();
+        }
+
+        // Update annotation layer cursor/pointer-events
+        function updateAnnotationLayerInteractivity() {
+            const layer = document.getElementById('annotationLayer');
+            if (!layer) return;
+            if (annoState.activeTool !== 'select') {
+                layer.classList.add('interactive');
+                layer.classList.remove('selecting');
+            } else {
+                layer.classList.remove('interactive');
+                layer.classList.add('selecting');
+            }
+        }
+
+        // Setup annotation toolbar event listeners
+        function setupAnnotationToolbar() {
+            // Select tool button
+            const selectBtn = document.querySelector('[data-tool="select"]');
+            if (selectBtn) {
+                selectBtn.addEventListener('click', () => selectAnnoTool('select'));
+            }
+
+            // Category toggle buttons
+            document.querySelectorAll('[data-category-toggle]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleCategoryDropdown(btn.dataset.categoryToggle);
+                });
+            });
+
+            // Shape option buttons (inside dropdowns)
+            document.querySelectorAll('.anno-shape-option').forEach(opt => {
+                opt.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectAnnoTool(opt.dataset.tool);
+                });
+            });
+
+            // Color swatches
+            document.querySelectorAll('.anno-color-swatch').forEach(swatch => {
+                swatch.addEventListener('click', () => {
+                    document.querySelectorAll('.anno-color-swatch').forEach(s => s.classList.remove('active'));
+                    swatch.classList.add('active');
+                    annoState.strokeColor = swatch.dataset.color;
+                });
+            });
+
+            // Stroke width buttons
+            document.querySelectorAll('.anno-stroke-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.anno-stroke-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    annoState.strokeWidth = parseInt(btn.dataset.stroke);
+                });
+            });
+
+            // Fill buttons
+            document.querySelectorAll('.anno-fill-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.anno-fill-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    annoState.fillMode = btn.dataset.fill;
+                });
+            });
+
+            // Close dropdowns when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.anno-tool-group[data-category]')) {
+                    closeAllCategoryDropdowns();
+                    // Re-highlight category of active tool
+                    if (annoState.activeTool !== 'select') {
+                        document.querySelectorAll('.anno-category-btn').forEach(btn => {
+                            const group = btn.closest('.anno-tool-group');
+                            const hasActiveTool = group && group.querySelector(`.anno-shape-option[data-tool="${annoState.activeTool}"]`);
+                            if (hasActiveTool) btn.classList.add('active');
+                        });
+                    }
+                }
+            });
+        }
+
+        // ---- SVG Annotation Layer (Feature #83) ----
+        function createAnnotationLayer(drawingDiv) {
+            // Check if layer already exists
+            let layer = drawingDiv.querySelector('.annotation-layer');
+            if (layer) return layer;
+
+            const svgNS = 'http://www.w3.org/2000/svg';
+            layer = document.createElementNS(svgNS, 'svg');
+            layer.setAttribute('class', 'annotation-layer');
+            layer.id = 'annotationLayer';
+            layer.setAttribute('xmlns', svgNS);
+
+            // Add arrowhead marker definitions
+            const defs = document.createElementNS(svgNS, 'defs');
+
+            // Single arrowhead marker (for end)
+            const markerEnd = document.createElementNS(svgNS, 'marker');
+            markerEnd.setAttribute('id', 'anno-arrowhead-end');
+            markerEnd.setAttribute('markerWidth', '10');
+            markerEnd.setAttribute('markerHeight', '7');
+            markerEnd.setAttribute('refX', '10');
+            markerEnd.setAttribute('refY', '3.5');
+            markerEnd.setAttribute('orient', 'auto');
+            markerEnd.setAttribute('markerUnits', 'strokeWidth');
+            const arrowPath = document.createElementNS(svgNS, 'polygon');
+            arrowPath.setAttribute('points', '0 0, 10 3.5, 0 7');
+            arrowPath.setAttribute('fill', 'context-stroke');
+            markerEnd.appendChild(arrowPath);
+            defs.appendChild(markerEnd);
+
+            // Arrowhead marker (for start - reversed)
+            const markerStart = document.createElementNS(svgNS, 'marker');
+            markerStart.setAttribute('id', 'anno-arrowhead-start');
+            markerStart.setAttribute('markerWidth', '10');
+            markerStart.setAttribute('markerHeight', '7');
+            markerStart.setAttribute('refX', '0');
+            markerStart.setAttribute('refY', '3.5');
+            markerStart.setAttribute('orient', 'auto');
+            markerStart.setAttribute('markerUnits', 'strokeWidth');
+            const arrowPathStart = document.createElementNS(svgNS, 'polygon');
+            arrowPathStart.setAttribute('points', '10 0, 0 3.5, 10 7');
+            arrowPathStart.setAttribute('fill', 'context-stroke');
+            markerStart.appendChild(arrowPathStart);
+            defs.appendChild(markerStart);
+
+            layer.appendChild(defs);
+
+            // Mouse events for drawing
+            layer.addEventListener('mousedown', onAnnotationMouseDown);
+            layer.addEventListener('mousemove', onAnnotationMouseMove);
+            layer.addEventListener('mouseup', onAnnotationMouseUp);
+
+            drawingDiv.appendChild(layer);
+            updateAnnotationLayerInteractivity();
+            return layer;
+        }
+
+        // ---- Drawing on the SVG layer (Features #84, #85, #86, #87) ----
+
+        // Helper: compute fill color based on fill mode
+        function getAnnoFillColor(color, fillMode) {
+            if (fillMode === 'none') return 'none';
+            if (fillMode === 'solid') return color;
+            // semi-transparent
+            const r = parseInt(color.slice(1,3), 16);
+            const g = parseInt(color.slice(3,5), 16);
+            const b = parseInt(color.slice(5,7), 16);
+            return `rgba(${r},${g},${b},0.25)`;
+        }
+
+        // Helper: compute block arrow polygon points
+        function getBlockArrowPoints(type, x, y, w, h) {
+            const bx = x + w, by = y + h;
+            const cx = x + w/2, cy = y + h/2;
+            switch(type) {
+                case 'block-arrow-right': {
+                    const hs = x + w * 0.6;
+                    return `${x},${y+h*0.25} ${hs},${y+h*0.25} ${hs},${y} ${bx},${cy} ${hs},${by} ${hs},${y+h*0.75} ${x},${y+h*0.75}`;
+                }
+                case 'block-arrow-left': {
+                    const he = x + w * 0.4;
+                    return `${bx},${y+h*0.25} ${he},${y+h*0.25} ${he},${y} ${x},${cy} ${he},${by} ${he},${y+h*0.75} ${bx},${y+h*0.75}`;
+                }
+                case 'block-arrow-up': {
+                    const he = y + h * 0.4;
+                    return `${x+w*0.25},${by} ${x+w*0.25},${he} ${x},${he} ${cx},${y} ${bx},${he} ${x+w*0.75},${he} ${x+w*0.75},${by}`;
+                }
+                case 'block-arrow-down': {
+                    const hs = y + h * 0.6;
+                    return `${x+w*0.25},${y} ${x+w*0.75},${y} ${x+w*0.75},${hs} ${bx},${hs} ${cx},${by} ${x},${hs} ${x+w*0.25},${hs}`;
+                }
+                case 'block-arrow-chevron': {
+                    const notch = w * 0.35;
+                    return `${x},${y} ${x+w-notch},${y} ${bx},${cy} ${x+w-notch},${by} ${x},${by} ${x+notch},${cy}`;
+                }
+                default: return '';
+            }
+        }
+
+        function onAnnotationMouseDown(e) {
+            if (annoState.activeTool === 'select') return;
+
+            const layer = e.currentTarget;
+            const rect = layer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            annoState.isDrawing = true;
+            annoState.drawStartX = x;
+            annoState.drawStartY = y;
+
+            const svgNS = 'http://www.w3.org/2000/svg';
+            const tool = annoState.activeTool;
+            const fill = getAnnoFillColor(annoState.strokeColor, annoState.fillMode);
+
+            if (tool === 'line' || tool === 'arrow' || tool === 'double-arrow') {
+                const line = document.createElementNS(svgNS, 'line');
+                line.setAttribute('x1', x);
+                line.setAttribute('y1', y);
+                line.setAttribute('x2', x);
+                line.setAttribute('y2', y);
+                line.setAttribute('stroke', annoState.strokeColor);
+                line.setAttribute('stroke-width', annoState.strokeWidth);
+                line.setAttribute('stroke-linecap', 'round');
+
+                if (tool === 'arrow') {
+                    line.setAttribute('marker-end', 'url(#anno-arrowhead-end)');
+                } else if (tool === 'double-arrow') {
+                    line.setAttribute('marker-end', 'url(#anno-arrowhead-end)');
+                    line.setAttribute('marker-start', 'url(#anno-arrowhead-start)');
+                }
+
+                layer.appendChild(line);
+                annoState.currentShapeEl = line;
+            } else if (tool === 'rectangle' || tool === 'rounded-rectangle') {
+                const rectEl = document.createElementNS(svgNS, 'rect');
+                rectEl.setAttribute('x', x);
+                rectEl.setAttribute('y', y);
+                rectEl.setAttribute('width', 0);
+                rectEl.setAttribute('height', 0);
+                if (tool === 'rounded-rectangle') {
+                    rectEl.setAttribute('rx', 0);
+                    rectEl.setAttribute('ry', 0);
+                }
+                rectEl.setAttribute('stroke', annoState.strokeColor);
+                rectEl.setAttribute('stroke-width', annoState.strokeWidth);
+                rectEl.setAttribute('fill', fill);
+                layer.appendChild(rectEl);
+                annoState.currentShapeEl = rectEl;
+            } else if (tool === 'circle') {
+                const ellipse = document.createElementNS(svgNS, 'ellipse');
+                ellipse.setAttribute('cx', x);
+                ellipse.setAttribute('cy', y);
+                ellipse.setAttribute('rx', 0);
+                ellipse.setAttribute('ry', 0);
+                ellipse.setAttribute('stroke', annoState.strokeColor);
+                ellipse.setAttribute('stroke-width', annoState.strokeWidth);
+                ellipse.setAttribute('fill', fill);
+                layer.appendChild(ellipse);
+                annoState.currentShapeEl = ellipse;
+            } else if (tool === 'triangle' || tool === 'diamond') {
+                const polygon = document.createElementNS(svgNS, 'polygon');
+                polygon.setAttribute('points', `${x},${y}`);
+                polygon.setAttribute('stroke', annoState.strokeColor);
+                polygon.setAttribute('stroke-width', annoState.strokeWidth);
+                polygon.setAttribute('fill', fill);
+                layer.appendChild(polygon);
+                annoState.currentShapeEl = polygon;
+            } else if (tool.startsWith('block-arrow-')) {
+                const polygon = document.createElementNS(svgNS, 'polygon');
+                polygon.setAttribute('points', `${x},${y}`);
+                polygon.setAttribute('stroke', annoState.strokeColor);
+                polygon.setAttribute('stroke-width', annoState.strokeWidth);
+                // Block arrows always have at least semi-transparent fill
+                const blockFill = fill === 'none' ? getAnnoFillColor(annoState.strokeColor, 'semi') : fill;
+                polygon.setAttribute('fill', blockFill);
+                layer.appendChild(polygon);
+                annoState.currentShapeEl = polygon;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function onAnnotationMouseMove(e) {
+            if (!annoState.isDrawing || !annoState.currentShapeEl) return;
+
+            const layer = e.currentTarget;
+            const rect = layer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const tool = annoState.activeTool;
+            const el = annoState.currentShapeEl;
+            const sx = annoState.drawStartX;
+            const sy = annoState.drawStartY;
+
+            if (tool === 'line' || tool === 'arrow' || tool === 'double-arrow') {
+                el.setAttribute('x2', x);
+                el.setAttribute('y2', y);
+            } else if (tool === 'rectangle' || tool === 'rounded-rectangle') {
+                const rx = Math.min(sx, x), ry = Math.min(sy, y);
+                const w = Math.abs(x - sx), h = Math.abs(y - sy);
+                el.setAttribute('x', rx);
+                el.setAttribute('y', ry);
+                el.setAttribute('width', w);
+                el.setAttribute('height', h);
+                if (tool === 'rounded-rectangle') {
+                    const r = Math.min(w, h) * 0.15;
+                    el.setAttribute('rx', r);
+                    el.setAttribute('ry', r);
+                }
+            } else if (tool === 'circle') {
+                el.setAttribute('cx', (sx + x) / 2);
+                el.setAttribute('cy', (sy + y) / 2);
+                el.setAttribute('rx', Math.abs(x - sx) / 2);
+                el.setAttribute('ry', Math.abs(y - sy) / 2);
+            } else if (tool === 'triangle') {
+                const rx = Math.min(sx, x), ry = Math.min(sy, y);
+                const w = Math.abs(x - sx), h = Math.abs(y - sy);
+                el.setAttribute('points', `${rx+w/2},${ry} ${rx+w},${ry+h} ${rx},${ry+h}`);
+            } else if (tool === 'diamond') {
+                const rx = Math.min(sx, x), ry = Math.min(sy, y);
+                const w = Math.abs(x - sx), h = Math.abs(y - sy);
+                el.setAttribute('points', `${rx+w/2},${ry} ${rx+w},${ry+h/2} ${rx+w/2},${ry+h} ${rx},${ry+h/2}`);
+            } else if (tool.startsWith('block-arrow-')) {
+                const rx = Math.min(sx, x), ry = Math.min(sy, y);
+                const w = Math.abs(x - sx), h = Math.abs(y - sy);
+                if (w > 2 && h > 2) {
+                    el.setAttribute('points', getBlockArrowPoints(tool, rx, ry, w, h));
+                }
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function onAnnotationMouseUp(e) {
+            if (!annoState.isDrawing) return;
+
+            if (annoState.currentShapeEl) {
+                // Store shape data
+                annoState.shapes.push({
+                    tool: annoState.activeTool,
+                    element: annoState.currentShapeEl,
+                    color: annoState.strokeColor,
+                    width: annoState.strokeWidth,
+                    fillMode: annoState.fillMode,
+                });
+            }
+
+            annoState.isDrawing = false;
+            annoState.currentShapeEl = null;
+
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
         // ---- Start ----
+        setupAnnotationToolbar();
         init();
     </script>
 </body>

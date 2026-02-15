@@ -1,5 +1,25 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 36 - 2026-02-15
+
+**Features Completed This Session:**
+- Feature #91: Clear all annotations and undo last shape (PASSING)
+  - Added Undo and Clear All buttons to annotation toolbar
+  - Undo removes last drawn shape, supports Ctrl+Z keyboard shortcut
+  - Clear All shows browser confirm() dialog before removing all annotations
+  - Cancel on dialog preserves shapes, Confirm clears all
+  - Drawing image unaffected by clearing annotations
+  - Zero console errors
+- Feature #92: Export annotated drawing as PNG (PASSING)
+  - Added "Export Annotated Drawing (.png)" option to Export dropdown
+  - Composites drawing image + SVG annotation overlay onto canvas
+  - Exports as InspectorPro_Annotated_{partNumber}.png
+  - Selection handles removed from export for clean output
+  - Handles both annotated and non-annotated cases
+  - Zero console errors
+
+**Current Status: 91/92 features passing (98.9%)**
+
 ### Session 35 - 2026-02-15
 
 **Features Completed This Session:**

@@ -416,14 +416,15 @@
         }
 
         .viewport-cad {
-            width: 340px;
-            min-width: 340px;
+            flex: 0 0 45%;
+            min-width: 400px;
             border-left: 1px solid var(--border);
             display: grid;
             grid-template-columns: 1fr 1fr;
             grid-template-rows: 1fr 1fr;
-            gap: 2px;
-            padding: 2px;
+            gap: 4px;
+            padding: 4px;
+            min-height: 100%;
         }
 
         .cad-cell {
@@ -435,10 +436,11 @@
             border-radius: 4px;
             overflow: hidden;
             cursor: pointer;
+            min-height: 0;
         }
         .cad-cell img {
-            max-width: 100%;
-            max-height: 100%;
+            width: 100%;
+            height: 100%;
             object-fit: contain;
         }
         .cad-cell-label {
@@ -1414,6 +1416,7 @@
                 const cadGrid = document.createElement('div');
                 cadGrid.className = 'viewport-cad';
                 if (state.activeTab === 'cad') {
+                    cadGrid.style.flex = '1 1 100%';
                     cadGrid.style.width = '100%';
                     cadGrid.style.minWidth = '100%';
                 }

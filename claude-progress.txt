@@ -1,5 +1,28 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 38 - 2026-02-15
+
+**Features Completed This Session:**
+- Feature #96: Annotations persist across tab switches (PASSING)
+  - Already working via data-driven architecture in annotations.js v2
+  - Shapes stored as data objects, re-rendered from data after each tab switch
+  - Verified: Drawing Only → Split View → back, CAD Views Only → back, Report → back
+  - Undo works correctly after tab switches (removes last shape properly)
+  - Zero console errors throughout
+- Feature #97: Annotation toolbar shows on Drawing Only tab for both PDF and image files (PASSING)
+  - Removed isPdf guards from updateAnnotationToolbarVisibility() and renderViewport()
+  - Removed PDF check from createAnnotationLayer() in annotations.js
+  - SVG overlay uses pointer-events:none by default, PDF native tools still accessible
+  - Custom shapes (rectangles, arrows, callouts) can be drawn on top of PDFs
+- Feature #98: Annotation layer only created on Drawing Only tab, not Split View (PASSING)
+  - Fixed annotations.js patched renderViewport to check state.activeTab === 'drawing'
+  - Split View stays clean for side-by-side comparison (no annotation overlay)
+  - Shapes persist in annoState data across tab switches and are restored when returning to Drawing Only
+
+**Current Status: 98/98 features passing (100%!) 🎉**
+
+**All features complete!**
+
 ### Session 37 - 2026-02-15
 
 **Features Completed This Session:**

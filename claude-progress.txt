@@ -1,5 +1,33 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 34 - 2026-02-15
+
+**Features Completed This Session:**
+- Feature #82: Annotation toolbar with shape categories (PASSING)
+  - Added category buttons: Lines, Rectangles, Basic Shapes, Block Arrows, Callouts
+  - Each category button opens a dropdown panel with shape options
+  - Toolbar matches dark theme, only visible when drawing is loaded
+  - Hides on CAD Views Only and Report tabs, reappears on Split/Drawing tabs
+  - Select tool, Color, Stroke, Fill controls all functional
+  - Zero console errors
+
+- Feature #83: SVG overlay layer for drawing annotations (PASSING)
+  - Transparent SVG element overlays drawing viewport
+  - Has arrowhead marker definitions in <defs>
+  - When no shape tool is active (select mode), pointer-events:none allows normal pan/zoom
+  - When a shape tool is selected, overlay becomes interactive with crosshair cursor
+  - Overlay created dynamically when drawing is rendered
+
+- Feature #84: Draw straight lines and arrows on drawing (PASSING)
+  - Straight line: click-drag creates line from start to end point, no arrowheads
+  - Arrow: click-drag creates line with single arrowhead at end (marker-end)
+  - Double arrow: click-drag creates line with arrowheads at both ends (marker-start + marker-end)
+  - All lines rendered with selected stroke color (default red #FF1744) and stroke width
+  - Lines persist on the overlay across interactions
+  - Zero console errors
+
+**Current Status: 84/92 features passing (91.3%)**
+
 ### Session 33 - 2026-02-14
 
 **Features Completed This Session:**

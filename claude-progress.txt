@@ -1,5 +1,21 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 32 - 2026-02-14
+
+**Features Completed This Session:**
+- Feature #80: API endpoints return proper error codes for malformed requests (PASSING)
+  - GET /api/detect-pn without filename → 422 with "Field required" message
+  - POST /api/inspect without file → 422 with missing field details
+  - POST /api/inspect with invalid part_number → 404 with "No inspection profile found" (was 500!)
+  - GET /api/reference-views/ without part number → 404 with "Not Found"
+  - All error responses include descriptive JSON "detail" messages
+  - Zero 500 errors for all known bad input scenarios
+  - Added FileNotFoundError/ValueError-specific exception handlers in server.py
+  - Added validation for empty part_number (422) and empty uploaded file (422)
+  - Zero console errors, no mock data patterns
+
+**Current Status: 78/80 features passing (97.5%)**
+
 ### Session 31 - 2026-02-14
 
 **Features Completed This Session:**

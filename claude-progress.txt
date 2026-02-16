@@ -1,5 +1,35 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 40 - 2026-02-16
+
+**Features Completed This Session:**
+- Feature #99: ASME feature type mapper (PASSING)
+  - Created ai_inspector/spatial/asme_mapper.py
+  - map_feature_type() maps 362+ profile feature type strings to ASME reference categories
+  - Priority-ordered keyword matching: tapped > counterbore > countersink > hole
+  - Supports: TappedHole, Counterbore, Countersink, Spotface, Chamfer, Fillet_Radius, Slot, Keyseat, Knurl, ConicalTaper, Hole
+  - Returns None for unmapped types (sheet metal bends, extrusions, bosses, etc.)
+  - get_all_categories() returns unique set of ASME categories for a list of feature types
+
+- Feature #100: ASME checklist loader (PASSING)
+  - Created ai_inspector/spatial/checklist_loader.py
+  - load_checklists_for_profile() reads profile features, maps to ASME categories
+  - Always includes foundational categories: Dimension_Basics, Line_Conventions
+  - Loads checklist.json from asme_feature_references/{category}/
+  - Gracefully skips missing files with warning (no crash)
+  - Pure data loader — no AI calls, no prompt construction
+
+- Feature #101: Enhanced inspection prompt with ASME checklists (PASSING)
+  - Modified engine.py to import and use checklist_loader
+  - inspect() calls load_checklists_for_profile() before Claude API call
+  - _format_checklists_as_text() converts checklists to readable markdown-style text
+  - Content array includes "=== ASME REPRESENTATION STANDARDS ===" text section
+  - INSPECTION_PROMPT includes instructions to evaluate representation quality against ASME checklists
+  - Existing PRESENT/MISSING/PARTIAL/DISCREPANT checking remains unchanged
+  - Graceful degradation: if checklist loading fails, inspection still works
+
+**Current Status: 101/107 features passing (94.4%)**
+
 ### Session 39 - 2026-02-16
 
 **Features Completed This Session:**

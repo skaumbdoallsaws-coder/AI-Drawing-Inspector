@@ -1,5 +1,28 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 43 - 2026-02-16
+
+**Features Completed This Session:**
+- Feature #109: Fix ASME prompt — sharpen instructions, reduce noise, reorder content (PASSING)
+  - Changed _FOUNDATIONAL_CATEGORIES to empty tuple in checklist_loader.py
+    - Only feature-specific checklists (Hole, Countersink, TappedHole, etc.) are now sent
+    - Dimension_Basics and Line_Conventions (~3500 chars of generic noise) no longer included
+  - Moved ASME text block BEFORE drawing images in engine.py _call_claude_vision()
+    - New content order: CAD views → ASME checklists → Drawing → Prompt
+    - Model reads requirements before evaluating the drawing
+  - Replaced vague ASME prompt instruction with explicit gap-checking language:
+    - "Compare FOUND CALLOUT text against every Required item in the checklist"
+    - Concrete examples: countersink symbol missing, thread class missing
+    - Compliance level definitions: COMPLIANT/MINOR_GAPS/MAJOR_GAPS/NON_COMPLIANT
+    - Instruction to mention important gaps in observation field too
+  - Verified with 11/11 code checks passing (Python import + source inspection)
+  - Browser UI inspection ran successfully (37.5s, 12,177 tokens)
+  - Zero console errors
+  - Note: uvicorn --reload + editable pip install can cause stale module caching;
+    clearing __pycache__ and reinstalling package resolves this
+
+**Current Status: 109/109 features passing (100%)**
+
 ### Session 42 - 2026-02-16
 
 **Features Completed This Session:**

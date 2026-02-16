@@ -131,6 +131,8 @@ against its spatial inspection profile generated from the 3D CAD model.
 {findings_json}
 ```
 
+{asme_section_instructions}
+
 ## Report Format
 
 Write a report with these sections:
@@ -140,7 +142,8 @@ Write a report with these sections:
 3. **CRITICAL ISSUES** — MISSING or DISCREPANT features (if any)
 4. **PARTIAL CALLOUTS** — Features visible but missing dimensions or tolerances
 5. **VIEW ASSESSMENT** — Are the right views and sections present?
-6. **RECOMMENDATIONS** — Specific actions to fix the drawing (if needed)
+{asme_section_number}
+7. **RECOMMENDATIONS** — Specific actions to fix the drawing (if needed)
 
 Keep it concise and actionable. If the drawing is complete, say so clearly.
 """
@@ -393,19 +396,20 @@ class SpatialInspector:
             asme_text=asme_text,
         )
 
+        # --- Compute representation summary (before report so GPT can use it) ---
+        rep_summary = self._compute_representation_summary(
+            findings.get("features", [])
+        )
+
         # --- GPT Report ---
         report_text, gpt_tokens = self._call_gpt_report(
-            findings, part_number, part_name, report_model
+            findings, part_number, part_name, report_model,
+            representation_summary=rep_summary,
         )
 
         elapsed = time.time() - start
 
         gap = findings.get("gap_summary", {})
-
-        # --- Compute representation summary ---
-        rep_summary = self._compute_representation_summary(
-            findings.get("features", [])
-        )
 
         return {
             "part_number": part_number,
@@ -710,12 +714,44 @@ class SpatialInspector:
         part_number: str,
         part_name: str,
         model: str,
+        representation_summary: Optional[dict] = None,
     ) -> tuple[str, int]:
         """Generate QC report via GPT."""
+        # Build the findings JSON, including representation_summary if available
+        findings_for_report = dict(findings)
+        if representation_summary is not None:
+            findings_for_report["representation_summary"] = representation_summary
+
+        # Build ASME section instructions if representation data exists
+        has_gaps = (
+            representation_summary is not None
+            and representation_summary.get("critical_gaps")
+        )
+        if representation_summary is not None:
+            asme_instructions = (
+                "## ASME Representation Data\n\n"
+                "The analysis also evaluated ASME Y14.5 representation compliance for each feature.\n"
+                "Per-feature fields include: representation_score (0-100), representation_gaps (list),\n"
+                "and asme_compliance (COMPLIANT/MINOR_GAPS/MAJOR_GAPS/NON_COMPLIANT).\n"
+                "A representation_summary is included with overall_score and critical_gaps.\n\n"
+                "Include an **ASME REPRESENTATION ANALYSIS** section in the report that covers:\n"
+                "- Overall ASME compliance score and summary\n"
+                "- Per-feature representation issues (only features with gaps)\n"
+                "- Reference specific ASME Y14.5 standards for each gap type\n"
+                "- Recommendations for correcting representation deficiencies\n"
+                "If all features are compliant with no gaps, note that positively and keep the section brief."
+            )
+            asme_section_number = "6. **ASME REPRESENTATION ANALYSIS** — ASME Y14.5 compliance assessment and representation gaps"
+        else:
+            asme_instructions = ""
+            asme_section_number = ""
+
         prompt = REPORT_PROMPT.format(
             part_number=part_number,
             part_name=part_name,
-            findings_json=json.dumps(findings, indent=2),
+            findings_json=json.dumps(findings_for_report, indent=2),
+            asme_section_instructions=asme_instructions,
+            asme_section_number=asme_section_number,
         )
 
         client = OpenAI(api_key=self._openai_key)
@@ -725,7 +761,7 @@ class SpatialInspector:
                 {"role": "system", "content": REPORT_SYSTEM},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=2000,
+            max_tokens=3000,
             temperature=0.3,
         )
 

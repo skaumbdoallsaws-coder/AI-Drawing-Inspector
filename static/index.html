@@ -865,6 +865,17 @@
             gap: 16px;
         }
 
+        .asme-badge {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: 9px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            line-height: 16px;
+            cursor: default;
+        }
+
         /* Error Toast */
         .error-toast {
             position: fixed;
@@ -1498,6 +1509,7 @@
                 <span id="profileCount">Profiles: --</span>
                 <span id="elapsedTime"></span>
                 <span id="tokenUsage"></span>
+                <span id="asmeScore"></span>
             </div>
             <div class="status-bar-right">
                 <span>InspectorPro v1.0</span>
@@ -1580,6 +1592,7 @@
         const profileCountEl = $('profileCount');
         const elapsedTimeEl = $('elapsedTime');
         const tokenUsageEl = $('tokenUsage');
+        const asmeScoreEl = $('asmeScore');
 
         // ---- Initialization ----
         async function init() {
@@ -2112,6 +2125,7 @@
             rightPanelEmpty.style.display = 'flex';
             elapsedTimeEl.textContent = '';
             tokenUsageEl.textContent = '';
+            asmeScoreEl.innerHTML = '';
             fileInput.value = '';
             $('cadToggle').checked = true;
 
@@ -2231,6 +2245,28 @@
             if (r.tokens) {
                 const totalTokens = (r.tokens.claude_input || 0) + (r.tokens.claude_output || 0) + (r.tokens.gpt_total || 0);
                 tokenUsageEl.textContent = `Tokens: ${totalTokens.toLocaleString()}`;
+            }
+
+            // Update ASME compliance badge
+            const repSummary = r.representation_summary;
+            if (repSummary && repSummary.overall_score != null) {
+                const score = Math.round(repSummary.overall_score);
+                let badgeColor;
+                if (score >= 90) badgeColor = '#00E676';
+                else if (score >= 70) badgeColor = '#FFD600';
+                else if (score >= 50) badgeColor = '#FF6D00';
+                else badgeColor = '#FF1744';
+
+                const compliant = repSummary.compliant || 0;
+                const minor = repSummary.minor_gaps || 0;
+                const major = repSummary.major_gaps || 0;
+                const nonCompliant = repSummary.non_compliant || 0;
+                const total = repSummary.total_evaluated || 0;
+                const tooltip = `ASME Representation Compliance: ${compliant} compliant, ${minor} minor gaps, ${major} major gaps out of ${total} evaluated`;
+
+                asmeScoreEl.innerHTML = `<span class="asme-badge" style="color:${badgeColor};border:1px solid ${badgeColor};background:rgba(0,0,0,0.3)" title="${tooltip}">ASME: ${score}%</span>`;
+            } else {
+                asmeScoreEl.innerHTML = '';
             }
 
             // Update feature tree

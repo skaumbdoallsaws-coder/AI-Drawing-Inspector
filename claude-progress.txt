@@ -1,5 +1,31 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 39 - 2026-02-16
+
+**Features Completed This Session:**
+- Feature #102: Representation fields in AI response schema (PASSING)
+  - Updated INSPECTION_PROMPT JSON example to include representation_score, representation_gaps, asme_compliance fields
+  - Added step 4 instructions explaining ASME Y14.5 representation compliance evaluation
+  - Added post-processing in _call_claude_vision() with fallback defaults (score→null, gaps→[], compliance→null)
+  - MISSING features have all representation fields forced to null/empty
+  - Existing response fields (status, severity, observation, found_callout) still parsed correctly
+
+- Feature #103: API response includes representation summary (PASSING)
+  - Added _compute_representation_summary() static method to SpatialInspector
+  - Computes: overall_score (avg), total_evaluated, compliant/minor_gaps/major_gaps/non_compliant counts
+  - critical_gaps: deduplicated top 10 gaps across all features
+  - Returns None when no features have representation data
+  - representation_summary included in inspect() return dict, flows through to /api/inspect response
+
+- Feature #104: Results table shows representation compliance badge (PASSING)
+  - Added .asme-badge CSS class with font-size 0.75em, padding 1px 4px, border-radius 3px, margin-left 6px
+  - Color variants: compliant (green #00E676), minor-gaps (yellow #FFD600), major-gaps (orange #FF6D00), non-compliant (red #FF1744)
+  - getAsmeBadgeHtml() helper returns badge HTML or empty string for null compliance
+  - Both canTransition and fallback branches of renderFeatureTree() include badge rendering
+  - Existing status dots and labels preserved unchanged
+
+**Current Status: 101/107 features passing (94.4%)**
+
 ### Session 38 - 2026-02-15
 
 **Features Completed This Session:**

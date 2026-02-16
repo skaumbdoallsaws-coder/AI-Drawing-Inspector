@@ -421,6 +421,30 @@
             color: var(--present);
             font-style: italic;
         }
+        .feature-detail .warnings-header {
+            color: #FF9800;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 8px;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        .asme-warning-line {
+            display: flex;
+            align-items: start;
+            gap: 6px;
+            padding: 4px 0;
+            font-size: 0.85em;
+            border-left: 2px solid #FF9800;
+            padding-left: 8px;
+            margin: 4px 0;
+        }
+        .caution-icon {
+            color: #FF9800;
+            font-size: 1.1em;
+            flex-shrink: 0;
+        }
 
         /* Center Viewport */
         .center-viewport {
@@ -2401,16 +2425,12 @@
                 html += `<div class="detail-value">ASME Score: ${f.representation_score}/100</div>`;
             }
 
-            // Representation gaps
-            html += `<div class="detail-label">Representation Gaps</div>`;
+            // Representation gaps - show as caution warnings if non-empty
             if (f.representation_gaps && f.representation_gaps.length > 0) {
-                html += `<ul class="gaps-list">`;
+                html += `<div class="warnings-header">Representation Warnings</div>`;
                 f.representation_gaps.forEach(gap => {
-                    html += `<li>${escapeHtml(gap)}</li>`;
+                    html += `<div class="asme-warning-line"><span class="caution-icon">⚠</span><span style="color:#ccc">${escapeHtml(gap)}</span></div>`;
                 });
-                html += `</ul>`;
-            } else {
-                html += `<div class="no-gaps">No representation gaps found</div>`;
             }
 
             html += `</div>`;

@@ -3,6 +3,7 @@ InspectorPro - FastAPI Web Server
 Thin wrapper around the SpatialInspector engine for engineering drawing QC inspection.
 """
 # Updated: proper HTTP error codes for malformed requests
+# Reloaded: ASME prompt improvements (feature #109) - reinstalled package
 
 import os
 import logging

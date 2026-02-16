@@ -14,8 +14,9 @@ from .asme_mapper import get_all_categories
 
 logger = logging.getLogger(__name__)
 
-# Foundational categories always included regardless of feature types
-_FOUNDATIONAL_CATEGORIES = ("Dimension_Basics", "Line_Conventions")
+# Foundational categories — disabled to reduce noise and let the model
+# focus on feature-specific checklists (Countersink, Hole, TappedHole, etc.)
+_FOUNDATIONAL_CATEGORIES = ()
 
 
 def load_checklists_for_profile(

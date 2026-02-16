@@ -66,10 +66,13 @@ For EACH feature listed in the profile:
 Also check the view_expectations — does the drawing include the recommended views
 and section cuts?
 
-{asme_section}For each feature with status PRESENT or PARTIAL, also evaluate its representation
-quality against the ASME checklist for that feature type. Report specific gaps
-(e.g. missing diameter symbol, blind hole without depth dimension, hidden lines
-not per Y14.2 convention).
+{asme_section}For each feature with status PRESENT or PARTIAL:
+- Compare the FOUND CALLOUT text against every item in the ASME checklist 'Required' list for that feature type
+- If ANY required item is not present in the callout or drawing representation, list it in representation_gaps
+- Example: if a countersink hole callout says only 'THRU' without countersink symbol, angle, or countersink diameter, those are each separate gaps
+- Example: if a tapped hole callout has no thread class (e.g., M10x1.5 without -6H), that is a gap
+- Set asme_compliance based on gap severity: COMPLIANT (all required items present), MINOR_GAPS (1-2 missing recommended items), MAJOR_GAPS (1+ missing required items), NON_COMPLIANT (most required items missing)
+- The observation field should ALSO mention the most important gaps in natural language
 
 ## Output
 
@@ -619,7 +622,7 @@ class SpatialInspector:
             profile_json=profile_text,
         )
 
-        # Build content: ref views → drawing pages → text prompt
+        # Build content: ref views → ASME checklists → drawing pages → text prompt
         content: list[dict] = []
 
         if ref_b64:
@@ -640,6 +643,13 @@ class SpatialInspector:
                         },
                     })
 
+        # Inject ASME checklists BEFORE the drawing so the model reads
+        # requirements first, then evaluates the drawing against them.
+        if asme_text:
+            content.append(
+                {"type": "text", "text": "=== ASME REPRESENTATION STANDARDS ===\n\n" + asme_text}
+            )
+
         content.append(
             {"type": "text", "text": "=== ENGINEERING DRAWING TO INSPECT ==="}
         )
@@ -657,12 +667,6 @@ class SpatialInspector:
                     "data": b64,
                 },
             })
-
-        # Inject ASME checklists as text (lightweight, ~200-300 tokens each)
-        if asme_text:
-            content.append(
-                {"type": "text", "text": "=== ASME REPRESENTATION STANDARDS ===\n\n" + asme_text}
-            )
 
         content.append({"type": "text", "text": prompt})
 

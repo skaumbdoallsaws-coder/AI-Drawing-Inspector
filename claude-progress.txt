@@ -1,5 +1,37 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 41 - 2026-02-16
+
+**Features Completed This Session:**
+- Feature #105: Feature detail panel shows representation gaps on click (PASSING)
+  - Click feature in results tree to expand inline detail panel below it
+  - Panel shows: observation text, found_callout, ASME Score (XX/100), representation_gaps as bulleted list
+  - If no gaps: shows "No representation gaps found"
+  - Toggle behavior: click same feature collapses, click different feature switches
+  - Detail panel has dark background (#1a1a2e) with colored left border matching status
+  - Present=green, Missing=red, Partial=yellow, Discrepant=orange borders
+  - Zero console errors
+
+- Feature #106: QC report includes ASME representation analysis section (PASSING)
+  - Moved _compute_representation_summary() call before GPT report generation
+  - Pass representation_summary in findings JSON to GPT
+  - Updated REPORT_PROMPT with conditional ASME section instructions
+  - When representation data exists: adds "ASME REPRESENTATION ANALYSIS" section (section 6)
+  - When no representation data: ASME section omitted entirely (not empty)
+  - Increased max_tokens from 2000 to 3000 for longer reports
+  - Existing report sections (SUMMARY, DRAWING COMPLETENESS, etc.) unchanged
+
+- Feature #107: Overall ASME compliance score display in results header (PASSING)
+  - Added ASME: XX% pill badge in status bar next to elapsed time and tokens
+  - Color-coded: green (>=90%), yellow (70-89%), orange (50-69%), red (<50%)
+  - Styled as rounded pill with semi-transparent background, consistent with dark theme
+  - Tooltip shows: "ASME Representation Compliance: X compliant, Y minor gaps, Z major gaps out of N evaluated"
+  - Hidden when representation_summary is null (backward compatible)
+  - Cleared on New Inspection reset
+  - Zero console errors
+
+**Current Status: 101/107 features passing (94.4%)**
+
 ### Session 40 - 2026-02-16
 
 **Features Completed This Session:**

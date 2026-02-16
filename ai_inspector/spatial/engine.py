@@ -63,6 +63,25 @@ For EACH feature listed in the profile:
    - asme_compliance: COMPLIANT (score 80-100), MINOR_GAPS (60-79), MAJOR_GAPS (30-59), NON_COMPLIANT (0-29)
    - For MISSING features, set representation_score to null, representation_gaps to [], asme_compliance to null
 
+IMPORTANT: The inspection profile's feature type classification may occasionally be wrong.
+If the callout you find on the drawing contradicts the profile's feature type, trust the
+drawing callout. For example:
+- If the profile says 'Countersink' but the callout shows a diameter + depth (no angle),
+  it is actually a Counterbore — evaluate against counterbore requirements
+- If the profile says 'Counterbore' but the callout shows a diameter + angle (no depth),
+  it is actually a Countersink — evaluate against countersink requirements
+- If the profile says 'Through hole' but the callout shows a depth dimension, it is a
+  Blind hole — evaluate accordingly
+- If the profile says 'Blind hole' but the callout shows 'THRU' or no depth, it is a
+  Through hole — evaluate accordingly
+When you detect such a discrepancy:
+1. Note it in the observation field as: 'Profile classifies this as [profile type] but
+   callout indicates [actual type]'
+2. Evaluate the feature against the CORRECT feature type (based on the drawing callout),
+   not the profile's classification
+3. Add 'Profile misclassification: classified as [profile type], actually [actual type]'
+   to the representation_gaps list
+
 Also check the view_expectations — does the drawing include the recommended views
 and section cuts?
 

@@ -356,6 +356,71 @@
             min-width: 35px;
             text-align: right;
         }
+        .asme-badge {
+            font-size: 0.75em;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin-left: 6px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .asme-badge.compliant {
+            background: rgba(0, 230, 118, 0.15);
+            color: #00E676;
+        }
+        .asme-badge.minor-gaps {
+            background: rgba(255, 214, 0, 0.15);
+            color: #FFD600;
+        }
+        .asme-badge.major-gaps {
+            background: rgba(255, 109, 0, 0.15);
+            color: #FF6D00;
+        }
+        .asme-badge.non-compliant {
+            background: rgba(255, 23, 68, 0.15);
+            color: #FF1744;
+        }
+        .feature-detail {
+            padding: 8px 12px 8px 28px;
+            background: #1a1a2e;
+            border-left: 2px solid var(--text-secondary);
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-primary);
+            animation: fadeIn 0.2s ease;
+        }
+        .feature-detail.present { border-left-color: var(--present); }
+        .feature-detail.missing { border-left-color: var(--missing); }
+        .feature-detail.partial { border-left-color: var(--partial); }
+        .feature-detail.discrepant { border-left-color: var(--discrepant); }
+        .feature-detail .detail-label {
+            color: var(--text-secondary);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+            margin-bottom: 2px;
+        }
+        .feature-detail .detail-label:first-child {
+            margin-top: 0;
+        }
+        .feature-detail .detail-value {
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+        .feature-detail .gaps-list {
+            list-style: disc;
+            padding-left: 16px;
+            margin: 2px 0 0 0;
+        }
+        .feature-detail .gaps-list li {
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+        .feature-detail .no-gaps {
+            color: var(--present);
+            font-style: italic;
+        }
 
         /* Center Viewport */
         .center-viewport {
@@ -2278,10 +2343,89 @@
             }
         }
 
+        function buildFeatureDetailHTML(f) {
+            const statusClass = (f.status || '').toLowerCase();
+            let html = `<div class="feature-detail ${statusClass}">`;
+
+            // Observation
+            if (f.observation) {
+                html += `<div class="detail-label">Observation</div>`;
+                html += `<div class="detail-value">${escapeHtml(f.observation)}</div>`;
+            }
+
+            // Found callout
+            if (f.found_callout) {
+                html += `<div class="detail-label">Found Callout</div>`;
+                html += `<div class="detail-value">${escapeHtml(f.found_callout)}</div>`;
+            }
+
+            // Representation score
+            if (f.representation_score != null) {
+                html += `<div class="detail-label">ASME Score</div>`;
+                html += `<div class="detail-value">ASME Score: ${f.representation_score}/100</div>`;
+            }
+
+            // Representation gaps
+            html += `<div class="detail-label">Representation Gaps</div>`;
+            if (f.representation_gaps && f.representation_gaps.length > 0) {
+                html += `<ul class="gaps-list">`;
+                f.representation_gaps.forEach(gap => {
+                    html += `<li>${escapeHtml(gap)}</li>`;
+                });
+                html += `</ul>`;
+            } else {
+                html += `<div class="no-gaps">No representation gaps found</div>`;
+            }
+
+            html += `</div>`;
+            return html;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function toggleFeatureDetail(item, f, tree) {
+            const existingDetail = item.nextElementSibling;
+            const isExpanded = existingDetail && existingDetail.classList.contains('feature-detail');
+
+            // Collapse any open detail panel
+            tree.querySelectorAll('.feature-detail').forEach(d => d.remove());
+            tree.querySelectorAll('.feature-item').forEach(fi => fi.classList.remove('selected'));
+
+            if (!isExpanded) {
+                // Expand this feature's detail
+                item.classList.add('selected');
+                const detailDiv = document.createElement('div');
+                detailDiv.innerHTML = buildFeatureDetailHTML(f);
+                const detailEl = detailDiv.firstElementChild;
+                item.after(detailEl);
+            }
+        }
+
+        function getAsmeBadgeHtml(f) {
+            const compliance = f.asme_compliance;
+            if (!compliance) return '';
+            const badgeMap = {
+                'COMPLIANT': { css: 'compliant', symbol: 'ASME \u2713' },
+                'MINOR_GAPS': { css: 'minor-gaps', symbol: '\u26A0' },
+                'MAJOR_GAPS': { css: 'major-gaps', symbol: '\u26A0' },
+                'NON_COMPLIANT': { css: 'non-compliant', symbol: '\u2717' }
+            };
+            const badge = badgeMap[compliance];
+            if (!badge) return '';
+            return `<span class="asme-badge ${badge.css}">${badge.symbol}</span>`;
+        }
+
         function renderFeatureTree(features) {
             const tree = featureTree;
             const existingItems = tree.querySelectorAll('.feature-item');
             const canTransition = existingItems.length === features.length;
+
+            // Remove any existing detail panels first
+            tree.querySelectorAll('.feature-detail').forEach(d => d.remove());
 
             if (canTransition) {
                 // Update existing items in-place for smooth dot color transition
@@ -2307,11 +2451,21 @@
                     nameEl.title = displayName;
                     statusEl.textContent = statusLabel;
 
+                    // Update or add ASME badge
+                    const existingBadge = item.querySelector('.asme-badge');
+                    if (existingBadge) existingBadge.remove();
+                    const badgeHtml = getAsmeBadgeHtml(f);
+                    if (badgeHtml) {
+                        statusEl.insertAdjacentHTML('afterend', badgeHtml);
+                    }
+
+                    // Store feature data on the element
+                    item._featureData = f;
+
                     // Add click handler if not already present
                     if (!item._hasClickHandler) {
                         item.addEventListener('click', () => {
-                            tree.querySelectorAll('.feature-item').forEach(fi => fi.classList.remove('selected'));
-                            item.classList.add('selected');
+                            toggleFeatureDetail(item, item._featureData, tree);
                         });
                         item._hasClickHandler = true;
                     }
@@ -2330,16 +2484,18 @@
                     const countStr = f.expected_count ? ` ×${f.expected_count}` : '';
                     const displayName = f.name + typeStr + countStr;
 
+                    const badgeHtml = getAsmeBadgeHtml(f);
                     const item = document.createElement('div');
                     item.className = 'feature-item';
                     item.innerHTML = `
                         <div class="feature-dot ${statusClass}"></div>
                         <span class="feature-name" title="${displayName}">${displayName}</span>
                         <span class="feature-status">${statusLabel}</span>
+                        ${badgeHtml}
                     `;
+                    item._featureData = f;
                     item.addEventListener('click', () => {
-                        tree.querySelectorAll('.feature-item').forEach(fi => fi.classList.remove('selected'));
-                        item.classList.add('selected');
+                        toggleFeatureDetail(item, item._featureData, tree);
                     });
                     tree.appendChild(item);
                 });

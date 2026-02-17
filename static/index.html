@@ -1006,22 +1006,50 @@
         .agent-panel-messages .agent-msg {
             padding: 8px 12px;
             border-radius: 8px;
-            font-size: 12px;
+            font-size: 13px;
             line-height: 1.5;
-            max-width: 90%;
+            max-width: 85%;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
         .agent-panel-messages .agent-msg.user {
-            background: var(--primary-btn);
+            background: #0d47a1;
             color: #fff;
             align-self: flex-end;
             border-bottom-right-radius: 2px;
         }
         .agent-panel-messages .agent-msg.assistant {
-            background: rgba(79, 195, 247, 0.1);
+            background: #2a2a2a;
             color: var(--text-primary);
-            border: 1px solid rgba(79, 195, 247, 0.2);
             align-self: flex-start;
             border-bottom-left-radius: 2px;
+        }
+        .agent-panel-messages .agent-msg strong {
+            font-weight: 700;
+        }
+        /* Typing indicator */
+        .agent-typing {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            align-self: flex-start;
+            padding: 10px 16px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            border-bottom-left-radius: 2px;
+        }
+        .agent-typing-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            animation: agentTyping 1.4s infinite;
+        }
+        .agent-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .agent-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes agentTyping {
+            0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+            30% { opacity: 1; transform: translateY(-3px); }
         }
         .agent-panel-input {
             padding: 12px;
@@ -1036,7 +1064,7 @@
             border-radius: 6px;
             padding: 8px 12px;
             color: var(--text-primary);
-            font-size: 12px;
+            font-size: 13px;
             font-family: inherit;
             outline: none;
         }
@@ -1053,12 +1081,16 @@
             color: #fff;
             padding: 8px 12px;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 13px;
             font-family: inherit;
             transition: opacity 0.2s;
         }
         .agent-panel-input button:hover {
             opacity: 0.85;
+        }
+        .agent-panel-input button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
         }
 
         /* Agent Toggle Button */
@@ -1739,12 +1771,12 @@
                     </div>
                     <div class="agent-panel-messages" id="agentMessages">
                         <div class="agent-welcome">
-                            Ask questions about your inspection results, drawing features, or quality standards.
+                            Hi, I can help you fix the issues found in this inspection.
                         </div>
                     </div>
                     <div class="agent-panel-input">
-                        <input type="text" id="agentInput" placeholder="Ask a question..." autocomplete="off">
-                        <button id="agentSendBtn">Send</button>
+                        <input type="text" id="agentInput" placeholder="Type a message..." autocomplete="off">
+                        <button id="agentSendBtn" disabled>Send</button>
                     </div>
                 </div>
             </div>
@@ -3394,18 +3426,33 @@
             // State preserved across open/close
             let agentChatHistory = [];
             let agentPanelOpen = false;
+            let agentWaiting = false;
 
             function toggleAgentPanel() {
                 agentPanelOpen = !agentPanelOpen;
                 if (agentPanelOpen) {
                     agentPanel.classList.add('open');
                     agentToggleBtn.classList.add('active');
-                    // Focus input when panel opens
                     setTimeout(() => agentInput.focus(), 350);
                 } else {
                     agentPanel.classList.remove('open');
                     agentToggleBtn.classList.remove('active');
                 }
+            }
+
+            // Basic markdown: **bold**, preserve newlines, bullet lists
+            function formatMessageText(text) {
+                let html = text
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\n/g, '<br>');
+                // Convert lines starting with - or • to bullet items
+                html = html.replace(/((?:^|<br>)\s*[-•]\s+.+(?:<br>\s*[-•]\s+.+)*)/g, (match) => {
+                    const items = match.split('<br>').filter(l => l.trim())
+                        .map(l => '<li>' + l.replace(/^\s*[-•]\s+/, '') + '</li>').join('');
+                    return '<ul style="margin:4px 0 4px 16px;padding:0;list-style:disc;">' + items + '</ul>';
+                });
+                return html;
             }
 
             function addMessage(text, role) {
@@ -3415,43 +3462,105 @@
 
                 const msgEl = document.createElement('div');
                 msgEl.className = 'agent-msg ' + role;
-                msgEl.textContent = text;
+                if (role === 'user') {
+                    msgEl.textContent = text;
+                } else {
+                    msgEl.innerHTML = formatMessageText(text);
+                }
                 agentMessages.appendChild(msgEl);
                 agentMessages.scrollTop = agentMessages.scrollHeight;
 
                 agentChatHistory.push({ role, text });
             }
 
-            function handleAgentSend() {
+            function showTypingIndicator() {
+                const typing = document.createElement('div');
+                typing.className = 'agent-typing';
+                typing.id = 'agentTypingIndicator';
+                typing.innerHTML = '<div class="agent-typing-dot"></div><div class="agent-typing-dot"></div><div class="agent-typing-dot"></div>';
+                agentMessages.appendChild(typing);
+                agentMessages.scrollTop = agentMessages.scrollHeight;
+            }
+
+            function removeTypingIndicator() {
+                const typing = document.getElementById('agentTypingIndicator');
+                if (typing) typing.remove();
+            }
+
+            function setWaiting(waiting) {
+                agentWaiting = waiting;
+                agentSendBtn.disabled = waiting || !agentInput.value.trim();
+                agentInput.disabled = waiting;
+                if (!waiting) agentInput.focus();
+            }
+
+            function updateSendButtonState() {
+                agentSendBtn.disabled = agentWaiting || !agentInput.value.trim();
+            }
+
+            async function handleAgentSend() {
                 const text = agentInput.value.trim();
-                if (!text) return;
+                if (!text || agentWaiting) return;
+
                 addMessage(text, 'user');
                 agentInput.value = '';
+                updateSendButtonState();
+                setWaiting(true);
+                showTypingIndicator();
 
-                // Provide a contextual response based on current state
-                setTimeout(() => {
-                    let response = '';
+                let response = '';
+                try {
+                    // Try POST to /api/agent/chat
+                    const res = await fetch('/api/agent/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: text,
+                            history: agentChatHistory.slice(0, -1), // exclude the just-added user msg
+                            context: {
+                                part_number: state.partNumber,
+                                part_name: state.partName,
+                                has_results: !!state.results,
+                                gap_summary: state.results ? state.results.gap_summary : null,
+                            }
+                        })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        response = data.response || data.message || 'No response from agent.';
+                    } else {
+                        throw new Error('API returned ' + res.status);
+                    }
+                } catch (err) {
+                    // Fallback: provide contextual response locally
                     if (state.results) {
                         const gs = state.results.gap_summary;
-                        response = `Based on the inspection of part ${state.partNumber} (${state.partName}):\n` +
-                            `Completeness: ${gs.completeness}%\n` +
-                            `Present: ${gs.present}, Missing: ${gs.missing}, Partial: ${gs.partial}\n\n` +
+                        response = `Based on the inspection of part **${state.partNumber}** (${state.partName}):\n` +
+                            `- Completeness: **${gs.completeness}%**\n` +
+                            `- Present: ${gs.present}, Missing: ${gs.missing}, Partial: ${gs.partial}\n\n` +
                             `How can I help you interpret these results?`;
                     } else if (state.partNumber) {
-                        response = `Part ${state.partNumber} (${state.partName}) is loaded with ${state.featureCount} features. ` +
+                        response = `Part **${state.partNumber}** (${state.partName}) is loaded with **${state.featureCount}** features. ` +
                             `Run an inspection to get detailed analysis.`;
                     } else {
                         response = `Upload a drawing and run an inspection first, then I can help you analyze the results.`;
                     }
-                    addMessage(response, 'assistant');
-                }, 500);
+                }
+
+                removeTypingIndicator();
+                addMessage(response, 'assistant');
+                setWaiting(false);
             }
 
             agentToggleBtn.addEventListener('click', toggleAgentPanel);
             agentSendBtn.addEventListener('click', handleAgentSend);
             agentInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') handleAgentSend();
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAgentSend();
+                }
             });
+            agentInput.addEventListener('input', updateSendButtonState);
         })();
 
         // ---- Start ----

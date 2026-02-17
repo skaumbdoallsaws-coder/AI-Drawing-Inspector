@@ -1,5 +1,23 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 46 - 2026-02-17
+
+**Features Completed This Session:**
+- Feature #112: Split View redesign: full-width drawing with CAD views in bottom strip (PASSING)
+  - Redesigned Split View tab layout: drawing now takes full viewport width
+  - 4 CAD reference views displayed as horizontal thumbnail strip at bottom (140px height)
+  - Added CSS class `.viewport-cad-strip` for horizontal layout with flex row
+  - Added `.split-layout` class on viewport-content for column flex direction
+  - Modified renderViewport() JS to use strip layout in Split View, keep 2x2 grid in CAD Views Only
+  - Drawing Only, CAD Views Only, Report tabs verified unchanged
+  - Lightbox click-to-enlarge works from thumbnail strip
+  - Layout tested at 1920px, 1440px, 1280px viewport widths
+  - When no file uploaded but part number selected, CAD strip still shows at bottom
+  - Right panel (results sidebar) is not affected
+  - Zero console errors
+
+**Current Status: 112/112 features passing (100%)**
+
 ### Session 45 - 2026-02-17
 
 **Features Completed This Session:**

@@ -1,5 +1,24 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 49 - 2026-02-17
+
+**Features Completed This Session:**
+- Feature #119: Rework agent system prompt: conversational, context-aware, scoped (PASSING)
+  - Replaced AGENT_SYSTEM_PROMPT with comprehensive prompt starting with "You are InspectorPro Agent"
+  - Added YOUR KNOWLEDGE section: ASME Y14.5-2018, SolidWorks, other CAD packages, drawing conventions
+  - Added YOUR ROLE section: proactively use inspection results, reference findings by name, show callout formats
+  - Added CONVERSATIONAL STYLE section: "like a senior engineer sitting next to them"
+  - Added SCOPE section: engineering drawings, CAD, ASME, GD&T; politely redirect off-topic
+  - Prompt tells agent to never mention RAG reference documents directly
+  - Changed max_tokens from 1024 to 2048 for longer SolidWorks walkthroughs
+  - Verified: "what is wrong with this drawing?" references specific findings (RACK VISE 400, 4 missing holes, gear teeth, 15% completeness)
+  - Verified: SolidWorks countersink question returns menu paths (Insert > Annotations > Hole Callout)
+  - Verified: off-topic question (cooking) gets polite redirect back to engineering domain
+  - RAG retrieval, context building, error handling all unchanged
+  - Zero console errors
+
+**Current Status: 119/119 features passing (100%) 🎉 PROJECT COMPLETE**
+
 ### Session 48 - 2026-02-17
 
 **Features Completed This Session:**

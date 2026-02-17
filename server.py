@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from ai_inspector.spatial import SpatialInspector
+from ai_inspector.spatial.profile_validator import validate_all_profiles
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -140,6 +141,20 @@ async def run_inspection(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error during inspection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/validate-profiles")
+async def validate_profiles():
+    """Run the profile validator and return results as JSON."""
+    try:
+        results = validate_all_profiles("400S_Sorted_Library")
+        return results
+    except FileNotFoundError as e:
+        logger.error(f"Library directory not found for validation: {e}")
+        raise HTTPException(status_code=500, detail="Inspection library not available for validation")
+    except Exception as e:
+        logger.error(f"Error validating profiles: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

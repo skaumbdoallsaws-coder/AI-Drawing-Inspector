@@ -1,5 +1,18 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 47 - 2026-02-17
+
+**Features Completed This Session:**
+- Feature #113: Fix feature list gap: move items up directly under FEATURES heading (PASSING)
+  - Root cause: The FEATURES panel-section had `flex:1` in its inline style, causing it to expand and push the feature tree items to the bottom of the left panel
+  - Fix: Removed `flex:1` from the FEATURES panel-section inline style (kept it on `.feature-tree` CSS for proper scrolling)
+  - Verified gap between FEATURES heading and first item is 10px, matching other sections (Drawing Upload, Part Information)
+  - Tested with 2-feature parts (1008175) and 7-feature parts (1008176)
+  - Left panel section order preserved: DRAWING UPLOAD, PART INFORMATION, CAD checkbox, FEATURES
+  - Zero console errors
+
+**Current Status: 113/113 features passing (100%)**
+
 ### Session 46 - 2026-02-17
 
 **Features Completed This Session:**

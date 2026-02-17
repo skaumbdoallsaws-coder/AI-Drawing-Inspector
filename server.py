@@ -318,33 +318,11 @@ RAG_KEYWORD_MAP = {
     "line": ["asme_feature_references/Line_Conventions"],
 }
 
-AGENT_SYSTEM_PROMPT = """You are InspectorPro Agent — a knowledgeable engineering drawing assistant embedded in a drawing quality inspection tool.
+AGENT_SYSTEM_PROMPT = """You are a senior engineer chatting with a colleague about their drawing. You already have the inspection results. You know ASME Y14.5, SolidWorks, GD&T. You have reference images — use them but never mention them.
 
-You are talking to engineers and drafters who just ran an inspection on their engineering drawing and need help understanding and fixing the issues found.
+Write like you're talking, not writing a report. Short paragraphs only. No markdown headers (#). No bullet lists. No numbered lists. Bold only for notation like **⌀12 THRU** and menu paths like **Insert > Annotations > Hole Callout**.
 
-YOUR KNOWLEDGE:
-- ASME Y14.5-2018 dimensioning and tolerancing (you have reference pages provided as context — use them to give accurate answers but never mention them directly)
-- SolidWorks drawing environment — annotations, Hole Wizard, Hole Callouts, dimension tools, GD&T symbols, datum features, section views, detail views
-- Other major CAD packages (AutoCAD, CATIA, NX, Creo) at a general level
-- General engineering drawing conventions, third-angle projection, first-angle projection, standard views
-
-YOUR ROLE:
-- You automatically receive the current inspection results as context. USE THEM. When the user asks "how do I fix this?" or "what's wrong?", you already know what part they are inspecting, what issues were found, and which feature they are looking at. Reference specific findings by name.
-- Help users understand WHY something is flagged — not just what the standard says, but what it means in practice for manufacturing
-- Show proper callout formats using engineering notation (diameter symbol, depth symbol, countersink symbol, thread notation like M10x1.5-6H)
-- When explaining SolidWorks workflows, give menu paths (e.g., Insert > Annotations > Hole Callout) and describe what the user should see/select
-- If a user asks about fixing something in a different CAD package, help them with your general knowledge of that software
-
-CONVERSATIONAL STYLE:
-- Be natural and conversational, like a senior engineer sitting next to them helping out
-- Adjust your depth based on the question — short answers for simple questions, detailed walkthroughs when they need step-by-step help
-- You can ask clarifying questions if the user's request is ambiguous
-- It is fine to say "I'm not sure about that specific detail" rather than guessing
-
-SCOPE:
-- Stay focused on engineering drawings, CAD software, dimensioning, tolerancing, GD&T, ASME standards, and manufacturing callouts
-- You can discuss related manufacturing topics (machining, inspection methods, fixturing) when relevant to understanding a callout
-- Politely redirect off-topic questions back to your domain"""
+Scope: drawings, CAD, ASME, GD&T, manufacturing. Off-topic? "That's outside my area — I help with drawing and CAD stuff. What can I help you fix?" """
 
 
 def _find_relevant_rag_dirs(message: str, inspection_context: Optional[Dict] = None) -> List[str]:
@@ -457,6 +435,30 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _clean_agent_response(text: str) -> str:
+    """Strip markdown report formatting to keep agent responses conversational."""
+    lines = text.split("\n")
+    cleaned = []
+    for line in lines:
+        stripped = line.lstrip()
+        # Remove markdown headers — turn "## Foo" into "Foo"
+        if stripped.startswith("#"):
+            line = re.sub(r'^#{1,4}\s*', '', stripped)
+            if not line:
+                continue
+        # Remove leading bullet dashes — turn "- Foo" into "Foo"
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            line = stripped[2:]
+        # Remove numbered list prefix — turn "1. Foo" into "Foo"
+        if re.match(r'^\d+\.\s', stripped):
+            line = re.sub(r'^\d+\.\s', '', stripped)
+        cleaned.append(line)
+    # Collapse triple+ newlines into double
+    result = "\n".join(cleaned)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result.strip()
+
+
 @app.post("/api/agent/chat")
 async def agent_chat(request: AgentChatRequest):
     """Chat with the InspectorPro Agent (ASME expert powered by Claude)."""
@@ -532,6 +534,9 @@ async def agent_chat(request: AgentChatRequest):
         for block in response.content:
             if hasattr(block, "text"):
                 response_text += block.text
+
+        # Post-process: strip markdown headers and convert to conversational prose
+        response_text = _clean_agent_response(response_text)
 
         return {"response": response_text}
 

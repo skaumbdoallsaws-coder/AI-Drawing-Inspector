@@ -3510,26 +3510,48 @@
 
                 let response = '';
                 try {
-                    // Try POST to /api/agent/chat
+                    // Build inspection context from current state
+                    const inspCtx = {};
+                    if (state.partNumber) {
+                        inspCtx.part_number = state.partNumber;
+                        inspCtx.part_name = state.partName;
+                    }
+                    if (state.results) {
+                        inspCtx.gap_summary = state.results.gap_summary || null;
+                        inspCtx.findings = (state.results.features || []).map(f => ({
+                            name: f.name, type: f.type, status: f.status,
+                            observation: f.observation || '', found_callout: f.found_callout || '',
+                            representation_gaps: f.representation_gaps || []
+                        }));
+                        const allGaps = [];
+                        (state.results.features || []).forEach(f => {
+                            (f.representation_gaps || []).forEach(g => { if (!allGaps.includes(g)) allGaps.push(g); });
+                        });
+                        inspCtx.representation_gaps = allGaps;
+                        inspCtx.critical_issues = (state.results.gap_summary || {}).critical_issues || [];
+                    }
+
+                    // Build history with 'content' field for backend
+                    const historyForApi = agentChatHistory.slice(0, -1).map(m => ({
+                        role: m.role, content: m.text
+                    }));
+
+                    // POST to /api/agent/chat
                     const res = await fetch('/api/agent/chat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             message: text,
-                            history: agentChatHistory.slice(0, -1), // exclude the just-added user msg
-                            context: {
-                                part_number: state.partNumber,
-                                part_name: state.partName,
-                                has_results: !!state.results,
-                                gap_summary: state.results ? state.results.gap_summary : null,
-                            }
+                            history: historyForApi,
+                            inspection_context: inspCtx,
                         })
                     });
                     if (res.ok) {
                         const data = await res.json();
                         response = data.response || data.message || 'No response from agent.';
                     } else {
-                        throw new Error('API returned ' + res.status);
+                        const errData = await res.json().catch(() => ({}));
+                        throw new Error(errData.detail || 'API returned ' + res.status);
                     }
                 } catch (err) {
                     // Fallback: provide contextual response locally

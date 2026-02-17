@@ -1093,6 +1093,39 @@
             cursor: not-allowed;
         }
 
+        /* Agent Suggestion Chips */
+        .agent-suggestions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 0 4px;
+        }
+        .agent-suggestion-chip {
+            display: block;
+            width: 100%;
+            padding: 8px 12px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 12.5px;
+            line-height: 1.4;
+            cursor: pointer;
+            font-family: inherit;
+            text-align: left;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .agent-suggestion-chip:hover {
+            background: rgba(79, 195, 247, 0.08);
+            border-color: var(--accent);
+        }
+        .agent-suggestions-loading {
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-align: center;
+            padding: 8px;
+        }
+
         /* Agent Toggle Button */
         .btn-agent {
             display: flex;
@@ -1771,7 +1804,7 @@
                     </div>
                     <div class="agent-panel-messages" id="agentMessages">
                         <div class="agent-welcome">
-                            Hi, I can help you fix the issues found in this inspection.
+                            Run an inspection first to get context-aware help, or ask me anything about ASME Y14.5 and SolidWorks annotations.
                         </div>
                     </div>
                     <div class="agent-panel-input">
@@ -2349,6 +2382,8 @@
 
                 state.results = await res.json();
                 showResults();
+                // Notify agent panel of new inspection results
+                if (window._agentOnInspectionComplete) window._agentOnInspectionComplete();
             } catch (e) {
                 // If aborted (user clicked New Inspection), don't show error
                 if (e.name === 'AbortError') {
@@ -3427,6 +3462,139 @@
             let agentChatHistory = [];
             let agentPanelOpen = false;
             let agentWaiting = false;
+            let suggestionsVisible = false;
+            let lastSuggestionsContext = null; // Track which results generated the suggestions
+
+            // Build inspection context from current app state
+            function buildInspectionContext() {
+                const inspCtx = {};
+                if (state.partNumber) {
+                    inspCtx.part_number = state.partNumber;
+                    inspCtx.part_name = state.partName;
+                }
+                if (state.results) {
+                    inspCtx.gap_summary = state.results.gap_summary || null;
+                    inspCtx.completeness_score = (state.results.gap_summary || {}).completeness || null;
+                    inspCtx.findings = (state.results.features || []).map(f => ({
+                        name: f.name, type: f.type, status: f.status,
+                        observation: f.observation || '', found_callout: f.found_callout || '',
+                        representation_gaps: f.representation_gaps || []
+                    }));
+                    const allGaps = [];
+                    (state.results.features || []).forEach(f => {
+                        (f.representation_gaps || []).forEach(g => { if (!allGaps.includes(g)) allGaps.push(g); });
+                    });
+                    inspCtx.representation_gaps = allGaps;
+                    inspCtx.critical_issues = (state.results.gap_summary || {}).critical_issues || [];
+                }
+                return inspCtx;
+            }
+
+            // Update greeting based on inspection results
+            function updateGreeting() {
+                const welcome = agentMessages.querySelector('.agent-welcome');
+                if (!welcome) return; // Messages already sent, don't replace
+                if (state.results) {
+                    const gs = state.results.gap_summary || {};
+                    const issueCount = (gs.missing || 0) + (gs.partial || 0) + (gs.discrepant || 0);
+                    welcome.innerHTML = `I can see the inspection results for <strong>${state.partName || state.partNumber}</strong>. ${issueCount} issue${issueCount !== 1 ? 's were' : ' was'} found. How can I help?`;
+                } else {
+                    welcome.textContent = 'Run an inspection first to get context-aware help, or ask me anything about ASME Y14.5 and SolidWorks annotations.';
+                }
+            }
+
+            // Fetch and display suggestion chips
+            async function loadSuggestions() {
+                if (!state.results) {
+                    removeSuggestions();
+                    return;
+                }
+
+                const inspCtx = buildInspectionContext();
+                // Check if we already generated suggestions for this exact context
+                const ctxKey = JSON.stringify({pn: inspCtx.part_number, ci: inspCtx.critical_issues, rg: inspCtx.representation_gaps});
+                if (ctxKey === lastSuggestionsContext && suggestionsVisible) return;
+
+                removeSuggestions();
+
+                // Show loading
+                const loadingEl = document.createElement('div');
+                loadingEl.className = 'agent-suggestions-loading';
+                loadingEl.id = 'agentSuggestionsLoading';
+                loadingEl.textContent = 'Generating suggestions...';
+                // Insert after welcome if present, otherwise at start
+                const welcome = agentMessages.querySelector('.agent-welcome');
+                if (welcome) {
+                    welcome.after(loadingEl);
+                } else {
+                    agentMessages.prepend(loadingEl);
+                }
+
+                try {
+                    const res = await fetch('/api/agent/suggestions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ inspection_context: inspCtx })
+                    });
+                    // Remove loading
+                    const ld = document.getElementById('agentSuggestionsLoading');
+                    if (ld) ld.remove();
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        const suggestions = data.suggestions || [];
+                        if (suggestions.length > 0) {
+                            renderSuggestionChips(suggestions);
+                            lastSuggestionsContext = ctxKey;
+                        }
+                    }
+                } catch (err) {
+                    // Remove loading on error, silently fail
+                    const ld = document.getElementById('agentSuggestionsLoading');
+                    if (ld) ld.remove();
+                }
+            }
+
+            function renderSuggestionChips(suggestions) {
+                removeSuggestions();
+                const container = document.createElement('div');
+                container.className = 'agent-suggestions';
+                container.id = 'agentSuggestionChips';
+                suggestions.forEach(text => {
+                    const chip = document.createElement('button');
+                    chip.className = 'agent-suggestion-chip';
+                    chip.textContent = text;
+                    chip.addEventListener('click', () => {
+                        sendSuggestion(text);
+                    });
+                    container.appendChild(chip);
+                });
+                // Insert after welcome if present, otherwise at start
+                const welcome = agentMessages.querySelector('.agent-welcome');
+                if (welcome) {
+                    welcome.after(container);
+                } else {
+                    agentMessages.prepend(container);
+                }
+                suggestionsVisible = true;
+                agentMessages.scrollTop = agentMessages.scrollHeight;
+            }
+
+            function removeSuggestions() {
+                const existing = document.getElementById('agentSuggestionChips');
+                if (existing) existing.remove();
+                const loading = document.getElementById('agentSuggestionsLoading');
+                if (loading) loading.remove();
+                suggestionsVisible = false;
+            }
+
+            function sendSuggestion(text) {
+                // Remove suggestions first
+                removeSuggestions();
+                // Set input and trigger send
+                agentInput.value = text;
+                handleAgentSend();
+            }
 
             function toggleAgentPanel() {
                 agentPanelOpen = !agentPanelOpen;
@@ -3434,6 +3602,11 @@
                     agentPanel.classList.add('open');
                     agentToggleBtn.classList.add('active');
                     setTimeout(() => agentInput.focus(), 350);
+                    // Update greeting and load suggestions when opening
+                    updateGreeting();
+                    if (agentChatHistory.length === 0) {
+                        loadSuggestions();
+                    }
                 } else {
                     agentPanel.classList.remove('open');
                     agentToggleBtn.classList.remove('active');
@@ -3459,6 +3632,9 @@
                 // Remove welcome message if present
                 const welcome = agentMessages.querySelector('.agent-welcome');
                 if (welcome) welcome.remove();
+
+                // Remove suggestion chips when any message is sent
+                removeSuggestions();
 
                 const msgEl = document.createElement('div');
                 msgEl.className = 'agent-msg ' + role;
@@ -3510,26 +3686,7 @@
 
                 let response = '';
                 try {
-                    // Build inspection context from current state
-                    const inspCtx = {};
-                    if (state.partNumber) {
-                        inspCtx.part_number = state.partNumber;
-                        inspCtx.part_name = state.partName;
-                    }
-                    if (state.results) {
-                        inspCtx.gap_summary = state.results.gap_summary || null;
-                        inspCtx.findings = (state.results.features || []).map(f => ({
-                            name: f.name, type: f.type, status: f.status,
-                            observation: f.observation || '', found_callout: f.found_callout || '',
-                            representation_gaps: f.representation_gaps || []
-                        }));
-                        const allGaps = [];
-                        (state.results.features || []).forEach(f => {
-                            (f.representation_gaps || []).forEach(g => { if (!allGaps.includes(g)) allGaps.push(g); });
-                        });
-                        inspCtx.representation_gaps = allGaps;
-                        inspCtx.critical_issues = (state.results.gap_summary || {}).critical_issues || [];
-                    }
+                    const inspCtx = buildInspectionContext();
 
                     // Build history with 'content' field for backend
                     const historyForApi = agentChatHistory.slice(0, -1).map(m => ({
@@ -3573,6 +3730,16 @@
                 addMessage(response, 'assistant');
                 setWaiting(false);
             }
+
+            // Expose a method for external code to notify agent of new inspection results
+            window._agentOnInspectionComplete = function() {
+                updateGreeting();
+                // If panel is open and no messages sent yet, refresh suggestions
+                if (agentPanelOpen && agentChatHistory.length === 0) {
+                    lastSuggestionsContext = null; // Force refresh
+                    loadSuggestions();
+                }
+            };
 
             agentToggleBtn.addEventListener('click', toggleAgentPanel);
             agentSendBtn.addEventListener('click', handleAgentSend);

@@ -177,6 +177,105 @@ class AgentChatRequest(BaseModel):
     inspection_context: Optional[Dict[str, Any]] = None
     context: Optional[Dict[str, Any]] = None  # Alternative name from frontend
 
+
+class AgentSuggestionsRequest(BaseModel):
+    inspection_context: Dict[str, Any]
+
+
+SUGGESTION_PROMPT = """Based on these engineering drawing inspection issues, generate 2-3 short questions (max 15 words each) that the engineer would naturally want to ask to fix these problems.
+Focus on: proper ASME notation, how to fix in SolidWorks, and understanding the requirement.
+Return ONLY a JSON array of strings. No other text. Example: ["Question 1?", "Question 2?", "Question 3?"]"""
+
+
+@app.post("/api/agent/suggestions")
+async def agent_suggestions(request: AgentSuggestionsRequest):
+    """Generate context-aware suggestion chips based on inspection results."""
+    try:
+        import anthropic
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Anthropic SDK not installed")
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+
+        ctx = request.inspection_context
+        # Build concise context for suggestion generation
+        context_parts = []
+        pn = ctx.get("part_number", "")
+        pname = ctx.get("part_name", "")
+        if pn:
+            context_parts.append(f"Part: {pn} ({pname})")
+
+        critical_issues = ctx.get("critical_issues", [])
+        if critical_issues:
+            context_parts.append("Critical issues:\n" + "\n".join(f"- {i}" for i in critical_issues[:5]))
+
+        representation_gaps = ctx.get("representation_gaps", [])
+        if representation_gaps:
+            context_parts.append("Representation gaps:\n" + "\n".join(f"- {g}" for g in representation_gaps[:5]))
+
+        findings = ctx.get("findings", [])
+        if findings:
+            issue_findings = [f for f in findings if f.get("status") in ("MISSING", "PARTIAL", "DISCREPANT")]
+            if issue_findings:
+                lines = []
+                for f in issue_findings[:5]:
+                    lines.append(f"- {f.get('name', 'Unknown')}: {f.get('status', 'N/A')} — {(f.get('observation') or '')[:80]}")
+                context_parts.append("Problem features:\n" + "\n".join(lines))
+
+        context_text = "\n\n".join(context_parts)
+        if not context_text:
+            return {"suggestions": []}
+
+        response = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=256,
+            messages=[{
+                "role": "user",
+                "content": f"{SUGGESTION_PROMPT}\n\n--- INSPECTION ISSUES ---\n{context_text}"
+            }],
+        )
+
+        # Parse response
+        response_text = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                response_text += block.text
+
+        # Extract JSON array from response
+        suggestions = []
+        try:
+            # Try direct JSON parse
+            suggestions = json.loads(response_text.strip())
+        except json.JSONDecodeError:
+            # Try to find JSON array in response
+            match = re.search(r'\[.*?\]', response_text, re.DOTALL)
+            if match:
+                try:
+                    suggestions = json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+
+        # Ensure we have a list of strings, max 3
+        if isinstance(suggestions, list):
+            suggestions = [s for s in suggestions if isinstance(s, str)][:3]
+        else:
+            suggestions = []
+
+        return {"suggestions": suggestions}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Agent suggestions error: {e}")
+        # Return empty suggestions on error rather than failing
+        return {"suggestions": []}
+
+
 # RAG keyword mapping to ASME reference directories
 RAG_KEYWORD_MAP = {
     "datum": ["rag_visual_db/07_Datums", "asme_feature_references/GDT_Datums"],

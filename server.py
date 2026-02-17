@@ -420,6 +420,23 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     if gaps:
         parts.append("Representation gaps:\n" + "\n".join(f"- {g}" for g in gaps[:5]))
 
+    # Focused feature — the user has selected/expanded this specific feature
+    focused = inspection_context.get("focused_feature")
+    if focused:
+        ff_parts = [f"CURRENTLY FOCUSED FEATURE: {focused.get('name', 'Unknown')}"]
+        ff_parts.append(f"  Status: {focused.get('status', 'N/A')}")
+        ff_parts.append(f"  Type: {focused.get('type', 'N/A')}")
+        if focused.get("observation"):
+            ff_parts.append(f"  Observation: {focused['observation']}")
+        if focused.get("found_callout"):
+            ff_parts.append(f"  Found callout: {focused['found_callout']}")
+        if focused.get("expected_count"):
+            ff_parts.append(f"  Expected count: {focused['expected_count']}")
+        ff_gaps = focused.get("representation_gaps", [])
+        if ff_gaps:
+            ff_parts.append("  Representation gaps: " + "; ".join(ff_gaps))
+        parts.append("\n".join(ff_parts))
+
     return "\n\n".join(parts)
 
 

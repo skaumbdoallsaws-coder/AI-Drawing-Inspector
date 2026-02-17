@@ -1876,6 +1876,7 @@
             detectPnRequestId: 0,
             inspectionAbortController: null,
             inspectionRequestId: 0,
+            focusedFeature: null,
         };
 
         // DOM Elements
@@ -2436,6 +2437,7 @@
             state.drawingPages = 1;
             state.currentPage = 1;
             state.elapsedSeconds = 0;
+            state.focusedFeature = null;
 
             // Reset UI
             uploadZone.classList.remove('loaded');
@@ -2764,6 +2766,11 @@
                 detailDiv.innerHTML = buildFeatureDetailHTML(f);
                 const detailEl = detailDiv.firstElementChild;
                 item.after(detailEl);
+                // Store focused feature for agent context
+                state.focusedFeature = f;
+            } else {
+                // Collapsed — clear focused feature
+                state.focusedFeature = null;
             }
         }
 
@@ -3487,6 +3494,21 @@
                     inspCtx.representation_gaps = allGaps;
                     inspCtx.critical_issues = (state.results.gap_summary || {}).critical_issues || [];
                 }
+                // Include focused/selected feature if one is expanded
+                if (state.focusedFeature) {
+                    const ff = state.focusedFeature;
+                    inspCtx.focused_feature = {
+                        name: ff.name,
+                        type: ff.type || null,
+                        status: ff.status || null,
+                        observation: ff.observation || '',
+                        found_callout: ff.found_callout || '',
+                        expected_count: ff.expected_count || null,
+                        representation_gaps: ff.representation_gaps || [],
+                        representation_score: ff.representation_score || null,
+                        asme_compliance: ff.asme_compliance || null,
+                    };
+                }
                 return inspCtx;
             }
 
@@ -3731,13 +3753,37 @@
                 setWaiting(false);
             }
 
+            // Add a system-style notification message to the chat
+            function addNotificationMessage(text) {
+                const msgEl = document.createElement('div');
+                msgEl.className = 'agent-msg assistant';
+                msgEl.style.cssText = 'font-style:italic; opacity:0.8; font-size:12px; border-left:2px solid var(--accent); padding-left:10px;';
+                msgEl.textContent = text;
+                agentMessages.appendChild(msgEl);
+                agentMessages.scrollTop = agentMessages.scrollHeight;
+            }
+
             // Expose a method for external code to notify agent of new inspection results
             window._agentOnInspectionComplete = function() {
-                updateGreeting();
-                // If panel is open and no messages sent yet, refresh suggestions
-                if (agentPanelOpen && agentChatHistory.length === 0) {
+                const hasConversation = agentChatHistory.length > 0;
+
+                if (hasConversation) {
+                    // Existing conversation: add notification message
+                    const gs = state.results ? state.results.gap_summary || {} : {};
+                    const issueCount = (gs.missing || 0) + (gs.partial || 0) + (gs.discrepant || 0);
+                    addNotificationMessage(`New inspection completed for ${state.partName || state.partNumber}. ${issueCount} issue${issueCount !== 1 ? 's' : ''} found.`);
+                    // Refresh suggestions if they are still visible
+                    if (suggestionsVisible) {
+                        lastSuggestionsContext = null;
+                        loadSuggestions();
+                    }
+                } else {
+                    // No conversation yet: update greeting and suggestions
+                    updateGreeting();
                     lastSuggestionsContext = null; // Force refresh
-                    loadSuggestions();
+                    if (agentPanelOpen) {
+                        loadSuggestions();
+                    }
                 }
             };
 

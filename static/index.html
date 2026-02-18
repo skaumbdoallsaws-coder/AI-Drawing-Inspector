@@ -1092,6 +1092,67 @@
             opacity: 0.4;
             cursor: not-allowed;
         }
+        /* Camera capture button */
+        .agent-camera-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            padding: 6px 8px;
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+            transition: color 0.2s, border-color 0.2s, background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .agent-camera-btn:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .agent-camera-btn.has-capture {
+            color: var(--accent);
+            border-color: var(--accent);
+            background: rgba(79, 195, 247, 0.1);
+        }
+        /* Screenshot thumbnail preview */
+        .agent-capture-preview {
+            padding: 6px 12px 0 12px;
+            display: none;
+        }
+        .agent-capture-preview.visible {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .agent-capture-thumb {
+            width: 60px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 4px;
+            border: 1px solid var(--accent);
+        }
+        .agent-capture-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex: 1;
+        }
+        .agent-capture-dismiss {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 2px 4px;
+            border-radius: 3px;
+            transition: color 0.2s, background 0.2s;
+        }
+        .agent-capture-dismiss:hover {
+            color: #FF1744;
+            background: rgba(255, 23, 68, 0.1);
+        }
 
         /* Agent Suggestion Chips */
         .agent-suggestions {
@@ -1902,8 +1963,14 @@
                             Run an inspection first to get context-aware help, or ask me anything about ASME Y14.5 and SolidWorks annotations.
                         </div>
                     </div>
+                    <div class="agent-capture-preview" id="agentCapturePreview">
+                        <img class="agent-capture-thumb" id="agentCaptureThumb" alt="Screenshot">
+                        <span class="agent-capture-label">Screenshot attached</span>
+                        <button class="agent-capture-dismiss" id="agentCaptureDismiss" title="Remove screenshot">✕</button>
+                    </div>
                     <div class="agent-panel-input">
                         <input type="text" id="agentInput" placeholder="Type a message..." autocomplete="off">
+                        <button class="agent-camera-btn" id="agentCameraBtn" title="Capture screenshot of current viewport">📷</button>
                         <button id="agentSendBtn" disabled>Send</button>
                     </div>
                 </div>
@@ -3901,6 +3968,10 @@
             const agentInput = $('agentInput');
             const agentSendBtn = $('agentSendBtn');
             const agentMessages = $('agentMessages');
+            const agentCameraBtn = $('agentCameraBtn');
+            const agentCapturePreview = $('agentCapturePreview');
+            const agentCaptureThumb = $('agentCaptureThumb');
+            const agentCaptureDismiss = $('agentCaptureDismiss');
 
             // State preserved across open/close
             let agentChatHistory = [];
@@ -3908,6 +3979,7 @@
             let agentWaiting = false;
             let suggestionsVisible = false;
             let lastSuggestionsContext = null; // Track which results generated the suggestions
+            let agentCapturedImage = null; // Base64 screenshot data URL
 
             // Build inspection context from current app state
             function buildInspectionContext() {
@@ -4130,18 +4202,155 @@
             }
 
             function updateSendButtonState() {
-                agentSendBtn.disabled = agentWaiting || !agentInput.value.trim();
+                // Allow send if there's text OR a captured image
+                const hasText = agentInput.value.trim().length > 0;
+                const hasImage = !!agentCapturedImage;
+                agentSendBtn.disabled = agentWaiting || (!hasText && !hasImage);
             }
+
+            // ---- Camera Capture ----
+            function captureViewportScreenshot() {
+                const tab = state.activeTab;
+                const vc = $('viewportContent');
+                let dataUrl = null;
+
+                try {
+                    if (tab === '3dmodel' && state.threeRenderer) {
+                        // Three.js canvas: capture via renderer.domElement.toDataURL()
+                        state.threeRenderer.render(state.threeScene, state.threeCamera);
+                        dataUrl = state.threeRenderer.domElement.toDataURL('image/png');
+                    } else if (tab === 'drawing' || tab === 'split') {
+                        // Drawing tab: try to capture the drawing image or canvas
+                        const img = vc.querySelector('img');
+                        const canvas = vc.querySelector('canvas');
+                        if (img) {
+                            // Draw image to a temporary canvas for capture
+                            const tempCanvas = document.createElement('canvas');
+                            tempCanvas.width = img.naturalWidth || img.width;
+                            tempCanvas.height = img.naturalHeight || img.height;
+                            const ctx = tempCanvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0);
+                            dataUrl = tempCanvas.toDataURL('image/png');
+                        } else if (canvas) {
+                            dataUrl = canvas.toDataURL('image/png');
+                        } else {
+                            // PDF embed or no content — try html2canvas-like approach
+                            // For now, capture the viewport via a fallback approach
+                            dataUrl = _captureElementFallback(vc);
+                        }
+                    } else if (tab === 'cad') {
+                        // CAD views grid: capture all images into a combined canvas
+                        dataUrl = _captureCadViewsGrid(vc);
+                    } else if (tab === 'report') {
+                        // Report tab: capture the report content area
+                        dataUrl = _captureElementFallback(vc);
+                    }
+                } catch (err) {
+                    console.warn('Screenshot capture failed:', err);
+                }
+
+                return dataUrl;
+            }
+
+            function _captureCadViewsGrid(container) {
+                // Capture 2x2 CAD view images into a combined canvas
+                const imgs = container.querySelectorAll('img');
+                if (!imgs.length) return null;
+                const cols = 2;
+                const rows = Math.ceil(imgs.length / cols);
+                const cellW = 400, cellH = 300;
+                const canvas = document.createElement('canvas');
+                canvas.width = cols * cellW;
+                canvas.height = rows * cellH;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#12121e';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                imgs.forEach((img, i) => {
+                    const col = i % cols;
+                    const row = Math.floor(i / cols);
+                    try {
+                        ctx.drawImage(img, col * cellW, row * cellH, cellW, cellH);
+                    } catch (e) { /* cross-origin, skip */ }
+                });
+                return canvas.toDataURL('image/png');
+            }
+
+            function _captureElementFallback(element) {
+                // Fallback: capture visible content as a simple screenshot using canvas
+                // This is a simplified approach for report or PDF content
+                const rect = element.getBoundingClientRect();
+                const canvas = document.createElement('canvas');
+                const scale = 1;
+                canvas.width = rect.width * scale;
+                canvas.height = rect.height * scale;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#12121e';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#e0e0e0';
+                ctx.font = '14px sans-serif';
+                // Render text content from the element
+                const textContent = element.innerText || element.textContent || '';
+                const lines = textContent.split('\n');
+                let y = 20;
+                for (const line of lines) {
+                    if (y > canvas.height - 10) break;
+                    ctx.fillText(line.substring(0, 120), 10, y);
+                    y += 18;
+                }
+                return canvas.toDataURL('image/png');
+            }
+
+            function setAgentCapture(dataUrl) {
+                agentCapturedImage = dataUrl;
+                if (dataUrl) {
+                    agentCaptureThumb.src = dataUrl;
+                    agentCapturePreview.classList.add('visible');
+                    agentCameraBtn.classList.add('has-capture');
+                } else {
+                    agentCapturePreview.classList.remove('visible');
+                    agentCameraBtn.classList.remove('has-capture');
+                    agentCaptureThumb.src = '';
+                }
+                updateSendButtonState();
+            }
+
+            function clearAgentCapture() {
+                setAgentCapture(null);
+            }
+
+            agentCameraBtn.addEventListener('click', function() {
+                if (agentWaiting) return;
+                const dataUrl = captureViewportScreenshot();
+                if (dataUrl) {
+                    setAgentCapture(dataUrl);
+                } else {
+                    // No content to capture — briefly flash the button
+                    agentCameraBtn.style.color = '#FF1744';
+                    setTimeout(() => { agentCameraBtn.style.color = ''; }, 500);
+                }
+            });
+
+            agentCaptureDismiss.addEventListener('click', clearAgentCapture);
 
             async function handleAgentSend() {
                 const text = agentInput.value.trim();
-                if (!text || agentWaiting) return;
+                const hasImage = !!agentCapturedImage;
+                if ((!text && !hasImage) || agentWaiting) return;
 
-                addMessage(text, 'user');
+                // Build display text (show "📷 Screenshot" if image attached)
+                const displayText = text || (hasImage ? '📷 [Screenshot attached]' : '');
+                addMessage(displayText, 'user');
+
+                // Grab and clear the captured image before clearing UI
+                const imageToSend = agentCapturedImage;
+                clearAgentCapture();
                 agentInput.value = '';
                 updateSendButtonState();
                 setWaiting(true);
                 showTypingIndicator();
+
+                // Use a fallback message if text is empty but image is present
+                const messageText = text || 'What can you see in this screenshot?';
 
                 let response = '';
                 try {
@@ -4153,14 +4362,18 @@
                     }));
 
                     // POST to /api/agent/chat
+                    const payload = {
+                        message: messageText,
+                        history: historyForApi,
+                        inspection_context: inspCtx,
+                    };
+                    if (imageToSend) {
+                        payload.image = imageToSend;
+                    }
                     const res = await fetch('/api/agent/chat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            message: text,
-                            history: historyForApi,
-                            inspection_context: inspCtx,
-                        })
+                        body: JSON.stringify(payload)
                     });
                     if (res.ok) {
                         const data = await res.json();

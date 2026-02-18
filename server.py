@@ -195,6 +195,7 @@ class AgentChatRequest(BaseModel):
     history: Optional[List[Dict[str, Any]]] = []
     inspection_context: Optional[Dict[str, Any]] = None
     context: Optional[Dict[str, Any]] = None  # Alternative name from frontend
+    image: Optional[str] = None  # Base64-encoded screenshot from camera button
 
 
 class AgentSuggestionsRequest(BaseModel):
@@ -530,6 +531,31 @@ async def agent_chat(request: AgentChatRequest):
             user_content.append({
                 "type": "text",
                 "text": f"=== CURRENT INSPECTION CONTEXT ===\n{context_text}"
+            })
+
+        # Add user-attached screenshot (from camera button)
+        if request.image:
+            # Strip data URL prefix if present (e.g., "data:image/png;base64,...")
+            img_data = request.image
+            media_type = "image/png"
+            if img_data.startswith("data:"):
+                # Parse data URL: data:image/png;base64,AAAA...
+                header, img_data = img_data.split(",", 1)
+                if "image/jpeg" in header:
+                    media_type = "image/jpeg"
+                elif "image/webp" in header:
+                    media_type = "image/webp"
+            user_content.append({
+                "type": "text",
+                "text": "=== SCREENSHOT OF CURRENT VIEWPORT (attached by user) ==="
+            })
+            user_content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": img_data,
+                }
             })
 
         # Add the actual user message

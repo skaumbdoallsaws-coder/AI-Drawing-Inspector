@@ -1,5 +1,29 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 51 - 2026-02-18
+
+**Features Completed This Session:**
+- Feature #121: On-demand vision capture — camera button in agent chat (PASSING)
+  - Added 📷 camera button next to Send button in agent chat input area
+  - Captures screenshot of current active viewport tab content on click
+  - Three.js canvas captured via renderer.domElement.toDataURL() for 3D Model tab
+  - Drawing images captured via temp canvas for Drawing Only and Split View tabs
+  - CAD views grid combined into single image for CAD Views Only tab
+  - Report tab captured via text-content fallback renderer
+  - Thumbnail preview with "Screenshot attached" label shown in chat input area
+  - Dismiss (✕) button removes the attached screenshot before sending
+  - Camera button highlights with cyan accent (.has-capture class) when screenshot attached
+  - Send button enabled when image attached (even without text)
+  - Base64 image included in /api/agent/chat request payload
+  - Backend strips data URL prefix, passes image to Claude Vision API as image content block
+  - Agent response references what it sees in the screenshot (tested: rack and pinion, holes, GD&T)
+  - Text-only messages work unchanged when camera is not used
+  - Updated AgentChatRequest model with optional image field
+  - Zero console errors throughout all testing
+  - No mock data patterns found in source code
+
+**Current Status: 121/121 features passing (100%) 🎉 PROJECT COMPLETE**
+
 ### Session 50 - 2026-02-18
 
 **Features Completed This Session:**

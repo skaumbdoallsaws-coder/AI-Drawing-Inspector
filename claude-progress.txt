@@ -1,5 +1,29 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 50 - 2026-02-18
+
+**Features Completed This Session:**
+- Feature #120: 3D Model Viewer — STL file display in new viewport tab (PASSING)
+  - Added 5th tab "3D Model" to center viewport tab bar (Split View | Drawing Only | CAD Views Only | 3D Model | Report)
+  - Three.js loaded via CDN (r128), custom STLLoader class handles both binary and ASCII STL formats
+  - Custom orbit controls: left-drag=orbit, right-drag=pan, scroll=zoom (no OrbitControls dependency)
+  - Light gray MeshPhongMaterial (0xc0c0c8) with specular highlights on dark #12121e background
+  - 3 directional lights + ambient for good model visibility
+  - Placeholder: "Select a part number to view 3D model" when no part selected
+  - Placeholder: "No 3D model available for {PN}" when STL file doesn't exist (404 from API)
+  - GET /api/3d-model/{part_number} endpoint serves raw STL bytes or returns 404
+  - Path traversal protection via regex sanitization of part number
+  - Camera state (position + target) preserved across tab switches via threeCameraState
+  - Fixed critical orbit controls bug: initial _needsUpdate:true + radius:5 was overriding _fitCameraToMesh
+  - Added _syncOrbitFromCamera() to sync spherical coords after camera repositioning
+  - ResizeObserver handles viewport resize correctly
+  - Loading indicator shown during STL fetch, removed on load/error
+  - Mesh cached (threeLoadedPart, threeStlAvailable) to avoid redundant API calls
+  - Zero console errors throughout all testing
+  - Verified with browser automation: cube STL loaded, rendered, camera preserved across tab switches
+
+**Current Status: 120/120 features passing (100%) 🎉 PROJECT COMPLETE**
+
 ### Session 49 - 2026-02-17
 
 **Features Completed This Session:**

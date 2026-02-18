@@ -3001,28 +3001,26 @@
                 _updateSphericalFromCamera();
 
                 // Feature #122: Zoom-to-cursor
-                // Get mouse position in normalized device coords (-1 to +1)
                 const rect = domElement.getBoundingClientRect();
-                const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-                const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                const mouseNDC = new THREE.Vector2(
+                    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                    -((e.clientY - rect.top) / rect.height) * 2 + 1
+                );
 
                 const zoomIn = e.deltaY < 0;
                 const factor = zoomIn ? 0.9 : 1.1;
                 const oldRadius = ctrl._spherical.radius;
-                ctrl._spherical.radius *= factor;
-                ctrl._spherical.radius = Math.max(0.1, ctrl._spherical.radius);
+                ctrl._spherical.radius = Math.max(0.1, ctrl._spherical.radius * factor);
 
-                // Shift target toward cursor position when zooming in, away when zooming out
-                const zoomDelta = oldRadius - ctrl._spherical.radius;
-                if (Math.abs(zoomDelta) > 0.0001) {
-                    // Ray from camera through mouse point
-                    const raycaster = new THREE.Raycaster();
-                    raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
-                    const dir = raycaster.ray.direction.clone();
-                    // Move target along the ray direction proportional to zoom
-                    const shiftAmount = zoomDelta * 0.3;
-                    ctrl.target.addScaledVector(dir, shiftAmount);
-                }
+                // Raycast to find the world point under cursor
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(mouseNDC, camera);
+                // Project a point along the ray at the distance of the current target
+                const distToTarget = camera.position.distanceTo(ctrl.target);
+                const cursorWorldPoint = raycaster.ray.at(distToTarget, new THREE.Vector3());
+                // Shift target toward cursor point proportional to zoom change
+                const zoomRatio = 1 - (ctrl._spherical.radius / oldRadius);
+                ctrl.target.lerp(cursorWorldPoint, zoomRatio);
 
                 ctrl._needsUpdate = true;
             }, { passive: false });

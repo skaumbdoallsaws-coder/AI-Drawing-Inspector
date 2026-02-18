@@ -601,6 +601,51 @@
             font-size: 14px;
         }
 
+        /* 3D Viewer Toolbar - Feature #122 */
+        .three-toolbar {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 4px;
+            padding: 4px 8px;
+            background: rgba(18, 18, 30, 0.85);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            backdrop-filter: blur(6px);
+            pointer-events: auto;
+        }
+        .three-toolbar button {
+            background: var(--surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            letter-spacing: 0.3px;
+        }
+        .three-toolbar button:hover {
+            background: var(--hover);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+        .three-toolbar button:active {
+            background: var(--accent);
+            color: #000;
+        }
+        .three-toolbar .tb-separator {
+            width: 1px;
+            background: var(--border);
+            margin: 2px 4px;
+            align-self: stretch;
+        }
+
         /* Lightbox */
         .lightbox {
             position: fixed;
@@ -2049,6 +2094,7 @@
             threeCameraState: null, // {position, target} preserved across tab switches
             threeLoadedPart: null,  // part number of currently loaded STL
             threeStlAvailable: null, // null=unknown, true=available, false=not found
+            _threeCameraAnimId: null, // Feature #122: camera transition animation frame
         };
 
         // DOM Elements
@@ -2360,6 +2406,11 @@
                 cancelAnimationFrame(state.threeAnimationId);
                 state.threeAnimationId = null;
             }
+            // Feature #122: Cancel camera transition animation
+            if (state._threeCameraAnimId) {
+                cancelAnimationFrame(state._threeCameraAnimId);
+                state._threeCameraAnimId = null;
+            }
             // Dispose Three.js renderer when leaving 3D tab
             if (state.threeRenderer) {
                 state.threeRenderer.dispose();
@@ -2619,6 +2670,9 @@
             });
             resizeObserver.observe(container);
 
+            // Feature #122: Add 3D viewer toolbar
+            _create3DToolbar(container);
+
             // Load the STL
             if (state.threeLoadedPart === state.partNumber && state.threeStlAvailable === true && state.threeMesh) {
                 // Reuse existing mesh geometry (model already loaded)
@@ -2734,6 +2788,134 @@
             controls._needsUpdate = false; // Camera is already in the right place
         }
 
+        // ---- Feature #122: 3D Viewer Toolbar & Preset Views ----
+
+        function _create3DToolbar(container) {
+            const toolbar = document.createElement('div');
+            toolbar.className = 'three-toolbar';
+
+            const buttons = [
+                { label: 'Fit', title: 'Fit to View — show entire model', action: 'fit' },
+                { label: '|', separator: true },
+                { label: 'Front', title: 'Front view', action: 'front' },
+                { label: 'Top', title: 'Top view', action: 'top' },
+                { label: 'Right', title: 'Right view', action: 'right' },
+                { label: 'Iso', title: 'Isometric view', action: 'iso' },
+            ];
+
+            buttons.forEach(b => {
+                if (b.separator) {
+                    const sep = document.createElement('div');
+                    sep.className = 'tb-separator';
+                    toolbar.appendChild(sep);
+                    return;
+                }
+                const btn = document.createElement('button');
+                btn.textContent = b.label;
+                btn.title = b.title;
+                btn.addEventListener('click', () => _handle3DPresetView(b.action));
+                toolbar.appendChild(btn);
+            });
+
+            container.appendChild(toolbar);
+        }
+
+        function _handle3DPresetView(action) {
+            const camera = state.threeCamera;
+            const controls = state.threeControls;
+            const mesh = state.threeMesh;
+            if (!camera || !controls || !mesh) return;
+
+            // Compute model bounds for positioning
+            mesh.geometry.computeBoundingBox();
+            const box = mesh.geometry.boundingBox.clone();
+            // Apply mesh position offset to the bounding box
+            box.min.add(mesh.position);
+            box.max.add(mesh.position);
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            const size = new THREE.Vector3();
+            box.getSize(size);
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let dist = maxDim / (2 * Math.tan(fov / 2));
+            dist *= 1.8; // padding
+
+            let targetPos, targetLookAt;
+            targetLookAt = new THREE.Vector3(0, 0, 0); // model is centered at origin
+
+            switch (action) {
+                case 'fit':
+                    // Isometric-like fit view (same as initial camera)
+                    targetPos = new THREE.Vector3(dist * 0.5, dist * 0.5, dist);
+                    break;
+                case 'front':
+                    // Looking from +Z toward origin
+                    targetPos = new THREE.Vector3(0, 0, dist);
+                    break;
+                case 'top':
+                    // Looking from +Y down (slight Z offset to avoid gimbal lock)
+                    targetPos = new THREE.Vector3(0, dist, dist * 0.001);
+                    break;
+                case 'right':
+                    // Looking from +X toward origin
+                    targetPos = new THREE.Vector3(dist, 0, 0);
+                    break;
+                case 'iso':
+                    // Standard isometric: equal angles
+                    const isoDist = dist * 0.577; // 1/sqrt(3)
+                    targetPos = new THREE.Vector3(isoDist * 1.5, isoDist * 1.5, isoDist * 1.5);
+                    break;
+                default:
+                    return;
+            }
+
+            _animateCameraTo(targetPos, targetLookAt);
+        }
+
+        function _animateCameraTo(targetPos, targetLookAt) {
+            const camera = state.threeCamera;
+            const controls = state.threeControls;
+            if (!camera || !controls) return;
+
+            // Cancel any running camera animation
+            if (state._threeCameraAnimId) {
+                cancelAnimationFrame(state._threeCameraAnimId);
+                state._threeCameraAnimId = null;
+            }
+
+            const startPos = camera.position.clone();
+            const startTarget = controls.target.clone();
+            const duration = 500; // ms
+            const startTime = performance.now();
+
+            function easeInOutCubic(t) {
+                return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            }
+
+            function step(now) {
+                const elapsed = now - startTime;
+                const rawT = Math.min(elapsed / duration, 1);
+                const t = easeInOutCubic(rawT);
+
+                camera.position.lerpVectors(startPos, targetPos, t);
+                controls.target.lerpVectors(startTarget, targetLookAt, t);
+                camera.lookAt(controls.target);
+
+                // Sync orbit spherical coords so manual orbit picks up from here
+                _syncOrbitFromCamera(controls, camera);
+
+                if (rawT < 1) {
+                    state._threeCameraAnimId = requestAnimationFrame(step);
+                } else {
+                    state._threeCameraAnimId = null;
+                }
+            }
+
+            state._threeCameraAnimId = requestAnimationFrame(step);
+        }
+
         function _createOrbitControls(camera, domElement) {
             // Minimal orbit controls: left-drag=orbit, right-drag=pan, scroll=zoom
             const ctrl = {
@@ -2817,9 +2999,31 @@
             domElement.addEventListener('wheel', (e) => {
                 e.preventDefault();
                 _updateSphericalFromCamera();
-                const factor = e.deltaY > 0 ? 1.1 : 0.9;
+
+                // Feature #122: Zoom-to-cursor
+                // Get mouse position in normalized device coords (-1 to +1)
+                const rect = domElement.getBoundingClientRect();
+                const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+                const zoomIn = e.deltaY < 0;
+                const factor = zoomIn ? 0.9 : 1.1;
+                const oldRadius = ctrl._spherical.radius;
                 ctrl._spherical.radius *= factor;
                 ctrl._spherical.radius = Math.max(0.1, ctrl._spherical.radius);
+
+                // Shift target toward cursor position when zooming in, away when zooming out
+                const zoomDelta = oldRadius - ctrl._spherical.radius;
+                if (Math.abs(zoomDelta) > 0.0001) {
+                    // Ray from camera through mouse point
+                    const raycaster = new THREE.Raycaster();
+                    raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
+                    const dir = raycaster.ray.direction.clone();
+                    // Move target along the ray direction proportional to zoom
+                    const shiftAmount = zoomDelta * 0.3;
+                    ctrl.target.addScaledVector(dir, shiftAmount);
+                }
+
                 ctrl._needsUpdate = true;
             }, { passive: false });
 

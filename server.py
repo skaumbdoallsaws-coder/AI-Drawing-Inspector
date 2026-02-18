@@ -164,6 +164,25 @@ async def validate_profiles():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/3d-model/{part_number}")
+async def get_3d_model(part_number: str):
+    """Serve the raw STL file for a part number, or 404 if not found."""
+    # Sanitize part_number to prevent path traversal
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    stl_path = Path("400S_Sorted_Library") / f"{safe_pn}.stl"
+    if not stl_path.exists():
+        raise HTTPException(status_code=404, detail=f"No 3D model found for part number '{part_number}'")
+
+    return FileResponse(
+        path=str(stl_path),
+        media_type="application/octet-stream",
+        filename=f"{safe_pn}.stl",
+    )
+
+
 # ---------- Agent Chat ----------
 
 class AgentMessage(BaseModel):

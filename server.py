@@ -164,6 +164,55 @@ async def validate_profiles():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/profile-details/{part_number}")
+async def get_profile_details(part_number: str):
+    """Return full inspection profile details for a part number.
+
+    Includes feature names, types, expected counts, and spatial descriptions.
+    Used by the Agent to provide pre-inspection context about a part.
+    """
+    # Sanitize part_number to prevent path traversal
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    # Try to find the inspection profile JSON on disk
+    library_dir = Path("400S_Sorted_Library")
+    profile_path = library_dir / f"{safe_pn}_inspection_profile.json"
+    if not profile_path.exists():
+        profile_path = library_dir / f"{safe_pn}.json"
+    if not profile_path.exists():
+        raise HTTPException(status_code=404, detail=f"No profile found for part number '{part_number}'")
+
+    try:
+        with open(profile_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Return a curated subset focused on what the agent needs
+        features = []
+        for feat in data.get("features", []):
+            features.append({
+                "name": feat.get("name", ""),
+                "type": feat.get("type", ""),
+                "count": feat.get("count", 1),
+                "spatial_description": feat.get("spatial_description", ""),
+            })
+
+        return {
+            "part_number": data.get("part_number", safe_pn),
+            "part_name": data.get("part_name", ""),
+            "part_description": data.get("part_description", ""),
+            "features": features,
+            "view_expectations": data.get("view_expectations", {}),
+        }
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in profile for '{part_number}': {e}")
+        raise HTTPException(status_code=500, detail="Invalid profile data")
+    except Exception as e:
+        logger.error(f"Error reading profile for '{part_number}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/3d-model/{part_number}")
 async def get_3d_model(part_number: str):
     """Serve the raw STL file for a part number, or 404 if not found."""
@@ -401,7 +450,7 @@ def _load_rag_images(directories: List[str], max_images: int = 4) -> List[Dict]:
 
 
 def _build_context_message(inspection_context: Optional[Dict]) -> str:
-    """Build a context string from inspection results."""
+    """Build a context string from inspection results or profile data."""
     if not inspection_context:
         return ""
 
@@ -434,6 +483,33 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     gaps = inspection_context.get("representation_gaps", [])
     if gaps:
         parts.append("Representation gaps:\n" + "\n".join(f"- {g}" for g in gaps[:5]))
+
+    # Pre-inspection profile data — available before inspection runs
+    profile_features = inspection_context.get("profile_features", [])
+    if profile_features and not findings:
+        # Only show profile features when we don't have inspection results yet
+        pf_lines = ["Expected features from inspection profile (no inspection run yet):"]
+        for pf in profile_features[:15]:
+            name = pf.get("name", "Unknown")
+            ftype = pf.get("type", "")
+            count = pf.get("count", 1)
+            desc = pf.get("spatial_description", "")
+            line = f"- {name} ({ftype}, expected qty: {count})"
+            if desc:
+                line += f" — {desc[:120]}"
+            pf_lines.append(line)
+        parts.append("\n".join(pf_lines))
+
+    part_desc = inspection_context.get("part_description")
+    if part_desc and not findings:
+        parts.append(f"Part description: {part_desc[:300]}")
+
+    view_expectations = inspection_context.get("view_expectations")
+    if view_expectations and not findings:
+        ve_lines = ["Expected views:"]
+        for view_name, desc in view_expectations.items():
+            ve_lines.append(f"- {view_name}: {desc[:150]}")
+        parts.append("\n".join(ve_lines))
 
     # Focused feature — the user has selected/expanded this specific feature
     focused = inspection_context.get("focused_feature")

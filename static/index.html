@@ -2084,6 +2084,8 @@
             inspectionAbortController: null,
             inspectionRequestId: 0,
             focusedFeature: null,
+            profileData: null, // Full profile details for agent pre-inspection context
+            profileDataRequestId: 0, // Race condition guard for profile fetches
             // 3D Model Viewer state
             threeScene: null,
             threeCamera: null,
@@ -2366,6 +2368,28 @@
 
             // Load CAD reference views
             loadReferenceViews(pn);
+
+            // Load full profile details for agent pre-inspection context
+            loadProfileDetails(pn);
+        }
+
+        async function loadProfileDetails(pn) {
+            const requestId = ++state.profileDataRequestId;
+            try {
+                const res = await fetch(`/api/profile-details/${encodeURIComponent(pn)}`);
+                if (requestId !== state.profileDataRequestId) return; // Stale request
+                if (res.ok) {
+                    state.profileData = await res.json();
+                    // Notify agent panel of part awareness
+                    if (window._agentOnPartDetected) window._agentOnPartDetected();
+                } else {
+                    state.profileData = null;
+                }
+            } catch (e) {
+                if (requestId === state.profileDataRequestId) {
+                    state.profileData = null;
+                }
+            }
         }
 
         async function loadReferenceViews(pn) {
@@ -3144,6 +3168,7 @@
             state.currentPage = 1;
             state.elapsedSeconds = 0;
             state.focusedFeature = null;
+            state.profileData = null;
 
             // Reset UI
             uploadZone.classList.remove('loaded');
@@ -4204,6 +4229,20 @@
                     });
                     inspCtx.representation_gaps = allGaps;
                     inspCtx.critical_issues = (state.results.gap_summary || {}).critical_issues || [];
+                } else if (state.profileData) {
+                    // Pre-inspection: send profile features so agent has part awareness
+                    inspCtx.profile_features = (state.profileData.features || []).map(f => ({
+                        name: f.name,
+                        type: f.type,
+                        count: f.count,
+                        spatial_description: f.spatial_description || '',
+                    }));
+                    if (state.profileData.part_description) {
+                        inspCtx.part_description = state.profileData.part_description;
+                    }
+                    if (state.profileData.view_expectations) {
+                        inspCtx.view_expectations = state.profileData.view_expectations;
+                    }
                 }
                 // Include focused/selected feature if one is expanded
                 if (state.focusedFeature) {
@@ -4223,7 +4262,7 @@
                 return inspCtx;
             }
 
-            // Update greeting based on inspection results
+            // Update greeting based on inspection results or profile data
             function updateGreeting() {
                 const welcome = agentMessages.querySelector('.agent-welcome');
                 if (!welcome) return; // Messages already sent, don't replace
@@ -4231,6 +4270,9 @@
                     const gs = state.results.gap_summary || {};
                     const issueCount = (gs.missing || 0) + (gs.partial || 0) + (gs.discrepant || 0);
                     welcome.innerHTML = `I can see the inspection results for <strong>${state.partName || state.partNumber}</strong>. ${issueCount} issue${issueCount !== 1 ? 's were' : ' was'} found. How can I help?`;
+                } else if (state.profileData && state.partNumber) {
+                    const featureCount = (state.profileData.features || []).length;
+                    welcome.innerHTML = `I can see you have part <strong>${state.partNumber}</strong> (${state.partName || 'unknown'}) loaded with <strong>${featureCount} features</strong>. Ask me about the expected geometry, or run an inspection for detailed analysis.`;
                 } else {
                     welcome.textContent = 'Run an inspection first to get context-aware help, or ask me anything about ASME Y14.5 and SolidWorks annotations.';
                 }
@@ -4636,6 +4678,21 @@
                     if (agentPanelOpen) {
                         loadSuggestions();
                     }
+                }
+            };
+
+            // Expose a method for external code to notify agent of part detection (pre-inspection)
+            window._agentOnPartDetected = function() {
+                if (!state.profileData || !state.partNumber) return;
+                const hasConversation = agentChatHistory.length > 0;
+                const featureCount = (state.profileData.features || []).length;
+
+                if (hasConversation) {
+                    // Existing conversation: add notification about part loaded
+                    addNotificationMessage(`Part ${state.partNumber} (${state.partName}) loaded — ${featureCount} features in profile.`);
+                } else {
+                    // No conversation yet: update greeting to reflect part awareness
+                    updateGreeting();
                 }
             };
 

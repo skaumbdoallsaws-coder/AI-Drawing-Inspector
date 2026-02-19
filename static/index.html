@@ -2501,17 +2501,29 @@
                     embed.style.cssText = 'width:100%;height:100%;';
                     drawingDiv.appendChild(embed);
                 } else {
+                    // Create a wrapper that holds both the image and annotation layer
+                    // Transform is applied to the wrapper so both move together on pan/zoom
+                    const drawingWrapper = document.createElement('div');
+                    drawingWrapper.id = 'drawingWrapper';
+                    drawingWrapper.style.cssText = 'position:relative; display:inline-block; max-width:100%; max-height:100%; transition: transform 0.1s;';
+                    drawingWrapper.style.transform = `scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px)`;
+
                     const img = document.createElement('img');
                     img.src = state.fileDataUrl;
-                    img.style.cssText = `transform: scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px); max-width:100%; max-height:100%; transition: transform 0.1s;`;
+                    img.style.cssText = 'max-width:100%; max-height:100%; display:block;';
                     img.draggable = false;
-                    drawingDiv.appendChild(img);
+                    drawingWrapper.appendChild(img);
+                    drawingDiv.appendChild(drawingWrapper);
+
+                    function updateDrawingTransform() {
+                        drawingWrapper.style.transform = `scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px)`;
+                    }
 
                     // Zoom
                     drawingDiv.addEventListener('wheel', (e) => {
                         e.preventDefault();
                         state.drawingZoom = Math.max(0.2, Math.min(5, state.drawingZoom + (e.deltaY > 0 ? -0.1 : 0.1)));
-                        img.style.transform = `scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px)`;
+                        updateDrawingTransform();
                     });
 
                     // Pan (only when select tool is active, not drawing annotation)
@@ -2525,7 +2537,7 @@
                         if (!state.isPanning) return;
                         state.drawingPanX = e.clientX - state.panStartX;
                         state.drawingPanY = e.clientY - state.panStartY;
-                        img.style.transform = `scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px)`;
+                        updateDrawingTransform();
                     });
                     document.addEventListener('mouseup', () => { state.isPanning = false; });
                 }
@@ -2533,11 +2545,12 @@
                 drawingDiv.appendChild(label);
                 viewportContent.appendChild(drawingDiv);
 
-                // Create SVG annotation layer on top of drawing on Drawing Only tab
-                // Feature #97: Enable for ALL file types including PDFs (custom shapes coexist with PDF native tools)
-                // The SVG overlay uses pointer-events:none by default, so PDF native tools remain accessible
+                // Create SVG annotation layer on top of drawing
                 if (state.activeTab === 'drawing') {
-                    createAnnotationLayer(drawingDiv);
+                    // For image uploads, put annotation layer inside the wrapper
+                    // so annotations transform with the drawing on pan/zoom
+                    const wrapper = document.getElementById('drawingWrapper');
+                    createAnnotationLayer(wrapper || drawingDiv);
                 }
             }
 
@@ -4029,13 +4042,22 @@
             }
         }
 
+        function _svgCoords(e, layer) {
+            // Convert screen mouse coords to SVG-space coords,
+            // accounting for CSS transform (scale) on the parent wrapper
+            const rect = layer.getBoundingClientRect();
+            const zoom = state.drawingZoom || 1;
+            return {
+                x: (e.clientX - rect.left) / zoom,
+                y: (e.clientY - rect.top) / zoom
+            };
+        }
+
         function onAnnotationMouseDown(e) {
             if (annoState.activeTool === 'select') return;
 
             const layer = e.currentTarget;
-            const rect = layer.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const { x, y } = _svgCoords(e, layer);
 
             annoState.isDrawing = true;
             annoState.drawStartX = x;
@@ -4118,9 +4140,7 @@
             if (!annoState.isDrawing || !annoState.currentShapeEl) return;
 
             const layer = e.currentTarget;
-            const rect = layer.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const { x, y } = _svgCoords(e, layer);
 
             const tool = annoState.activeTool;
             const el = annoState.currentShapeEl;

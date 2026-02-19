@@ -595,10 +595,29 @@
         .viewport-empty {
             flex: 1;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             color: var(--text-secondary);
             font-size: 14px;
+            gap: 12px;
+            user-select: none;
+        }
+        .viewport-empty .brand-watermark {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            opacity: 0.08;
+        }
+        .viewport-empty .brand-watermark svg {
+            width: 64px;
+            height: 64px;
+        }
+        .viewport-empty .brand-watermark .brand-name {
+            font-size: 38px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: #ffffff;
         }
 
         /* 3D Viewer Toolbar - Feature #122 */
@@ -1048,25 +1067,72 @@
             text-align: center;
             padding: 24px 8px;
         }
+        .agent-msg-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            max-width: 92%;
+        }
+        .agent-msg-row.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+        .agent-msg-row.assistant {
+            align-self: flex-start;
+        }
+        .agent-msg-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            margin-top: 18px;
+        }
+        .agent-msg-avatar.user-avatar {
+            background: #0d47a1;
+            color: #fff;
+        }
+        .agent-msg-avatar.bot-avatar {
+            background: #1565c0;
+            padding: 3px;
+        }
+        .agent-msg-avatar.bot-avatar svg {
+            width: 100%;
+            height: 100%;
+        }
+        .agent-msg-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .agent-msg-name {
+            font-size: 11px;
+            color: var(--text-secondary);
+            padding: 0 4px;
+        }
+        .agent-msg-row.user .agent-msg-name {
+            text-align: right;
+        }
         .agent-panel-messages .agent-msg {
             padding: 8px 12px;
             border-radius: 8px;
             font-size: 13px;
             line-height: 1.5;
-            max-width: 85%;
             white-space: pre-wrap;
             word-wrap: break-word;
         }
         .agent-panel-messages .agent-msg.user {
             background: #0d47a1;
             color: #fff;
-            align-self: flex-end;
             border-bottom-right-radius: 2px;
         }
         .agent-panel-messages .agent-msg.assistant {
             background: #2a2a2a;
             color: var(--text-primary);
-            align-self: flex-start;
             border-bottom-left-radius: 2px;
         }
         .agent-panel-messages .agent-msg strong {
@@ -1136,6 +1202,18 @@
         .agent-panel-input button:disabled {
             opacity: 0.4;
             cursor: not-allowed;
+        }
+        .agent-beta-disclaimer {
+            padding: 4px 12px 8px;
+            text-align: center;
+            font-size: 10px;
+            color: var(--text-secondary);
+            opacity: 0.6;
+            line-height: 1.4;
+        }
+        .agent-beta-disclaimer span {
+            font-weight: 600;
+            color: var(--accent);
         }
         /* Camera capture button */
         .agent-camera-btn {
@@ -1596,6 +1674,35 @@
             cursor: default;
         }
 
+        /* Auto-annotation findings (Feature #125) */
+        .anno-findings-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 11px;
+            user-select: none;
+        }
+        .anno-findings-toggle input[type="checkbox"] {
+            accent-color: var(--accent);
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+        .anno-findings-label {
+            white-space: nowrap;
+        }
+        .auto-annotation-group {
+            pointer-events: none;
+        }
+        .auto-annotation-label {
+            font-size: 9px;
+            font-family: 'Segoe UI', sans-serif;
+            font-weight: 600;
+            pointer-events: none;
+        }
+
         /* Annotation shape text editing */
         .anno-text-editor {
             position: absolute;
@@ -1958,9 +2065,26 @@
                             Clear All
                         </button>
                     </div>
+                    <!-- Show Findings Toggle (Feature #125) -->
+                    <div class="anno-tool-group" id="annoFindingsGroup" style="display:none;">
+                        <label class="anno-findings-toggle" title="Toggle auto-generated inspection finding annotations">
+                            <input type="checkbox" id="showFindingsToggle" checked>
+                            <span class="anno-findings-label">Show Findings</span>
+                        </label>
+                    </div>
                 </div>
                 <div class="viewport-content" id="viewportContent">
-                    <div class="viewport-empty" id="viewportEmpty">Upload a drawing to begin inspection</div>
+                    <div class="viewport-empty" id="viewportEmpty">
+                        <div class="brand-watermark">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+                                <rect x="2" y="2" width="28" height="28" rx="6" fill="#1565c0"/>
+                                <path d="M8 16h16M16 8v16" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+                                <circle cx="16" cy="16" r="5" stroke="#4fc3f7" stroke-width="1.5" fill="none"/>
+                                <circle cx="16" cy="16" r="9" stroke="#4fc3f7" stroke-width="0.8" fill="none" stroke-dasharray="2 3"/>
+                            </svg>
+                            <span class="brand-name">InspectorPro</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -2018,6 +2142,7 @@
                         <button class="agent-camera-btn" id="agentCameraBtn" title="Capture screenshot of current viewport">📷</button>
                         <button id="agentSendBtn" disabled>Send</button>
                     </div>
+                    <div class="agent-beta-disclaimer"><span>InspectorPro Beta</span> &mdash; Responses may be inaccurate. Always verify critical dimensions against the original drawing.</div>
                 </div>
             </div>
         </div>
@@ -2422,6 +2547,27 @@
             renderViewport();
         }
 
+        function _brandedEmpty(subtitle) {
+            const el = document.createElement('div');
+            el.className = 'viewport-empty';
+            el.innerHTML = `<div class="brand-watermark">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+                    <rect x="2" y="2" width="28" height="28" rx="6" fill="#1565c0"/>
+                    <path d="M8 16h16M16 8v16" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+                    <circle cx="16" cy="16" r="5" stroke="#4fc3f7" stroke-width="1.5" fill="none"/>
+                    <circle cx="16" cy="16" r="9" stroke="#4fc3f7" stroke-width="0.8" fill="none" stroke-dasharray="2 3"/>
+                </svg>
+                <span class="brand-name">InspectorPro</span>
+            </div>`;
+            if (subtitle) {
+                const sub = document.createElement('div');
+                sub.style.cssText = 'opacity:0.5; font-size:13px; margin-top:4px;';
+                sub.textContent = subtitle;
+                el.appendChild(sub);
+            }
+            return el;
+        }
+
         function renderViewport() {
             // Feature #120: Save 3D camera state before clearing viewport
             _save3DCameraState();
@@ -2467,20 +2613,15 @@
             const showCad = state.activeTab === 'split' || state.activeTab === 'cad';
 
             if (!state.file && Object.keys(state.cadViews).length === 0) {
-                const empty = document.createElement('div');
-                empty.className = 'viewport-empty';
-                empty.textContent = 'Upload a drawing to begin inspection';
-                viewportContent.appendChild(empty);
+                viewportContent.appendChild(_brandedEmpty());
                 return;
             }
 
             // Feature #112: In Split View with no file but CAD views available,
             // show empty drawing area above CAD strip
             if (state.activeTab === 'split' && !state.fileDataUrl && Object.keys(state.cadViews).length > 0) {
-                const empty = document.createElement('div');
-                empty.className = 'viewport-empty';
+                const empty = _brandedEmpty();
                 empty.style.flex = '1';
-                empty.textContent = 'Upload a drawing to begin inspection';
                 viewportContent.appendChild(empty);
             }
 
@@ -2598,6 +2739,19 @@
                 empty.className = 'viewport-empty';
                 empty.textContent = state.activeTab === 'report' ? 'Run an inspection to view the report' : 'No content to display';
                 viewportContent.appendChild(empty);
+            }
+
+            // Feature #125: Re-draw auto-annotations if inspection results exist
+            if (state.results && state.results.features && showDrawing) {
+                const annotatableFeatures = state.results.features.filter(f =>
+                    (f.status || '').toUpperCase() !== 'MISSING'
+                );
+                if (annotatableFeatures.length > 0) {
+                    // Delay slightly to ensure image is rendered
+                    setTimeout(() => {
+                        autoAnnotateFindings(state.results);
+                    }, 100);
+                }
             }
         }
 
@@ -3212,6 +3366,13 @@
             annoState.currentShapeEl = null;
             selectAnnoTool('select');
 
+            // Reset auto-annotation state (Feature #125)
+            state.showFindings = true;
+            const findingsGroup = $('annoFindingsGroup');
+            if (findingsGroup) findingsGroup.style.display = 'none';
+            const findingsToggle = $('showFindingsToggle');
+            if (findingsToggle) findingsToggle.checked = true;
+
             runBtn.textContent = 'Run Inspection';
             runBtn.disabled = false;
             runBtn.onclick = handleRunInspection;
@@ -3350,6 +3511,260 @@
 
             // Show export button
             exportBtn.style.display = '';
+
+            // Auto-annotate drawing with inspection findings (Feature #125)
+            // Delay to ensure viewport has been re-rendered with drawing
+            setTimeout(() => {
+                autoAnnotateFindings(r);
+            }, 600);
+        }
+
+        // ---- Auto-Annotation of Inspection Findings (Feature #125) ----
+
+        // Track state for auto-annotations
+        state.showFindings = true;
+
+        function getAutoAnnotationColor(feature) {
+            const status = (feature.status || '').toUpperCase();
+            // Color-code by status (feature spec: red=MISSING/FAIL, yellow=PARTIAL, green=PRESENT/PASS)
+            if (status === 'PRESENT') return '#00E676';
+            if (status === 'PARTIAL') return '#FFD600';
+            if (status === 'MISSING') return '#FF1744';
+            if (status === 'DISCREPANT') return '#FF6D00';
+            return '#4fc3f7'; // default accent
+        }
+
+        function generateFallbackLocations(features) {
+            // Generate evenly-distributed fallback positions for features
+            // that have no AI-provided location data
+            const annotatable = features.filter(f =>
+                (f.status || '').toUpperCase() !== 'MISSING'
+            );
+            if (annotatable.length === 0) return features;
+
+            const cols = Math.min(annotatable.length, 3);
+            const rows = Math.ceil(annotatable.length / cols);
+            const cellW = 90 / cols;
+            const cellH = 80 / rows;
+            let idx = 0;
+
+            return features.map(f => {
+                // Skip if already has location or is MISSING
+                if (f.location && f.location.x_pct != null) return f;
+                if ((f.status || '').toUpperCase() === 'MISSING') return f;
+
+                const col = idx % cols;
+                const row = Math.floor(idx / cols);
+                idx++;
+
+                return {
+                    ...f,
+                    location: {
+                        x_pct: 5 + col * cellW,
+                        y_pct: 10 + row * cellH,
+                        width_pct: Math.min(cellW - 2, 28),
+                        height_pct: Math.min(cellH - 2, 18),
+                        page: 1
+                    }
+                };
+            });
+        }
+
+        function autoAnnotateFindings(results) {
+            if (!results || !results.features) return;
+
+            let features = results.features;
+
+            // Check if any non-MISSING features exist (need something to annotate)
+            const annotatableFeatures = features.filter(f =>
+                (f.status || '').toUpperCase() !== 'MISSING'
+            );
+            if (annotatableFeatures.length === 0) return;
+
+            // Generate fallback locations for features without AI-provided ones
+            const hasAiLocations = features.some(f => f.location && f.location.x_pct != null);
+            if (!hasAiLocations) {
+                features = generateFallbackLocations(features);
+            }
+
+            // Show the findings toggle
+            const findingsGroup = $('annoFindingsGroup');
+            if (findingsGroup) {
+                findingsGroup.style.display = '';
+            }
+
+            // For PDF uploads, swap embed for image so annotations can overlay
+            const isPdf = state.fileDataUrl && state.fileDataUrl.startsWith('data:application/pdf');
+            if (isPdf) {
+                swapPdfToImageForAnnotations({ ...results, features });
+                return; // swapPdfToImage will call drawAutoAnnotations after swap
+            }
+
+            // For image uploads, draw directly
+            drawAutoAnnotations(features);
+        }
+
+        async function swapPdfToImageForAnnotations(results) {
+            try {
+                const formData = new FormData();
+                formData.append('file', state.file);
+                formData.append('page', String(state.currentPage || 1));
+                const resp = await fetch('/api/render-pdf-page', { method: 'POST', body: formData });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (!data.image) return;
+
+                // Find the drawing area
+                const drawingDiv = document.getElementById('drawingArea');
+                if (!drawingDiv) return;
+
+                // Remove the existing embed element
+                const embed = drawingDiv.querySelector('embed');
+                if (embed) embed.remove();
+
+                // Create a drawingWrapper (same as image uploads) with img
+                const drawingWrapper = document.createElement('div');
+                drawingWrapper.id = 'drawingWrapper';
+                drawingWrapper.style.cssText = 'position:relative; display:inline-block; max-width:100%; max-height:100%; transition: transform 0.1s;';
+                drawingWrapper.style.transform = `scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px)`;
+
+                const img = document.createElement('img');
+                img.src = data.image;
+                img.style.cssText = 'max-width:100%; max-height:100%; display:block;';
+                img.draggable = false;
+                drawingWrapper.appendChild(img);
+
+                // Insert wrapper before the label
+                const label = drawingDiv.querySelector('.drawing-label');
+                if (label) {
+                    drawingDiv.insertBefore(drawingWrapper, label);
+                } else {
+                    drawingDiv.appendChild(drawingWrapper);
+                }
+
+                // Set up pan/zoom on the new wrapper
+                function updateDrawingTransform() {
+                    drawingWrapper.style.transform = `scale(${state.drawingZoom}) translate(${state.drawingPanX}px, ${state.drawingPanY}px)`;
+                }
+                drawingDiv.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    state.drawingZoom = Math.max(0.2, Math.min(5, state.drawingZoom + (e.deltaY > 0 ? -0.1 : 0.1)));
+                    updateDrawingTransform();
+                });
+                drawingDiv.addEventListener('mousedown', (e) => {
+                    if (annoState.activeTool !== 'select') return;
+                    state.isPanning = true;
+                    state.panStartX = e.clientX - state.drawingPanX;
+                    state.panStartY = e.clientY - state.drawingPanY;
+                });
+
+                // Create annotation layer on the wrapper
+                createAnnotationLayer(drawingWrapper);
+
+                // Now draw auto-annotations
+                img.onload = () => {
+                    drawAutoAnnotations(results.features);
+                };
+                // In case image is already cached
+                if (img.complete) {
+                    drawAutoAnnotations(results.features);
+                }
+            } catch (e) {
+                console.error('Failed to swap PDF to image for annotations:', e);
+            }
+        }
+
+        function drawAutoAnnotations(features) {
+            const wrapper = document.getElementById('drawingWrapper');
+            if (!wrapper) return;
+
+            const img = wrapper.querySelector('img');
+            if (!img) return;
+
+            // Ensure annotation layer exists
+            let layer = wrapper.querySelector('#annotationLayer');
+            if (!layer) {
+                layer = createAnnotationLayer(wrapper);
+            }
+            if (!layer) return;
+
+            // Remove any existing auto-annotation group
+            const existing = layer.querySelector('#autoAnnotationsGroup');
+            if (existing) existing.remove();
+
+            const svgNS = 'http://www.w3.org/2000/svg';
+            const group = document.createElementNS(svgNS, 'g');
+            group.id = 'autoAnnotationsGroup';
+            group.setAttribute('class', 'auto-annotation-group');
+
+            // Get the rendered image dimensions for coordinate conversion
+            const imgW = img.clientWidth || img.naturalWidth || 800;
+            const imgH = img.clientHeight || img.naturalHeight || 600;
+
+            features.forEach((f, idx) => {
+                if (!f.location || f.location.x_pct == null) return;
+
+                const loc = f.location;
+                const x = (parseFloat(loc.x_pct) / 100) * imgW;
+                const y = (parseFloat(loc.y_pct) / 100) * imgH;
+                const w = (parseFloat(loc.width_pct || 10) / 100) * imgW;
+                const h = (parseFloat(loc.height_pct || 5) / 100) * imgH;
+
+                const color = getAutoAnnotationColor(f);
+
+                // Parse color to get rgba fill
+                const r = parseInt(color.slice(1, 3), 16);
+                const g = parseInt(color.slice(3, 5), 16);
+                const b = parseInt(color.slice(5, 7), 16);
+                const fillColor = `rgba(${r},${g},${b},0.15)`;
+
+                // Create rounded rectangle
+                const rect = document.createElementNS(svgNS, 'rect');
+                rect.setAttribute('x', x);
+                rect.setAttribute('y', y);
+                rect.setAttribute('width', w);
+                rect.setAttribute('height', h);
+                rect.setAttribute('rx', '4');
+                rect.setAttribute('ry', '4');
+                rect.setAttribute('fill', fillColor);
+                rect.setAttribute('stroke', color);
+                rect.setAttribute('stroke-width', '1.5');
+                rect.setAttribute('stroke-dasharray', '6 3');  // Dashed stroke for distinction
+                rect.setAttribute('data-auto-annotation', 'true');
+                group.appendChild(rect);
+
+                // Add small label with feature name
+                const label = document.createElementNS(svgNS, 'text');
+                label.setAttribute('x', x + 3);
+                label.setAttribute('y', y - 3);
+                label.setAttribute('fill', color);
+                label.setAttribute('class', 'auto-annotation-label');
+                label.setAttribute('data-auto-annotation', 'true');
+                // Truncate long names
+                const displayName = f.name.length > 25 ? f.name.substring(0, 22) + '...' : f.name;
+                label.textContent = displayName;
+                group.appendChild(label);
+            });
+
+            layer.appendChild(group);
+
+            // Apply current visibility state
+            const toggle = $('showFindingsToggle');
+            if (toggle && !toggle.checked) {
+                group.style.display = 'none';
+            }
+        }
+
+        // Show Findings toggle handler
+        const showFindingsToggle = $('showFindingsToggle');
+        if (showFindingsToggle) {
+            showFindingsToggle.addEventListener('change', (e) => {
+                state.showFindings = e.target.checked;
+                const group = document.getElementById('autoAnnotationsGroup');
+                if (group) {
+                    group.style.display = e.target.checked ? '' : 'none';
+                }
+            });
         }
 
         function renderResults(r) {
@@ -4423,6 +4838,8 @@
                 return html;
             }
 
+            const _logoSvgSmall = `<svg viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="28" height="28" rx="6" fill="#1565c0"/><path d="M8 16h16M16 8v16" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><circle cx="16" cy="16" r="5" stroke="#4fc3f7" stroke-width="1.5" fill="none"/><circle cx="16" cy="16" r="9" stroke="#4fc3f7" stroke-width="0.8" fill="none" stroke-dasharray="2 3"/></svg>`;
+
             function addMessage(text, role) {
                 // Remove welcome message if present
                 const welcome = agentMessages.querySelector('.agent-welcome');
@@ -4431,6 +4848,27 @@
                 // Remove suggestion chips when any message is sent
                 removeSuggestions();
 
+                // Build message row with avatar and name
+                const row = document.createElement('div');
+                row.className = 'agent-msg-row ' + role;
+
+                const avatar = document.createElement('div');
+                avatar.className = 'agent-msg-avatar';
+                if (role === 'user') {
+                    avatar.classList.add('user-avatar');
+                    avatar.textContent = 'SK';
+                } else {
+                    avatar.classList.add('bot-avatar');
+                    avatar.innerHTML = _logoSvgSmall;
+                }
+
+                const content = document.createElement('div');
+                content.className = 'agent-msg-content';
+
+                const name = document.createElement('div');
+                name.className = 'agent-msg-name';
+                name.textContent = role === 'user' ? 'Shadrack' : 'InspectorPro';
+
                 const msgEl = document.createElement('div');
                 msgEl.className = 'agent-msg ' + role;
                 if (role === 'user') {
@@ -4438,18 +4876,41 @@
                 } else {
                     msgEl.innerHTML = formatMessageText(text);
                 }
-                agentMessages.appendChild(msgEl);
+
+                content.appendChild(name);
+                content.appendChild(msgEl);
+                row.appendChild(avatar);
+                row.appendChild(content);
+
+                agentMessages.appendChild(row);
                 agentMessages.scrollTop = agentMessages.scrollHeight;
 
                 agentChatHistory.push({ role, text });
             }
 
             function showTypingIndicator() {
+                const row = document.createElement('div');
+                row.className = 'agent-msg-row assistant';
+                row.id = 'agentTypingIndicator';
+
+                const avatar = document.createElement('div');
+                avatar.className = 'agent-msg-avatar bot-avatar';
+                avatar.innerHTML = _logoSvgSmall;
+
+                const content = document.createElement('div');
+                content.className = 'agent-msg-content';
+                const name = document.createElement('div');
+                name.className = 'agent-msg-name';
+                name.textContent = 'InspectorPro';
                 const typing = document.createElement('div');
                 typing.className = 'agent-typing';
-                typing.id = 'agentTypingIndicator';
                 typing.innerHTML = '<div class="agent-typing-dot"></div><div class="agent-typing-dot"></div><div class="agent-typing-dot"></div>';
-                agentMessages.appendChild(typing);
+                content.appendChild(name);
+                content.appendChild(typing);
+
+                row.appendChild(avatar);
+                row.appendChild(content);
+                agentMessages.appendChild(row);
                 agentMessages.scrollTop = agentMessages.scrollHeight;
             }
 
@@ -4702,11 +5163,28 @@
 
             // Add a system-style notification message to the chat
             function addNotificationMessage(text) {
+                const row = document.createElement('div');
+                row.className = 'agent-msg-row assistant';
+
+                const avatar = document.createElement('div');
+                avatar.className = 'agent-msg-avatar bot-avatar';
+                avatar.innerHTML = _logoSvgSmall;
+
+                const content = document.createElement('div');
+                content.className = 'agent-msg-content';
+                const name = document.createElement('div');
+                name.className = 'agent-msg-name';
+                name.textContent = 'InspectorPro';
                 const msgEl = document.createElement('div');
                 msgEl.className = 'agent-msg assistant';
                 msgEl.style.cssText = 'font-style:italic; opacity:0.8; font-size:12px; border-left:2px solid var(--accent); padding-left:10px;';
                 msgEl.textContent = text;
-                agentMessages.appendChild(msgEl);
+                content.appendChild(name);
+                content.appendChild(msgEl);
+                row.appendChild(avatar);
+                row.appendChild(content);
+
+                agentMessages.appendChild(row);
                 agentMessages.scrollTop = agentMessages.scrollHeight;
             }
 

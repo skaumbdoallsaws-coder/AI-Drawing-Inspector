@@ -4,6 +4,7 @@ Thin wrapper around the SpatialInspector engine for engineering drawing QC inspe
 """
 # Updated: proper HTTP error codes for malformed requests
 # Reloaded: ASME prompt improvements (feature #109) - reinstalled package
+# Reloaded: Feature #125 - auto-annotation bounding box locations in inspection prompt
 
 import os
 import re
@@ -136,6 +137,15 @@ async def run_inspection(
         )
 
         logger.info(f"Inspection complete for {part_number}: {result.get('gap_summary', {}).get('completeness', 'N/A')}")
+
+        # Feature #125: Ensure every feature has a location field for auto-annotation
+        for feature in result.get("features", []):
+            if "location" not in feature:
+                feature["location"] = None
+            # Force null location for MISSING features
+            if feature.get("status") == "MISSING":
+                feature["location"] = None
+
         return result
     except HTTPException:
         raise  # Re-raise HTTPExceptions as-is

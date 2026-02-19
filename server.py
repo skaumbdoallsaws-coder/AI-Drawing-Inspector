@@ -677,6 +677,63 @@ async def agent_chat(request: AgentChatRequest):
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
 
 
+# ---------- PDF Rendering ----------
+
+
+@app.post("/api/render-pdf-page")
+async def render_pdf_page(
+    file: UploadFile = File(...),
+    page: int = Form(1),
+):
+    """Render a PDF page to a PNG image and return it as base64.
+
+    Used by the frontend camera capture when the uploaded drawing is a PDF,
+    since browser embed elements cannot be captured via JavaScript canvas.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PyMuPDF (fitz) is not installed")
+
+    try:
+        pdf_bytes = await file.read()
+        if len(pdf_bytes) == 0:
+            raise HTTPException(status_code=422, detail="Uploaded PDF file is empty")
+
+        # Open the PDF from bytes
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        page_count = len(doc)
+
+        # Validate page number (1-based)
+        if page < 1 or page > page_count:
+            doc.close()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid page number {page}. PDF has {page_count} page(s)."
+            )
+
+        # Render the page at 2x resolution for clarity
+        pdf_page = doc.load_page(page - 1)  # 0-indexed
+        zoom = 2.0
+        mat = fitz.Matrix(zoom, zoom)
+        pix = pdf_page.get_pixmap(matrix=mat)
+        png_bytes = pix.tobytes("png")
+        doc.close()
+
+        # Encode as base64 data URL
+        b64 = base64.b64encode(png_bytes).decode("utf-8")
+        data_url = f"data:image/png;base64,{b64}"
+
+        logger.info(f"Rendered PDF page {page}/{page_count} to PNG ({len(png_bytes)} bytes)")
+        return {"image": data_url, "page": page, "total_pages": page_count}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rendering PDF page: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to render PDF page: {str(e)}")
+
+
 # ---------- Static Files ----------
 
 # Serve the frontend

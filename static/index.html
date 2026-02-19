@@ -4453,7 +4453,29 @@
             }
 
             // ---- Camera Capture ----
-            function captureViewportScreenshot() {
+            async function _renderPdfPageOnServer() {
+                // Send the PDF file to the server for rendering the current page to PNG
+                if (!state.file || !state.fileDataUrl || !state.fileDataUrl.startsWith('data:application/pdf')) {
+                    return null;
+                }
+                try {
+                    const formData = new FormData();
+                    formData.append('file', state.file);
+                    formData.append('page', String(state.currentPage || 1));
+                    const resp = await fetch('/api/render-pdf-page', { method: 'POST', body: formData });
+                    if (!resp.ok) {
+                        console.warn('PDF render endpoint returned', resp.status);
+                        return null;
+                    }
+                    const data = await resp.json();
+                    return data.image || null; // data URL: "data:image/png;base64,..."
+                } catch (err) {
+                    console.warn('PDF server-side render failed:', err);
+                    return null;
+                }
+            }
+
+            async function captureViewportScreenshot() {
                 const tab = state.activeTab;
                 const vc = $('viewportContent');
                 let dataUrl = null;
@@ -4465,22 +4487,25 @@
                         dataUrl = state.threeRenderer.domElement.toDataURL('image/png');
                     } else if (tab === 'drawing' || tab === 'split') {
                         // Drawing tab: try to capture the drawing image or canvas
-                        const img = vc.querySelector('img');
-                        const canvas = vc.querySelector('canvas');
-                        if (img) {
-                            // Draw image to a temporary canvas for capture
-                            const tempCanvas = document.createElement('canvas');
-                            tempCanvas.width = img.naturalWidth || img.width;
-                            tempCanvas.height = img.naturalHeight || img.height;
-                            const ctx = tempCanvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0);
-                            dataUrl = tempCanvas.toDataURL('image/png');
-                        } else if (canvas) {
-                            dataUrl = canvas.toDataURL('image/png');
+                        // Check if this is a PDF drawing — use server-side rendering
+                        if (state.fileDataUrl && state.fileDataUrl.startsWith('data:application/pdf')) {
+                            dataUrl = await _renderPdfPageOnServer();
                         } else {
-                            // PDF embed or no content — try html2canvas-like approach
-                            // For now, capture the viewport via a fallback approach
-                            dataUrl = _captureElementFallback(vc);
+                            const img = vc.querySelector('img');
+                            const canvas = vc.querySelector('canvas');
+                            if (img) {
+                                // Draw image to a temporary canvas for capture
+                                const tempCanvas = document.createElement('canvas');
+                                tempCanvas.width = img.naturalWidth || img.width;
+                                tempCanvas.height = img.naturalHeight || img.height;
+                                const ctx = tempCanvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0);
+                                dataUrl = tempCanvas.toDataURL('image/png');
+                            } else if (canvas) {
+                                dataUrl = canvas.toDataURL('image/png');
+                            } else {
+                                dataUrl = _captureElementFallback(vc);
+                            }
                         }
                     } else if (tab === 'cad') {
                         // CAD views grid: capture all images into a combined canvas
@@ -4562,15 +4587,23 @@
                 setAgentCapture(null);
             }
 
-            agentCameraBtn.addEventListener('click', function() {
+            agentCameraBtn.addEventListener('click', async function() {
                 if (agentWaiting) return;
-                const dataUrl = captureViewportScreenshot();
-                if (dataUrl) {
-                    setAgentCapture(dataUrl);
-                } else {
-                    // No content to capture — briefly flash the button
-                    agentCameraBtn.style.color = '#FF1744';
-                    setTimeout(() => { agentCameraBtn.style.color = ''; }, 500);
+                // Briefly show loading state on camera button for async capture
+                agentCameraBtn.style.opacity = '0.5';
+                agentCameraBtn.style.pointerEvents = 'none';
+                try {
+                    const dataUrl = await captureViewportScreenshot();
+                    if (dataUrl) {
+                        setAgentCapture(dataUrl);
+                    } else {
+                        // No content to capture — briefly flash the button red
+                        agentCameraBtn.style.color = '#FF1744';
+                        setTimeout(() => { agentCameraBtn.style.color = ''; }, 500);
+                    }
+                } finally {
+                    agentCameraBtn.style.opacity = '';
+                    agentCameraBtn.style.pointerEvents = '';
                 }
             });
 

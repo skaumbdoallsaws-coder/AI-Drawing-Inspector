@@ -298,17 +298,130 @@
             align-items: center;
             gap: 0;
             padding: 0 12px;
-            height: 22px;
-            min-height: 22px;
-            background: #171B23;
+            height: 20px;
+            min-height: 20px;
+            background: #0F1319;
             border-bottom: 1px solid #323846;
-            font-size: 11px;
+            font-size: 10px;
             color: #737C89;
             overflow: hidden;
             white-space: nowrap;
         }
         .breadcrumb-bar:empty {
             display: none;
+        }
+
+        /* Contextual Ribbon — replaces stacked subtab/controls rows */
+        .ribbon {
+            display: flex;
+            align-items: center;
+            height: 38px;
+            min-height: 38px;
+            background: #131820;
+            border-bottom: 1px solid #323846;
+            padding: 0 12px;
+            gap: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+        .ribbon:empty {
+            display: none;
+        }
+        .ribbon-group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 0 8px;
+        }
+        .ribbon-sep {
+            width: 1px;
+            height: 22px;
+            background: #323846;
+            flex-shrink: 0;
+        }
+        .ribbon-label {
+            font-size: 10px;
+            color: #737C89;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            font-weight: 600;
+            margin-right: 6px;
+            white-space: nowrap;
+        }
+        .ribbon-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid #323846;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #9AA3AF;
+            white-space: nowrap;
+        }
+        .ribbon-chip.accent {
+            color: var(--accent);
+            border-color: rgba(79,195,247,0.2);
+        }
+        .ribbon-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            background: none;
+            border: 1px solid #323846;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #9AA3AF;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.1s, color 0.1s;
+            white-space: nowrap;
+        }
+        .ribbon-btn:hover {
+            background: rgba(255,255,255,0.06);
+            color: #E3E6EB;
+        }
+        .ribbon-btn.active {
+            background: rgba(79,195,247,0.1);
+            border-color: rgba(79,195,247,0.3);
+            color: var(--accent);
+        }
+        .ribbon-btn.primary {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+        .ribbon-btn.primary:hover {
+            background: #39b0e6;
+        }
+        .ribbon-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .ribbon-select {
+            background: #151A22;
+            color: #E3E6EB;
+            border: 1px solid #323846;
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .ribbon-legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .ribbon-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: #9AA3AF;
         }
         .breadcrumb-item {
             color: #9AA3AF;
@@ -1476,9 +1589,7 @@
             width: 100%;
         }
         .assy-subtabs {
-            display: flex;
-            background: var(--bg-toolbar);
-            border-bottom: 1px solid var(--border);
+            display: none !important; /* Hidden — ribbon is the authoritative subtab surface */
         }
         .assy-subtab {
             padding: 6px 16px;
@@ -1531,7 +1642,7 @@
             color: #FFB300;
         }
         .diff-rev-bar {
-            display: flex;
+            display: none !important; /* Hidden — ribbon owns compare controls */
             align-items: center;
             gap: 12px;
             padding: 6px 16px;
@@ -1639,14 +1750,7 @@
             font-style: italic;
         }
         .assembly-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 16px;
-            background: var(--bg-toolbar);
-            border-bottom: 1px solid var(--border);
-            font-size: 13px;
-            color: var(--text-primary);
+            display: none !important; /* Hidden — ribbon shows assembly info as chips */
         }
         .assembly-header .assy-name {
             font-weight: 600;
@@ -4262,6 +4366,8 @@
                 </div>
                 <!-- Breadcrumb Bar -->
                 <div class="breadcrumb-bar" id="breadcrumbBar"></div>
+                <!-- Contextual Ribbon — populated by renderRibbon() per active tab -->
+                <div class="ribbon" id="contextRibbon"></div>
                 <!-- Annotation Toolbar -->
                 <div class="annotation-toolbar" id="annotationToolbar">
                     <!-- Tool Selection Group -->
@@ -7929,6 +8035,276 @@
             printContainer.style.display = 'none';
         }
 
+        // Contextual Ribbon — renders tab-specific command groups
+        function renderRibbon() {
+            const ribbon = document.getElementById('contextRibbon');
+            if (!ribbon) return;
+            ribbon.innerHTML = '';
+
+            if (state.activeTab === 'drawing') {
+                // Drawing ribbon: Overlay mode | Zoom controls | file info
+                const g1 = document.createElement('div');
+                g1.className = 'ribbon-group';
+                const overlayLabel = document.createElement('span');
+                overlayLabel.className = 'ribbon-label';
+                overlayLabel.textContent = 'Overlay';
+                g1.appendChild(overlayLabel);
+                const overlaySelect = document.getElementById('findingsOverlayMode');
+                if (overlaySelect) {
+                    const sel = document.createElement('select');
+                    sel.className = 'ribbon-select';
+                    ['balloons','highlights','notes','fai','none'].forEach(v => {
+                        const opt = document.createElement('option');
+                        opt.value = v;
+                        opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+                        if (state.findingsOverlayMode === v) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                    sel.addEventListener('change', () => {
+                        overlaySelect.value = sel.value;
+                        overlaySelect.dispatchEvent(new Event('change'));
+                    });
+                    g1.appendChild(sel);
+                }
+                ribbon.appendChild(g1);
+
+                ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+
+                // Zoom group
+                const g2 = document.createElement('div');
+                g2.className = 'ribbon-group';
+                const zoomLabel = document.createElement('span');
+                zoomLabel.className = 'ribbon-label';
+                zoomLabel.textContent = 'Zoom';
+                g2.appendChild(zoomLabel);
+                [
+                    {label:'Fit', action:() => { if (window._fitDrawingToViewport) window._fitDrawingToViewport(); }},
+                    {label:'+', action:() => { if (window._zoomDrawing) window._zoomDrawing(1.25); }},
+                    {label:'−', action:() => { if (window._zoomDrawing) window._zoomDrawing(0.8); }},
+                ].forEach(b => {
+                    const btn = document.createElement('button');
+                    btn.className = 'ribbon-btn';
+                    btn.textContent = b.label;
+                    btn.addEventListener('click', b.action);
+                    g2.appendChild(btn);
+                });
+                ribbon.appendChild(g2);
+
+                // File info chip
+                if (state.fileName) {
+                    ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+                    const g3 = document.createElement('div');
+                    g3.className = 'ribbon-group';
+                    const chip = document.createElement('span');
+                    chip.className = 'ribbon-chip';
+                    chip.textContent = state.fileName;
+                    g3.appendChild(chip);
+                    ribbon.appendChild(g3);
+                }
+
+            } else if (state.activeTab === '3dmodel') {
+                // 3D Model ribbon: subtabs + compare controls if available
+                if (partDiffState.available) {
+                    const g1 = document.createElement('div');
+                    g1.className = 'ribbon-group';
+                    ['3dmodel','compare'].forEach(id => {
+                        const btn = document.createElement('button');
+                        btn.className = 'ribbon-btn' + (partDiffState.activeSubtab === id ? ' active' : '');
+                        btn.textContent = id === '3dmodel' ? '3D Model' : 'Compare';
+                        btn.addEventListener('click', () => {
+                            if (partDiffState.activeSubtab === id) return;
+                            partDiffState.activeSubtab = id;
+                            if (id === '3dmodel') _destroyPartDiffViewers();
+                            switchTab('3dmodel');
+                        });
+                        g1.appendChild(btn);
+                    });
+                    ribbon.appendChild(g1);
+
+                    if (partDiffState.activeSubtab === 'compare') {
+                        ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+                        const g2 = document.createElement('div');
+                        g2.className = 'ribbon-group';
+                        const revLabel = document.createElement('span');
+                        revLabel.className = 'ribbon-label';
+                        revLabel.textContent = 'Compare';
+                        g2.appendChild(revLabel);
+                        // Rev A select
+                        const selA = document.createElement('select');
+                        selA.className = 'ribbon-select';
+                        partDiffState.revisions.forEach(rev => {
+                            const opt = document.createElement('option');
+                            opt.value = rev; opt.textContent = 'Rev ' + rev;
+                            if (rev === partDiffState.activeRevA) opt.selected = true;
+                            selA.appendChild(opt);
+                        });
+                        g2.appendChild(selA);
+                        g2.appendChild(Object.assign(document.createElement('span'), {textContent:' vs ', style:'color:#737C89;font-size:11px;margin:0 4px;'}));
+                        const selB = document.createElement('select');
+                        selB.className = 'ribbon-select';
+                        partDiffState.revisions.forEach(rev => {
+                            const opt = document.createElement('option');
+                            opt.value = rev; opt.textContent = 'Rev ' + rev;
+                            if (rev === partDiffState.activeRevB) opt.selected = true;
+                            selB.appendChild(opt);
+                        });
+                        g2.appendChild(selB);
+
+                        // Compare button
+                        const compareBtn = document.createElement('button');
+                        compareBtn.className = 'ribbon-btn primary';
+                        compareBtn.textContent = 'Compare';
+                        compareBtn.addEventListener('click', () => {
+                            partDiffState.activeRevA = selA.value;
+                            partDiffState.activeRevB = selB.value;
+                            if (state.partNumber) _loadPartCompareViewers(state.partNumber, selA.value, selB.value);
+                        });
+                        g2.appendChild(compareBtn);
+                        ribbon.appendChild(g2);
+
+                        // Legend
+                        ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+                        const g3 = document.createElement('div');
+                        g3.className = 'ribbon-group';
+                        [
+                            {color:'#FF5252', label:'Removed'},
+                            {color:'#00E676', label:'Added'},
+                            {color:'#FFB300', label:'Changed'},
+                        ].forEach(l => {
+                            const item = document.createElement('span');
+                            item.className = 'ribbon-legend-item';
+                            item.innerHTML = '<span class="ribbon-legend-dot" style="background:'+l.color+';"></span> '+l.label;
+                            g3.appendChild(item);
+                        });
+                        ribbon.appendChild(g3);
+                    }
+
+                } else {
+                    // No revisions — show part info
+                    if (state.partNumber) {
+                        const g1 = document.createElement('div');
+                        g1.className = 'ribbon-group';
+                        const chip = document.createElement('span');
+                        chip.className = 'ribbon-chip accent';
+                        chip.textContent = state.partNumber + (state.partName ? ' — ' + state.partName : '');
+                        g1.appendChild(chip);
+                        ribbon.appendChild(g1);
+                    }
+                }
+
+            } else if (state.activeTab === 'assembly') {
+                // Assembly ribbon: info + subtabs + compare controls
+                if (assemblyContext) {
+                    const g1 = document.createElement('div');
+                    g1.className = 'ribbon-group';
+                    const chip = document.createElement('span');
+                    chip.className = 'ribbon-chip';
+                    chip.textContent = (assemblyContext.assembly_name || assemblyContext.assembly_number || 'Assembly').toUpperCase();
+                    g1.appendChild(chip);
+                    const stats = document.createElement('span');
+                    stats.className = 'ribbon-chip';
+                    stats.textContent = (assemblyContext.component_count || '?') + ' components · ' + (assemblyContext.mate_count || '?') + ' mates';
+                    g1.appendChild(stats);
+                    ribbon.appendChild(g1);
+                }
+
+                if (diffState.available) {
+                    ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+                    const g2 = document.createElement('div');
+                    g2.className = 'ribbon-group';
+                    ['3dmodel','compare'].forEach(id => {
+                        const btn = document.createElement('button');
+                        btn.className = 'ribbon-btn' + (diffState.activeSubtab === id ? ' active' : '');
+                        btn.textContent = id === '3dmodel' ? '3D Model' : 'Compare';
+                        btn.addEventListener('click', () => {
+                            if (diffState.activeSubtab === id) return;
+                            diffState.activeSubtab = id;
+                            if (id === '3dmodel') _destroyDiffViewers();
+                            switchTab('assembly');
+                        });
+                        g2.appendChild(btn);
+                    });
+                    ribbon.appendChild(g2);
+
+                    if (diffState.activeSubtab === 'compare') {
+                        ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+                        const g3 = document.createElement('div');
+                        g3.className = 'ribbon-group';
+                        const selA = document.createElement('select');
+                        selA.className = 'ribbon-select';
+                        diffState.revisions.forEach(rev => {
+                            const opt = document.createElement('option');
+                            opt.value = rev; opt.textContent = 'Rev ' + rev;
+                            if (rev === diffState.activeRevA) opt.selected = true;
+                            selA.appendChild(opt);
+                        });
+                        g3.appendChild(selA);
+                        g3.appendChild(Object.assign(document.createElement('span'), {textContent:' vs ', style:'color:#737C89;font-size:11px;margin:0 4px;'}));
+                        const selB = document.createElement('select');
+                        selB.className = 'ribbon-select';
+                        diffState.revisions.forEach(rev => {
+                            const opt = document.createElement('option');
+                            opt.value = rev; opt.textContent = 'Rev ' + rev;
+                            if (rev === diffState.activeRevB) opt.selected = true;
+                            selB.appendChild(opt);
+                        });
+                        g3.appendChild(selB);
+
+                        const compareBtn = document.createElement('button');
+                        compareBtn.className = 'ribbon-btn primary';
+                        compareBtn.textContent = 'Compare';
+                        compareBtn.addEventListener('click', () => {
+                            diffState.activeRevA = selA.value;
+                            diffState.activeRevB = selB.value;
+                            const assyNum = assemblyContext?.assembly_number;
+                            if (assyNum) _loadCompareViewers(assyNum, selA.value, selB.value);
+                        });
+                        g3.appendChild(compareBtn);
+                        ribbon.appendChild(g3);
+
+                        // Legend
+                        ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+                        const g4 = document.createElement('div');
+                        g4.className = 'ribbon-group';
+                        [
+                            {color:'#FF5252', label:'Removed'},
+                            {color:'#00E676', label:'Added'},
+                            {color:'#FFB300', label:'Changed'},
+                        ].forEach(l => {
+                            const item = document.createElement('span');
+                            item.className = 'ribbon-legend-item';
+                            item.innerHTML = '<span class="ribbon-legend-dot" style="background:'+l.color+';"></span> '+l.label;
+                            g4.appendChild(item);
+                        });
+                        ribbon.appendChild(g4);
+                    }
+                }
+
+            } else if (state.activeTab === 'report') {
+                // Report ribbon: FAI controls
+                const g1 = document.createElement('div');
+                g1.className = 'ribbon-group';
+                const printBtn = document.createElement('button');
+                printBtn.className = 'ribbon-btn';
+                printBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg> Print FAI';
+                printBtn.addEventListener('click', () => { if (window._printFaiReport) window._printFaiReport(); });
+                g1.appendChild(printBtn);
+                ribbon.appendChild(g1);
+
+                if (state.results) {
+                    ribbon.appendChild(Object.assign(document.createElement('div'), {className:'ribbon-sep'}));
+                    const g2 = document.createElement('div');
+                    g2.className = 'ribbon-group';
+                    const chip = document.createElement('span');
+                    chip.className = 'ribbon-chip';
+                    const fc = (state.results.features || []).length;
+                    chip.textContent = fc + ' finding' + (fc !== 1 ? 's' : '');
+                    g2.appendChild(chip);
+                    ribbon.appendChild(g2);
+                }
+            }
+        }
+
         function renderViewport() {
             // Feature #120: Save 3D camera state before clearing viewport
             _save3DCameraState();
@@ -7964,8 +8340,9 @@
 
             viewportContent.innerHTML = '';
 
-            // Update annotation toolbar visibility
+            // Update annotation toolbar visibility and ribbon
             updateAnnotationToolbarVisibility();
+            renderRibbon();
 
             // Feature #112: Split View uses column layout (drawing on top, CAD strip on bottom)
             // split-layout removed
@@ -16972,9 +17349,12 @@
                     clone.querySelectorAll('.tab-shortcut').forEach(s => s.remove());
                     parts.push(clone.textContent.trim());
                 }
-                // Subtab if any (compare mode — assembly or part)
-                const compareActive = document.querySelector('.assy-subtabs .assy-subtab.active, .part-subtabs .part-subtab.active');
-                if (compareActive) parts.push(compareActive.textContent.trim());
+                // Subtab if any (compare mode — read from state, not hidden DOM)
+                if (state.activeTab === 'assembly' && diffState.available && diffState.activeSubtab === 'compare') {
+                    parts.push('Compare');
+                } else if (state.activeTab === '3dmodel' && partDiffState.available && partDiffState.activeSubtab === 'compare') {
+                    parts.push('Compare');
+                }
 
                 if (parts.length === 0) {
                     bar.innerHTML = '';

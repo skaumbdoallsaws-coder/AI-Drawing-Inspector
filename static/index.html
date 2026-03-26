@@ -220,46 +220,104 @@
             margin: 0 4px;
         }
 
-        /* Right Edge Agent Tab — icon only on resize handle */
-        .agent-edge-tab {
-            position: absolute;
-            top: 100px;
-            left: 0;
-            width: 24px;
-            height: 24px;
-            display: none;
+        /* Right Activity Rail — mirrors left activity bar */
+        .right-activity-rail {
+            width: 40px;
+            min-width: 40px;
+            background: #0D1016;
+            border-left: 1px solid #323846;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 6px;
+            gap: 2px;
+        }
+        .right-rail-icon {
+            width: 36px;
+            height: 36px;
+            display: flex;
             align-items: center;
             justify-content: center;
-            transform: translateX(-50%);
-            background: rgba(17, 17, 24, 0.96);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 6px;
-            color: #9AA3AF;
+            border-radius: 4px;
             cursor: pointer;
-            padding: 0;
-            z-index: 80;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.28);
-            transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+            transition: background 0.1s;
+            position: relative;
+            color: #737C89;
         }
-        .agent-edge-tab:hover {
+        .right-rail-icon:hover {
+            background: rgba(255,255,255,0.05);
             color: #E3E6EB;
-            border-color: rgba(255,255,255,0.12);
-            background: rgba(20, 20, 32, 0.98);
         }
-        .agent-edge-tab.active {
-            color: var(--accent);
-            border-color: rgba(79,195,247,0.4);
-            box-shadow: 0 0 0 1px rgba(79,195,247,0.14), 0 4px 12px rgba(0,0,0,0.28);
+        .right-rail-icon.active {
+            color: #E3E6EB;
         }
-        .agent-edge-tab:focus-visible {
-            outline: 1px solid rgba(79,195,247,0.7);
-            outline-offset: 2px;
+        .right-rail-icon.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 6px;
+            bottom: 6px;
+            width: 2px;
+            background: var(--accent);
+            border-radius: 0 1px 1px 0;
         }
-        .agent-edge-tab svg {
-            width: 16px;
-            height: 16px;
+        .right-rail-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+        .right-rail-icon .right-rail-tooltip {
+            display: none;
+            position: absolute;
+            right: 44px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #323846;
+            color: #E3E6EB;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            z-index: 50;
+            pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .right-rail-icon:hover .right-rail-tooltip {
             display: block;
         }
+
+        /* Right Dock — shared container, replaces separate rightPanel + agentPanel */
+        .right-dock {
+            display: flex;
+            flex-direction: column;
+            width: 280px;
+            min-width: 180px;
+            max-width: 500px;
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border);
+            overflow: hidden;
+            position: relative;
+        }
+        .right-dock.collapsed {
+            width: 0 !important;
+            min-width: 0 !important;
+            border-left: none;
+            overflow: hidden;
+        }
+        .right-dock-resize-handle {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 6px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 10;
+        }
+        .right-dock-resize-handle:hover {
+            background: rgba(79, 195, 247, 0.15);
+        }
+
+        /* Hide old agent-edge-tab */
+        .agent-edge-tab { display: none !important; }
 
         /* Window Control Buttons — minimize, maximize, close */
         .window-controls {
@@ -2271,11 +2329,8 @@
 
         /* Right Panel */
         .right-panel {
-            width: 260px;
-            min-width: 180px;
-            max-width: 500px;
+            flex: 1;
             background: var(--bg-panel);
-            border-left: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
@@ -2643,22 +2698,18 @@
 
         /* Agent Panel */
         .agent-panel {
-            width: 0;
-            min-width: 0;
+            flex: 1;
             overflow: hidden;
             background: var(--bg-panel);
-            border-left: 1px solid var(--border);
-            display: flex;
+            display: none;
             flex-direction: column;
-            transition: width 0.3s ease-in-out, min-width 0.3s ease-in-out;
         }
         .agent-panel.open {
-            width: 320px;
-            min-width: 320px;
+            display: flex;
         }
         .agent-panel-inner {
-            width: 320px;
-            min-width: 320px;
+            width: 100%;
+            min-width: 0;
             height: 100%;
             display: flex;
             flex-direction: column;
@@ -4309,12 +4360,6 @@
                     </svg>
                     <span class="activity-tooltip">3D Model</span>
                 </div>
-                <div class="activity-bar-icon" data-panel="agent" title="Agent">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-                    </svg>
-                    <span class="activity-tooltip">Agent Panel</span>
-                </div>
                 <div class="activity-bar-spacer"></div>
             </div>
 
@@ -4560,9 +4605,13 @@
                 </div>
             </div>
 
-            <!-- Right Panel (overlay) -->
-            <div class="right-panel" id="rightPanel">
-                <div class="right-panel-resize-handle" id="rightPanelResizeHandle"></div>
+            <!-- Right Dock (shared container for results + agent) -->
+            <div class="right-dock" id="rightDock">
+                <div class="right-dock-resize-handle" id="rightDockResizeHandle"></div>
+
+                <!-- Results subtree (persistent, toggled by mode) -->
+                <div class="right-panel" id="rightPanel" style="display:none;">
+                <div style="display:none;"></div><!-- placeholder for old resize handle refs -->
                 <!-- Loading State -->
                 <div class="loading-state" id="loadingState">
                     <svg class="loading-logo" viewBox="0 0 32 32" fill="none">
@@ -4588,12 +4637,7 @@
                 </div>
             </div>
 
-            <button class="agent-edge-tab" id="agentEdgeTab" type="button" title="Toggle Agent Panel" aria-label="Toggle Agent Panel" aria-pressed="false">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="7.25" r="3.25"></circle>
-                    <path d="M6 19.5c0-3.1 2.7-5.25 6-5.25s6 2.15 6 5.25"></path>
-                </svg>
-            </button>
+            <!-- agent-edge-tab removed — replaced by right activity rail -->
 
             <!-- Agent Panel -->
             <div class="agent-panel" id="agentPanel">
@@ -4637,6 +4681,19 @@
                         <button class="voice-stop-btn" id="voiceStopBtn" title="Stop" style="display:none">&#x2715;</button>
                     </div>
                     <div class="agent-beta-disclaimer"><span>InspectorPro Beta</span> &mdash; Responses may be inaccurate. Always verify critical dimensions against the original drawing.</div>
+                </div>
+            </div>
+            </div><!-- end right-dock -->
+
+            <!-- Right Activity Rail -->
+            <div class="right-activity-rail" id="rightActivityRail">
+                <div class="right-rail-icon" id="rightRailResults" title="Results">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+                    <span class="right-rail-tooltip">Results</span>
+                </div>
+                <div class="right-rail-icon active" id="rightRailAgent" title="Agent">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span class="right-rail-tooltip">Agent</span>
                 </div>
             </div>
         </div>
@@ -14548,6 +14605,9 @@
             let agentConversations = { 'inspector': [], 'deviation-analyst': [], 'parts-finder': [] };
             let agentMessagesHtml = { 'inspector': '', 'deviation-analyst': '', 'parts-finder': '' };
             let agentPanelOpen = false;
+            // Expose setter for right dock mode sync
+            window._setAgentPanelOpen = (v) => { agentPanelOpen = v; };
+            window._getAgentPanelOpen = () => agentPanelOpen;
             let agentWaiting = false;
             let suggestionsVisible = false;
             let lastSuggestionsContext = null; // Track which results generated the suggestions
@@ -14943,18 +15003,21 @@
             });
 
             function toggleAgentPanel() {
-                agentPanelOpen = !agentPanelOpen;
+                // Delegate to the new right dock mode system
+                if (window._setRightDockMode) {
+                    const currentMode = window._getRightDockMode ? window._getRightDockMode() : null;
+                    window._setRightDockMode(currentMode === 'agent' ? null : 'agent');
+                }
+                // Sync old state from dock
+                agentPanelOpen = agentPanel.classList.contains('open');
                 if (agentPanelOpen) {
-                    agentPanel.classList.add('open');
                     agentToggleBtn.classList.add('active');
-                    setTimeout(() => agentInput.focus(), 350);
-                    // Update greeting and load suggestions when opening
+                    setTimeout(() => agentInput.focus(), 100);
                     updateGreeting();
                     if (agentConversations[currentAgent].length === 0) {
                         loadSuggestions();
                     }
                 } else {
-                    agentPanel.classList.remove('open');
                     agentToggleBtn.classList.remove('active');
                 }
                 updateAgentIndicator();
@@ -17253,10 +17316,11 @@
         })();
 
         // ---- Right Panel Resize ----
+        // Right Dock Resize
         (function() {
-            const panel = document.getElementById('rightPanel');
-            const handle = document.getElementById('rightPanelResizeHandle');
-            if (!panel || !handle) return;
+            const dock = document.getElementById('rightDock');
+            const handle = document.getElementById('rightDockResizeHandle');
+            if (!dock || !handle) return;
 
             let isDragging = false;
             let startX = 0;
@@ -17266,7 +17330,7 @@
                 e.preventDefault();
                 isDragging = true;
                 startX = e.clientX;
-                startWidth = panel.offsetWidth;
+                startWidth = dock.offsetWidth;
                 handle.classList.add('dragging');
                 document.body.style.cursor = 'col-resize';
                 document.body.style.userSelect = 'none';
@@ -17276,7 +17340,7 @@
                 if (!isDragging) return;
                 const delta = startX - e.clientX;
                 const newWidth = Math.max(200, Math.min(600, startWidth + delta));
-                panel.style.width = newWidth + 'px';
+                dock.style.width = newWidth + 'px';
             });
 
             document.addEventListener('mouseup', () => {
@@ -17410,56 +17474,65 @@
             });
         })();
 
+        // Right Dock Mode Controller
+        (function() {
+            let rightDockMode = 'agent'; // 'results' | 'agent' | null
+            const dock = document.getElementById('rightDock');
+            const resultsPanel = document.getElementById('rightPanel');
+            const agentPanel = document.getElementById('agentPanel');
+            const railResults = document.getElementById('rightRailResults');
+            const railAgent = document.getElementById('rightRailAgent');
+
+            function setRightDockMode(mode) {
+                if (rightDockMode === mode) mode = null; // toggle off
+                rightDockMode = mode;
+
+                // Toggle dock visibility
+                if (dock) {
+                    dock.classList.toggle('collapsed', mode === null);
+                }
+
+                // Toggle persistent subtrees by display
+                if (resultsPanel) resultsPanel.style.display = (mode === 'results') ? 'flex' : 'none';
+                if (agentPanel) {
+                    if (mode === 'agent') {
+                        agentPanel.classList.add('open');
+                        agentPanel.style.display = 'flex';
+                    } else {
+                        agentPanel.classList.remove('open');
+                        agentPanel.style.display = 'none';
+                    }
+                }
+
+                // Update rail icon active states
+                if (railResults) railResults.classList.toggle('active', mode === 'results');
+                if (railAgent) railAgent.classList.toggle('active', mode === 'agent');
+
+                // Sync legacy agentPanelOpen state
+                if (window._setAgentPanelOpen) {
+                    window._setAgentPanelOpen(mode === 'agent');
+                }
+
+                // Sync agentToggleBtn visual state
+                const atb = document.getElementById('agentToggleBtn');
+                if (atb) atb.classList.toggle('active', mode === 'agent');
+            }
+
+            // Wire rail icon clicks
+            if (railResults) railResults.addEventListener('click', () => setRightDockMode(rightDockMode === 'results' ? null : 'results'));
+            if (railAgent) railAgent.addEventListener('click', () => setRightDockMode(rightDockMode === 'agent' ? null : 'agent'));
+
+            // Expose for compatibility
+            window._setRightDockMode = setRightDockMode;
+            window._getRightDockMode = () => rightDockMode;
+
+            // Initialize: show agent by default
+            setRightDockMode('agent');
+        })();
+
         // Toolbar Control Buttons
         (function() {
-            // Right-edge agent tab follows the results panel edge.
-            const agentEdgeTab = document.getElementById('agentEdgeTab');
-            const mainContent = document.querySelector('.main-content');
-            const rightPanel = document.getElementById('rightPanel');
-            const agentPanel = document.getElementById('agentPanel');
-            const leftPanel = document.querySelector('.left-panel');
-
-            function syncAgentEdgeTab() {
-                if (!agentEdgeTab || !mainContent || !rightPanel) return;
-                const mainRect = mainContent.getBoundingClientRect();
-                const rightRect = rightPanel.getBoundingClientRect();
-                const hidden = rightRect.width <= 4 || getComputedStyle(rightPanel).display === 'none';
-                agentEdgeTab.style.display = hidden ? 'none' : 'flex';
-                if (hidden) return;
-
-                const edgeX = rightRect.left - mainRect.left;
-                agentEdgeTab.style.left = `${Math.max(12, edgeX)}px`;
-
-                const isOpen = !!agentPanel && agentPanel.classList.contains('open');
-                agentEdgeTab.classList.toggle('active', isOpen);
-                agentEdgeTab.setAttribute('aria-pressed', isOpen ? 'true' : 'false');
-            }
-
-            if (agentEdgeTab && mainContent && rightPanel) {
-                agentEdgeTab.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    document.getElementById('agentToggleBtn')?.click();
-                    requestAnimationFrame(syncAgentEdgeTab);
-                    setTimeout(syncAgentEdgeTab, 120);
-                });
-
-                const edgeResizeObserver = new ResizeObserver(() => syncAgentEdgeTab());
-                edgeResizeObserver.observe(mainContent);
-                edgeResizeObserver.observe(rightPanel);
-                if (agentPanel) edgeResizeObserver.observe(agentPanel);
-                if (leftPanel) edgeResizeObserver.observe(leftPanel);
-
-                const edgeMutationObserver = new MutationObserver(() => requestAnimationFrame(syncAgentEdgeTab));
-                edgeMutationObserver.observe(rightPanel, { attributes: true, attributeFilter: ['style', 'class'] });
-                if (agentPanel) edgeMutationObserver.observe(agentPanel, { attributes: true, attributeFilter: ['style', 'class'] });
-                if (leftPanel) edgeMutationObserver.observe(leftPanel, { attributes: true, attributeFilter: ['style', 'class'] });
-
-                window.addEventListener('resize', syncAgentEdgeTab);
-                window._syncAgentEdgeTab = syncAgentEdgeTab;
-                requestAnimationFrame(syncAgentEdgeTab);
-                setTimeout(syncAgentEdgeTab, 250);
-            }
+            // Old agent-edge-tab controller removed — replaced by right activity rail
 
             // Search field opens Command Palette
             const searchWrap = document.getElementById('toolbarSearchWrap');
@@ -17514,7 +17587,7 @@
                             if (window._openCommandPalette) window._openCommandPalette();
                             break;
                         case 'agent':
-                            document.getElementById('agentToggleBtn')?.click();
+                            if (window._setRightDockMode) window._setRightDockMode(window._getRightDockMode?.() === 'agent' ? null : 'agent');
                             break;
                         case 'settings':
                             if (window._toast) window._toast('Settings panel coming soon', 'info');
@@ -17579,22 +17652,15 @@
             leftRestore.addEventListener('click', expandLeft);
             leftRestore.addEventListener('dblclick', expandLeft);
 
-            // Right panel double-click to collapse
-            if (rightPanel) {
-                rightPanel.addEventListener('dblclick', (e) => {
-                    const rect = rightPanel.getBoundingClientRect();
+            // Right dock double-click to collapse via dock mode
+            const rightDock = document.getElementById('rightDock');
+            if (rightDock) {
+                rightDock.addEventListener('dblclick', (e) => {
+                    const rect = rightDock.getBoundingClientRect();
                     if (e.clientX > rect.left + 8) return;
-                    if (rightCollapsed) {
-                        rightPanel.style.width = rightOrigWidth;
-                        rightPanel.style.minWidth = '';
-                        rightPanel.style.overflow = '';
-                        rightCollapsed = false;
-                    } else {
-                        rightOrigWidth = rightPanel.style.width || '260px';
-                        rightPanel.style.width = '0px';
-                        rightPanel.style.minWidth = '0px';
-                        rightPanel.style.overflow = 'hidden';
-                        rightCollapsed = true;
+                    // Toggle dock off
+                    if (window._setRightDockMode) {
+                        window._setRightDockMode(null);
                     }
                 });
             }

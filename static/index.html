@@ -391,8 +391,9 @@
             border-bottom: 1px solid #323846;
             padding: 0;
             gap: 0;
-            overflow-x: auto;
-            overflow-y: hidden;
+            overflow: visible;
+            position: relative;
+            z-index: 50;
         }
         .ribbon:empty {
             display: none;
@@ -8276,121 +8277,182 @@
                     selectBtn.addEventListener('click', () => document.querySelector('.anno-tool-btn[data-tool="select"]')?.click());
                     gIll.appendChild(selectBtn);
 
-                    // Shape category dropdown buttons
+                    // Single Shapes button with Word-style dropdown grid
+                    const shapesWrap = document.createElement('div');
+                    shapesWrap.style.cssText = 'position:relative;';
+                    const shapesBtn = document.createElement('button');
+                    shapesBtn.className = 'ribbon-btn';
+                    shapesBtn.innerHTML = '○ Shapes ▾';
+                    shapesBtn.title = 'Shapes';
+
+                    const shapesDropdown = document.createElement('div');
+                    shapesDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:8px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:220px;';
+                    shapesDropdown.setAttribute('data-ribbon-dropdown', '');
+
                     const shapeCategories = [
-                        { label: '╱', title: 'Lines', shapes: [
-                            {tool:'line', name:'Line'}, {tool:'arrow', name:'Arrow'}, {tool:'double-arrow', name:'Double Arrow'}
+                        { title: 'Lines', shapes: [
+                            {tool:'line', icon:'╱'}, {tool:'arrow', icon:'→'}, {tool:'double-arrow', icon:'↔'}
                         ]},
-                        { label: '▭', title: 'Rectangles', shapes: [
-                            {tool:'rectangle', name:'Rectangle'}, {tool:'rounded-rectangle', name:'Rounded Rect'}
+                        { title: 'Rectangles', shapes: [
+                            {tool:'rectangle', icon:'▭'}, {tool:'rounded-rectangle', icon:'▢'}
                         ]},
-                        { label: '○', title: 'Shapes', shapes: [
-                            {tool:'circle', name:'Circle'}, {tool:'triangle', name:'Triangle'}, {tool:'diamond', name:'Diamond'}
+                        { title: 'Basic Shapes', shapes: [
+                            {tool:'circle', icon:'○'}, {tool:'triangle', icon:'△'}, {tool:'diamond', icon:'◇'}
                         ]},
-                        { label: '➜', title: 'Block Arrows', shapes: [
-                            {tool:'block-arrow-right', name:'Right'}, {tool:'block-arrow-left', name:'Left'},
-                            {tool:'block-arrow-up', name:'Up'}, {tool:'block-arrow-down', name:'Down'},
-                            {tool:'block-arrow-chevron', name:'Chevron'}
+                        { title: 'Block Arrows', shapes: [
+                            {tool:'block-arrow-right', icon:'▶'}, {tool:'block-arrow-left', icon:'◀'},
+                            {tool:'block-arrow-up', icon:'▲'}, {tool:'block-arrow-down', icon:'▼'},
+                            {tool:'block-arrow-chevron', icon:'›'}
                         ]},
-                        { label: '💬', title: 'Callouts', shapes: [
-                            {tool:'speech-bubble', name:'Speech'}, {tool:'line-callout', name:'Line Callout'},
-                            {tool:'cloud-callout', name:'Cloud'}
+                        { title: 'Callouts', shapes: [
+                            {tool:'speech-bubble', icon:'💬'}, {tool:'line-callout', icon:'📌'},
+                            {tool:'cloud-callout', icon:'☁'}
                         ]},
                     ];
 
                     shapeCategories.forEach(cat => {
-                        const wrap = document.createElement('div');
-                        wrap.style.cssText = 'position:relative;';
-                        const btn = document.createElement('button');
-                        btn.className = 'ribbon-btn';
-                        btn.innerHTML = cat.label + ' ▾';
-                        btn.title = cat.title;
+                        // Category header
+                        const header = document.createElement('div');
+                        header.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 4px 2px;margin-top:4px;border-top:1px solid #323846;';
+                        if (cat === shapeCategories[0]) header.style.borderTop = 'none';
+                        header.textContent = cat.title;
+                        shapesDropdown.appendChild(header);
 
-                        // Dropdown panel
-                        const dropdown = document.createElement('div');
-                        dropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:4px;padding:4px 0;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);min-width:140px;';
+                        // Shape icon grid
+                        const grid = document.createElement('div');
+                        grid.style.cssText = 'display:flex;flex-direction:column;gap:1px;padding:2px 0;';
 
                         cat.shapes.forEach(s => {
-                            const opt = document.createElement('button');
-                            opt.style.cssText = 'display:block;width:100%;padding:5px 12px;background:none;border:none;color:#ccc;font-size:12px;font-family:inherit;cursor:pointer;text-align:left;';
-                            opt.textContent = s.name;
-                            opt.addEventListener('mouseenter', () => { opt.style.background = 'rgba(79,195,247,0.12)'; opt.style.color = '#fff'; });
-                            opt.addEventListener('mouseleave', () => { opt.style.background = 'none'; opt.style.color = '#ccc'; });
-                            opt.addEventListener('click', (e) => {
+                            const shapeBtn = document.createElement('button');
+                            shapeBtn.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 8px;background:none;border:1px solid transparent;border-radius:3px;color:#ccc;font-size:13px;cursor:pointer;transition:background 0.1s,border-color 0.1s;width:100%;text-align:left;';
+                            const iconName = s.tool.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                            shapeBtn.innerHTML = '<span style="font-size:16px;width:20px;text-align:center;">' + s.icon + '</span><span style="font-size:11px;color:#9AA3AF;">' + iconName + '</span>';
+                            shapeBtn.title = iconName;
+                            shapeBtn.addEventListener('mouseenter', () => { shapeBtn.style.background = 'rgba(79,195,247,0.12)'; shapeBtn.style.borderColor = 'rgba(79,195,247,0.3)'; });
+                            shapeBtn.addEventListener('mouseleave', () => { shapeBtn.style.background = 'none'; shapeBtn.style.borderColor = 'transparent'; });
+                            shapeBtn.addEventListener('click', (e) => {
                                 e.stopPropagation();
                                 document.querySelector('.anno-shape-option[data-tool="'+s.tool+'"]')?.click();
-                                dropdown.style.display = 'none';
+                                shapesDropdown.style.display = 'none';
                             });
-                            dropdown.appendChild(opt);
+                            grid.appendChild(shapeBtn);
                         });
 
-                        btn.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            const isOpen = dropdown.style.display !== 'none';
-                            // Close all other dropdowns
-                            ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
-                            dropdown.style.display = isOpen ? 'none' : 'block';
-                        });
-                        dropdown.setAttribute('data-ribbon-dropdown', '');
-
-                        wrap.appendChild(btn);
-                        wrap.appendChild(dropdown);
-                        gIll.appendChild(wrap);
+                        shapesDropdown.appendChild(grid);
                     });
+
+                    shapesBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const isOpen = shapesDropdown.style.display !== 'none';
+                        ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+                        shapesDropdown.style.display = isOpen ? 'none' : 'block';
+                    });
+
+                    shapesWrap.appendChild(shapesBtn);
+                    shapesWrap.appendChild(shapesDropdown);
+                    gIll.appendChild(shapesWrap);
 
                     ribbon.appendChild(gIll);
 
-                    // Style group — color, stroke, fill
+                    // Style group — single dropdown for color, stroke, fill
                     ribbon.appendChild(_ribbonSep());
                     const gStyle = _ribbonGroup('Style');
 
-                    // Color swatches (correct selectors)
+                    const styleWrap = document.createElement('div');
+                    styleWrap.style.cssText = 'position:relative;';
+                    const styleBtn = document.createElement('button');
+                    styleBtn.className = 'ribbon-btn';
+                    styleBtn.innerHTML = '🎨 Style ▾';
+                    styleBtn.title = 'Color, Stroke & Fill';
+
+                    const styleDropdown = document.createElement('div');
+                    styleDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:8px 12px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:200px;';
+                    styleDropdown.setAttribute('data-ribbon-dropdown', '');
+
+                    // Colors section
+                    const colorHeader = document.createElement('div');
+                    colorHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:2px 0 4px;';
+                    colorHeader.textContent = 'Color';
+                    styleDropdown.appendChild(colorHeader);
+
+                    const colorGrid = document.createElement('div');
+                    colorGrid.style.cssText = 'display:flex;gap:4px;padding:2px 0 8px;';
                     ['#FF1744','#FFD600','#00E676','#4fc3f7','#FFFFFF','#000000'].forEach(c => {
                         const swatch = document.createElement('button');
-                        swatch.style.cssText = 'width:16px;height:16px;padding:0;border-radius:2px;background:'+c+';border:1px solid rgba(255,255,255,0.15);min-width:16px;cursor:pointer;';
+                        swatch.style.cssText = 'width:24px;height:24px;padding:0;border-radius:3px;background:'+c+';border:1px solid rgba(255,255,255,0.2);cursor:pointer;transition:transform 0.1s;';
                         swatch.title = c;
-                        swatch.addEventListener('click', () => {
+                        swatch.addEventListener('mouseenter', () => { swatch.style.transform = 'scale(1.15)'; });
+                        swatch.addEventListener('mouseleave', () => { swatch.style.transform = 'scale(1)'; });
+                        swatch.addEventListener('click', (e) => {
+                            e.stopPropagation();
                             document.querySelector('.anno-color-swatch[data-color="'+c+'"]')?.click();
                         });
-                        gStyle.appendChild(swatch);
+                        colorGrid.appendChild(swatch);
                     });
+                    styleDropdown.appendChild(colorGrid);
 
-                    // Stroke width
-                    const strokeSep = document.createElement('span');
-                    strokeSep.style.cssText = 'width:1px;height:14px;background:#323846;margin:0 4px;';
-                    gStyle.appendChild(strokeSep);
+                    // Stroke section
+                    const strokeHeader = document.createElement('div');
+                    strokeHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-top:1px solid #323846;margin-top:4px;';
+                    strokeHeader.textContent = 'Stroke';
+                    styleDropdown.appendChild(strokeHeader);
+
+                    const strokeGrid = document.createElement('div');
+                    strokeGrid.style.cssText = 'display:flex;flex-direction:column;gap:1px;padding:2px 0 8px;';
                     [
-                        {w:'1', label:'━', title:'Thin'},
-                        {w:'2', label:'▬', title:'Medium'},
-                        {w:'4', label:'▰', title:'Thick'},
+                        {w:'1', label:'Thin', preview:'height:1px'},
+                        {w:'2', label:'Medium', preview:'height:2px'},
+                        {w:'4', label:'Thick', preview:'height:4px'},
                     ].forEach(s => {
-                        const btn = document.createElement('button');
-                        btn.className = 'ribbon-btn';
-                        btn.textContent = s.label;
-                        btn.title = s.title;
-                        btn.style.cssText = 'padding:2px 4px;min-width:20px;font-size:10px;';
-                        btn.addEventListener('click', () => document.querySelector('.anno-stroke-btn[data-stroke="'+s.w+'"]')?.click());
-                        gStyle.appendChild(btn);
+                        const row = document.createElement('button');
+                        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;background:none;border:1px solid transparent;border-radius:3px;color:#ccc;font-size:11px;cursor:pointer;width:100%;text-align:left;';
+                        row.innerHTML = '<span style="width:40px;display:flex;align-items:center;"><span style="display:block;width:100%;'+s.preview+';background:#9AA3AF;border-radius:1px;"></span></span><span>'+s.label+'</span>';
+                        row.addEventListener('mouseenter', () => { row.style.background = 'rgba(79,195,247,0.12)'; row.style.borderColor = 'rgba(79,195,247,0.3)'; });
+                        row.addEventListener('mouseleave', () => { row.style.background = 'none'; row.style.borderColor = 'transparent'; });
+                        row.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            document.querySelector('.anno-stroke-btn[data-stroke="'+s.w+'"]')?.click();
+                        });
+                        strokeGrid.appendChild(row);
                     });
+                    styleDropdown.appendChild(strokeGrid);
 
-                    // Fill
-                    const fillSep = document.createElement('span');
-                    fillSep.style.cssText = 'width:1px;height:14px;background:#323846;margin:0 4px;';
-                    gStyle.appendChild(fillSep);
+                    // Fill section
+                    const fillHeader = document.createElement('div');
+                    fillHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-top:1px solid #323846;margin-top:4px;';
+                    fillHeader.textContent = 'Fill';
+                    styleDropdown.appendChild(fillHeader);
+
+                    const fillGrid = document.createElement('div');
+                    fillGrid.style.cssText = 'display:flex;flex-direction:column;gap:1px;padding:2px 0;';
                     [
-                        {f:'none', label:'∅', title:'No Fill'},
-                        {f:'semi', label:'◕', title:'Semi-transparent'},
-                        {f:'solid', label:'●', title:'Solid Fill'},
+                        {f:'none', icon:'∅', label:'No Fill'},
+                        {f:'semi', icon:'◕', label:'Semi-transparent'},
+                        {f:'solid', icon:'●', label:'Solid Fill'},
                     ].forEach(s => {
-                        const btn = document.createElement('button');
-                        btn.className = 'ribbon-btn';
-                        btn.textContent = s.label;
-                        btn.title = s.title;
-                        btn.style.cssText = 'padding:2px 4px;min-width:20px;font-size:10px;';
-                        btn.addEventListener('click', () => document.querySelector('.anno-fill-btn[data-fill="'+s.f+'"]')?.click());
-                        gStyle.appendChild(btn);
+                        const row = document.createElement('button');
+                        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;background:none;border:1px solid transparent;border-radius:3px;color:#ccc;font-size:11px;cursor:pointer;width:100%;text-align:left;';
+                        row.innerHTML = '<span style="font-size:14px;width:20px;text-align:center;">'+s.icon+'</span><span>'+s.label+'</span>';
+                        row.addEventListener('mouseenter', () => { row.style.background = 'rgba(79,195,247,0.12)'; row.style.borderColor = 'rgba(79,195,247,0.3)'; });
+                        row.addEventListener('mouseleave', () => { row.style.background = 'none'; row.style.borderColor = 'transparent'; });
+                        row.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            document.querySelector('.anno-fill-btn[data-fill="'+s.f+'"]')?.click();
+                        });
+                        fillGrid.appendChild(row);
+                    });
+                    styleDropdown.appendChild(fillGrid);
+
+                    styleBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const isOpen = styleDropdown.style.display !== 'none';
+                        ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+                        styleDropdown.style.display = isOpen ? 'none' : 'block';
                     });
 
+                    styleWrap.appendChild(styleBtn);
+                    styleWrap.appendChild(styleDropdown);
+                    gStyle.appendChild(styleWrap);
                     ribbon.appendChild(gStyle);
 
                     // Edit group — undo, clear
@@ -8500,20 +8562,6 @@
                         g2.appendChild(compareBtn);
                         ribbon.appendChild(g2);
 
-                        // Legend
-                        ribbon.appendChild(_ribbonSep());
-                        const g3 = _ribbonGroup('Legend');
-                        [
-                            {color:'#FF5252', label:'Removed'},
-                            {color:'#00E676', label:'Added'},
-                            {color:'#FFB300', label:'Changed'},
-                        ].forEach(l => {
-                            const item = document.createElement('span');
-                            item.className = 'ribbon-legend-item';
-                            item.innerHTML = '<span class="ribbon-legend-dot" style="background:'+l.color+';"></span> '+l.label;
-                            g3.appendChild(item);
-                        });
-                        ribbon.appendChild(g3);
                     }
 
                 } else {
@@ -8528,8 +8576,151 @@
                     }
                 }
 
+                // Evaluate: Properties | Features
+                if (state.partNumber) {
+                    ribbon.appendChild(_ribbonSep());
+
+                    // Properties dropdown — fetches raw part JSON on first click
+                    const gProps = _ribbonGroup('Properties');
+                    const propsWrap = document.createElement('div');
+                    propsWrap.style.cssText = 'position:relative;';
+                    const propsBtn = document.createElement('button');
+                    propsBtn.className = 'ribbon-btn';
+                    propsBtn.innerHTML = '⚖ Properties ▾';
+                    propsBtn.title = 'Mass, Material, Bounding Box';
+
+                    const propsDropdown = document.createElement('div');
+                    propsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;';
+                    propsDropdown.setAttribute('data-ribbon-dropdown', '');
+
+                    // Lazy-load raw part data on first open
+                    let propsLoaded = false;
+                    function loadProps() {
+                        if (propsLoaded) return;
+                        propsLoaded = true;
+                        propsDropdown.innerHTML = '<div style="color:#737C89;font-size:11px;padding:4px;">Loading...</div>';
+                        fetch(`/api/part-properties/${encodeURIComponent(state.partNumber)}`)
+                            .then(r => r.ok ? r.json() : null)
+                            .then(pd => {
+                                propsDropdown.innerHTML = '';
+                                if (!pd) { propsDropdown.innerHTML = '<div style="color:#737C89;font-size:11px;padding:4px;">No data available</div>'; return; }
+                                const phys = pd.physical || {};
+                                const ident = pd.identity || {};
+                                buildPropsUI(phys, ident);
+                                // Cache for features group
+                                state._rawPartData = pd;
+                            })
+                            .catch(() => {
+                                propsDropdown.innerHTML = '<div style="color:#737C89;font-size:11px;padding:4px;">No data available</div>';
+                            });
+                    }
+
+                    function buildPropsUI(phys, ident) {
+                    const propRows = [
+                        {label: 'Material', value: phys.assignedMaterial || ident.material || '—'},
+                        {label: 'Mass', value: phys.mass ? (phys.mass * 1000).toFixed(1) + ' g' : '—'},
+                        {label: 'Volume', value: phys.volume ? (phys.volume * 1e9).toFixed(1) + ' mm³' : '—'},
+                        {label: 'Surface Area', value: phys.surfaceArea ? (phys.surfaceArea * 1e6).toFixed(1) + ' mm²' : '—'},
+                    ];
+                    const bbox = phys.boundingBox;
+                    if (bbox) {
+                        propRows.push({label: 'Bounding Box', value: (bbox.length*1000).toFixed(1) + ' × ' + (bbox.height*1000).toFixed(1) + ' × ' + (bbox.width*1000).toFixed(1) + ' mm'});
+                    }
+                    const com = phys.centerOfMass;
+                    if (com && com.length >= 3) {
+                        propRows.push({label: 'Center of Mass', value: com.map(v => (v*1000).toFixed(1)).join(', ') + ' mm'});
+                    }
+
+                    propRows.forEach(r => {
+                        const row = document.createElement('div');
+                        row.style.cssText = 'display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(255,255,255,0.04);';
+                        row.innerHTML = '<span style="color:#737C89;">'+r.label+'</span><span style="color:#E3E6EB;">'+r.value+'</span>';
+                        propsDropdown.appendChild(row);
+                    });
+                    } // end buildPropsUI
+
+                    propsBtn.addEventListener('click', (e) => {
+                        loadProps(); // lazy-load on first click
+                        e.stopPropagation();
+                        const isOpen = propsDropdown.style.display !== 'none';
+                        ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+                        propsDropdown.style.display = isOpen ? 'none' : 'block';
+                    });
+                    propsWrap.appendChild(propsBtn);
+                    propsWrap.appendChild(propsDropdown);
+                    gProps.appendChild(propsWrap);
+                    ribbon.appendChild(gProps);
+
+                    // Features dropdown
+                    ribbon.appendChild(_ribbonSep());
+                    const gFeat = _ribbonGroup('Features');
+                    const featWrap = document.createElement('div');
+                    featWrap.style.cssText = 'position:relative;';
+                    const featBtn = document.createElement('button');
+                    featBtn.className = 'ribbon-btn';
+                    featBtn.innerHTML = '📋 Features ▾';
+                    featBtn.title = 'Feature summary and hole details';
+
+                    const featDropdown = document.createElement('div');
+                    featDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:280px;max-height:300px;overflow-y:auto;';
+                    featDropdown.setAttribute('data-ribbon-dropdown', '');
+
+                    // Feature summary by type
+                    const fcm = state.featureColorMap;
+                    if (fcm && fcm.features) {
+                        const typeCounts = {};
+                        fcm.features.forEach(f => {
+                            const t = f.type || 'unknown';
+                            typeCounts[t] = (typeCounts[t] || 0) + 1;
+                        });
+                        const sumHeader = document.createElement('div');
+                        sumHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:0 0 4px;';
+                        sumHeader.textContent = 'Feature Summary (' + fcm.features.length + ' total)';
+                        featDropdown.appendChild(sumHeader);
+
+                        Object.entries(typeCounts).sort((a,b) => b[1]-a[1]).forEach(([type, count]) => {
+                            const row = document.createElement('div');
+                            row.style.cssText = 'display:flex;justify-content:space-between;padding:2px 0;font-size:11px;';
+                            row.innerHTML = '<span style="color:#9AA3AF;">'+type+'</span><span style="color:#E3E6EB;">'+count+'</span>';
+                            featDropdown.appendChild(row);
+                        });
+
+                        // Hole details — from cached raw part data
+                        const holes = (state._rawPartData?.features?.holeWizardHoles || []);
+                        if (holes.length > 0) {
+                            const holeHeader = document.createElement('div');
+                            holeHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:8px 0 4px;margin-top:6px;border-top:1px solid #323846;';
+                            holeHeader.textContent = 'Holes (' + holes.length + ')';
+                            featDropdown.appendChild(holeHeader);
+
+                            holes.forEach(h => {
+                                const row = document.createElement('div');
+                                row.style.cssText = 'padding:3px 0;font-size:11px;border-bottom:1px solid rgba(255,255,255,0.04);';
+                                let desc = h.name || 'Hole';
+                                if (h.diameter) desc += ' — ⌀' + (h.diameter * 1000).toFixed(2) + 'mm';
+                                if (h.instanceCount > 1) desc += ' ×' + h.instanceCount;
+                                row.style.color = '#E3E6EB';
+                                row.textContent = desc;
+                                featDropdown.appendChild(row);
+                            });
+                        }
+                    }
+
+                    featBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        loadProps(); // ensure raw data is cached
+                        const isOpen = featDropdown.style.display !== 'none';
+                        ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+                        featDropdown.style.display = isOpen ? 'none' : 'block';
+                    });
+                    featWrap.appendChild(featBtn);
+                    featWrap.appendChild(featDropdown);
+                    gFeat.appendChild(featWrap);
+                    ribbon.appendChild(gFeat);
+                }
+
             } else if (state.activeTab === 'assembly') {
-                // Assembly ribbon: Assembly | View | Revision | Legend
+                // Assembly ribbon: Assembly | View | Revision
                 if (assemblyContext) {
                     const g1 = _ribbonGroup('Assembly');
                     const chip = document.createElement('span');
@@ -8595,21 +8786,103 @@
                         g3.appendChild(compareBtn);
                         ribbon.appendChild(g3);
 
-                        // Legend
-                        ribbon.appendChild(_ribbonSep());
-                        const g4 = _ribbonGroup('Legend');
-                        [
-                            {color:'#FF5252', label:'Removed'},
-                            {color:'#00E676', label:'Added'},
-                            {color:'#FFB300', label:'Changed'},
-                        ].forEach(l => {
-                            const item = document.createElement('span');
-                            item.className = 'ribbon-legend-item';
-                            item.innerHTML = '<span class="ribbon-legend-dot" style="background:'+l.color+';"></span> '+l.label;
-                            g4.appendChild(item);
-                        });
-                        ribbon.appendChild(g4);
                     }
+                }
+
+                // Assembly Evaluate: Properties | Relationships
+                if (assemblyContext) {
+                    ribbon.appendChild(_ribbonSep());
+
+                    // Properties dropdown
+                    const gAProps = _ribbonGroup('Properties');
+                    const aPropsWrap = document.createElement('div');
+                    aPropsWrap.style.cssText = 'position:relative;';
+                    const aPropsBtn = document.createElement('button');
+                    aPropsBtn.className = 'ribbon-btn';
+                    aPropsBtn.innerHTML = '⚖ Properties ▾';
+
+                    const aPropsDropdown = document.createElement('div');
+                    aPropsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;max-height:300px;overflow-y:auto;';
+                    aPropsDropdown.setAttribute('data-ribbon-dropdown', '');
+
+                    const assyRows = [
+                        {label: 'Assembly', value: assemblyContext.assembly_name || assemblyContext.assembly_number || '—'},
+                        {label: 'Components', value: assemblyContext.component_count || '—'},
+                        {label: 'Unique Parts', value: assemblyContext.unique_part_count || '—'},
+                        {label: 'Mates', value: assemblyContext.mate_count || '—'},
+                    ];
+                    // Add part properties if any selected
+                    assyRows.forEach(r => {
+                        const row = document.createElement('div');
+                        row.style.cssText = 'display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(255,255,255,0.04);';
+                        row.innerHTML = '<span style="color:#737C89;">'+r.label+'</span><span style="color:#E3E6EB;">'+r.value+'</span>';
+                        aPropsDropdown.appendChild(row);
+                    });
+
+                    aPropsBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const isOpen = aPropsDropdown.style.display !== 'none';
+                        ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+                        aPropsDropdown.style.display = isOpen ? 'none' : 'block';
+                    });
+                    aPropsWrap.appendChild(aPropsBtn);
+                    aPropsWrap.appendChild(aPropsDropdown);
+                    gAProps.appendChild(aPropsWrap);
+                    ribbon.appendChild(gAProps);
+
+                    // Relationships dropdown
+                    ribbon.appendChild(_ribbonSep());
+                    const gRel = _ribbonGroup('Relationships');
+                    const relWrap = document.createElement('div');
+                    relWrap.style.cssText = 'position:relative;';
+                    const relBtn = document.createElement('button');
+                    relBtn.className = 'ribbon-btn';
+                    relBtn.innerHTML = '🔗 Relationships ▾';
+
+                    const relDropdown = document.createElement('div');
+                    relDropdown.style.cssText = 'display:none;position:absolute;top:100%;right:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:300px;max-height:350px;overflow-y:auto;';
+                    relDropdown.setAttribute('data-ribbon-dropdown', '');
+
+                    // Mate types summary
+                    const mates = assemblyContext.mate_relationships || [];
+                    if (mates.length > 0) {
+                        const mateHeader = document.createElement('div');
+                        mateHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:0 0 4px;';
+                        mateHeader.textContent = 'Mate Relationships (' + mates.length + ')';
+                        relDropdown.appendChild(mateHeader);
+
+                        mates.slice(0, 15).forEach(m => {
+                            const row = document.createElement('div');
+                            row.style.cssText = 'padding:2px 0;font-size:10px;color:#9AA3AF;border-bottom:1px solid rgba(255,255,255,0.03);';
+                            const c1 = m.component1FileName || m.component1 || '';
+                            const c2 = m.component2FileName || m.component2 || '';
+                            const count = m.mateCount || '';
+                            row.textContent = c1.replace('.sldprt','').replace('.SLDPRT','') + ' ↔ ' + c2.replace('.sldprt','').replace('.SLDPRT','') + (count ? ' (' + count + ')' : '');
+                            relDropdown.appendChild(row);
+                        });
+                        if (mates.length > 15) {
+                            const more = document.createElement('div');
+                            more.style.cssText = 'padding:4px 0;font-size:10px;color:#737C89;font-style:italic;';
+                            more.textContent = '... and ' + (mates.length - 15) + ' more';
+                            relDropdown.appendChild(more);
+                        }
+                    } else {
+                        const noMates = document.createElement('div');
+                        noMates.style.cssText = 'font-size:11px;color:#737C89;padding:4px 0;';
+                        noMates.textContent = 'No mate data available';
+                        relDropdown.appendChild(noMates);
+                    }
+
+                    relBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const isOpen = relDropdown.style.display !== 'none';
+                        ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+                        relDropdown.style.display = isOpen ? 'none' : 'block';
+                    });
+                    relWrap.appendChild(relBtn);
+                    relWrap.appendChild(relDropdown);
+                    gRel.appendChild(relWrap);
+                    ribbon.appendChild(gRel);
                 }
 
             } else if (state.activeTab === 'report') {

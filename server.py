@@ -574,6 +574,28 @@ async def get_profile_details(part_number: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/part-properties/{part_number}")
+async def get_part_properties(part_number: str):
+    """Return physical properties and features from the raw part JSON."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    library_dir = Path("400S_Sorted_Library")
+    json_path = library_dir / f"{safe_pn}.json"
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail="Part data not found")
+
+    with open(json_path, "r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+
+    return {
+        "identity": data.get("identity", {}),
+        "physical": data.get("physical", {}),
+        "features": data.get("features", {}),
+    }
+
+
 @app.get("/api/3d-model/{part_number}")
 async def get_3d_model(part_number: str):
     """Serve the raw STL file for a part number, or 404 if not found."""

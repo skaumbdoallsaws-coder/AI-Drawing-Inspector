@@ -3400,17 +3400,13 @@
 
         /* ---- Annotation Toolbar ---- */
         .annotation-toolbar {
-            display: none;
-            height: 36px;
-            min-height: 36px;
-            background: var(--bg-toolbar);
-            border-bottom: 1px solid var(--border);
-            align-items: center;
-            padding: 0 8px;
-            gap: 2px;
+            display: none !important;
+            height: 0;
+            min-height: 0;
+            overflow: hidden;
         }
         .annotation-toolbar.visible {
-            display: flex;
+            display: none !important;
         }
         .anno-tool-group {
             display: flex;
@@ -8216,6 +8212,11 @@
             return Object.assign(document.createElement('div'), {className:'ribbon-sep'});
         }
 
+        // Close ribbon dropdowns on outside click
+        document.addEventListener('click', () => {
+            document.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+        });
+
         function renderRibbon() {
             const ribbon = document.getElementById('contextRibbon');
             if (!ribbon) return;
@@ -8260,15 +8261,189 @@
                 });
                 ribbon.appendChild(g2);
 
-                // File info
-                if (state.fileName) {
+                // Annotation tools — only when a drawing is loaded
+                if (state.fileDataUrl) {
                     ribbon.appendChild(_ribbonSep());
-                    const g3 = _ribbonGroup('File');
-                    const chip = document.createElement('span');
-                    chip.className = 'ribbon-chip';
-                    chip.textContent = state.fileName;
-                    g3.appendChild(chip);
-                    ribbon.appendChild(g3);
+
+                    // Illustrations group — select + shape categories with dropdowns
+                    const gIll = _ribbonGroup('Illustrations');
+
+                    // Select tool
+                    const selectBtn = document.createElement('button');
+                    selectBtn.className = 'ribbon-btn';
+                    selectBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M3 2l3 12 2.5-4.5L13 7z"/></svg>';
+                    selectBtn.title = 'Select / Move (V)';
+                    selectBtn.addEventListener('click', () => document.querySelector('.anno-tool-btn[data-tool="select"]')?.click());
+                    gIll.appendChild(selectBtn);
+
+                    // Shape category dropdown buttons
+                    const shapeCategories = [
+                        { label: '╱', title: 'Lines', shapes: [
+                            {tool:'line', name:'Line'}, {tool:'arrow', name:'Arrow'}, {tool:'double-arrow', name:'Double Arrow'}
+                        ]},
+                        { label: '▭', title: 'Rectangles', shapes: [
+                            {tool:'rectangle', name:'Rectangle'}, {tool:'rounded-rectangle', name:'Rounded Rect'}
+                        ]},
+                        { label: '○', title: 'Shapes', shapes: [
+                            {tool:'circle', name:'Circle'}, {tool:'triangle', name:'Triangle'}, {tool:'diamond', name:'Diamond'}
+                        ]},
+                        { label: '➜', title: 'Block Arrows', shapes: [
+                            {tool:'block-arrow-right', name:'Right'}, {tool:'block-arrow-left', name:'Left'},
+                            {tool:'block-arrow-up', name:'Up'}, {tool:'block-arrow-down', name:'Down'},
+                            {tool:'block-arrow-chevron', name:'Chevron'}
+                        ]},
+                        { label: '💬', title: 'Callouts', shapes: [
+                            {tool:'speech-bubble', name:'Speech'}, {tool:'line-callout', name:'Line Callout'},
+                            {tool:'cloud-callout', name:'Cloud'}
+                        ]},
+                    ];
+
+                    shapeCategories.forEach(cat => {
+                        const wrap = document.createElement('div');
+                        wrap.style.cssText = 'position:relative;';
+                        const btn = document.createElement('button');
+                        btn.className = 'ribbon-btn';
+                        btn.innerHTML = cat.label + ' ▾';
+                        btn.title = cat.title;
+
+                        // Dropdown panel
+                        const dropdown = document.createElement('div');
+                        dropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:4px;padding:4px 0;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);min-width:140px;';
+
+                        cat.shapes.forEach(s => {
+                            const opt = document.createElement('button');
+                            opt.style.cssText = 'display:block;width:100%;padding:5px 12px;background:none;border:none;color:#ccc;font-size:12px;font-family:inherit;cursor:pointer;text-align:left;';
+                            opt.textContent = s.name;
+                            opt.addEventListener('mouseenter', () => { opt.style.background = 'rgba(79,195,247,0.12)'; opt.style.color = '#fff'; });
+                            opt.addEventListener('mouseleave', () => { opt.style.background = 'none'; opt.style.color = '#ccc'; });
+                            opt.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                document.querySelector('.anno-shape-option[data-tool="'+s.tool+'"]')?.click();
+                                dropdown.style.display = 'none';
+                            });
+                            dropdown.appendChild(opt);
+                        });
+
+                        btn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const isOpen = dropdown.style.display !== 'none';
+                            // Close all other dropdowns
+                            ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
+                            dropdown.style.display = isOpen ? 'none' : 'block';
+                        });
+                        dropdown.setAttribute('data-ribbon-dropdown', '');
+
+                        wrap.appendChild(btn);
+                        wrap.appendChild(dropdown);
+                        gIll.appendChild(wrap);
+                    });
+
+                    ribbon.appendChild(gIll);
+
+                    // Style group — color, stroke, fill
+                    ribbon.appendChild(_ribbonSep());
+                    const gStyle = _ribbonGroup('Style');
+
+                    // Color swatches (correct selectors)
+                    ['#FF1744','#FFD600','#00E676','#4fc3f7','#FFFFFF','#000000'].forEach(c => {
+                        const swatch = document.createElement('button');
+                        swatch.style.cssText = 'width:16px;height:16px;padding:0;border-radius:2px;background:'+c+';border:1px solid rgba(255,255,255,0.15);min-width:16px;cursor:pointer;';
+                        swatch.title = c;
+                        swatch.addEventListener('click', () => {
+                            document.querySelector('.anno-color-swatch[data-color="'+c+'"]')?.click();
+                        });
+                        gStyle.appendChild(swatch);
+                    });
+
+                    // Stroke width
+                    const strokeSep = document.createElement('span');
+                    strokeSep.style.cssText = 'width:1px;height:14px;background:#323846;margin:0 4px;';
+                    gStyle.appendChild(strokeSep);
+                    [
+                        {w:'1', label:'━', title:'Thin'},
+                        {w:'2', label:'▬', title:'Medium'},
+                        {w:'4', label:'▰', title:'Thick'},
+                    ].forEach(s => {
+                        const btn = document.createElement('button');
+                        btn.className = 'ribbon-btn';
+                        btn.textContent = s.label;
+                        btn.title = s.title;
+                        btn.style.cssText = 'padding:2px 4px;min-width:20px;font-size:10px;';
+                        btn.addEventListener('click', () => document.querySelector('.anno-stroke-btn[data-stroke="'+s.w+'"]')?.click());
+                        gStyle.appendChild(btn);
+                    });
+
+                    // Fill
+                    const fillSep = document.createElement('span');
+                    fillSep.style.cssText = 'width:1px;height:14px;background:#323846;margin:0 4px;';
+                    gStyle.appendChild(fillSep);
+                    [
+                        {f:'none', label:'∅', title:'No Fill'},
+                        {f:'semi', label:'◕', title:'Semi-transparent'},
+                        {f:'solid', label:'●', title:'Solid Fill'},
+                    ].forEach(s => {
+                        const btn = document.createElement('button');
+                        btn.className = 'ribbon-btn';
+                        btn.textContent = s.label;
+                        btn.title = s.title;
+                        btn.style.cssText = 'padding:2px 4px;min-width:20px;font-size:10px;';
+                        btn.addEventListener('click', () => document.querySelector('.anno-fill-btn[data-fill="'+s.f+'"]')?.click());
+                        gStyle.appendChild(btn);
+                    });
+
+                    ribbon.appendChild(gStyle);
+
+                    // Edit group — undo, clear
+                    ribbon.appendChild(_ribbonSep());
+                    const gEdit = _ribbonGroup('Edit');
+                    const undoBtn2 = document.createElement('button');
+                    undoBtn2.className = 'ribbon-btn';
+                    undoBtn2.textContent = '↩ Undo';
+                    undoBtn2.title = 'Undo last shape (Ctrl+Z)';
+                    undoBtn2.addEventListener('click', () => document.getElementById('annoUndoBtn')?.click());
+                    gEdit.appendChild(undoBtn2);
+                    const clearBtn2 = document.createElement('button');
+                    clearBtn2.className = 'ribbon-btn';
+                    clearBtn2.textContent = '✕ Clear';
+                    clearBtn2.title = 'Clear all annotations';
+                    clearBtn2.addEventListener('click', () => document.getElementById('annoClearAllBtn')?.click());
+                    gEdit.appendChild(clearBtn2);
+                    ribbon.appendChild(gEdit);
+
+                    // Display group — findings, dims toggles
+                    ribbon.appendChild(_ribbonSep());
+                    const gDisp = _ribbonGroup('Display');
+                    // Findings checkbox — sync from hidden toggle
+                    const hiddenFindings = document.getElementById('annoFindingsToggle');
+                    const findingsLabel = document.createElement('label');
+                    findingsLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#9AA3AF;cursor:pointer;';
+                    const findingsCb = document.createElement('input');
+                    findingsCb.type = 'checkbox';
+                    findingsCb.checked = hiddenFindings ? hiddenFindings.checked : true;
+                    findingsCb.addEventListener('change', () => {
+                        if (hiddenFindings && hiddenFindings.checked !== findingsCb.checked) {
+                            hiddenFindings.click();
+                        }
+                    });
+                    findingsLabel.appendChild(findingsCb);
+                    findingsLabel.appendChild(document.createTextNode('Findings'));
+                    gDisp.appendChild(findingsLabel);
+                    // Dims checkbox — sync from hidden toggle
+                    const hiddenDims = document.getElementById('annoDimsToggle');
+                    const dimsLabel = document.createElement('label');
+                    dimsLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#9AA3AF;cursor:pointer;';
+                    const dimsCb = document.createElement('input');
+                    dimsCb.type = 'checkbox';
+                    dimsCb.checked = hiddenDims ? hiddenDims.checked : false;
+                    dimsCb.addEventListener('change', () => {
+                        if (hiddenDims && hiddenDims.checked !== dimsCb.checked) {
+                            hiddenDims.click();
+                        }
+                    });
+                    dimsLabel.appendChild(dimsCb);
+                    dimsLabel.appendChild(document.createTextNode('Dims'));
+                    gDisp.appendChild(dimsLabel);
+                    ribbon.appendChild(gDisp);
                 }
 
             } else if (state.activeTab === '3dmodel') {
@@ -8560,10 +8735,7 @@
                 drawingDiv.className = 'viewport-drawing';
                 drawingDiv.id = 'drawingArea';
 
-                const label = document.createElement('div');
-                label.className = 'drawing-label';
-                const totalPages = state.results?.drawing_pages || state.drawingPages || 1;
-                label.textContent = `Engineering Drawing \u2014 Sheet ${state.currentPage} of ${totalPages}`;
+                // Drawing label removed — ribbon shows context instead
 
                 // Drawing toolbar (Fit, +, -)
                 const drawingToolbar = document.createElement('div');
@@ -8797,7 +8969,7 @@
                 });
                 document.addEventListener('mouseup', () => { state.isPanning = false; });
 
-                drawingDiv.appendChild(label);
+                // drawingDiv.appendChild(label); — removed, ribbon shows context
                 try { renderDimExplorerPanel(drawingDiv); }
                 catch (e) { console.error('[DimExplorer] panel render crashed:', e); }
                 viewportContent.appendChild(drawingDiv);

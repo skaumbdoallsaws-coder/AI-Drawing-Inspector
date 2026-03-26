@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Demo 17 — Assembly Revision Compare LinkedIn Post</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; font-family: -apple-system, 'Segoe UI', sans-serif; }
+
+  .post-image {
+    width: 1080px;
+    height: 1080px;
+    position: relative;
+    overflow: hidden;
+    margin: 40px auto;
+    background-color: #1a1d23;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 48px 60px 60px;
+  }
+
+  .crosshair {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid rgba(79, 195, 247, 0.3);
+    border-radius: 50%;
+  }
+  .crosshair::before, .crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(79, 195, 247, 0.3);
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+  }
+  .crosshair::before { width: 8px; height: 1.5px; }
+  .crosshair::after { width: 1.5px; height: 8px; }
+
+  .new-badge {
+    display: inline-block;
+    background: #00E676;
+    color: #111;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 4px 14px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+  }
+
+  .post-title {
+    font-size: 46px;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.2;
+    letter-spacing: -1.5px;
+    margin-bottom: 12px;
+  }
+  .post-title .highlight { color: #4fc3f7; }
+
+  .post-subtitle {
+    font-size: 17px;
+    color: rgba(255,255,255,0.35);
+    margin-bottom: 32px;
+    max-width: 750px;
+    line-height: 1.4;
+  }
+
+  /* Screenshot */
+  .screenshot-wrap {
+    margin-bottom: 32px;
+  }
+  .screenshot-wrap img {
+    width: 940px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  }
+
+  /* Legend */
+  .legend-row {
+    display: flex;
+    gap: 32px;
+    justify-content: center;
+    margin-bottom: 28px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .legend-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+  }
+
+  /* Bullets */
+  .bullets-row {
+    display: flex;
+    gap: 36px;
+    justify-content: center;
+  }
+  .bullet {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .bullet-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .bullet-text {
+    font-size: 14px;
+    color: rgba(255,255,255,0.6);
+  }
+
+  /* Logo */
+  .post-logo {
+    position: absolute;
+    bottom: 20px;
+    left: 28px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .post-logo-icon {
+    width: 30px;
+    height: 30px;
+    background: #1976d2;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .post-logo-icon svg { width: 18px; height: 18px; }
+  .post-logo-text {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .post-logo-text span:first-child { color: #ffffff; }
+  .post-logo-text span:last-child { color: #4fc3f7; }
+</style>
+</head>
+<body>
+
+<div style="position:relative;">
+  <div class="post-image" id="linkedin-sq">
+    <div class="crosshair" style="top:40px;left:80px;"></div>
+    <div class="crosshair" style="top:60px;right:100px;"></div>
+    <div class="crosshair" style="bottom:80px;left:200px;"></div>
+    <div class="crosshair" style="bottom:50px;right:150px;"></div>
+
+    <div class="new-badge">NEW</div>
+    <div class="post-title">
+      Compare assembly <span class="highlight">revisions</span>.<br>
+      See exactly what <span style="color:#FFB300;">changed</span>.
+    </div>
+    <div class="post-subtitle">Added, removed, and modified parts highlighted in 3D &mdash; with mate and feature-level context</div>
+
+    <div class="screenshot-wrap">
+      <img src="demo17_assembly_compare.png" alt="Assembly Rev A vs Rev B comparison">
+    </div>
+
+    <div class="legend-row">
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#FF5252;"></div>
+        <div class="legend-label">Removed</div>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#00E676;"></div>
+        <div class="legend-label">Added</div>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#FFB300;"></div>
+        <div class="legend-label">Changed</div>
+      </div>
+    </div>
+
+    <div class="bullets-row">
+      <div class="bullet">
+        <div class="bullet-dot" style="background:#4fc3f7;"></div>
+        <div class="bullet-text">Ask &ldquo;What changed?&rdquo; &mdash; only affected parts light up</div>
+      </div>
+      <div class="bullet">
+        <div class="bullet-dot" style="background:#FFB300;"></div>
+        <div class="bullet-text">Detects parameter changes like flange offsets and deleted holes</div>
+      </div>
+    </div>
+
+    <div class="post-logo">
+      <div class="post-logo-icon">
+        <svg viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="10" stroke="#fff" stroke-width="1.5" fill="none"/>
+          <circle cx="16" cy="16" r="3" fill="#fff"/>
+          <line x1="16" y1="4" x2="16" y2="10" stroke="#fff" stroke-width="1.5"/>
+          <line x1="16" y1="22" x2="16" y2="28" stroke="#fff" stroke-width="1.5"/>
+          <line x1="4" y1="16" x2="10" y2="16" stroke="#fff" stroke-width="1.5"/>
+          <line x1="22" y1="16" x2="28" y2="16" stroke="#fff" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <div class="post-logo-text">
+        <span>Inspector</span><span>Pro</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

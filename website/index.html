@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InspectorPro — AI-Powered Engineering Drawing Inspection</title>
+  <meta name="description" content="Upload an engineering drawing. InspectorPro checks it against the 3D CAD model. Three AI agents — inspection, deviation analysis, and part sourcing — on one platform.">
+  <meta property="og:title" content="InspectorPro — Your drawings. Verified by your 3D model.">
+  <meta property="og:description" content="AI-powered engineering drawing inspection against 3D CAD models. Three agents — inspection, deviation analysis, and part sourcing — on one platform.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://inspectorpro.io/assets/images/demo12_opening_1920x1080.png">
+  <meta property="og:url" content="https://inspectorpro.io">
+  <link rel="canonical" href="https://inspectorpro.io">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Fade-in animation */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+<!-- Brand crosshair markers -->
+<div style="position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:0;overflow:hidden;">
+  <svg style="position:absolute;top:80px;left:60px;width:56px;height:56px;opacity:0.45;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+  <svg style="position:absolute;top:120px;right:180px;width:48px;height:48px;opacity:0.4;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+  <svg style="position:absolute;top:42%;left:3%;width:64px;height:64px;opacity:0.4;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+  <svg style="position:absolute;top:65%;right:6%;width:52px;height:52px;opacity:0.4;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+  <svg style="position:absolute;bottom:18%;left:15%;width:44px;height:44px;opacity:0.4;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+  <svg style="position:absolute;bottom:35%;right:20%;width:60px;height:60px;opacity:0.4;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+  <svg style="position:absolute;top:25%;left:35%;width:40px;height:40px;opacity:0.4;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+  <svg style="position:absolute;bottom:10%;left:55%;width:50px;height:50px;opacity:0.4;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
+</div>
+
+<!-- HEADER -->
+<header class="site-header">
+  <div class="header-top">
+    <a href="/" class="header-logo" onclick="event.preventDefault();window.scrollTo({top:0,behavior:'smooth'})">
+      <img src="assets/images/logo.png" alt="InspectorPro">
+      <span class="logo-text"><span class="w">Inspector</span><span class="c">Pro</span></span>
+    </a>
+  </div>
+  <div class="header-bottom">
+    <a href="#features" class="nav-link">Features</a>
+    <a href="#demos" class="nav-link">Demos</a>
+    <a href="#contact" class="nav-link">Contact</a>
+    <button class="btn-primary" style="margin-left:auto;" onclick="document.getElementById('contact').scrollIntoView({behavior:'smooth'})">Request Demo</button>
+    <button class="mobile-menu-btn" id="mobileMenuBtn">&#9776;</button>
+  </div>
+</header>
+
+<!-- Mobile Nav -->
+<nav class="mobile-nav" id="mobileNav">
+  <a href="#features">Features</a>
+  <a href="#demos">Demos</a>
+  <a href="#contact">Contact</a>
+  <a href="#contact" style="color:#4fc3f7;font-weight:600;">Request Demo</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg-top"></div>
+  <div class="hero-overlay-top"></div>
+  <div class="hero-bg-bottom"></div>
+  <div class="hero-overlay-bottom"></div>
+  <div class="hero-grid"></div>
+  <div class="hero-band">
+    <div class="hero-content">
+      <div class="hero-text">
+        <h1 class="hero-title">
+          Your drawings &mdash; Verified by your 3D model
+        </h1>
+        <p class="hero-subtitle">
+          Try InspectorPro today. No installation required.
+        </p>
+        <div class="hero-buttons">
+          <a href="#demos" class="btn-primary">Watch Demo</a>
+          <a href="#contact" class="btn-outline">Request Access</a>
+        </div>
+      </div>
+      <div class="hero-image">
+        <div class="monitor-frame">
+          <img src="assets/images/hero_app_screenshot.png" alt="InspectorPro - AI-powered drawing inspection with 3D model verification" fetchpriority="high">
+        </div>
+        <div class="monitor-stand"></div>
+        <div class="monitor-base"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom-half action strip -->
+  <div class="hero-actions">
+    <div class="hero-actions-heading">Try InspectorPro now &mdash; no waiting, no installation required</div>
+    <div class="hero-actions-grid">
+      <div class="hero-action-item">
+        <div class="hero-action-icon">
+          <svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#4fc3f7" stroke-width="1.5" fill="rgba(79,195,247,0.08)"/><circle cx="24" cy="24" r="14" stroke="#4fc3f7" stroke-width="1" fill="none" opacity="0.6"/><line x1="24" y1="4" x2="24" y2="14" stroke="#4fc3f7" stroke-width="1.5"/><line x1="24" y1="34" x2="24" y2="44" stroke="#4fc3f7" stroke-width="1.5"/><line x1="4" y1="24" x2="14" y2="24" stroke="#4fc3f7" stroke-width="1.5"/><line x1="34" y1="24" x2="44" y2="24" stroke="#4fc3f7" stroke-width="1.5"/><circle cx="24" cy="24" r="3" fill="#4fc3f7"/></svg>
+        </div>
+        <div class="hero-action-title">Sample Drawings</div>
+        <div class="hero-action-desc">Try InspectorPro with pre-loaded engineering drawings and profiles</div>
+      </div>
+      <div class="hero-action-item">
+        <div class="hero-action-icon">
+          <svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#4fc3f7" stroke-width="1.5" fill="rgba(79,195,247,0.08)"/><circle cx="24" cy="24" r="14" stroke="#4fc3f7" stroke-width="1" fill="none" opacity="0.6"/><line x1="24" y1="4" x2="24" y2="14" stroke="#4fc3f7" stroke-width="1.5"/><line x1="24" y1="34" x2="24" y2="44" stroke="#4fc3f7" stroke-width="1.5"/><line x1="4" y1="24" x2="14" y2="24" stroke="#4fc3f7" stroke-width="1.5"/><line x1="34" y1="24" x2="44" y2="24" stroke="#4fc3f7" stroke-width="1.5"/><circle cx="24" cy="24" r="3" fill="#4fc3f7"/><path d="M18 28V20l6-4 6 4v8" stroke="#fff" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><polyline points="16,28 24,33 32,28" stroke="#fff" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="hero-action-title">Upload Your Drawing</div>
+        <div class="hero-action-desc">Upload your own engineering drawing for AI-powered inspection</div>
+      </div>
+      <div class="hero-action-item">
+        <div class="hero-action-icon">
+          <svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#4fc3f7" stroke-width="1.5" fill="rgba(79,195,247,0.08)"/><circle cx="24" cy="24" r="14" stroke="#4fc3f7" stroke-width="1" fill="none" opacity="0.6"/><line x1="24" y1="4" x2="24" y2="14" stroke="#4fc3f7" stroke-width="1.5"/><line x1="24" y1="34" x2="24" y2="44" stroke="#4fc3f7" stroke-width="1.5"/><line x1="4" y1="24" x2="14" y2="24" stroke="#4fc3f7" stroke-width="1.5"/><line x1="34" y1="24" x2="44" y2="24" stroke="#4fc3f7" stroke-width="1.5"/><circle cx="24" cy="24" r="3" fill="#4fc3f7"/><circle cx="18" cy="22" r="2.5" stroke="#FFB300" stroke-width="1" fill="none"/><circle cx="24" cy="18" r="2.5" stroke="#00E676" stroke-width="1" fill="none"/><circle cx="30" cy="22" r="2.5" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="20" y1="23" x2="22" y2="19" stroke="rgba(255,255,255,0.3)" stroke-width="0.8"/><line x1="26" y1="19" x2="28" y2="21" stroke="rgba(255,255,255,0.3)" stroke-width="0.8"/></svg>
+        </div>
+        <div class="hero-action-title">Three AI Agents</div>
+        <div class="hero-action-desc">Iris inspects, Sage reasons, Scout sources &mdash; all on one platform</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SOCIAL PROOF -->
+<section class="social-proof">
+  <p>Built for SolidWorks engineers &middot; ASME Y14.5 aware &middot; No installation required</p>
+</section>
+
+<!-- VALUE PROPS -->
+<section class="value-props">
+  <div class="section-header fade-in">
+    <h2>Three agents. One platform.</h2>
+    <p>Catch issues, understand impact, source replacements &mdash; all from the same drawing.</p>
+  </div>
+  <div class="cards">
+    <!-- Iris -->
+    <div class="card fade-in" style="--card-accent: #4fc3f7;">
+      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:64px;height:64px;"><defs><clipPath id="irisClip"><circle cx="16" cy="16" r="14"/></clipPath><linearGradient id="irisBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#29b6f6"/><stop offset="100%" stop-color="#0277bd"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#irisBg)"/><g clip-path="url(#irisClip)"><ellipse cx="16" cy="13" rx="5.5" ry="6" fill="#ffe0b2"/><ellipse cx="16" cy="12.5" rx="5.5" ry="6" fill="#ffcc80"/><circle cx="16" cy="13" r="5.2" fill="#ffe0b2"/><ellipse cx="14.2" cy="12.5" rx="1" ry="0.9" fill="#fff"/><ellipse cx="17.8" cy="12.5" rx="1" ry="0.9" fill="#fff"/><circle cx="14.2" cy="12.5" r="0.5" fill="#1565c0"/><circle cx="17.8" cy="12.5" r="0.5" fill="#1565c0"/><path d="M14.5 15.2q1.5 1 3 0" stroke="#c68a5c" stroke-width="0.5" fill="none" stroke-linecap="round"/><path d="M8.5 11q3-5.5 7.5-4.5t7.5 4.5v-2q-3-4.5-7.5-3.8T8.5 8.5z" fill="#4e342e"/><path d="M8 10.5q3.5-5.5 8-4.5t8 4.5v-1.5q-3.5-5.5-8-4.8T8 9z" fill="#3e2723"/><ellipse cx="16" cy="27" rx="7" ry="7" fill="#0277bd"/><rect x="12" y="19" width="8" height="4" rx="1" fill="#ffe0b2"/><path d="M12 20.5q0 3 4 4t4-4" fill="#0277bd"/></g></svg>
+      </div>
+      <h3>Drawing Inspection</h3>
+      <p>Checks dimensions, callouts, and views against the 3D CAD model. Catches missing features, tolerance gaps, and representation issues.</p>
+      <div class="card-agent" style="color:#4fc3f7;">Powered by Iris</div>
+    </div>
+    <!-- Sage -->
+    <div class="card fade-in" style="--card-accent: #FFB300;">
+      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:64px;height:64px;"><defs><clipPath id="sageClipW"><circle cx="16" cy="16" r="14"/></clipPath><linearGradient id="sageBgW" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffca28"/><stop offset="100%" stop-color="#f57f17"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#sageBgW)"/><g clip-path="url(#sageClipW)"><circle cx="16" cy="13.5" r="5.2" fill="#ffe0b2"/><ellipse cx="14.2" cy="13" rx="1" ry="0.9" fill="#fff"/><ellipse cx="17.8" cy="13" rx="1" ry="0.9" fill="#fff"/><circle cx="14.2" cy="13" r="0.5" fill="#4e342e"/><circle cx="17.8" cy="13" r="0.5" fill="#4e342e"/><path d="M14.5 15.5q1.5 0.8 3 0" stroke="#c68a5c" stroke-width="0.5" fill="none" stroke-linecap="round"/><path d="M12 11.5h2.5" stroke="#5d4037" stroke-width="0.7" stroke-linecap="round"/><path d="M17.5 11.5h2.5" stroke="#5d4037" stroke-width="0.7" stroke-linecap="round"/><path d="M8.5 11q3-5 7.5-4t7.5 4v-2.5q-3-4.5-7.5-3.8T8.5 8.5z" fill="#5d4037"/><path d="M8 10.5q3.5-5.5 8-4.5t8 4.5v-1.5q-3.5-5.5-8-4.8T8 9z" fill="#4e342e"/><ellipse cx="16" cy="27" rx="7" ry="7" fill="#e65100"/><rect x="12" y="19" width="8" height="4" rx="1" fill="#ffe0b2"/><path d="M12 20.5q0 3 4 4t4-4" fill="#e65100"/></g></svg>
+      </div>
+      <h3>Deviation Analysis</h3>
+      <p>Reasons through assembly mates, fits, and tolerances. Provides scrap, rework, or accept decisions with engineering justification.</p>
+      <div class="card-agent" style="color:#FFB300;">Powered by Sage</div>
+    </div>
+    <!-- Scout -->
+    <div class="card fade-in" style="--card-accent: #00E676;">
+      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:64px;height:64px;"><defs><clipPath id="scoutClipW"><circle cx="16" cy="16" r="14"/></clipPath><linearGradient id="scoutBgW" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#66bb6a"/><stop offset="100%" stop-color="#2e7d32"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#scoutBgW)"/><g clip-path="url(#scoutClipW)"><circle cx="16" cy="13" r="5.2" fill="#ffe0b2"/><ellipse cx="14.2" cy="12.5" rx="1" ry="0.9" fill="#fff"/><ellipse cx="17.8" cy="12.5" rx="1" ry="0.9" fill="#fff"/><circle cx="14.2" cy="12.5" r="0.5" fill="#2e7d32"/><circle cx="17.8" cy="12.5" r="0.5" fill="#2e7d32"/><path d="M14 15q2 1.5 4 0" stroke="#c68a5c" stroke-width="0.5" fill="none" stroke-linecap="round"/><path d="M8 12q2-6 8-5.5t8 5.5" fill="#4e342e"/><path d="M7.5 12.5q2.5-7 8.5-6t8.5 6v-2q-3-6-8.5-5.2T7.5 10.5z" fill="#3e2723"/><path d="M9 9q3-3 7-2.5t7 2.5" fill="#4e342e"/><ellipse cx="16" cy="27" rx="7" ry="7" fill="#1b5e20"/><rect x="12" y="19" width="8" height="4" rx="1" fill="#ffe0b2"/><path d="M12 20.5q0 3 4 4t4-4" fill="#1b5e20"/></g></svg>
+      </div>
+      <h3>Part Sourcing</h3>
+      <p>Searches supplier websites in real time with specs matched to your drawing. Assembly-aware &mdash; surfaces relevant vendor options.</p>
+      <div class="card-agent" style="color:#00E676;">Powered by Scout</div>
+    </div>
+  </div>
+</section>
+
+
+<!-- FEATURES -->
+<section class="features" id="features">
+
+  <!-- Feature 1: Drawing Verification -->
+  <div class="feature-row fade-in">
+    <div class="feature-text">
+      <div class="feature-label" style="color:#4fc3f7;">DRAWING VERIFICATION</div>
+      <h3>Check drawings against the 3D model before they reach the floor.</h3>
+      <p>Upload a drawing. InspectorPro compares it to the CAD model feature by feature &mdash; missing dimensions, tolerance gaps, incorrect views, uncalled-out holes. Each feature is identified from the 3D model, not inferred from the drawing. Results land in a findings table you can act on immediately.</p>
+      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
+    </div>
+    <div class="feature-media">
+      <!-- TODO: Replace with autoplay MP4 clip of drawing inspection in action -->
+      <div class="media-placeholder" data-label="Drawing inspection clip">
+        <img src="assets/images/hero_app_screenshot.png" alt="Drawing verification against 3D model" loading="lazy">
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 2: Revision Comparison -->
+  <div class="feature-row reverse fade-in" id="demos">
+    <div class="feature-text">
+      <div class="feature-label" style="color:#FF5252;">REVISION COMPARISON</div>
+      <h3>See exactly what changed between revisions, down to the feature level.</h3>
+      <p>Load Rev A and Rev B side by side. Removed features light up red, added green, modified amber. InspectorPro uses the CAD model&rsquo;s feature identity &mdash; not a pixel overlay &mdash; so it can tell you a specific flange was extended from 44.45mm to 76.2mm, not just that &ldquo;something moved.&rdquo;</p>
+      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
+    </div>
+    <div class="feature-media">
+      <!-- TODO: Replace with autoplay MP4 clip of revision comparison -->
+      <div class="media-placeholder" data-label="Revision comparison clip">
+        <img src="assets/images/demo15_rev_compare.png" alt="Feature-level revision comparison" loading="lazy">
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 3: Deviation Analysis -->
+  <div class="feature-row fade-in">
+    <div class="feature-text">
+      <div class="feature-label" style="color:#FFB300;">DEVIATION ANALYSIS</div>
+      <h3>Make scrap, rework, or accept decisions with assembly-aware reasoning.</h3>
+      <p>When a dimension is out of tolerance, InspectorPro doesn&rsquo;t just flag it. It checks the assembly &mdash; mate relationships, fit interfaces, downstream parts &mdash; and tells you whether the part will still function, what risk you carry if you accept it, and what to do next. Engineering reasoning, not just a red cell.</p>
+      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
+    </div>
+    <div class="feature-media">
+      <!-- TODO: Replace with autoplay MP4 clip of Sage deviation analysis -->
+      <div class="media-placeholder" data-label="Deviation analysis clip">
+        <img src="assets/images/demo12_opening_1920x1080.png" alt="Assembly-aware deviation analysis" loading="lazy">
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 4: FAI Reporting -->
+  <div class="feature-row reverse fade-in">
+    <div class="feature-text">
+      <div class="feature-label" style="color:#00E676;">FAI REPORTING</div>
+      <h3>Generate first article reports without rebuilding the job in spreadsheets.</h3>
+      <p>Numbered balloons on the drawing. Auto pass/fail evaluation as you type measurements. Enter &ldquo;all bores measured 25.003&rdquo; and eight cells fill at once. AI-generated verdicts explain each disposition. Print a clean report with header, characteristics table, and signature lines.</p>
+      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
+    </div>
+    <div class="feature-media">
+      <!-- TODO: Replace with poster image, optional play -->
+      <div class="media-placeholder" data-label="FAI report">
+        <img src="assets/images/fai_mockup_overview.png" alt="First Article Inspection report" loading="lazy">
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 5: Assembly Walkthroughs -->
+  <div class="feature-row fade-in">
+    <div class="feature-text">
+      <div class="feature-label" style="color:#4fc3f7;">TRAINING &amp; DESIGN REVIEW</div>
+      <h3>Walk through the assembly with synced 3D narration and highlights.</h3>
+      <p>Ask a question and the 3D model becomes a guided tour &mdash; voice narration, camera flying to each part, highlights tracking the explanation. Interrupt anytime with a follow-up. Resume where you left off. Onboard new techs and run design reviews without tying up a senior engineer.</p>
+      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
+    </div>
+    <div class="feature-media">
+      <!-- TODO: Replace with poster image, optional play -->
+      <div class="media-placeholder" data-label="Assembly walkthrough">
+        <img src="assets/images/demo11_opening_1920x1080.png" alt="Voice-guided assembly walkthrough" loading="lazy">
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 6: Part Sourcing -->
+  <div class="feature-row reverse fade-in">
+    <div class="feature-text">
+      <div class="feature-label" style="color:#00E676;">PART SOURCING</div>
+      <h3>Search replacement parts using the specs already in the drawing.</h3>
+      <p>When a part needs replacing, Scout pulls the dimensions, material, and thread specs from the drawing and searches supplier catalogs. It knows the assembly context &mdash; what the part connects to &mdash; so the options it surfaces actually fit.</p>
+      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
+    </div>
+    <div class="feature-media">
+      <!-- TODO: Replace with static screenshot -->
+      <div class="media-placeholder" data-label="Part sourcing">
+        <img src="assets/images/demo10_opening_1920x1080.png" alt="AI-powered part sourcing" loading="lazy">
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- CTA + CONTACT -->
+<section class="cta-section" id="contact">
+  <div class="cta-glow"></div>
+  <h2>Ready to see it in action?</h2>
+  <p>Request a live demo. We'll walk you through the platform with your own drawings.</p>
+  <p class="cta-email">Or email us at <a href="mailto:info@inspectorpro.io">info@inspectorpro.io</a></p>
+
+  <!-- TODO: Replace YOUR_FORM_ID with actual Formspree form ID from https://formspree.io -->
+  <form class="contact-form" action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
+    <div class="form-row">
+      <input type="text" name="name" placeholder="Your name" required>
+      <input type="email" name="email" placeholder="Work email" required>
+    </div>
+    <input type="text" name="company" placeholder="Company">
+    <textarea name="message" placeholder="Tell us about your use case (optional)"></textarea>
+    <button type="submit" class="btn-primary btn-lg btn-full">Request Demo</button>
+  </form>
+</section>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <div class="footer-logo">
+    <img src="assets/images/logo_with_text_hires.png" alt="InspectorPro">
+  </div>
+  <nav class="footer-nav">
+    <a href="#features">Features</a>
+    <a href="#demos">Demos</a>
+    <a href="#contact">Contact</a>
+    <a href="https://www.linkedin.com/company/inspectorpro" target="_blank" rel="noopener">LinkedIn</a>
+  </nav>
+  <div>&copy; 2026 InspectorPro. All rights reserved.</div>
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>
+

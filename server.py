@@ -174,9 +174,13 @@ def _load_assembly_profiles():
                     total_mappings += 1
 
         # Also index by new part numbers from partDataCache
+        # Prefer customProperties.PartNo (stable) over identity.partNumber
         part_data_cache = assy_data.get("partDataCache", {})
         for old_key, part_data in part_data_cache.items():
-            new_pn = (part_data.get("identity") or {}).get("partNumber", "")
+            ident = part_data.get("identity") or {}
+            new_pn = (ident.get("customProperties") or {}).get("PartNo", "")
+            if not new_pn:
+                new_pn = ident.get("partNumber") or ""
             if new_pn and new_pn not in seen_parts:
                 seen_parts.add(new_pn)
                 if new_pn not in assembly_part_lookup:
@@ -587,6 +591,307 @@ async def get_3d_model(part_number: str):
         media_type="application/octet-stream",
         filename=f"{safe_pn}.stl",
     )
+
+
+@app.get("/api/part-glb/{part_number}")
+async def get_part_glb(part_number: str):
+    """Serve the per-feature colored GLB for a part, or 404 if not available."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    # For revisioned parts, prefer parts/{pn}/revA/ to avoid stale root-level assets
+    rev_path = Path("400S_Sorted_Library/parts") / safe_pn / "revA" / f"{safe_pn}_colored.glb"
+    root_path = Path("400S_Sorted_Library") / f"{safe_pn}_colored.glb"
+    glb_path = rev_path if rev_path.exists() else root_path
+    if not glb_path.exists():
+        raise HTTPException(status_code=404, detail=f"No feature-colored GLB for part '{part_number}'")
+
+    return FileResponse(
+        path=str(glb_path),
+        media_type="model/gltf-binary",
+        filename=f"{safe_pn}_colored.glb",
+    )
+
+
+@app.get("/api/part-features/{part_number}")
+async def get_part_features(part_number: str):
+    """Serve the feature color map JSON for a part, or 404 if not available."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    # For revisioned parts, prefer parts/{pn}/revA/ to avoid stale root-level assets
+    rev_json = Path("400S_Sorted_Library/parts") / safe_pn / "revA" / f"{safe_pn}_feature_colors.json"
+    root_json = Path("400S_Sorted_Library") / f"{safe_pn}_feature_colors.json"
+    json_path = rev_json if rev_json.exists() else root_json
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail=f"No feature color data for part '{part_number}'")
+
+    with open(json_path, "r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+    return data
+
+
+@app.get("/api/part-revisions/{part_number}")
+async def get_part_revisions(part_number: str):
+    """List available revisions for a part."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    parts_dir = Path("400S_Sorted_Library/parts") / safe_pn
+    if not parts_dir.exists() or not parts_dir.is_dir():
+        return {"revisions": [], "part_number": safe_pn}
+
+    revisions = sorted([
+        d.name[3:]  # strip "rev" prefix
+        for d in parts_dir.iterdir()
+        if d.is_dir() and d.name.lower().startswith("rev")
+    ])
+    return {"revisions": revisions, "part_number": safe_pn}
+
+
+@app.get("/api/part-glb-rev/{part_number}")
+async def get_part_glb_revision(part_number: str, revision: str = Query(...)):
+    """Serve a specific revision of the per-feature colored GLB for a part."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    safe_rev = re.sub(r'[^\w]', '', revision)
+    if not safe_pn or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid part number or revision")
+
+    glb_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / f"{safe_pn}_colored.glb"
+    if not glb_path.exists():
+        raise HTTPException(status_code=404, detail=f"No GLB for part '{part_number}' revision '{revision}'")
+
+    return FileResponse(path=str(glb_path), media_type="model/gltf-binary", filename=f"{safe_pn}_colored.glb")
+
+
+@app.get("/api/part-feature-diff/{part_number}")
+async def get_part_feature_diff(part_number: str, revA: str = Query(...), revB: str = Query(...)):
+    """Compare features between two part revisions."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    safe_a = re.sub(r'[^\w]', '', revA)
+    safe_b = re.sub(r'[^\w]', '', revB)
+
+    base_dir = Path("400S_Sorted_Library/parts") / safe_pn
+    json_a = base_dir / f"rev{safe_a}" / f"{safe_pn}_feature_colors.json"
+    json_b = base_dir / f"rev{safe_b}" / f"{safe_pn}_feature_colors.json"
+
+    if not json_a.exists() or not json_b.exists():
+        raise HTTPException(status_code=404, detail="Revision feature data not found")
+
+    with open(json_a, encoding="utf-8-sig") as f:
+        features_a = json.load(f).get("features", [])
+    with open(json_b, encoding="utf-8-sig") as f:
+        features_b = json.load(f).get("features", [])
+
+    # Feature diff: match by cad_feature_id, compare fields
+    map_a = {f["cad_feature_id"]: f for f in features_a}
+    map_b = {f["cad_feature_id"]: f for f in features_b}
+    ids_a = set(map_a.keys())
+    ids_b = set(map_b.keys())
+
+    # Helper: compare two feature dicts and return field-level diffs including parameters
+    def _compare_feature_fields(fa, fb):
+        diffs = {}
+        for field in ["face_count", "display_label", "type", "sw_name"]:
+            if fa.get(field) != fb.get(field):
+                diffs[field] = {"old": fa.get(field), "new": fb.get(field)}
+        # Compare parameters dict (dimensional values for diff detection)
+        params_a = fa.get("parameters", {})
+        params_b = fb.get("parameters", {})
+        if params_a or params_b:
+            _LENGTH_TOL = 0.01   # mm
+            _ANGLE_TOL = 0.1     # degrees
+            _BOOL_FIELDS = {"is_through"}
+            param_diffs = {}
+            all_param_keys = set(list(params_a.keys()) + list(params_b.keys()))
+            for pk in all_param_keys:
+                va = params_a.get(pk)
+                vb = params_b.get(pk)
+                if va == vb:
+                    continue
+                if pk in _BOOL_FIELDS:
+                    param_diffs[pk] = {"old": va, "new": vb}
+                elif isinstance(va, (int, float)) and isinstance(vb, (int, float)):
+                    tol = _ANGLE_TOL if ("angle" in pk or "deg" in pk) else _LENGTH_TOL
+                    if abs(va - vb) >= tol:
+                        param_diffs[pk] = {"old": va, "new": vb}
+                else:
+                    param_diffs[pk] = {"old": va, "new": vb}
+            if param_diffs:
+                diffs["parameters"] = param_diffs
+        return diffs
+
+    changed = {}
+    for fid in ids_a & ids_b:
+        fa = map_a[fid]
+        fb = map_b[fid]
+        diffs = _compare_feature_fields(fa, fb)
+        if diffs:
+            changed[fid] = {
+                "display_label_a": fa.get("display_label", ""),
+                "display_label_b": fb.get("display_label", ""),
+                "color_name": fb.get("color_name", ""),
+                "changes": diffs,
+            }
+
+    # Stage 2: Match unmatched features by type + subtype similarity
+    # Codex review fixes: (1) canonical subtypes, (2) size-aware similarity,
+    # (3) global best-match instead of greedy, (4) empty subtypes handled
+    unmatched_a = {fid: map_a[fid] for fid in ids_a - ids_b}
+    unmatched_b = {fid: map_b[fid] for fid in ids_b - ids_a}
+
+    modified = {}
+    matched_a = set()
+    matched_b = set()
+
+    # --- Helpers ---
+    _SUBTYPE_SYNONYMS = {
+        "cbore": "counterbore", "counterbore": "counterbore",
+        "csk": "countersink", "countersink": "countersink",
+        "tapped": "tapped", "clearance": "clearance",
+        "dowel": "dowel", "ream": "ream",
+    }
+
+    def _hole_subtype(name: str) -> str:
+        """Extract canonical functional subtype from a hole name."""
+        name_lower = name.lower()
+        for kw, canonical in _SUBTYPE_SYNONYMS.items():
+            if kw in name_lower:
+                return canonical
+        return "_other"
+
+    _SIZE_RE = re.compile(r'[Mm](\d+(?:\.\d+)?)')
+
+    def _extract_size(name: str) -> float:
+        """Extract metric size (e.g. M12 → 12.0) from a hole name, or 0."""
+        m = _SIZE_RE.search(name)
+        return float(m.group(1)) if m else 0.0
+
+    def _feature_similarity(name_a: str, name_b: str) -> float:
+        """Size-aware similarity: word overlap penalized by size difference."""
+        wa = set(name_a.lower().replace("x", " ").split())
+        wb = set(name_b.lower().replace("x", " ").split())
+        if not wa or not wb:
+            return 0.0
+        word_score = len(wa & wb) / max(len(wa), len(wb))
+        # Penalize large size differences (M12 vs M3 = 0.25 penalty, M12 vs M10 = 0.83 penalty)
+        sa, sb = _extract_size(name_a), _extract_size(name_b)
+        if sa > 0 and sb > 0:
+            size_ratio = min(sa, sb) / max(sa, sb)  # 0..1, higher = more similar
+            return word_score * (0.3 + 0.7 * size_ratio)  # size contributes 70% weight
+        return word_score
+
+    def _global_best_match(candidates_a, candidates_b, feat_map_a, feat_map_b, threshold):
+        """Global best-match: score all pairs, pick highest first (Hungarian-lite)."""
+        scored = []
+        for fid_a in candidates_a:
+            na = feat_map_a[fid_a].get("sw_name", "")
+            for fid_b in candidates_b:
+                score = _feature_similarity(na, feat_map_b[fid_b].get("sw_name", ""))
+                if score >= threshold:
+                    scored.append((score, fid_a, fid_b))
+        scored.sort(key=lambda x: -x[0])  # highest score first
+        used_a, used_b = set(), set()
+        pairs = []
+        for score, fid_a, fid_b in scored:
+            if fid_a in used_a or fid_b in used_b:
+                continue
+            pairs.append((fid_a, fid_b))
+            used_a.add(fid_a)
+            used_b.add(fid_b)
+        return pairs
+
+    if unmatched_a and unmatched_b:
+        # Group unmatched by type
+        by_type_a = {}
+        for fid, feat in unmatched_a.items():
+            ftype = feat.get("type", "")
+            by_type_a.setdefault(ftype, []).append(fid)
+        by_type_b = {}
+        for fid, feat in unmatched_b.items():
+            ftype = feat.get("type", "")
+            by_type_b.setdefault(ftype, []).append(fid)
+
+        for ftype in set(by_type_a.keys()) & set(by_type_b.keys()):
+            list_a = list(by_type_a[ftype])
+            list_b = list(by_type_b[ftype])
+
+            if ftype == "holeWizard":
+                # Group by canonical subtype
+                sub_a = {}
+                for fid in list_a:
+                    st = _hole_subtype(map_a[fid].get("sw_name", ""))
+                    sub_a.setdefault(st, []).append(fid)
+                sub_b = {}
+                for fid in list_b:
+                    st = _hole_subtype(map_b[fid].get("sw_name", ""))
+                    sub_b.setdefault(st, []).append(fid)
+
+                for subtype in set(sub_a.keys()) & set(sub_b.keys()):
+                    # Global best-match within subtype (0.5 threshold — size-aware)
+                    pairs = _global_best_match(sub_a[subtype], sub_b[subtype], map_a, map_b, 0.5)
+                    for fid_a, fid_b in pairs:
+                        fa, fb = map_a[fid_a], map_b[fid_b]
+                        diffs = _compare_feature_fields(fa, fb)
+                        if not diffs:
+                            diffs["cad_feature_id"] = {"old": fid_a, "new": fid_b}
+                        modified[f"mod_{fid_a}"] = {
+                            "revA_id": fid_a, "revB_id": fid_b, "type": ftype,
+                            "display_label_a": fa.get("display_label", fid_a),
+                            "display_label_b": fb.get("display_label", fid_b),
+                            "color_name_a": fa.get("color_name", ""),
+                            "color_name_b": fb.get("color_name", ""),
+                            "changes": diffs,
+                        }
+                        matched_a.add(fid_a)
+                        matched_b.add(fid_b)
+            else:
+                # Non-hole features: global best-match by name similarity
+                pairs = _global_best_match(list_a, list_b, map_a, map_b, 0.5)
+                for fid_a, fid_b in pairs:
+                    fa, fb = map_a[fid_a], map_b[fid_b]
+                    diffs = _compare_feature_fields(fa, fb)
+                    if not diffs:
+                        diffs["cad_feature_id"] = {"old": fid_a, "new": fid_b}
+                    modified[f"mod_{fid_a}"] = {
+                        "revA_id": fid_a, "revB_id": fid_b, "type": ftype,
+                        "display_label_a": fa.get("display_label", fid_a),
+                        "display_label_b": fb.get("display_label", fid_b),
+                        "color_name_a": fa.get("color_name", ""),
+                        "color_name_b": fb.get("color_name", ""),
+                        "changes": diffs,
+                    }
+                    matched_a.add(fid_a)
+                    matched_b.add(fid_b)
+
+    # Remaining truly unmatched
+    added = [{"cad_feature_id": fid, "display_label": map_b[fid].get("display_label", fid),
+              "type": map_b[fid].get("type", ""), "color_name": map_b[fid].get("color_name", "")}
+             for fid in unmatched_b if fid not in matched_b]
+    removed = [{"cad_feature_id": fid, "display_label": map_a[fid].get("display_label", fid),
+                "type": map_a[fid].get("type", ""), "color_name": map_a[fid].get("color_name", "")}
+               for fid in unmatched_a if fid not in matched_a]
+
+    summary_parts = []
+    if changed: summary_parts.append(f"{len(changed)} feature(s) changed")
+    if modified: summary_parts.append(f"{len(modified)} feature(s) modified across revisions")
+    if added: summary_parts.append(f"{len(added)} added")
+    if removed: summary_parts.append(f"{len(removed)} removed")
+
+    return {
+        "part_number": safe_pn,
+        "revA": safe_a,
+        "revB": safe_b,
+        "changed_features": changed,
+        "modified_features": modified,
+        "added_features": added,
+        "removed_features": removed,
+        "unchanged_features": sorted(ids_a & ids_b - set(changed.keys())),
+        "summary": ", ".join(summary_parts) if summary_parts else "No changes detected",
+    }
 
 
 # ---------- Assembly Configuration Generation ----------
@@ -1090,17 +1395,34 @@ async def get_assembly_context(part_number: str):
     has_views = (assemblies_dir / f"{assy_number}_view_front.png").exists()
     has_glb = (assemblies_dir / f"{assy_number}_colored.glb").exists()
 
+    # Hex-to-friendly-name lookup for Sasha Trubetskoy palette + common colors
+    _HEX_TO_NAME = {
+        "#E6194B": "red", "#3CB44B": "green", "#FFE119": "yellow", "#0082C8": "blue",
+        "#F58230": "orange", "#911EB4": "purple", "#46F0F0": "cyan", "#F032E6": "magenta",
+        "#D2F53C": "lime", "#FABEBE": "pink", "#008080": "teal", "#E6BEFF": "lavender",
+        "#AA6E28": "brown", "#FFFAC8": "cream", "#800000": "maroon", "#AAFFC3": "mint",
+        "#808000": "olive", "#FFD8B1": "apricot", "#000080": "navy", "#808080": "gray",
+        "#FFFFFF": "white", "#000000": "black",
+    }
+
     # Build color legend: resolve old filenames to new part numbers + descriptions
     color_map = assy_data.get("partColorMapping", assy_data.get("colorAssignments", {}))
     part_data_cache = assy_data.get("partDataCache", {})
     part_color_legend = []
     for old_key, color in color_map.items():
         identity = (part_data_cache.get(old_key, {}).get("identity") or {})
+        hex_val = color if isinstance(color, str) else color.get("color", "#888")
+        color_name = _HEX_TO_NAME.get(hex_val.upper(), hex_val)
+        # Prefer customProperties.PartNo (stable across extractions) over identity.partNumber
+        pn = (identity.get("customProperties") or {}).get("PartNo", "")
+        if not pn:
+            pn = identity.get("partNumber") or old_key.replace(".sldprt", "").replace(".SLDPRT", "")
         part_color_legend.append({
             "old_key": old_key,
-            "part_number": identity.get("partNumber", old_key.replace(".sldprt", "").replace(".SLDPRT", "")),
+            "part_number": pn,
             "description": identity.get("description", ""),
-            "color": color if isinstance(color, str) else color.get("color", "#888"),
+            "color": hex_val,
+            "color_name": color_name,
         })
 
     # Build centroid lookup: partDataKey -> list of translations (ALL instances)
@@ -1180,14 +1502,20 @@ async def get_assembly_views(assembly_number: str):
 
 
 @app.get("/api/assembly-model/{assembly_number}")
-async def get_assembly_model(assembly_number: str):
-    """Serve the colored GLB 3D model for an assembly."""
+async def get_assembly_model(assembly_number: str, revision: Optional[str] = None):
+    """Serve the colored GLB 3D model for an assembly, optionally for a specific revision."""
     safe_num = re.sub(r'[^\w\-]', '', assembly_number)
     if not safe_num:
         raise HTTPException(status_code=400, detail="Invalid assembly number")
 
     assemblies_dir = Path("400S_Sorted_Library/assemblies")
-    glb_path = assemblies_dir / f"{safe_num}_colored.glb"
+
+    if revision:
+        safe_rev = re.sub(r'[^\w]', '', revision)
+        glb_path = assemblies_dir / safe_num / f"rev{safe_rev}" / f"{safe_num}_colored.glb"
+    else:
+        glb_path = assemblies_dir / f"{safe_num}_colored.glb"
+
     if not glb_path.exists():
         raise HTTPException(status_code=404, detail=f"No 3D model found for assembly '{assembly_number}'")
 
@@ -1196,6 +1524,76 @@ async def get_assembly_model(assembly_number: str):
         media_type="model/gltf-binary",
         filename=f"{safe_num}_colored.glb",
     )
+
+
+@app.get("/api/assembly-revisions/{assembly_number}")
+async def get_assembly_revisions(assembly_number: str):
+    """List available revisions for an assembly."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    if not safe_num:
+        raise HTTPException(status_code=400, detail="Invalid assembly number")
+
+    assy_dir = Path("400S_Sorted_Library/assemblies") / safe_num
+    if not assy_dir.exists() or not assy_dir.is_dir():
+        return {"revisions": []}
+
+    revisions = sorted([
+        d.name[3:]  # strip "rev" prefix
+        for d in assy_dir.iterdir()
+        if d.is_dir() and d.name.lower().startswith("rev")
+    ])
+    return {"revisions": revisions, "assembly_number": safe_num}
+
+
+@app.get("/api/assembly-diff/{assembly_number}")
+async def get_assembly_diff(assembly_number: str, revA: str = Query(...), revB: str = Query(...)):
+    """Compute diff between two assembly revisions."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_a = re.sub(r'[^\w]', '', revA)
+    safe_b = re.sub(r'[^\w]', '', revB)
+
+    base_dir = Path("400S_Sorted_Library/assemblies") / safe_num
+    dir_a = base_dir / f"rev{safe_a}"
+    dir_b = base_dir / f"rev{safe_b}"
+
+    json_a = dir_a / f"{safe_num}_assembly.json"
+    json_b = dir_b / f"{safe_num}_assembly.json"
+    if not json_a.exists() or not json_b.exists():
+        raise HTTPException(status_code=404, detail="Revision assembly JSON not found")
+
+    with open(json_a, encoding="utf-8-sig") as f:
+        assy_a = json.load(f)
+    with open(json_b, encoding="utf-8-sig") as f:
+        assy_b = json.load(f)
+
+    parts_dir_a = dir_a / "parts" if (dir_a / "parts").exists() else None
+    parts_dir_b = dir_b / "parts" if (dir_b / "parts").exists() else None
+
+    from ai_inspector.comparison.assembly_differ import compute_assembly_diff
+    diff_result = compute_assembly_diff(assy_a, assy_b, parts_dir_a, parts_dir_b)
+    diff_result["revA"] = safe_a
+    diff_result["revB"] = safe_b
+    diff_result["assembly_number"] = safe_num
+
+    # Build per-revision legends for side-specific mesh mapping
+    # Uses partColorMapping if available, falls back to partDataCache keys
+    def _build_legend(assy_data):
+        color_map = assy_data.get("partColorMapping", assy_data.get("colorAssignments", {}))
+        pdc = assy_data.get("partDataCache", {})
+        legend = []
+        # Use color map keys if available, otherwise fall back to partDataCache keys
+        source_keys = color_map.keys() if color_map else pdc.keys()
+        for old_key in source_keys:
+            identity = (pdc.get(old_key, {}).get("identity") or {})
+            pn = (identity.get("customProperties") or {}).get("PartNo", "")
+            if not pn:
+                pn = identity.get("partNumber") or old_key.replace(".sldprt", "").replace(".SLDPRT", "")
+            legend.append({"old_key": old_key, "part_number": pn})
+        return legend
+    diff_result["legendA"] = _build_legend(assy_a)
+    diff_result["legendB"] = _build_legend(assy_b)
+
+    return diff_result
 
 
 # ---------- Agent Chat ----------
@@ -1394,6 +1792,46 @@ If you write more than 3 sentences, you have failed. Rewrite shorter.
 
 Scope: drawings, CAD, ASME, GD&T, manufacturing. Off-topic? "That's outside my area — what drawing question can I help with?"
 
+PART FEATURE REVISION COMPARISON:
+When PART FEATURE CHANGES data is present in context, the user has a part with multiple revisions. You have the actual feature-level diff data.
+- Answer questions about what changed using the diff data — do not guess.
+- Use COMPARE_FEATURES: to highlight features on both viewports.
+- CRITICAL: Only emit markers for the SPECIFIC category the user asked about:
+  - "what was removed" → emit ONLY removed_* markers
+  - "what was added" → emit ONLY added_* markers
+  - "what was changed/modified" → emit ONLY pair_* and mod_* markers
+  - "show all differences" → emit ALL markers
+  Do NOT highlight everything when the user asks about one category.
+- Refer to features by display labels and colors in text, not by IDs.
+- The 3-sentence limit is SUSPENDED for revision diff questions — explain each change clearly.
+
+FEATURE COUNTING:
+When the user asks "how many features" on a part, count the feature GROUPS from the inspection profile (e.g., 5 groups: body, outer fillets, inner fillets, cam holes, mounting holes). Each group has an instance count. Give the group count as the primary answer with a quick breakdown. Do NOT ask which counting method they prefer.
+
+FEATURE-DRIVEN INSPECTION (when AVAILABLE CAD FEATURES data is present):
+You have a CAD-backed feature checklist for this part. Use it to improve your inspection:
+- Cross-reference CAD features against the drawing: is each feature properly dimensioned and called out?
+- Flag missing callouts: "The CAD model has 5 mounting holes but only 3 are dimensioned on the drawing."
+- Flag missing tolerances: "The cam shaft holes have no tolerance callout — these are likely fit interfaces."
+- Verify feature counts: "The CAD model shows 2 cam holes but the drawing only dimensions 1 — is the other assumed symmetric?"
+- You have the feature list from the CAD model. Use it as a checklist when checking the drawing — this is stronger than inferring features from the drawing alone.
+- ASME Y14.5 GUIDANCE: For supported feature types, apply the appropriate ASME callout expectations:
+  - Holes (holeWizard): position tolerance with datum reference, diameter symbol, THRU or depth
+  - Fillets (fillet): R or CR symbol with radius value
+  - Chamfers (chamfer): angle x distance or distance x distance
+  - Counterbores: diameter + depth in correct order per Y14.5-2018
+  - Threads: thread class, thread depth, major diameter
+  - Patterns: number of instances, spacing, position tolerance
+  For supported types, check that the drawing callout follows the expected ASME convention. Flag issues specifically: "This hole uses a note instead of a position tolerance FCF — per Y14.5 Section 7.4, holes should use geometric tolerancing." Note: not all feature types have ASME mappings — use drawing evidence to supplement when the CAD type alone is not conclusive.
+- VIEW EXPECTATIONS: Use CAD feature face information and reference views to narrow which drawing view should show each feature:
+  - Features on the top face → likely visible in the top/plan view
+  - Features on the end faces → likely visible in the end/side view
+  - Through features → circles in face-on view, hidden lines in perpendicular view
+  This helps you focus on the right view when checking for a specific feature, but always verify against the actual drawing layout — views may differ from standard projection.
+
+FEATURE HIGHLIGHTING ON 3D MODEL:
+When AVAILABLE CAD FEATURES data is present, you can highlight features on the 3D model. Emit HIGHLIGHT_FEATURES: feature_id1, feature_id2 on its own line. Use color names in text. The model starts gray — your highlight reveals color. When flagging a missing or under-dimensioned feature, highlight it so the user can see exactly which feature you're referring to.
+
 DIMENSION HIGHLIGHTING:
 - If the user has SELECTED DIMENSIONS (listed above), they are already highlighted — do NOT re-highlight them. Just answer the question.
 - If the user asks you to SHOW, FIND, or LOCATE a dimension (and it is NOT already selected), end your response with:
@@ -1536,9 +1974,62 @@ HIGHLIGHT_PARTS: part_number3
 Description of this part. 2-3 sentences.
 
 - Cover all major part groups in logical engineering order (housing → core mechanism → secondary → fasteners).
-- Use exact part numbers from AVAILABLE PARTS list.
+- Use exact part numbers from AVAILABLE PARTS list in the HIGHLIGHT_PARTS markers, but NEVER mention part numbers in the spoken text. The narration is read aloud — part numbers sound robotic and break the flow.
+- When referencing part colors, use the color NAME only (e.g. "the green chassis"), NEVER include hex codes like #D2F53C — the response is read aloud by text-to-speech.
+- Focus on FUNCTION and RELATIONSHIPS — what each part does, how it connects to others, why it matters. Do NOT include dimensions, measurements, numeric specs, diameters, lengths, or any numbers with units (mm, inches, degrees, kg, etc.) in walkthrough narration.
+- NEVER describe the assembly as a "toy", "model", "miniature", or "replica". Just call it what it is (e.g. "bulldozer assembly", "engine assembly"). Treat every assembly as a real engineering product.
+- NEVER mention raw material names like "ABS", "PLA", "PC", or plastic types. Just say "steel", "cast iron", "aluminum", or omit the material if it's not engineering-relevant. Treat every part as production hardware.
 - Start with one brief intro sentence before the first HIGHLIGHT_PARTS line.
-- This mode ONLY activates when the user explicitly asks for a walkthrough/tour/narration."""
+- This mode ONLY activates when the user explicitly asks for a walkthrough/tour/narration.
+
+EXCEPTION — REVISION DIFF MODE:
+When REVISION CHANGES data is present in context, the user is comparing two assembly revisions. The 3-sentence limit is SUSPENDED. Instead:
+- Start with a one-line summary: "Rev A to Rev B: 3 parts changed, 1 added."
+- YOU MUST emit a COMPARE_PARTS: line at the END of your response. This is mandatory, not optional.
+  Copy the exact markers from the COMPARE_PARTS USAGE section in the context.
+  Only emit the markers matching what the user asked about:
+  - "what was removed" → COMPARE_PARTS: removed_XXXX
+  - "what was added" → COMPARE_PARTS: added_XXXX
+  - "what was changed" → COMPARE_PARTS: changed_XXXX, changed_YYYY
+  - "show all differences" → COMPARE_PARTS: all markers
+- If COMPARE_PARTS markers are NOT listed in the context, use HIGHLIGHT_PARTS: instead.
+- For each changed part, explain:
+  1. What changed (dimension, tolerance, geometry, mass)
+  2. Why it likely changed (engineering reasoning from mate context)
+  3. What downstream impact it has on mating parts
+- Use bold for changed values: **25.000mm → 25.400mm (+0.4mm)**.
+- Do NOT reference part colors from the 3D model color legend (both viewers are gray in compare mode).
+- If mates changed, explain what the new constraint means for the assembly.
+- This mode activates when REVISION CHANGES is in the context AND the user asks about changes/differences.
+
+FEATURE HIGHLIGHTING ON 3D MODEL:
+When AVAILABLE CAD FEATURES data is present in context, you can highlight specific features on the part's 3D model.
+- When the user asks to see, show, or identify a specific feature type (holes, fillets, chamfers, extrudes), emit HIGHLIGHT_FEATURES with the matching cad_feature_ids.
+- Example: user asks "show me the holes" → emit HIGHLIGHT_FEATURES: holewzd_3_4_0_75_diameter_hole1, holewzd_3_8_0_375_diameter_hole1
+- You can also use shorthand: HIGHLIGHT_FEATURES: fillet1, holes (fuzzy matching resolves partial names, plurals, and type keywords).
+- Refer to features by their color name in your text: "the green 3/4 inch hole" not the cad_feature_id.
+- The 3D model starts gray. Your HIGHLIGHT_FEATURES command reveals the feature's assigned color.
+- Always put HIGHLIGHT_FEATURES on its own line at the end of your response, same as HIGHLIGHT_PARTS.
+
+FEATURE COUNTING:
+When the user asks "how many features" on a part, there are two valid counts:
+- GEOMETRIC COUNT: The total number of individual geometric elements (e.g., 2 cam holes + 5 mounting holes + 8 fillets = 15 features). Use the inspection profile data which lists instance counts per feature type. This is what engineers typically mean and should be your DEFAULT answer.
+- FEATURE TREE COUNT: The number of SolidWorks modeling operations (e.g., 1 extrude + 1 fillet + 2 hole wizard = 4 operations). This comes from the CAD feature list.
+Always answer with the geometric count first. Only mention the feature tree count if the user specifically asks about CAD operations or the SolidWorks feature tree. Do NOT ask the user which counting method they prefer — just give the geometric count.
+
+PART FEATURE REVISION COMPARISON:
+When PART FEATURE CHANGES data is present in context, the user has a part with multiple revisions. You have the actual feature-level diff data.
+- Answer questions about what changed using the diff data — do not guess.
+- Use COMPARE_FEATURES: to highlight features on both Rev A and Rev B viewports.
+- CRITICAL: Only emit markers for the SPECIFIC category the user asked about:
+  - "what was removed" → emit ONLY removed_* markers
+  - "what was added" → emit ONLY added_* markers
+  - "what was changed/modified" → emit ONLY pair_* and mod_* markers
+  - "show all differences" → emit ALL markers
+  Do NOT highlight everything when the user asks about one category.
+- Refer to features by display labels and colors in text, not by feature IDs.
+- The 3-sentence limit is SUSPENDED for revision diff questions — explain each change clearly.
+- Start with a summary, then detail each change."""
 
 PARTS_FINDER_PROMPT = """You are Scout, a procurement specialist. You know McMaster-Carr, Misumi, SKF, Fastenal inside-out. You source parts for machine shops.
 When assembly context is provided, factor in the part's function, mating constraints, and operating environment when suggesting replacements or alternatives.
@@ -1785,6 +2276,26 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         sp_lines.append("The user may ask about these parts. Reference them by part number and description.")
         parts.append("\n".join(sp_lines))
 
+    # CAD features available for highlighting on the 3D part model
+    available_cad_features = inspection_context.get("available_cad_features", [])
+    if available_cad_features:
+        cf_lines = ["AVAILABLE CAD FEATURES ON THIS PART (you can highlight any on the 3D model):"]
+        for feat in available_cad_features:
+            fid = feat.get("cad_feature_id", "")
+            label = feat.get("display_label", "")
+            ftype = feat.get("type", "")
+            color = feat.get("color_name", "")
+            face_count = feat.get("face_count", 0)
+            type_desc = {"holeWizard": "hole", "fillet": "fillet/round", "chamfer": "chamfer/bevel",
+                         "extrude": "extrusion", "extruthin": "thin extrusion (base body)",
+                         "revolve": "revolution", "cut": "cut"}.get(ftype, ftype)
+            cf_lines.append(f"- {fid} \u2014 {label} ({type_desc}, {face_count} faces) [{color}]")
+        cf_lines.append("To highlight features, include a line: HIGHLIGHT_FEATURES: feature_id1, feature_id2")
+        cf_lines.append("You can also use the feature type as shorthand: HIGHLIGHT_FEATURES: fillet1 (fuzzy matching is supported).")
+        cf_lines.append("Use color names in text (e.g. \"the green holes\"), not feature IDs.")
+        cf_lines.append("The 3D model starts gray \u2014 your highlight reveals the feature's color.")
+        parts.append("\n".join(cf_lines))
+
     # All available parts for agent-driven highlighting
     available_parts = inspection_context.get("available_parts", [])
     if available_parts:
@@ -1792,9 +2303,12 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         for ap in available_parts:
             pn = ap.get("part_number", "")
             desc = ap.get("description", "")
+            color_name = ap.get("color_name", "")
             label = pn
             if desc:
                 label += f" \u2014 {desc}"
+            if color_name:
+                label += f" [{color_name}]"
             c = ap.get("centroid_mm")
             if c and len(c) > 0:
                 if len(c) == 1:
@@ -1896,10 +2410,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
                 pn = _file_to_pn.get(stem, stem)
                 desc = next((i.get("description", "") for i in _legend if i.get("part_number") == pn), "")
                 part_names.append(f"{pn} ({desc})" if desc else pn)
-            dir_vec = step.get("direction", [0, 0, 0])
-            axes = {0: "X", 1: "Y", 2: "Z"}
-            dir_desc = ", ".join(f"{'+' if dir_vec[i] > 0 else '-'}{axes[i]}" for i in range(3) if abs(dir_vec[i]) > 0.01)
-            es_lines.append(f"  Step {step.get('stepIndex', 0) + 1}: {', '.join(part_names)} → direction {dir_desc}")
+            es_lines.append(f"  Step {step.get('stepIndex', 0) + 1}: {', '.join(part_names)}")
         es_lines.append("When asked for disassembly, follow this exact step order. Use the part numbers above in HIGHLIGHT_PARTS.")
         parts.append("\n".join(es_lines))
 
@@ -1916,6 +2427,199 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             pw_lines.append(f"  Currently highlighted parts: {', '.join(hl_parts)}")
         pw_lines.append("Answer the user's question concisely (max 3 sentences). They may say 'continue' to resume the tour.")
         parts.append("\n".join(pw_lines))
+
+    # Part feature revision diff context
+    part_feature_diff = inspection_context.get("part_feature_diff")
+    if part_feature_diff:
+        pfd_lines = [f"PART FEATURE CHANGES (Rev {part_feature_diff.get('revA', '?')} \u2192 Rev {part_feature_diff.get('revB', '?')}):"]
+        pfd_lines.append(f"Summary: {part_feature_diff.get('summary', 'No changes')}")
+
+        changed = part_feature_diff.get("changed_features", {})
+        if changed:
+            pfd_lines.append("COMPARE PAIRS (use pair_id in COMPARE_FEATURES marker):")
+            for i, (fid, info) in enumerate(changed.items()):
+                pair_id = f"pair_{i}"
+                label_a = info.get("display_label_a", fid)
+                label_b = info.get("display_label_b", fid)
+                color = info.get("color_name", "")
+                # Omit color label when compare mode is active (viewers are gray)
+                color_suffix = "" if (inspection_context.get("compare_mode_available") or inspection_context.get("part_compare_active")) else f" [{color}]"
+                pfd_lines.append(f"  {pair_id}: MODIFIED \u2014 {info.get('changes', {}).get('display_label', {}).get('old', label_a)} \u2192 {info.get('changes', {}).get('display_label', {}).get('new', label_b)}{color_suffix}")
+                for field, change in info.get("changes", {}).items():
+                    if field == "parameters":
+                        for param_name, param_change in change.items():
+                            pfd_lines.append(f"    param {param_name}: {param_change.get('old', '?')} \u2192 {param_change.get('new', '?')}")
+                    elif field != "display_label":
+                        pfd_lines.append(f"    {field}: {change.get('old')} \u2192 {change.get('new')}")
+
+        modified = part_feature_diff.get("modified_features", {})
+        if modified:
+            pfd_lines.append("MODIFIED FEATURES (same feature, changed between revisions):")
+            for mod_id, info in modified.items():
+                label_a = info.get("display_label_a", "")
+                label_b = info.get("display_label_b", "")
+                ftype = info.get("type", "")
+                color_a = info.get("color_name_a", "")
+                color_b = info.get("color_name_b", "")
+                if inspection_context.get("compare_mode_available") or inspection_context.get("part_compare_active"):
+                    pfd_lines.append(f"  {mod_id}: {ftype} — {label_a} → {label_b}")
+                else:
+                    pfd_lines.append(f"  {mod_id}: {ftype} — {label_a} [{color_a}] → {label_b} [{color_b}]")
+                for field, change in info.get("changes", {}).items():
+                    if field == "parameters":
+                        for param_name, param_change in change.items():
+                            pfd_lines.append(f"    param {param_name}: {param_change.get('old', '?')} → {param_change.get('new', '?')}")
+                    else:
+                        pfd_lines.append(f"    {field}: {change.get('old')} → {change.get('new')}")
+
+        added = part_feature_diff.get("added_features", [])
+        if added:
+            pfd_lines.append("ADDED FEATURES (new in Rev B):")
+            for feat in added:
+                fid = feat.get("cad_feature_id", feat) if isinstance(feat, dict) else feat
+                label = feat.get("display_label", fid) if isinstance(feat, dict) else fid
+                ftype = feat.get("type", "") if isinstance(feat, dict) else ""
+                color = feat.get("color_name", "") if isinstance(feat, dict) else ""
+                color_suffix = "" if (inspection_context.get("compare_mode_available") or inspection_context.get("part_compare_active")) else f" [{color}]"
+                pfd_lines.append(f"  added_{fid}: {label} ({ftype}){color_suffix}")
+
+        removed = part_feature_diff.get("removed_features", [])
+        if removed:
+            pfd_lines.append("REMOVED FEATURES (was in Rev A, gone in Rev B):")
+            for feat in removed:
+                fid = feat.get("cad_feature_id", feat) if isinstance(feat, dict) else feat
+                label = feat.get("display_label", fid) if isinstance(feat, dict) else fid
+                ftype = feat.get("type", "") if isinstance(feat, dict) else ""
+                color = feat.get("color_name", "") if isinstance(feat, dict) else ""
+                color_suffix = "" if (inspection_context.get("compare_mode_available") or inspection_context.get("part_compare_active")) else f" [{color}]"
+                pfd_lines.append(f"  removed_{fid}: {label} ({ftype}){color_suffix}")
+
+        # Build category-specific marker lists so the agent can select the right ones
+        removed_markers = []
+        if removed:
+            for feat in removed:
+                fid = feat.get("cad_feature_id", feat) if isinstance(feat, dict) else feat
+                removed_markers.append(f"removed_{fid}")
+        added_markers = []
+        if added:
+            for feat in added:
+                fid = feat.get("cad_feature_id", feat) if isinstance(feat, dict) else feat
+                added_markers.append(f"added_{fid}")
+        modified_markers = []
+        if changed:
+            for i in range(len(changed)):
+                modified_markers.append(f"pair_{i}")
+        if modified:
+            for mod_id in modified:
+                modified_markers.append(mod_id)
+        all_markers = removed_markers + added_markers + modified_markers
+
+        pfd_lines.append("COMPARE_FEATURES USAGE — emit ONLY the markers relevant to the user's question:")
+        if removed_markers:
+            pfd_lines.append(f"  For REMOVED features only: COMPARE_FEATURES: {', '.join(removed_markers)}")
+        if added_markers:
+            pfd_lines.append(f"  For ADDED features only: COMPARE_FEATURES: {', '.join(added_markers)}")
+        if modified_markers:
+            pfd_lines.append(f"  For MODIFIED/CHANGED features only: COMPARE_FEATURES: {', '.join(modified_markers)}")
+        if all_markers:
+            pfd_lines.append(f"  For ALL changes at once: COMPARE_FEATURES: {', '.join(all_markers)}")
+        pfd_lines.append("IMPORTANT: Only highlight what the user asked about. If they ask 'what was removed', emit ONLY the removed markers. If they ask 'what was added', emit ONLY the added markers. If they ask 'show all differences', emit ALL markers.")
+        if not all_markers:
+            pfd_lines.append("  No changes to highlight.")
+        if inspection_context.get("part_compare_active"):
+            pfd_lines.append("Refer to features by display labels only, not IDs. Do NOT reference feature colors (blue, red, green, etc.) — both viewers are gray in compare mode.")
+        else:
+            pfd_lines.append("Refer to features by display labels and colors in text, not IDs.")
+        parts.append("\n".join(pfd_lines))
+
+    # Revision diff context (assembly compare mode)
+    revision_diff = inspection_context.get("revision_diff")
+    if revision_diff:
+        rd_lines = [f"REVISION CHANGES (Rev {revision_diff.get('revA', '?')} \u2192 Rev {revision_diff.get('revB', '?')}):"]
+        rd_lines.append(f"Summary: {revision_diff.get('summary', 'No changes')}")
+
+        changed = revision_diff.get("changed_parts", {})
+        if changed:
+            rd_lines.append("CHANGED PARTS:")
+            for pn, changes in list(changed.items())[:10]:
+                desc = changes.get("description", "")
+                line_parts = [f"  {pn} ({desc}):"]
+                dims = changes.get("dimensions_changed", [])
+                for d in dims[:5]:
+                    old_f = d.get("old", {})
+                    new_f = d.get("new", {})
+                    if old_f and new_f:
+                        old_val = round(old_f.get("value", 0) * 1000, 3)
+                        new_val = round(new_f.get("value", 0) * 1000, 3)
+                        delta = round(d.get("delta_value", 0) * 1000, 3)
+                        line_parts.append(f"dim {old_val}mm \u2192 {new_val}mm (\u0394{delta}mm)")
+                phys = changes.get("physical_changed") or {}
+                if "mass" in phys:
+                    m = phys["mass"]
+                    old_g = round(m["old"] * 1000, 1)
+                    new_g = round(m["new"] * 1000, 1)
+                    line_parts.append(f"mass {old_g}g \u2192 {new_g}g ({m['delta_pct']}%)")
+                feats = changes.get("features_changed", [])
+                for fc in feats[:3]:
+                    line_parts.append(fc.get("details", ""))
+                rd_lines.append(" ".join(line_parts))
+
+        added = revision_diff.get("added_parts", [])
+        if added:
+            rd_lines.append("ADDED PARTS: " + ", ".join(added))
+
+        removed = revision_diff.get("removed_parts", [])
+        if removed:
+            rd_lines.append("REMOVED PARTS: " + ", ".join(removed))
+
+        mate_changes = revision_diff.get("mates_changed", [])
+        mate_added = revision_diff.get("mates_added", [])
+        mate_removed = revision_diff.get("mates_removed", [])
+        if mate_changes or mate_added or mate_removed:
+            rd_lines.append("MATE CHANGES:")
+            for mc in mate_changes[:5]:
+                rd_lines.append(f"  Modified: {mc.get('description', '')}")
+            for ma in mate_added[:5]:
+                rd_lines.append(f"  Added: {ma.get('description', '')}")
+            for mr in mate_removed[:5]:
+                rd_lines.append(f"  Removed: {mr.get('description', '')}")
+
+        # COMPARE_PARTS markers for dual-viewport assembly revision comparison
+        compare_available = inspection_context.get("compare_mode_available", False)
+        compare_active = inspection_context.get("compare_mode_active", False)
+
+        if compare_available:
+            # Build category-specific COMPARE_PARTS marker lists
+            cp_removed = [f"removed_{pn}" for pn in removed] if removed else []
+            cp_added = [f"added_{pn}" for pn in added] if added else []
+            cp_changed = [f"changed_{pn}" for pn in changed.keys()] if changed else []
+            cp_all = cp_removed + cp_added + cp_changed
+
+            rd_lines.append("")
+            rd_lines.append("COMPARE_PARTS USAGE (dual viewport revision comparison):")
+            rd_lines.append("YOU MUST emit a COMPARE_PARTS: line at the end of EVERY revision-related response. This is NOT optional.")
+            rd_lines.append("The COMPARE_PARTS line highlights parts on the dual Rev A / Rev B viewports.")
+            if not compare_active:
+                rd_lines.append("The compare view will auto-open automatically.")
+            if cp_removed:
+                rd_lines.append(f"  For REMOVED parts only: COMPARE_PARTS: {', '.join(cp_removed)}")
+            if cp_added:
+                rd_lines.append(f"  For ADDED parts only: COMPARE_PARTS: {', '.join(cp_added)}")
+            if cp_changed:
+                rd_lines.append(f"  For MODIFIED/CHANGED parts only: COMPARE_PARTS: {', '.join(cp_changed)}")
+            if cp_all:
+                rd_lines.append(f"  For ALL changes at once: COMPARE_PARTS: {', '.join(cp_all)}")
+            rd_lines.append("CRITICAL: Only emit markers for the SPECIFIC category the user asked about.")
+            rd_lines.append("  'what was removed' → ONLY removed_* markers. 'what was added' → ONLY added_* markers.")
+            rd_lines.append("  'what changed' → ONLY changed_* markers. 'show all differences' → ALL markers.")
+            rd_lines.append("IMPORTANT: In compare mode, do NOT reference part colors (red, green, blue, etc.) from the 3D model color legend.")
+            rd_lines.append("Both viewers are gray. Only the compare highlighting colors matter: red=removed, green=added, amber=changed.")
+
+        if not compare_available:
+            # Single-view: keep existing HIGHLIGHT_PARTS behavior
+            rd_lines.append("Use HIGHLIGHT_PARTS: part_number to highlight individual parts on the single viewer when discussing them.")
+
+        parts.append("\n".join(rd_lines))
 
     return "\n\n".join(parts)
 
@@ -2314,6 +3018,115 @@ async def agent_chat(request: AgentChatRequest):
             highlight_views = [v.strip() for v in hv_match.group(1).split(",") if v.strip()]
             response_text = re.sub(r'^HIGHLIGHT_VIEWS:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
 
+        # Extract feature highlight commands (per-feature on single part 3D model)
+        highlight_features = []
+        hf_match = re.search(r'^HIGHLIGHT_FEATURES?:\s*(.+)$', response_text, re.MULTILINE)
+        if hf_match:
+            available_feature_ids = set()
+            if ctx:
+                for feat in ctx.get("available_cad_features", []):
+                    available_feature_ids.add(feat.get("cad_feature_id", ""))
+            raw_features = [f.strip() for f in hf_match.group(1).split(",") if f.strip()]
+            if available_feature_ids:
+                # Exact match first
+                highlight_features = [f for f in raw_features if f in available_feature_ids]
+                # Fuzzy fallback: match by substring or type keyword for any unmatched
+                if len(highlight_features) < len(raw_features):
+                    unmatched = [f for f in raw_features if f not in available_feature_ids]
+                    def _slug(s):
+                        """Normalize a string for fuzzy matching: lowercase, strip all non-alphanumeric."""
+                        return re.sub(r'[^a-z0-9]', '', s.lower())
+                    for um in unmatched:
+                        um_slug = _slug(um)
+                        for avail_id in available_feature_ids:
+                            if avail_id in highlight_features:
+                                continue
+                            avail_slug = _slug(avail_id)
+                            # Substring match in either direction
+                            if um_slug in avail_slug or avail_slug in um_slug:
+                                highlight_features.append(avail_id)
+                            # Type keyword match: "fillet" matches any ID starting with "fillet"
+                            elif avail_slug.startswith(um_slug):
+                                highlight_features.append(avail_id)
+                            # Plural stripping: "fillets" -> "fillet", "holes" -> "hole"
+                            elif um_slug.endswith('s') and avail_slug.startswith(um_slug[:-1]):
+                                highlight_features.append(avail_id)
+                    highlight_features = list(dict.fromkeys(highlight_features))  # dedupe preserving order
+            else:
+                highlight_features = raw_features
+            response_text = re.sub(r'^HIGHLIGHT_FEATURES?:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
+        # Extract compare features marker (dual-view part revision comparison)
+        compare_features = []
+        cf_match = re.search(r'^COMPARE_FEATURES:\s*(.+)$', response_text, re.MULTILINE)
+        if cf_match:
+            raw_pairs = [p.strip() for p in cf_match.group(1).split(',') if p.strip()]
+            # Validate against the actual diff context
+            part_diff = ctx.get("part_feature_diff", {}) if ctx else {}
+            changed_keys = list(part_diff.get("changed_features", {}).keys())
+            added_ids = set()
+            removed_ids = set()
+            for f in part_diff.get("added_features", []):
+                fid = f.get("cad_feature_id", f) if isinstance(f, dict) else f
+                added_ids.add(fid)
+            for f in part_diff.get("removed_features", []):
+                fid = f.get("cad_feature_id", f) if isinstance(f, dict) else f
+                removed_ids.add(fid)
+            modified_keys = set(part_diff.get("modified_features", {}).keys())
+            for pid in raw_pairs:
+                if pid.startswith("pair_"):
+                    idx = int(pid.replace("pair_", "")) if pid.replace("pair_", "").isdigit() else -1
+                    if 0 <= idx < len(changed_keys):
+                        compare_features.append(pid)
+                elif pid.startswith("mod_"):
+                    if pid in modified_keys:
+                        compare_features.append(pid)
+                elif pid.startswith("added_"):
+                    fid = pid.replace("added_", "", 1)
+                    if fid in added_ids:
+                        compare_features.append(pid)
+                elif pid.startswith("removed_"):
+                    fid = pid.replace("removed_", "", 1)
+                    if fid in removed_ids:
+                        compare_features.append(pid)
+            dropped = [p for p in raw_pairs if p not in compare_features]
+            if dropped:
+                logger.warning(f"[Compare] Invalid COMPARE_FEATURES markers dropped: {dropped}")
+            response_text = re.sub(r'^COMPARE_FEATURES:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
+        # Extract compare parts marker (dual-view assembly revision comparison)
+        compare_parts = []
+        cp_match = re.search(r'^COMPARE_PARTS:\s*(.+)$', response_text, re.MULTILINE)
+        if cp_match:
+            raw_parts = [p.strip() for p in cp_match.group(1).split(',') if p.strip()]
+            rev_diff = ctx.get("revision_diff", {}) if ctx else {}
+            valid_changed = set(rev_diff.get("changed_parts", {}).keys())
+            valid_added = set(rev_diff.get("added_parts", []))
+            valid_removed = set(rev_diff.get("removed_parts", []))
+            for pid in raw_parts:
+                if pid.startswith("changed_"):
+                    pn = pid.replace("changed_", "", 1)
+                    if pn in valid_changed:
+                        compare_parts.append(pid)
+                elif pid.startswith("added_"):
+                    pn = pid.replace("added_", "", 1)
+                    if pn in valid_added:
+                        compare_parts.append(pid)
+                elif pid.startswith("removed_"):
+                    pn = pid.replace("removed_", "", 1)
+                    if pn in valid_removed:
+                        compare_parts.append(pid)
+            dropped = [p for p in raw_parts if p not in compare_parts]
+            if dropped:
+                logger.warning(f"[Compare] Invalid COMPARE_PARTS markers dropped: {dropped}")
+            response_text = re.sub(r'^COMPARE_PARTS:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
+        # Log parser miss: HIGHLIGHT_PARTS in compare-capable revision mode
+        if not compare_parts and ctx and ctx.get("compare_mode_available") and ctx.get("revision_diff"):
+            hp_check = re.search(r'^HIGHLIGHT_PARTS:', response_text, re.MULTILINE)
+            if hp_check:
+                logger.debug("[Compare] Agent emitted HIGHLIGHT_PARTS in compare-capable revision mode — parser miss, dropping")
+
         # Extract part highlight commands before cleaning
         highlight_parts = []
         narration_segments = []
@@ -2407,6 +3220,12 @@ async def agent_chat(request: AgentChatRequest):
             result["highlight_dimensions"] = highlight_dims
         if highlight_views:
             result["highlight_views"] = highlight_views
+        if highlight_features:
+            result["highlight_features"] = highlight_features
+        if compare_features:
+            result["compare_features"] = compare_features
+        if compare_parts:
+            result["compare_parts"] = compare_parts
         if highlight_parts:
             result["highlight_parts"] = highlight_parts
         if isolate_parts:

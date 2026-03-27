@@ -319,6 +319,106 @@
         /* Hide old agent-edge-tab */
         .agent-edge-tab { display: none !important; }
 
+        /* BOM Table — floating draggable overlay */
+        .bom-overlay {
+            position: absolute;
+            top: 60px;
+            left: 60px;
+            width: 520px;
+            max-height: 400px;
+            background: #171B23;
+            border: 1px solid #323846;
+            border-radius: 6px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            z-index: 30;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .bom-titlebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: #0D1016;
+            cursor: grab;
+            user-select: none;
+            border-bottom: 1px solid #323846;
+        }
+        .bom-titlebar:active { cursor: grabbing; }
+        .bom-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #E3E6EB;
+            letter-spacing: -0.2px;
+        }
+        .bom-titlebar-btns {
+            display: flex;
+            gap: 4px;
+        }
+        .bom-titlebar-btn {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: none;
+            border: none;
+            color: #737C89;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .bom-titlebar-btn:hover { background: rgba(255,255,255,0.08); color: #E3E6EB; }
+        .bom-titlebar-btn.close:hover { background: #c42b1c; color: #fff; }
+        .bom-body {
+            overflow-y: auto;
+            flex: 1;
+        }
+        .bom-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        .bom-table th {
+            position: sticky;
+            top: 0;
+            background: #131820;
+            color: #737C89;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 9px;
+            padding: 6px 8px;
+            text-align: left;
+            border-bottom: 1px solid #323846;
+        }
+        .bom-table td {
+            padding: 5px 8px;
+            color: #9AA3AF;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .bom-table tr {
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .bom-table tr:hover {
+            background: rgba(255,255,255,0.04);
+        }
+        .bom-table tr.selected {
+            background: rgba(79,195,247,0.1);
+        }
+        .bom-table tr.selected td {
+            color: #E3E6EB;
+        }
+        .bom-color-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            display: inline-block;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+
         /* Orientation Gizmo — corner axis overlay for 3D viewports */
         .orientation-gizmo {
             position: absolute;
@@ -8216,6 +8316,203 @@
             return Object.assign(document.createElement('div'), {className:'ribbon-sep'});
         }
 
+        // BOM Table — floating overlay with part highlighting
+        function _clearBomHighlights() {
+            if (!state.assyPartMeshMap) return;
+            // Restore to Part Explorer state if active, otherwise restore originals
+            if (typeof restoreAllPartMaterials === 'function') {
+                restoreAllPartMaterials();
+            } else {
+                for (const meshes of Object.values(state.assyPartMeshMap)) {
+                    meshes.forEach(m => {
+                        if (m.userData._origEmissive) {
+                            m.material.emissive.copy(m.userData._origEmissive);
+                            m.material.emissiveIntensity = m.userData._origEmissiveIntensity || 0;
+                        }
+                        m.material.opacity = m.userData._origOpacity || 1;
+                        m.material.transparent = m.userData._origTransparent || false;
+                        m.material.needsUpdate = true;
+                    });
+                }
+            }
+        }
+
+        function _showBOMTable() {
+            if (!assemblyContext) return;
+            const viewport = document.getElementById('viewportContent');
+            if (!viewport) return;
+
+            // Build BOM data from assembly context
+            const legend = assemblyContext.part_color_legend || [];
+            const components = assemblyContext.components || [];
+
+            // Count instances per part number
+            const qtys = {};
+            components.forEach(c => {
+                const pdk = (c.partDataKey || c.referencedFileName || '').toLowerCase();
+                const legendItem = legend.find(l => l.old_key.toLowerCase() === pdk);
+                const pn = legendItem ? legendItem.part_number : pdk;
+                qtys[pn] = (qtys[pn] || 0) + 1;
+            });
+
+            const bomData = legend.map((item, i) => ({
+                item: i + 1,
+                pn: item.part_number,
+                desc: item.description || '',
+                qty: qtys[item.part_number] || 1,
+                color: item.color || '#888',
+            }));
+
+            // Create overlay
+            const overlay = document.createElement('div');
+            overlay.className = 'bom-overlay';
+            overlay.id = 'bomOverlay';
+
+            // Title bar
+            const titlebar = document.createElement('div');
+            titlebar.className = 'bom-titlebar';
+            const title = document.createElement('span');
+            title.className = 'bom-title';
+            title.textContent = 'Bill of Materials (' + bomData.length + ' parts)';
+            titlebar.appendChild(title);
+
+            const btns = document.createElement('div');
+            btns.className = 'bom-titlebar-btns';
+            const minBtn = document.createElement('button');
+            minBtn.className = 'bom-titlebar-btn';
+            minBtn.textContent = '—';
+            minBtn.title = 'Minimize';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'bom-titlebar-btn close';
+            closeBtn.textContent = '×';
+            closeBtn.title = 'Close';
+            btns.appendChild(minBtn);
+            btns.appendChild(closeBtn);
+            titlebar.appendChild(btns);
+            overlay.appendChild(titlebar);
+
+            // Body
+            const body = document.createElement('div');
+            body.className = 'bom-body';
+
+            const table = document.createElement('table');
+            table.className = 'bom-table';
+
+            // Header
+            const thead = document.createElement('thead');
+            thead.innerHTML = '<tr><th>#</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Color</th></tr>';
+            table.appendChild(thead);
+
+            // Body rows
+            const tbody = document.createElement('tbody');
+            const selectedParts = new Set();
+
+            bomData.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + row.item + '</td><td>' + row.pn + '</td><td>' + row.desc + '</td><td>' + row.qty + '</td><td><span class="bom-color-swatch" style="background:' + row.color + ';"></span></td>';
+
+                tr.addEventListener('click', (e) => {
+                    const isCtrl = e.ctrlKey || e.metaKey;
+                    const wasSelected = selectedParts.has(row.pn);
+
+                    if (!isCtrl) {
+                        // Single click on already-selected row → deselect all
+                        if (wasSelected && selectedParts.size === 1) {
+                            selectedParts.clear();
+                            tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+                        } else {
+                            // Single select — clear others, select this one
+                            selectedParts.clear();
+                            tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+                            selectedParts.add(row.pn);
+                            tr.classList.add('selected');
+                        }
+                    } else {
+                        // Ctrl+click — toggle this row
+                        if (wasSelected) {
+                            selectedParts.delete(row.pn);
+                            tr.classList.remove('selected');
+                        } else {
+                            selectedParts.add(row.pn);
+                            tr.classList.add('selected');
+                        }
+                    }
+
+                    // Highlight selected parts in 3D
+                    _clearBomHighlights();
+                    if (selectedParts.size > 0 && state.assyPartMeshMap) {
+                        const highlightColor = new THREE.Color(0x4fc3f7);
+                        for (const [pn, meshes] of Object.entries(state.assyPartMeshMap)) {
+                            meshes.forEach(m => {
+                                if (selectedParts.has(pn)) {
+                                    m.material.emissive.copy(highlightColor);
+                                    m.material.emissiveIntensity = 0.5;
+                                    m.material.opacity = 1;
+                                    m.material.transparent = false;
+                                } else {
+                                    m.material.opacity = 0.12;
+                                    m.material.transparent = true;
+                                    m.material.emissive.set(0x000000);
+                                    m.material.emissiveIntensity = 0;
+                                }
+                                m.material.depthWrite = true;
+                                m.material.needsUpdate = true;
+                            });
+                        }
+                    }
+                });
+
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(tbody);
+            body.appendChild(table);
+            overlay.appendChild(body);
+
+            // Minimize
+            let minimized = false;
+            minBtn.addEventListener('click', () => {
+                minimized = !minimized;
+                body.style.display = minimized ? 'none' : '';
+                minBtn.textContent = minimized ? '+' : '—';
+            });
+
+            // Close
+            closeBtn.addEventListener('click', () => {
+                if (overlay._cleanupDrag) overlay._cleanupDrag();
+                overlay.remove();
+                _clearBomHighlights();
+            });
+
+            // Drag — with cleanup on close
+            let isDragging = false, dragStartX = 0, dragStartY = 0, origLeft = 0, origTop = 0;
+            titlebar.addEventListener('mousedown', (e) => {
+                if (e.target.closest('.bom-titlebar-btn')) return;
+                isDragging = true;
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                origLeft = overlay.offsetLeft;
+                origTop = overlay.offsetTop;
+                e.preventDefault();
+            });
+            const _bomMouseMove = (e) => {
+                if (!isDragging) return;
+                overlay.style.left = (origLeft + e.clientX - dragStartX) + 'px';
+                overlay.style.top = (origTop + e.clientY - dragStartY) + 'px';
+            };
+            const _bomMouseUp = () => { isDragging = false; };
+            document.addEventListener('mousemove', _bomMouseMove);
+            document.addEventListener('mouseup', _bomMouseUp);
+
+            // Store cleanup for close
+            overlay._cleanupDrag = () => {
+                document.removeEventListener('mousemove', _bomMouseMove);
+                document.removeEventListener('mouseup', _bomMouseUp);
+            };
+
+            viewport.appendChild(overlay);
+        }
+
         // Close ribbon dropdowns on outside click
         document.addEventListener('click', () => {
             document.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
@@ -8917,6 +9214,21 @@
                     relWrap.appendChild(relDropdown);
                     gRel.appendChild(relWrap);
                     ribbon.appendChild(gRel);
+
+                    // BOM group
+                    ribbon.appendChild(_ribbonSep());
+                    const gBom = _ribbonGroup('BOM');
+                    const bomBtn = document.createElement('button');
+                    bomBtn.className = 'ribbon-btn';
+                    bomBtn.innerHTML = '📋 BOM';
+                    bomBtn.title = 'Bill of Materials';
+                    bomBtn.addEventListener('click', () => {
+                        const existing = document.getElementById('bomOverlay');
+                        if (existing) { if (existing._cleanupDrag) existing._cleanupDrag(); existing.remove(); _clearBomHighlights(); return; }
+                        _showBOMTable();
+                    });
+                    gBom.appendChild(bomBtn);
+                    ribbon.appendChild(gBom);
                 }
 
             } else if (state.activeTab === 'report') {

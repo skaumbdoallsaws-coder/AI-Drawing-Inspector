@@ -8319,20 +8319,36 @@
         // BOM Table — floating overlay with part highlighting
         function _clearBomHighlights() {
             if (!state.assyPartMeshMap) return;
-            // Restore to Part Explorer state if active, otherwise restore originals
-            if (typeof restoreAllPartMaterials === 'function') {
-                restoreAllPartMaterials();
-            } else {
-                for (const meshes of Object.values(state.assyPartMeshMap)) {
-                    meshes.forEach(m => {
-                        if (m.userData._origEmissive) {
-                            m.material.emissive.copy(m.userData._origEmissive);
-                            m.material.emissiveIntensity = m.userData._origEmissiveIntensity || 0;
-                        }
-                        m.material.opacity = m.userData._origOpacity || 1;
-                        m.material.transparent = m.userData._origTransparent || false;
-                        m.material.needsUpdate = true;
-                    });
+            // Restore all meshes to original materials
+            for (const meshes of Object.values(state.assyPartMeshMap)) {
+                meshes.forEach(m => {
+                    if (m.userData._origEmissive) {
+                        m.material.emissive.copy(m.userData._origEmissive);
+                        m.material.emissiveIntensity = m.userData._origEmissiveIntensity || 0;
+                    }
+                    m.material.opacity = m.userData._origOpacity || 1;
+                    m.material.transparent = m.userData._origTransparent || false;
+                    m.material.depthWrite = m.userData._origDepthWrite !== undefined ? m.userData._origDepthWrite : true;
+                    m.material.needsUpdate = true;
+                });
+            }
+            // Reapply Part Explorer selections if any are active
+            if (state.partExplorerSelectedParts && state.partExplorerSelectedParts.size > 0) {
+                const highlightColor = new THREE.Color(0x4fc3f7);
+                for (const [pn, meshes] of Object.entries(state.assyPartMeshMap)) {
+                    if (state.partExplorerSelectedParts.has(pn)) {
+                        meshes.forEach(m => {
+                            m.material.emissive.copy(highlightColor);
+                            m.material.emissiveIntensity = 0.45;
+                            m.material.needsUpdate = true;
+                        });
+                    } else {
+                        meshes.forEach(m => {
+                            m.material.opacity = 0.05;
+                            m.material.transparent = true;
+                            m.material.needsUpdate = true;
+                        });
+                    }
                 }
             }
         }

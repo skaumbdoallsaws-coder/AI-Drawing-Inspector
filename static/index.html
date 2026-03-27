@@ -17386,7 +17386,14 @@
 
                     // Inject part feature revision diff for agent-driven comparison
                     if (partDiffState.diffResult) {
-                        inspCtx.part_feature_diff = partDiffState.diffResult;
+                        // Strip color names from diff when in compare mode (viewers are gray)
+                        const pfd = JSON.parse(JSON.stringify(partDiffState.diffResult));
+                        // Remove color_name from all diff entries
+                        (pfd.changed_features ? Object.values(pfd.changed_features) : []).forEach(f => { delete f.color_name; });
+                        (pfd.modified_features ? Object.values(pfd.modified_features) : []).forEach(f => { delete f.color_name_a; delete f.color_name_b; });
+                        (pfd.added_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
+                        (pfd.removed_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
+                        inspCtx.part_feature_diff = pfd;
                         inspCtx.part_revisions = partDiffState.revisions;
                         inspCtx.part_compare_active = true;
                     }

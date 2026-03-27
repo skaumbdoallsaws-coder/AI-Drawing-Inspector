@@ -5375,6 +5375,9 @@
             state.featureMeshMap = null;
             state.featureColorMap = null;
             state.featureHighlightActive = false;
+            state._rawPartData = null;
+            state._rawPartDataFetching = false;
+            state._rawPartDataCallbacks = [];
             // Clear part diff state and destroy viewers
             _destroyPartDiffViewers();
             partDiffState.available = false;
@@ -8593,24 +8596,42 @@
                     propsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;';
                     propsDropdown.setAttribute('data-ribbon-dropdown', '');
 
-                    // Lazy-load raw part data on first open
-                    let propsLoaded = false;
-                    function loadProps() {
-                        if (propsLoaded) return;
-                        propsLoaded = true;
+                    // Load raw part data — uses state._rawPartData as cache
+                    // state._rawPartData is cleared on part switch/reset
+                    // Uses a pending callbacks list so concurrent callers all get notified
+                    if (!state._rawPartDataCallbacks) state._rawPartDataCallbacks = [];
+
+                    function loadProps(callback) {
+                        // Already cached — use immediately
+                        if (state._rawPartData && state._rawPartData._pn === state.partNumber) {
+                            if (callback) callback(state._rawPartData);
+                            return;
+                        }
+                        // Queue callback for when fetch completes
+                        if (callback) state._rawPartDataCallbacks.push(callback);
+                        // Already fetching — callback is queued, don't start another fetch
+                        if (state._rawPartDataFetching) return;
+                        state._rawPartDataFetching = true;
+                        const fetchPn = state.partNumber;
                         propsDropdown.innerHTML = '<div style="color:#737C89;font-size:11px;padding:4px;">Loading...</div>';
-                        fetch(`/api/part-properties/${encodeURIComponent(state.partNumber)}`)
+                        fetch(`/api/part-properties/${encodeURIComponent(fetchPn)}`)
                             .then(r => r.ok ? r.json() : null)
                             .then(pd => {
-                                propsDropdown.innerHTML = '';
-                                if (!pd) { propsDropdown.innerHTML = '<div style="color:#737C89;font-size:11px;padding:4px;">No data available</div>'; return; }
-                                const phys = pd.physical || {};
-                                const ident = pd.identity || {};
-                                buildPropsUI(phys, ident);
-                                // Cache for features group
+                                state._rawPartDataFetching = false;
+                                if (state.partNumber !== fetchPn) { state._rawPartDataCallbacks = []; return; }
+                                if (!pd) { propsDropdown.innerHTML = '<div style="color:#737C89;font-size:11px;padding:4px;">No data available</div>'; state._rawPartDataCallbacks = []; return; }
+                                pd._pn = fetchPn;
                                 state._rawPartData = pd;
+                                propsDropdown.innerHTML = '';
+                                buildPropsUI(pd.physical || {}, pd.identity || {});
+                                // Fire all queued callbacks
+                                const cbs = state._rawPartDataCallbacks.splice(0);
+                                cbs.forEach(cb => cb(pd));
                             })
                             .catch(() => {
+                                state._rawPartDataFetching = false;
+                                state._rawPartDataCallbacks = [];
+                                if (state.partNumber !== fetchPn) return;
                                 propsDropdown.innerHTML = '<div style="color:#737C89;font-size:11px;padding:4px;">No data available</div>';
                             });
                     }
@@ -8639,8 +8660,13 @@
                     });
                     } // end buildPropsUI
 
+                    // If cached, populate immediately
+                    if (state._rawPartData && state._rawPartData._pn === state.partNumber) {
+                        buildPropsUI(state._rawPartData.physical || {}, state._rawPartData.identity || {});
+                    }
+
                     propsBtn.addEventListener('click', (e) => {
-                        loadProps(); // lazy-load on first click
+                        loadProps(); // lazy-load or use cache
                         e.stopPropagation();
                         const isOpen = propsDropdown.style.display !== 'none';
                         ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
@@ -8685,21 +8711,28 @@
                             featDropdown.appendChild(row);
                         });
 
-                        // Hole details — from cached raw part data
+                        // Hole details — use shared rebuild function (same marker contract)
+                        _rebuildHoleSection();
+                    }
+
+                    // Helper to rebuild hole section in place
+                    function _rebuildHoleSection() {
+                        // Remove old hole section if any
+                        const oldHoleHeader = featDropdown.querySelector('[data-hole-section]');
+                        if (oldHoleHeader) { while (oldHoleHeader.nextSibling) featDropdown.removeChild(oldHoleHeader.nextSibling); featDropdown.removeChild(oldHoleHeader); }
                         const holes = (state._rawPartData?.features?.holeWizardHoles || []);
                         if (holes.length > 0) {
                             const holeHeader = document.createElement('div');
+                            holeHeader.setAttribute('data-hole-section', '');
                             holeHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:8px 0 4px;margin-top:6px;border-top:1px solid #323846;';
                             holeHeader.textContent = 'Holes (' + holes.length + ')';
                             featDropdown.appendChild(holeHeader);
-
                             holes.forEach(h => {
                                 const row = document.createElement('div');
-                                row.style.cssText = 'padding:3px 0;font-size:11px;border-bottom:1px solid rgba(255,255,255,0.04);';
+                                row.style.cssText = 'padding:3px 0;font-size:11px;border-bottom:1px solid rgba(255,255,255,0.04);color:#E3E6EB;';
                                 let desc = h.name || 'Hole';
-                                if (h.diameter) desc += ' — ⌀' + (h.diameter * 1000).toFixed(2) + 'mm';
-                                if (h.instanceCount > 1) desc += ' ×' + h.instanceCount;
-                                row.style.color = '#E3E6EB';
+                                if (h.diameter) desc += ' — \u2300' + (h.diameter * 1000).toFixed(2) + 'mm';
+                                if (h.instanceCount > 1) desc += ' \u00d7' + h.instanceCount;
                                 row.textContent = desc;
                                 featDropdown.appendChild(row);
                             });
@@ -8708,7 +8741,8 @@
 
                     featBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        loadProps(); // ensure raw data is cached
+                        // Load data then rebuild hole section in place (no full ribbon rerender)
+                        loadProps((pd) => { _rebuildHoleSection(); });
                         const isOpen = featDropdown.style.display !== 'none';
                         ribbon.querySelectorAll('[data-ribbon-dropdown]').forEach(d => d.style.display = 'none');
                         featDropdown.style.display = isOpen ? 'none' : 'block';
@@ -8808,7 +8842,7 @@
                     const assyRows = [
                         {label: 'Assembly', value: assemblyContext.assembly_name || assemblyContext.assembly_number || '—'},
                         {label: 'Components', value: assemblyContext.component_count || '—'},
-                        {label: 'Unique Parts', value: assemblyContext.unique_part_count || '—'},
+                        {label: 'Unique Parts', value: assemblyContext.unique_part_count || (assemblyContext.part_color_legend ? assemblyContext.part_color_legend.length : '—')},
                         {label: 'Mates', value: assemblyContext.mate_count || '—'},
                     ];
                     // Add part properties if any selected
@@ -8844,7 +8878,7 @@
                     relDropdown.setAttribute('data-ribbon-dropdown', '');
 
                     // Mate types summary
-                    const mates = assemblyContext.mate_relationships || [];
+                    const mates = assemblyContext.all_mate_relationships || assemblyContext.mate_relationships || [];
                     if (mates.length > 0) {
                         const mateHeader = document.createElement('div');
                         mateHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:0 0 4px;';
@@ -14006,6 +14040,9 @@
             state.partNumber = null;
             state.partName = null;
             state.featureCount = null;
+            state._rawPartData = null;
+            state._rawPartDataFetching = false;
+            state._rawPartDataCallbacks = [];
             state.autoDetected = false;
             state.cadViews = {};
             state.results = null;

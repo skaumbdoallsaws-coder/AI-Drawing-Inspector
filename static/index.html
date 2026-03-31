@@ -13419,6 +13419,42 @@
             });
         }
 
+        // Lazy-hydrate geometry diff from backend cache (survives refresh/restart)
+        async function _ensureGeometryDiffContext() {
+            if (!state.partNumber || !partDiffState.available) return null;
+            const revA = partDiffState.activeRevA || partDiffState.revisions[0];
+            const revB = partDiffState.activeRevB || partDiffState.revisions[partDiffState.revisions.length - 1];
+            if (!revA || !revB) return null;
+
+            // Already have matching result
+            const existing = state._geometryDiffResult;
+            if (existing && existing.part_number === state.partNumber &&
+                existing.revA === revA && existing.revB === revB) {
+                return existing;
+            }
+
+            try {
+                const resp = await fetch(`/api/geometry-diff/${encodeURIComponent(state.partNumber)}?revA=${encodeURIComponent(revA)}&revB=${encodeURIComponent(revB)}`);
+                if (!resp.ok) return null;
+                const result = await resp.json();
+                state._geometryDiffResult = {
+                    part_number: state.partNumber,
+                    revA, revB,
+                    identical: result.identical,
+                    removed_volume_mm3: result.removed_volume_mm3,
+                    added_volume_mm3: result.added_volume_mm3,
+                    net_change_mm3: result.net_change_mm3,
+                    volume_a_mm3: result.volume_a_mm3,
+                    volume_b_mm3: result.volume_b_mm3,
+                    changed_centroids: result.changed_centroids || [],
+                    import_warnings: result.import_warnings || [],
+                };
+                return state._geometryDiffResult;
+            } catch {
+                return null;
+            }
+        }
+
         function _capturePreFitLocalBox(group) {
             if (!group) return;
             const box = new THREE.Box3().setFromObject(group);
@@ -15932,12 +15968,13 @@
                     };
                 }
 
-                // Send geometry diff when it matches current part
-                if (
-                    state._geometryDiffResult &&
-                    state._geometryDiffResult.part_number === state.partNumber
-                ) {
-                    inspCtx.geometry_diff = state._geometryDiffResult;
+                // Send geometry diff when it matches current part and rev pair
+                if (state._geometryDiffResult && state._geometryDiffResult.part_number === state.partNumber) {
+                    const gRevA = partDiffState.activeRevA || (partDiffState.revisions && partDiffState.revisions[0]);
+                    const gRevB = partDiffState.activeRevB || (partDiffState.revisions && partDiffState.revisions[partDiffState.revisions.length - 1]);
+                    if (!gRevA || !gRevB || (state._geometryDiffResult.revA === gRevA && state._geometryDiffResult.revB === gRevB)) {
+                        inspCtx.geometry_diff = state._geometryDiffResult;
+                    }
                 }
 
                 // Include selected dimensions from Dimension Explorer
@@ -17682,6 +17719,14 @@
                             });
                         }
                     }
+                    // Lazy-hydrate geometry diff from cache if user asks about it
+                    if (partDiffState.available && !state._geometryDiffResult) {
+                        const geoQ = /geometry.?diff|what.?(material|volume).*(added|removed|changed)|net.?volume|solid.?changed|where.*(geometry|material).?change/i;
+                        if (geoQ.test(messageText)) {
+                            await _ensureGeometryDiffContext();
+                        }
+                    }
+
                     const inspCtx = buildInspectionContext();
 
                     // Inject paused walkthrough context for barge-in questions

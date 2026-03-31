@@ -8966,6 +8966,7 @@
                         compareBtn.className = 'ribbon-btn primary';
                         compareBtn.textContent = 'Compare';
                         compareBtn.addEventListener('click', () => {
+                            if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
                             partDiffState.activeRevA = selA.value;
                             partDiffState.activeRevB = selB.value;
                             if (state.partNumber) _loadPartCompareViewers(state.partNumber, selA.value, selB.value);
@@ -13235,6 +13236,7 @@
             compareBtn.textContent = 'Compare';
             compareBtn.style.cssText = 'background:var(--accent);color:#fff;border:none;border-radius:3px;padding:3px 12px;font-size:11px;cursor:pointer;font-weight:600;';
             compareBtn.addEventListener('click', () => {
+                if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
                 partDiffState.activeRevA = selectA.value;
                 partDiffState.activeRevB = selectB.value;
                 _loadPartCompareViewers(pn, selectA.value, selectB.value);
@@ -13283,6 +13285,154 @@
             if (partDiffState.activeRevA && partDiffState.activeRevB) {
                 setTimeout(() => _loadPartCompareViewers(pn, partDiffState.activeRevA, partDiffState.activeRevB), 50);
             }
+        }
+
+        function _showGeometryDiffResult(result, partNumber, revA, revB) {
+            state._geometryDiffResult = {
+                part_number: partNumber,
+                revA, revB,
+                identical: result.identical,
+                removed_volume_mm3: result.removed_volume_mm3,
+                added_volume_mm3: result.added_volume_mm3,
+                net_change_mm3: result.net_change_mm3,
+                volume_a_mm3: result.volume_a_mm3,
+                volume_b_mm3: result.volume_b_mm3,
+                changed_centroids: result.changed_centroids || [],
+                import_warnings: result.import_warnings || [],
+            };
+
+            const existing = document.getElementById('geoDiffPanel');
+            if (existing) existing.remove();
+
+            const panel = document.createElement('div');
+            panel.id = 'geoDiffPanel';
+            panel.style.cssText = 'position:absolute;bottom:40px;left:50%;transform:translateX(-50%);z-index:100;background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:12px 18px;box-shadow:0 8px 32px rgba(0,0,0,0.4);min-width:320px;';
+
+            if (result.identical) {
+                panel.innerHTML = '<div style="text-align:center;color:var(--present);font-size:13px;font-weight:600;">Geometry is identical - no material changes detected.</div>';
+            } else {
+                const removed = result.removed_volume_mm3 || 0;
+                const added = result.added_volume_mm3 || 0;
+                const net = result.net_change_mm3 || 0;
+                const warnings = result.import_warnings || [];
+                const time = result.computation_time_s || 0;
+
+                let html = '<div style="font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Solid-Body Geometry Diff</div>';
+                html += '<div style="display:flex;gap:24px;font-size:13px;">';
+                if (removed > 0.001) html += `<div><span style="color:#FF5252;font-weight:700;">Removed:</span> ${removed.toFixed(1)} mm\u00B3</div>`;
+                if (added > 0.001) html += `<div><span style="color:#00E676;font-weight:700;">Added:</span> ${added.toFixed(1)} mm\u00B3</div>`;
+                html += `<div><span style="color:var(--text-secondary);">Net:</span> ${net >= 0 ? '+' : ''}${net.toFixed(1)} mm\u00B3</div>`;
+                html += '</div>';
+                html += `<div style="font-size:10px;color:var(--text-secondary);margin-top:6px;">Computed in ${time.toFixed(1)}s</div>`;
+                if (warnings.length > 0) {
+                    html += '<div style="font-size:10px;color:var(--gauge-amber);margin-top:4px;">\u26A0 ' + warnings.join('; ') + '</div>';
+                }
+                panel.innerHTML = html;
+                _loadGeoDiffOverlay(result, partNumber, revA, revB);
+            }
+
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '\u00D7';
+            closeBtn.style.cssText = 'position:absolute;top:4px;right:8px;background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:16px;';
+            closeBtn.addEventListener('click', () => _clearGeometryDiffContext());
+            panel.appendChild(closeBtn);
+
+            const viewport = document.querySelector('.viewport-content');
+            if (viewport) viewport.appendChild(panel);
+        }
+
+        function _loadGeoDiffOverlay(result, partNumber, revA, revB) {
+            const stlLoader = new THREE.STLLoader();
+            const pair = `${revA}_vs_${revB}`;
+
+            function computeStepToModelLocalOffset(viewer, stepBbox) {
+                const preFitBox = viewer?.liveScene?.userData?._preFitLocalBox;
+                if (!preFitBox || !stepBbox) return new THREE.Vector3();
+
+                const modelCenter = new THREE.Vector3(
+                    preFitBox.center[0],
+                    preFitBox.center[1],
+                    preFitBox.center[2]
+                );
+                const stepCenter = new THREE.Vector3(
+                    ((stepBbox.min[0] + stepBbox.max[0]) * 0.5) * 0.001,
+                    ((stepBbox.min[1] + stepBbox.max[1]) * 0.5) * 0.001,
+                    ((stepBbox.min[2] + stepBbox.max[2]) * 0.5) * 0.001
+                );
+                return modelCenter.sub(stepCenter);
+            }
+
+            function addOverlay(viewer, type) {
+                if (!viewer || !viewer.liveScene) return;
+                const stepBbox = viewer === partDiffState.viewerA ? result.bbox_a : result.bbox_b;
+                const needsStlOffset = viewer.liveScene.userData?._modelSource === 'stl';
+                const offset = needsStlOffset ? computeStepToModelLocalOffset(viewer, stepBbox) : new THREE.Vector3();
+                const url = `/api/geometry-diff/${encodeURIComponent(partNumber)}/${pair}/${type}.stl`;
+
+                stlLoader.load(url, (geometry) => {
+                    geometry.scale(0.001, 0.001, 0.001);
+                    geometry.translate(offset.x, offset.y, offset.z);
+
+                    const color = type === 'removed' ? 0xFF5252 : 0x00E676;
+                    const material = new THREE.MeshStandardMaterial({
+                        color,
+                        opacity: 0.5,
+                        transparent: true,
+                        side: THREE.DoubleSide,
+                        depthWrite: false,
+                        polygonOffset: true,
+                        polygonOffsetFactor: -1,
+                        polygonOffsetUnits: -1,
+                    });
+                    const mesh = new THREE.Mesh(geometry, material);
+                    mesh.userData._geoDiffOverlay = true;
+                    mesh.renderOrder = 1;
+                    viewer.liveScene.add(mesh);
+                }, undefined, () => {
+                    console.log(`[GeoDiff] No ${type}.stl to load (expected if volume is 0)`);
+                });
+            }
+
+            if (result.removed_volume_mm3 > 0.001) addOverlay(partDiffState.viewerA, 'removed');
+            if (result.added_volume_mm3 > 0.001) addOverlay(partDiffState.viewerB, 'added');
+        }
+
+        function _clearGeometryDiffContext() {
+            state._geometryDiffResult = null;
+            const panel = document.getElementById('geoDiffPanel');
+            if (panel) panel.remove();
+            _clearGeoDiffOverlay();
+        }
+
+        function _clearGeoDiffOverlay() {
+            [partDiffState.viewerA, partDiffState.viewerB].forEach(viewer => {
+                if (!viewer || !viewer.liveScene) return;
+                const toRemove = [];
+                viewer.liveScene.traverse(child => {
+                    if (child.userData && child.userData._geoDiffOverlay) toRemove.push(child);
+                });
+                toRemove.forEach(mesh => {
+                    mesh.geometry?.dispose();
+                    mesh.material?.dispose();
+                    mesh.parent?.remove(mesh);
+                });
+            });
+        }
+
+        function _capturePreFitLocalBox(group) {
+            if (!group) return;
+            const box = new THREE.Box3().setFromObject(group);
+            if (box.isEmpty()) return;
+            const center = new THREE.Vector3();
+            const size = new THREE.Vector3();
+            box.getCenter(center);
+            box.getSize(size);
+            group.userData._preFitLocalBox = {
+                min: box.min.toArray(),
+                max: box.max.toArray(),
+                center: center.toArray(),
+                size: size.toArray(),
+            };
         }
 
         async function _loadPartCompareViewers(partNumber, revA, revB) {
@@ -13353,12 +13503,14 @@
                 liveA.userData._modelSource = sceneA.userData._modelSource;
                 partDiffState.viewerA.scene.add(liveA);
                 partDiffState.viewerA.liveScene = liveA;
+                _capturePreFitLocalBox(liveA);
                 partDiffState.viewerA.partMeshMap = _buildPartFeatureDiffMap(liveA);
 
                 const liveB = sceneB.clone(true);
                 liveB.userData._modelSource = sceneB.userData._modelSource;
                 partDiffState.viewerB.scene.add(liveB);
                 partDiffState.viewerB.liveScene = liveB;
+                _capturePreFitLocalBox(liveB);
                 partDiffState.viewerB.partMeshMap = _buildPartFeatureDiffMap(liveB);
 
                 _fitCameraToGroup(partDiffState.viewerA.camera, partDiffState.viewerA.controls, liveA);
@@ -14523,6 +14675,7 @@
                 state.inspectionRequestId++;
             }
 
+            if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
             state.file = null;
             state.fileDataUrl = null;
             state.partNumber = null;
@@ -15777,6 +15930,16 @@
                         representation_score: ff.representation_score || null,
                         asme_compliance: ff.asme_compliance || null,
                     };
+                }
+
+                // Only send geometry diff when it matches current compare state
+                if (
+                    state._geometryDiffResult &&
+                    state._geometryDiffResult.part_number === state.partNumber &&
+                    state._geometryDiffResult.revA === partDiffState.activeRevA &&
+                    state._geometryDiffResult.revB === partDiffState.activeRevB
+                ) {
+                    inspCtx.geometry_diff = state._geometryDiffResult;
                 }
 
                 // Include selected dimensions from Dimension Explorer

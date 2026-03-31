@@ -17720,7 +17720,7 @@
                         }
                     }
                     // Lazy-hydrate geometry diff from cache if user asks about it
-                    if (partDiffState.available && !state._geometryDiffResult) {
+                    if (partDiffState.available) {
                         const geoQ = /geometry.?diff|what.?(material|volume).*(added|removed|changed)|net.?volume|solid.?changed|where.*(geometry|material).?change/i;
                         if (geoQ.test(messageText)) {
                             await _ensureGeometryDiffContext();

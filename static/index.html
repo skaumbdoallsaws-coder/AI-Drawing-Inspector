@@ -15932,12 +15932,10 @@
                     };
                 }
 
-                // Only send geometry diff when it matches current compare state
+                // Send geometry diff when it matches current part
                 if (
                     state._geometryDiffResult &&
-                    state._geometryDiffResult.part_number === state.partNumber &&
-                    state._geometryDiffResult.revA === partDiffState.activeRevA &&
-                    state._geometryDiffResult.revB === partDiffState.activeRevB
+                    state._geometryDiffResult.part_number === state.partNumber
                 ) {
                     inspCtx.geometry_diff = state._geometryDiffResult;
                 }

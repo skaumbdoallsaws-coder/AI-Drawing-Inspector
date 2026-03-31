@@ -121,7 +121,7 @@
             display: flex;
             align-items: center;
             background: rgba(255,255,255,0.03);
-            border: 1px solid #323846;
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 3px;
             padding: 0 6px;
             height: 24px;
@@ -164,7 +164,7 @@
             gap: 2px;
             margin-left: 8px;
             padding-left: 8px;
-            border-left: 1px solid #323846;
+            border-left: 1px solid rgba(255,255,255,0.07);
         }
         .toolbar-control-btn {
             width: 30px;
@@ -219,7 +219,7 @@
         .icon-toolbar-sep {
             width: 1px;
             height: 16px;
-            background: #323846;
+            background: rgba(255,255,255,0.07);
             margin: 0 4px;
         }
 
@@ -275,7 +275,7 @@
             right: 44px;
             top: 50%;
             transform: translateY(-50%);
-            background: #323846;
+            background: rgba(255,255,255,0.07);
             color: #E3E6EB;
             font-size: 11px;
             padding: 4px 8px;
@@ -330,8 +330,8 @@
             left: 60px;
             width: 520px;
             max-height: 400px;
-            background: #171B23;
-            border: 1px solid #323846;
+            background: var(--bg-panel);
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 6px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.5);
             z-index: 30;
@@ -347,7 +347,7 @@
             background: var(--bg-tab);
             cursor: grab;
             user-select: none;
-            border-bottom: 1px solid #323846;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
         }
         .bom-titlebar:active { cursor: grabbing; }
         .bom-title {
@@ -395,7 +395,7 @@
             font-size: 9px;
             padding: 6px 8px;
             text-align: left;
-            border-bottom: 1px solid #323846;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
         }
         .bom-table td {
             padding: 5px 8px;
@@ -529,7 +529,7 @@
         .ribbon-sep {
             width: 1px;
             align-self: stretch;
-            background: #323846;
+            background: rgba(255,255,255,0.07);
             flex-shrink: 0;
         }
         .ribbon-label {
@@ -547,7 +547,7 @@
             gap: 4px;
             padding: 2px 8px;
             background: rgba(255,255,255,0.04);
-            border: 1px solid #323846;
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 3px;
             font-size: 11px;
             color: #9AA3AF;
@@ -607,9 +607,9 @@
             height: 14px;
         }
         .ribbon-select {
-            background: #151A22;
+            background: var(--bg-tab);
             color: #E3E6EB;
-            border: 1px solid #323846;
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 3px;
             padding: 2px 6px;
             font-size: 11px;
@@ -659,8 +659,8 @@
             pointer-events: none;
         }
         .toast {
-            background: #1B212B;
-            border: 1px solid #323846;
+            background: var(--bg-ribbon);
+            border: 1px solid rgba(255,255,255,0.07);
             border-left: 3px solid var(--accent);
             border-radius: 4px;
             padding: 8px 14px;
@@ -738,7 +738,7 @@
             left: 44px;
             top: 50%;
             transform: translateY(-50%);
-            background: #323846;
+            background: rgba(255,255,255,0.07);
             color: #ddd;
             font-size: 11px;
             padding: 4px 8px;
@@ -784,7 +784,7 @@
         .cmd-palette {
             width: 520px;
             max-height: 400px;
-            background: #1B212B;
+            background: var(--bg-ribbon);
             border: 1px solid #333;
             border-radius: 6px;
             box-shadow: 0 16px 48px rgba(0,0,0,0.6);
@@ -796,7 +796,7 @@
             padding: 10px 14px;
             background: transparent;
             border: none;
-            border-bottom: 1px solid #323846;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
             color: #e0e0e0;
             font-size: 14px;
             font-family: inherit;
@@ -877,8 +877,8 @@
             top: 100%;
             left: 0;
             min-width: 200px;
-            background: #1B212B;
-            border: 1px solid #323846;
+            background: var(--bg-ribbon);
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 4px;
             padding: 4px 0;
             z-index: 200;
@@ -907,7 +907,7 @@
         }
         .menu-separator {
             height: 1px;
-            background: #323846;
+            background: rgba(255,255,255,0.07);
             margin: 4px 0;
         }
         .menu-shortcut {
@@ -1009,7 +1009,7 @@
 
         .panel-section {
             padding: 10px 12px;
-            border-bottom: 1px solid #323846;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
         }
 
         .panel-section-title {
@@ -1023,7 +1023,7 @@
 
         /* Upload Zone — docked pane style */
         .upload-zone {
-            border: 1px solid #323846;
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 3px;
             padding: 12px 8px;
             text-align: center;
@@ -2252,7 +2252,7 @@
         .scout-browser-card {
             width: 60vw; max-width: 900px;
             height: 50vh; max-height: 560px;
-            background: #1a1a28;
+            background: var(--bg-panel);
             border-radius: 12px;
             border: 1.5px solid #00E676;
             box-shadow: 0 0 30px rgba(0,230,118,0.15), 0 0 60px rgba(0,230,118,0.08), 0 20px 60px rgba(0,0,0,0.5);
@@ -2274,8 +2274,8 @@
         .scout-browser-header {
             display: flex; align-items: center; gap: 10px;
             padding: 10px 16px;
-            background: #12121e;
-            border-bottom: 1px solid #323846;
+            background: var(--bg-tab);
+            border-bottom: 1px solid rgba(255,255,255,0.07);
             min-height: 44px;
         }
         .scout-browser-favicon {
@@ -2286,8 +2286,8 @@
             flex: 1; font-size: 12px; color: #888;
             font-family: 'Consolas','Monaco',monospace;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            background: #0e0e18; padding: 4px 10px;
-            border-radius: 4px; border: 1px solid #323846;
+            background: var(--bg-tab); padding: 4px 10px;
+            border-radius: 4px; border: 1px solid rgba(255,255,255,0.07);
         }
         .scout-browser-live-badge {
             background: #00E676; color: #000;
@@ -2298,7 +2298,7 @@
         }
         @keyframes livePulse { 0%,100%{opacity:1;} 50%{opacity:0.6;} }
         .scout-browser-content {
-            flex: 1; overflow: hidden; position: relative; background: #0e0e18;
+            flex: 1; overflow: hidden; position: relative; background: var(--bg-tab);
         }
         .scout-browser-content img {
             width: 100%; height: 100%;
@@ -2306,7 +2306,7 @@
         }
         .scout-browser-skeleton {
             position: absolute; inset: 0;
-            background: linear-gradient(90deg, #1a1a28 0%, #323846 50%, #1a1a28 100%);
+            background: linear-gradient(90deg, #1a1a28 0%, rgba(255,255,255,0.07) 50%, #1a1a28 100%);
             background-size: 200% 100%;
             animation: shimmer 1.5s infinite;
         }
@@ -2315,7 +2315,7 @@
             100% { background-position: -200% 0; }
         }
         .scout-browser-progress {
-            height: 3px; background: #12121e; position: relative; overflow: hidden;
+            height: 3px; background: var(--bg-tab); position: relative; overflow: hidden;
         }
         .scout-browser-progress-bar {
             height: 100%;
@@ -2325,7 +2325,7 @@
         }
         .scout-browser-status {
             padding: 6px 16px; font-size: 11px; color: #888;
-            background: #12121e; border-top: 1px solid #323846;
+            background: var(--bg-tab); border-top: 1px solid rgba(255,255,255,0.07);
             display: flex; align-items: center; gap: 8px;
         }
         .scout-browser-status .scout-search-dot {
@@ -2338,7 +2338,7 @@
             display: none; flex-direction: column;
             padding: 14px 18px; gap: 0;
             overflow-y: auto; height: 100%;
-            scrollbar-width: thin; scrollbar-color: #323846 transparent;
+            scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.07) transparent;
         }
         .scout-search-results.active { display: flex; animation: searchListFadeIn 0.3s ease-out; }
         @keyframes searchListFadeIn {
@@ -2359,7 +2359,7 @@
         }
         .scout-search-result-item .sr-favicon {
             width: 20px; height: 20px; border-radius: 4px;
-            flex-shrink: 0; background: #1a1a28; object-fit: contain;
+            flex-shrink: 0; background: var(--bg-panel); object-fit: contain;
         }
         .scout-search-result-item .sr-text { flex: 1; min-width: 0; }
         .scout-search-result-item .sr-domain {
@@ -2420,7 +2420,7 @@
             100% { transform: translateY(-50px); }
         }
         .scout-blur-line {
-            height: 11px; background: #323846; border-radius: 5px; opacity: 0.45;
+            height: 11px; background: rgba(255,255,255,0.07); border-radius: 5px; opacity: 0.45;
         }
         .scout-blur-line:nth-child(1) { width: 95%; }
         .scout-blur-line:nth-child(2) { width: 78%; }
@@ -2447,7 +2447,7 @@
             filter: drop-shadow(0 0 4px rgba(0,230,118,0.4));
         }
         .scout-narration-bubble {
-            background: rgba(26, 29, 46, 0.95); border: 1px solid #323846;
+            background: rgba(26, 29, 46, 0.95); border: 1px solid rgba(255,255,255,0.07);
             border-radius: 10px; padding: 10px 14px;
             display: flex; align-items: flex-start; gap: 8px;
             min-width: 260px; max-width: 420px;
@@ -2456,7 +2456,7 @@
         .scout-narration-bubble::before {
             content: ''; position: absolute; top: -7px; left: 8px;
             width: 14px; height: 14px; background: rgba(26, 29, 46, 0.95);
-            border-left: 1px solid #323846; border-top: 1px solid #323846;
+            border-left: 1px solid rgba(255,255,255,0.07); border-top: 1px solid rgba(255,255,255,0.07);
             transform: rotate(45deg);
         }
         .scout-narration-text {
@@ -2471,7 +2471,7 @@
 
         /* Scout part result cards in chat */
         .scout-part-card {
-            background: #1a1d2e; border: 1px solid #323846;
+            background: var(--bg-panel); border: 1px solid rgba(255,255,255,0.07);
             border-radius: 8px; padding: 10px 14px; margin: 6px 0;
         }
         .scout-part-card .spc-name { font-weight: 600; color: #e0e0e0; font-size: 13px; }
@@ -2803,7 +2803,7 @@
         .fai-desc { max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; color:var(--text-secondary); }
         .fai-num { text-align:right; font-family:'Roboto Mono',monospace; font-size:11px; }
         .fai-char-num { text-align:center; width:32px; }
-        .fai-measured-input { width:72px; background:#0d1117; border:1px solid #2d333b; border-radius:4px; color:var(--text-primary); padding:3px 6px; font-size:12px; font-family:'Roboto Mono',monospace; text-align:right; }
+        .fai-measured-input { width:72px; background:var(--bg-tab); border:1px solid rgba(255,255,255,0.07); border-radius:4px; color:var(--text-primary); padding:3px 6px; font-size:12px; font-family:'Roboto Mono',monospace; text-align:right; }
         .fai-measured-input:focus { border-color:var(--accent); outline:none; }
         .fai-summary { padding:10px 12px; font-size:12px; color:var(--text-secondary); display:flex; gap:12px; align-items:center; border-top:1px solid var(--border); }
         .fai-verdict-btn, .fai-print-btn { margin:8px 12px; padding:6px 16px; border:1px solid var(--accent); background:transparent; color:var(--accent); border-radius:6px; cursor:pointer; font-size:12px; transition:all 0.15s; }
@@ -3079,7 +3079,7 @@
             border-bottom-right-radius: 2px;
         }
         .agent-panel-messages .agent-msg.assistant {
-            background: #2a2a2a;
+            background: var(--bg-panel);
             color: var(--text-primary);
             border-bottom-left-radius: 2px;
         }
@@ -3093,7 +3093,7 @@
             align-items: center;
             align-self: flex-start;
             padding: 10px 16px;
-            background: #2a2a2a;
+            background: var(--bg-panel);
             border-radius: 8px;
             border-bottom-left-radius: 2px;
         }
@@ -3430,7 +3430,7 @@
             gap: 4px;
             padding: 3px 8px;
             background: transparent;
-            border: 1px solid #323846;
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 3px;
             color: #9AA3AF;
             font-size: 11px;
@@ -8697,7 +8697,7 @@
                     shapesBtn.title = 'Shapes';
 
                     const shapesDropdown = document.createElement('div');
-                    shapesDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:8px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:220px;';
+                    shapesDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:var(--bg-ribbon);border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:8px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:220px;';
                     shapesDropdown.setAttribute('data-ribbon-dropdown', '');
 
                     const shapeCategories = [
@@ -8724,7 +8724,7 @@
                     shapeCategories.forEach(cat => {
                         // Category header
                         const header = document.createElement('div');
-                        header.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 4px 2px;margin-top:4px;border-top:1px solid #323846;';
+                        header.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 4px 2px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.07);';
                         if (cat === shapeCategories[0]) header.style.borderTop = 'none';
                         header.textContent = cat.title;
                         shapesDropdown.appendChild(header);
@@ -8777,7 +8777,7 @@
                     styleBtn.title = 'Color, Stroke & Fill';
 
                     const styleDropdown = document.createElement('div');
-                    styleDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:8px 12px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:200px;';
+                    styleDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:var(--bg-ribbon);border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:8px 12px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:200px;';
                     styleDropdown.setAttribute('data-ribbon-dropdown', '');
 
                     // Colors section
@@ -8804,7 +8804,7 @@
 
                     // Stroke section
                     const strokeHeader = document.createElement('div');
-                    strokeHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-top:1px solid #323846;margin-top:4px;';
+                    strokeHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-top:1px solid rgba(255,255,255,0.07);margin-top:4px;';
                     strokeHeader.textContent = 'Stroke';
                     styleDropdown.appendChild(strokeHeader);
 
@@ -8830,7 +8830,7 @@
 
                     // Fill section
                     const fillHeader = document.createElement('div');
-                    fillHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-top:1px solid #323846;margin-top:4px;';
+                    fillHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;border-top:1px solid rgba(255,255,255,0.07);margin-top:4px;';
                     fillHeader.textContent = 'Fill';
                     styleDropdown.appendChild(fillHeader);
 
@@ -9039,7 +9039,7 @@
                     propsBtn.title = 'Mass, Material, Bounding Box';
 
                     const propsDropdown = document.createElement('div');
-                    propsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;';
+                    propsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:var(--bg-ribbon);border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;';
                     propsDropdown.setAttribute('data-ribbon-dropdown', '');
 
                     // Load raw part data — uses state._rawPartData as cache
@@ -9132,7 +9132,7 @@
                     featBtn.title = 'Feature summary and hole details';
 
                     const featDropdown = document.createElement('div');
-                    featDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:280px;max-height:300px;overflow-y:auto;';
+                    featDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:var(--bg-ribbon);border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:280px;max-height:300px;overflow-y:auto;';
                     featDropdown.setAttribute('data-ribbon-dropdown', '');
 
                     // Feature summary by type
@@ -9168,7 +9168,7 @@
                         if (holes.length > 0) {
                             const holeHeader = document.createElement('div');
                             holeHeader.setAttribute('data-hole-section', '');
-                            holeHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:8px 0 4px;margin-top:6px;border-top:1px solid #323846;';
+                            holeHeader.style.cssText = 'font-size:10px;color:#737C89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:8px 0 4px;margin-top:6px;border-top:1px solid rgba(255,255,255,0.07);';
                             holeHeader.textContent = 'Holes (' + holes.length + ')';
                             featDropdown.appendChild(holeHeader);
                             holes.forEach(h => {
@@ -9278,7 +9278,7 @@
                     const aPropsBtn = _ribbonIconBtn('properties', 'Properties \u25BE');
 
                     const aPropsDropdown = document.createElement('div');
-                    aPropsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;max-height:300px;overflow-y:auto;';
+                    aPropsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:var(--bg-ribbon);border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;max-height:300px;overflow-y:auto;';
                     aPropsDropdown.setAttribute('data-ribbon-dropdown', '');
 
                     const assyRows = [
@@ -9314,7 +9314,7 @@
                     const relBtn = _ribbonIconBtn('relationships', 'Relationships \u25BE');
 
                     const relDropdown = document.createElement('div');
-                    relDropdown.style.cssText = 'display:none;position:absolute;top:100%;right:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:300px;max-height:350px;overflow-y:auto;';
+                    relDropdown.style.cssText = 'display:none;position:absolute;top:100%;right:0;background:var(--bg-ribbon);border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:300px;max-height:350px;overflow-y:auto;';
                     relDropdown.setAttribute('data-ribbon-dropdown', '');
 
                     // Mate types summary
@@ -10798,7 +10798,7 @@
         function _renderSingleViewerSubtab(container) {
             const viewer3d = document.createElement('div');
             viewer3d.id = 'assy-3d-container';
-            viewer3d.style.cssText = 'flex:1;position:relative;background:#191919;min-height:0;';
+            viewer3d.style.cssText = 'flex:1;position:relative;background:var(--bg-main);min-height:0;';
             container.appendChild(viewer3d);
 
             const legend = document.createElement('div');
@@ -12870,7 +12870,7 @@
 
             const menu = document.createElement('div');
             menu.className = 'note-context-menu';
-            menu.style.cssText = 'position:fixed;z-index:10000;background:#1e1e1e;border:1px solid ' + noteData.color + ';border-radius:6px;padding:8px 12px;max-width:320px;box-shadow:0 4px 16px rgba(0,0,0,0.5);font-family:Inter,system-ui,sans-serif;';
+            menu.style.cssText = 'position:fixed;z-index:10000;background:var(--bg-panel);border:1px solid ' + noteData.color + ';border-radius:6px;padding:8px 12px;max-width:320px;box-shadow:0 4px 16px rgba(0,0,0,0.5);font-family:Inter,system-ui,sans-serif;';
 
             // Status badge
             const badge = document.createElement('div');
@@ -13187,7 +13187,7 @@
                 // Normal 3D model viewer
                 const container = document.createElement('div');
                 container.id = 'three-container';
-                container.style.cssText = 'flex:1;position:relative;background:#12121e;min-height:0;';
+                container.style.cssText = 'flex:1;position:relative;background:var(--bg-main);min-height:0;';
                 wrapper.appendChild(container);
 
                 if (state.threeLoadedPart === state.partNumber && state.threeStlAvailable === false) {
@@ -16087,7 +16087,7 @@
                     '<a href="$2" target="_blank" rel="noopener" style="color:#00E676;text-decoration:underline;">$1</a>');
                 // Convert --- to styled dividers
                 html = html.replace(/<br>---<br>/g,
-                    '<hr style="border:none;border-top:1px solid #323846;margin:8px 0;">');
+                    '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:8px 0;">');
                 // Convert lines starting with - or Ã¢â‚¬Â¢ to bullet items
                 html = html.replace(/((?:^|<br>)\s*[-•]\s+.+(?:<br>\s*[-•]\s+.+)*)/g, (match) => {
                     const items = match.split('<br>').filter(l => l.trim())

@@ -691,6 +691,11 @@ async def get_3d_model(part_number: str):
         raise HTTPException(status_code=400, detail="Invalid part number")
 
     stl_path = Path("400S_Sorted_Library") / f"{safe_pn}.stl"
+    # Fallback: check parts/{pn}/revA/ for revision-stored STL
+    if not stl_path.exists():
+        rev_stl = Path("400S_Sorted_Library/parts") / safe_pn / "revA" / f"{safe_pn}.stl"
+        if rev_stl.exists():
+            stl_path = rev_stl
     if not stl_path.exists():
         raise HTTPException(status_code=404, detail=f"No 3D model found for part number '{part_number}'")
 

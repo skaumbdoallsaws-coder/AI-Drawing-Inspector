@@ -17720,9 +17720,24 @@
                         }
                     }
                     // Lazy-hydrate geometry diff from cache if user asks about it
-                    if (partDiffState.available) {
+                    {
                         const geoQ = /geometry.?diff|what.?(material|volume).*(added|removed|changed)|net.?volume|solid.?changed|where.*(geometry|material).?change/i;
                         if (geoQ.test(messageText)) {
+                            // Ensure partDiffState is populated first
+                            if (!partDiffState.available && state.partNumber) {
+                                try {
+                                    const revResp = await fetch(`/api/part-revisions/${encodeURIComponent(state.partNumber)}`);
+                                    if (revResp.ok) {
+                                        const revData = await revResp.json();
+                                        partDiffState.revisions = revData.revisions || [];
+                                        partDiffState.available = partDiffState.revisions.length >= 2;
+                                        if (partDiffState.available) {
+                                            partDiffState.activeRevA = partDiffState.activeRevA || partDiffState.revisions[0];
+                                            partDiffState.activeRevB = partDiffState.activeRevB || partDiffState.revisions[partDiffState.revisions.length - 1];
+                                        }
+                                    }
+                                } catch (e) { /* ignore */ }
+                            }
                             await _ensureGeometryDiffContext();
                         }
                     }

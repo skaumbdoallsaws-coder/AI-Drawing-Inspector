@@ -15972,7 +15972,9 @@
                 if (state._geometryDiffResult && state._geometryDiffResult.part_number === state.partNumber) {
                     const gRevA = partDiffState.activeRevA || (partDiffState.revisions && partDiffState.revisions[0]);
                     const gRevB = partDiffState.activeRevB || (partDiffState.revisions && partDiffState.revisions[partDiffState.revisions.length - 1]);
+                    console.log('[GeoDiff Context] guard:', 'stored:', state._geometryDiffResult.revA, state._geometryDiffResult.revB, 'current:', gRevA, gRevB);
                     if (!gRevA || !gRevB || (state._geometryDiffResult.revA === gRevA && state._geometryDiffResult.revB === gRevB)) {
+                        console.log('[GeoDiff Context] INJECTED into inspCtx');
                         inspCtx.geometry_diff = state._geometryDiffResult;
                     }
                 }
@@ -17722,9 +17724,12 @@
                     // Lazy-hydrate geometry diff from cache if user asks about it
                     {
                         const geoQ = /geometry.?diff|what.?(material|volume).*(added|removed|changed)|net.?volume|solid.?changed|where.*(geometry|material).?change/i;
-                        if (geoQ.test(messageText)) {
+                        const geoMatch = geoQ.test(messageText);
+                        console.log('[GeoDiff Hydrate] regex match:', geoMatch, 'partNumber:', state.partNumber, 'available:', partDiffState.available, 'existing:', !!state._geometryDiffResult);
+                        if (geoMatch) {
                             // Ensure partDiffState is populated first
                             if (!partDiffState.available && state.partNumber) {
+                                console.log('[GeoDiff Hydrate] Fetching revisions...');
                                 try {
                                     const revResp = await fetch(`/api/part-revisions/${encodeURIComponent(state.partNumber)}`);
                                     if (revResp.ok) {
@@ -17735,10 +17740,12 @@
                                             partDiffState.activeRevA = partDiffState.activeRevA || partDiffState.revisions[0];
                                             partDiffState.activeRevB = partDiffState.activeRevB || partDiffState.revisions[partDiffState.revisions.length - 1];
                                         }
+                                        console.log('[GeoDiff Hydrate] Revisions:', partDiffState.revisions, 'available:', partDiffState.available);
                                     }
-                                } catch (e) { /* ignore */ }
+                                } catch (e) { console.error('[GeoDiff Hydrate] Rev fetch error:', e); }
                             }
-                            await _ensureGeometryDiffContext();
+                            const hydrated = await _ensureGeometryDiffContext();
+                            console.log('[GeoDiff Hydrate] Result:', hydrated ? 'got data' : 'null');
                         }
                     }
 
@@ -17867,6 +17874,29 @@
                                 applyPartHighlight3D();
                                 _animateIsolate(data.isolate_parts, 800);
                             }
+                        }
+                        // Agent-driven geometry diff overlay
+                        if (data.show_geometry_diff && state._geometryDiffResult && !state._geometryDiffResult.identical) {
+                            (async () => {
+                                // Switch to Compare view if needed
+                                if (state.activeTab !== '3dmodel' || partDiffState.activeSubtab !== 'compare') {
+                                    partDiffState.activeSubtab = 'compare';
+                                    switchTab('3dmodel');
+                                }
+                                // Wait for compare viewers to load
+                                await new Promise(resolve => {
+                                    const check = setInterval(() => {
+                                        if (partDiffState.viewerA && partDiffState.viewerB) {
+                                            clearInterval(check);
+                                            resolve();
+                                        }
+                                    }, 100);
+                                    setTimeout(() => { clearInterval(check); resolve(); }, 5000);
+                                });
+                                // Show overlay + stats panel
+                                const gr = state._geometryDiffResult;
+                                _showGeometryDiffResult(gr, gr.part_number, gr.revA, gr.revB);
+                            })();
                         }
                         // Agent-driven motion animation
                         if (data.animate_motion === 'start') {

@@ -2237,6 +2237,7 @@ GEOMETRY DIFF is a standalone data source — it does not require feature diff o
 For questions about geometry changes, added/removed material, net volume change, or where the solid changed, answer directly from the GEOMETRY DIFF section.
 Reference the exact volumes, centroid locations, and rev pair from the data.
 If GEOMETRY DIFF is NOT in context and the user asks about it, tell them to run Geometry Diff from the 3D Model Compare ribbon.
+When you answer a geometry diff question and GEOMETRY DIFF data is present, emit SHOW_GEOMETRY_DIFF on its own line at the end of your response. This displays the added/removed material overlays on the 3D compare viewer.
 
 FAI TABLE COMMANDS:
 When FAI TABLE data is present in context, the user has a First Article Inspection table open.
@@ -2914,6 +2915,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         gd_lines.append("Reference the volume, location, and type (added/removed) in your answer.")
         gd_lines.append("If the user asks about the diff, you have the exact data — do not guess.")
         gd_lines.append("Answer geometry diff questions from this section even if no part feature diff or assembly revision diff is present.")
+        gd_lines.append("To show the overlays on the 3D model, emit SHOW_GEOMETRY_DIFF on its own line at the end of your response.")
         parts.append("\n".join(gd_lines))
 
     # FAI characteristics table state (for chat-driven fill commands)
@@ -3646,6 +3648,12 @@ async def agent_chat(request: AgentChatRequest):
             asme_refs = asme_refs[:3]
         if asme_refs:
             result["asme_refs"] = asme_refs
+
+        # Parse SHOW_GEOMETRY_DIFF marker
+        show_geo_diff = re.search(r'^SHOW_GEOMETRY_DIFF\s*$', response_text, re.MULTILINE)
+        if show_geo_diff:
+            result["show_geometry_diff"] = True
+            response_text = re.sub(r'^SHOW_GEOMETRY_DIFF\s*$', '', response_text, flags=re.MULTILINE).strip()
 
         # Parse ANIMATE_MOTION marker
         animate_match = re.search(r'ANIMATE_MOTION:\s*(start|stop)', response_text, re.I)

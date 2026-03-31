@@ -13599,7 +13599,8 @@
                     }
                 }
 
-                // Orientation gizmo on primary compare pane
+                // Orientation gizmo on primary compare pane (dispose old first)
+                if (partDiffState._diffGizmo) partDiffState._diffGizmo.dispose();
                 const partDiffGizmo = createOrientationGizmo(paneA);
                 partDiffState._diffGizmo = partDiffGizmo;
 
@@ -14012,7 +14013,8 @@
             state.threeRenderer = renderer;
             state.threeControls = controls;
 
-            // Orientation gizmo
+            // Orientation gizmo (dispose old first)
+            if (state._partGizmo) state._partGizmo.dispose();
             const partGizmo = createOrientationGizmo(container);
             state._partGizmo = partGizmo;
 

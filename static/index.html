@@ -5302,10 +5302,23 @@
             });
 
             if (visibleCount === 0) {
-                const empty = document.createElement('div');
-                empty.className = 'search-dropdown-empty';
-                empty.textContent = 'No results found';
-                dropdownList.appendChild(empty);
+                const directPn = q.replace(/[^a-z0-9_-]/gi, '');
+                if (directPn) {
+                    const loadItem = document.createElement('div');
+                    loadItem.className = 'search-dropdown-item';
+                    loadItem.textContent = `Load part ${directPn}`;
+                    loadItem.addEventListener('click', () => {
+                        selectPartNumber(directPn, false);
+                        dropdownList.classList.remove('open');
+                        partSearch.value = directPn;
+                    });
+                    dropdownList.appendChild(loadItem);
+                } else {
+                    const empty = document.createElement('div');
+                    empty.className = 'search-dropdown-empty';
+                    empty.textContent = 'No results found';
+                    dropdownList.appendChild(empty);
+                }
             }
         }
 
@@ -5466,10 +5479,34 @@
             if (el) el.style.display = 'none';
         }
 
-        function selectPartNumber(pn, isAuto) {
-            const profile = state.profiles.find(p => p.part_number === pn);
-            if (!profile) return;
+        async function selectPartNumber(pn, isAuto) {
+            let profile = state.profiles.find(p => p.part_number === pn);
+            if (!profile) {
+                // Fallback: try loading from profile-details endpoint
+                try {
+                    const res = await fetch(`/api/profile-details/${encodeURIComponent(pn)}`);
+                    if (!res.ok) {
+                        if (window._toast) window._toast(`Part ${pn} not found`, 'error');
+                        return;
+                    }
+                    const details = await res.json();
+                    profile = {
+                        part_number: pn,
+                        part_name: details.part_name || '',
+                        feature_count: Array.isArray(details.features) ? details.features.length : 0,
+                        has_views: false
+                    };
+                    state.profiles.push(profile);
+                    state.profiles.sort((a, b) => String(a.part_number).localeCompare(String(b.part_number)));
+                    profileCountEl.textContent = `Profiles: ${state.profiles.length}`;
+                    populateDropdown(state.profiles);
+                } catch (e) {
+                    if (window._toast) window._toast(`Part ${pn} not found`, 'error');
+                    return;
+                }
+            }
 
+            if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
             state.partNumber = pn;
             state.partName = profile.part_name;
             state.featureCount = profile.feature_count;

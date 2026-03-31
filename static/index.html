@@ -13287,7 +13287,7 @@
             }
         }
 
-        function _showGeometryDiffResult(result, partNumber, revA, revB) {
+        function _storeGeometryDiffResults(result, partNumber, revA, revB) {
             state._geometryDiffResult = {
                 part_number: partNumber,
                 revA, revB,
@@ -13300,6 +13300,34 @@
                 changed_centroids: result.changed_centroids || [],
                 import_warnings: result.import_warnings || [],
             };
+
+            const hasVisualFields = !!(result && (result.bbox_a || result.bbox_b || result.removed_stl || result.added_stl || result.computation_time_s !== undefined));
+            const prevVisual = state._geometryDiffVisualResult;
+            const prevVisualMatches = prevVisual &&
+                prevVisual.part_number === partNumber &&
+                prevVisual.revA === revA &&
+                prevVisual.revB === revB;
+
+            if (hasVisualFields) {
+                state._geometryDiffVisualResult = {
+                    ...result,
+                    part_number: partNumber,
+                    revA,
+                    revB,
+                };
+            } else if (!prevVisualMatches) {
+                state._geometryDiffVisualResult = null;
+            }
+
+            return {
+                compact: state._geometryDiffResult,
+                visual: state._geometryDiffVisualResult,
+            };
+        }
+
+        function _showGeometryDiffResult(result, partNumber, revA, revB) {
+            const stored = _storeGeometryDiffResults(result, partNumber, revA, revB);
+            const visualResult = stored.visual || result;
 
             const existing = document.getElementById('geoDiffPanel');
             if (existing) existing.remove();
@@ -13328,7 +13356,11 @@
                     html += '<div style="font-size:10px;color:var(--gauge-amber);margin-top:4px;">\u26A0 ' + warnings.join('; ') + '</div>';
                 }
                 panel.innerHTML = html;
-                _loadGeoDiffOverlay(result, partNumber, revA, revB);
+                if (visualResult && (visualResult.bbox_a || visualResult.bbox_b)) {
+                    _loadGeoDiffOverlay(visualResult, partNumber, revA, revB);
+                } else {
+                    console.warn('[GeoDiff] Visual result missing bbox data; stats panel shown without overlay.');
+                }
             }
 
             const closeBtn = document.createElement('button');
@@ -13399,6 +13431,7 @@
 
         function _clearGeometryDiffContext() {
             state._geometryDiffResult = null;
+            state._geometryDiffVisualResult = null;
             const panel = document.getElementById('geoDiffPanel');
             if (panel) panel.remove();
             _clearGeoDiffOverlay();
@@ -13428,8 +13461,12 @@
 
             // Already have matching result
             const existing = state._geometryDiffResult;
-            if (existing && existing.part_number === state.partNumber &&
-                existing.revA === revA && existing.revB === revB) {
+            const visualExisting = state._geometryDiffVisualResult;
+            const hasMatchingCompact = existing && existing.part_number === state.partNumber &&
+                existing.revA === revA && existing.revB === revB;
+            const hasMatchingVisual = visualExisting && visualExisting.part_number === state.partNumber &&
+                visualExisting.revA === revA && visualExisting.revB === revB;
+            if (hasMatchingCompact && hasMatchingVisual) {
                 return existing;
             }
 
@@ -13437,18 +13474,7 @@
                 const resp = await fetch(`/api/geometry-diff/${encodeURIComponent(state.partNumber)}?revA=${encodeURIComponent(revA)}&revB=${encodeURIComponent(revB)}`);
                 if (!resp.ok) return null;
                 const result = await resp.json();
-                state._geometryDiffResult = {
-                    part_number: state.partNumber,
-                    revA, revB,
-                    identical: result.identical,
-                    removed_volume_mm3: result.removed_volume_mm3,
-                    added_volume_mm3: result.added_volume_mm3,
-                    net_change_mm3: result.net_change_mm3,
-                    volume_a_mm3: result.volume_a_mm3,
-                    volume_b_mm3: result.volume_b_mm3,
-                    changed_centroids: result.changed_centroids || [],
-                    import_warnings: result.import_warnings || [],
-                };
+                _storeGeometryDiffResults(result, state.partNumber, revA, revB);
                 return state._geometryDiffResult;
             } catch {
                 return null;
@@ -17893,8 +17919,13 @@
                                     }, 100);
                                     setTimeout(() => { clearInterval(check); resolve(); }, 5000);
                                 });
-                                // Show overlay + stats panel
-                                const gr = state._geometryDiffResult;
+                                // Ensure full visual payload is available for STL alignment.
+                                await _ensureGeometryDiffContext();
+                                const gr = state._geometryDiffVisualResult;
+                                if (!gr) {
+                                    console.warn('[GeoDiff] show_geometry_diff requested, but no visual payload is available.');
+                                    return;
+                                }
                                 _showGeometryDiffResult(gr, gr.part_number, gr.revA, gr.revB);
                             })();
                         }

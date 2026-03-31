@@ -694,9 +694,11 @@ async def get_3d_model(part_number: str):
     # Fallback: check parts/{pn}/revA/ for revision-stored STL
     if not stl_path.exists():
         rev_stl = Path("400S_Sorted_Library/parts") / safe_pn / "revA" / f"{safe_pn}.stl"
+        logger.info(f"[3D Model] Root STL not found, checking revision path: {rev_stl} exists={rev_stl.exists()}")
         if rev_stl.exists():
             stl_path = rev_stl
     if not stl_path.exists():
+        logger.warning(f"[3D Model] No STL found for {safe_pn}")
         raise HTTPException(status_code=404, detail=f"No 3D model found for part number '{part_number}'")
 
     return FileResponse(

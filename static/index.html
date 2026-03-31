@@ -13303,25 +13303,60 @@
             paneA.addEventListener('mousedown', () => { partDiffState.primaryViewer = 'A'; });
             paneB.addEventListener('mousedown', () => { partDiffState.primaryViewer = 'B'; });
 
-            const loader = new THREE.GLTFLoader();
-            function loadGLB(url) {
-                return new Promise((resolve, reject) => {
-                    loader.load(url, gltf => resolve(gltf), undefined, err => reject(err));
-                });
+            // Content-type aware model loader: handles both GLB and STL responses
+            async function _loadPartRevisionModel(partNum, revision) {
+                const url = `/api/part-glb-rev/${encodeURIComponent(partNum)}?revision=${encodeURIComponent(revision)}`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`Failed to load model: ${resp.status}`);
+                const contentType = resp.headers.get('content-type') || '';
+                const buffer = await resp.arrayBuffer();
+
+                if (contentType.includes('stl') || contentType.includes('octet-stream')) {
+                    // STL response
+                    const stlLoader = new THREE.STLLoader();
+                    const geometry = stlLoader.parse(buffer);
+                    geometry.computeVertexNormals();
+                    geometry.scale(0.001, 0.001, 0.001); // mm -> meters
+                    const material = new THREE.MeshStandardMaterial({
+                        color: 0xCCCCCC, metalness: 0.3, roughness: 0.6
+                    });
+                    const mesh = new THREE.Mesh(geometry, material);
+                    const group = new THREE.Group();
+                    group.add(mesh);
+                    group.userData._modelSource = 'stl';
+                    return group;
+                } else {
+                    // GLB response
+                    return new Promise((resolve, reject) => {
+                        const blob = new Blob([buffer], { type: 'model/gltf-binary' });
+                        const objectUrl = URL.createObjectURL(blob);
+                        const gltfLoader = new THREE.GLTFLoader();
+                        gltfLoader.load(objectUrl, (gltf) => {
+                            URL.revokeObjectURL(objectUrl);
+                            gltf.scene.userData._modelSource = 'glb';
+                            resolve(gltf.scene);
+                        }, undefined, (err) => {
+                            URL.revokeObjectURL(objectUrl);
+                            reject(err);
+                        });
+                    });
+                }
             }
 
             try {
-                const [gltfA, gltfB] = await Promise.all([
-                    loadGLB(`/api/part-glb-rev/${encodeURIComponent(partNumber)}?revision=${encodeURIComponent(revA)}`),
-                    loadGLB(`/api/part-glb-rev/${encodeURIComponent(partNumber)}?revision=${encodeURIComponent(revB)}`),
+                const [sceneA, sceneB] = await Promise.all([
+                    _loadPartRevisionModel(partNumber, revA),
+                    _loadPartRevisionModel(partNumber, revB),
                 ]);
 
-                const liveA = gltfA.scene.clone(true);
+                const liveA = sceneA.clone(true);
+                liveA.userData._modelSource = sceneA.userData._modelSource;
                 partDiffState.viewerA.scene.add(liveA);
                 partDiffState.viewerA.liveScene = liveA;
                 partDiffState.viewerA.partMeshMap = _buildPartFeatureDiffMap(liveA);
 
-                const liveB = gltfB.scene.clone(true);
+                const liveB = sceneB.clone(true);
+                liveB.userData._modelSource = sceneB.userData._modelSource;
                 partDiffState.viewerB.scene.add(liveB);
                 partDiffState.viewerB.liveScene = liveB;
                 partDiffState.viewerB.partMeshMap = _buildPartFeatureDiffMap(liveB);

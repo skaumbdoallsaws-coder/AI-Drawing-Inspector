@@ -84,8 +84,8 @@
         .toolbar {
             height: 42px;
             min-height: 42px;
-            background: #0D1016;
-            border-bottom: 1px solid #323846;
+            background: var(--bg-toolbar);
+            border-bottom: 1px solid var(--border-structure);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -344,7 +344,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 6px 10px;
-            background: #0D1016;
+            background: var(--bg-tab);
             cursor: grab;
             user-select: none;
             border-bottom: 1px solid #323846;
@@ -387,7 +387,7 @@
         .bom-table th {
             position: sticky;
             top: 0;
-            background: #131820;
+            background: var(--bg-tab);
             color: #737C89;
             font-weight: 600;
             text-transform: uppercase;
@@ -1202,7 +1202,7 @@
         }
         .feature-detail {
             padding: 8px 12px 8px 28px;
-            background: #1a1a2e;
+            background: rgba(255,255,255,0.02);
             border-left: 2px solid var(--text-secondary);
             font-size: 11px;
             line-height: 1.5;
@@ -1825,7 +1825,7 @@
         .diff-viewer-pane {
             flex: 1;
             position: relative;
-            background: #191919;
+            background: var(--bg-main);
             min-width: 0;
         }
         .diff-viewer-pane:first-child {
@@ -3025,7 +3025,7 @@
             position: absolute;
             inset: 3px;
             border-radius: 50%;
-            background: #0D1016;
+            background: var(--bg-panel);
         }
         .agent-icon-btn.disabled {
             opacity: 0.3;
@@ -3854,7 +3854,7 @@
             color: var(--text-primary);
         }
         .findings-mode-select option {
-            background: #1a1d24;
+            background: var(--bg-panel);
             color: #e0e0e0;
         }
         /* Highlight mode rectangles */
@@ -9502,7 +9502,7 @@
                 // Inner viewport (clips overflow)
                 const viewportInner = document.createElement('div');
                 viewportInner.id = 'drawingViewportInner';
-                viewportInner.style.cssText = 'flex:1;overflow:hidden;position:relative;cursor:grab;background:#1a1d23;';
+                viewportInner.style.cssText = 'flex:1;overflow:hidden;position:relative;cursor:grab;background:var(--bg-main);';
 
                 // Create a wrapper that holds the displayed drawing plus overlays.
                 const drawingWrapper = document.createElement('div');

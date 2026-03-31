@@ -27,6 +27,8 @@
   </style>
 </head>
 <body>
+<!-- Engineering grid overlay -->
+<div style="position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:0;background:linear-gradient(rgba(79,195,247,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(79,195,247,0.04) 1px,transparent 1px);background-size:80px 80px;"></div>
 <!-- Brand crosshair markers -->
 <div style="position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:0;overflow:hidden;">
   <svg style="position:absolute;top:80px;left:60px;width:56px;height:56px;opacity:0.45;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1"/><circle cx="12" cy="12" r="2" fill="#4fc3f7" opacity="0.4"/></svg>
@@ -138,8 +140,8 @@
   <div class="cards">
     <!-- Iris -->
     <div class="card fade-in" style="--card-accent: #4fc3f7;">
-      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;">
-        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:64px;height:64px;"><defs><clipPath id="irisClip"><circle cx="16" cy="16" r="14"/></clipPath><linearGradient id="irisBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#29b6f6"/><stop offset="100%" stop-color="#0277bd"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#irisBg)"/><g clip-path="url(#irisClip)"><ellipse cx="16" cy="13" rx="5.5" ry="6" fill="#ffe0b2"/><ellipse cx="16" cy="12.5" rx="5.5" ry="6" fill="#ffcc80"/><circle cx="16" cy="13" r="5.2" fill="#ffe0b2"/><ellipse cx="14.2" cy="12.5" rx="1" ry="0.9" fill="#fff"/><ellipse cx="17.8" cy="12.5" rx="1" ry="0.9" fill="#fff"/><circle cx="14.2" cy="12.5" r="0.5" fill="#1565c0"/><circle cx="17.8" cy="12.5" r="0.5" fill="#1565c0"/><path d="M14.5 15.2q1.5 1 3 0" stroke="#c68a5c" stroke-width="0.5" fill="none" stroke-linecap="round"/><path d="M8.5 11q3-5.5 7.5-4.5t7.5 4.5v-2q-3-4.5-7.5-3.8T8.5 8.5z" fill="#4e342e"/><path d="M8 10.5q3.5-5.5 8-4.5t8 4.5v-1.5q-3.5-5.5-8-4.8T8 9z" fill="#3e2723"/><ellipse cx="16" cy="27" rx="7" ry="7" fill="#0277bd"/><rect x="12" y="19" width="8" height="4" rx="1" fill="#ffe0b2"/><path d="M12 20.5q0 3 4 4t4-4" fill="#0277bd"/></g></svg>
+      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;border:3px solid #4fc3f7;">
+        <img src="assets/images/avatar_iris.jpg" alt="Iris" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
       </div>
       <h3>Drawing Inspection</h3>
       <p>Checks dimensions, callouts, and views against the 3D CAD model. Catches missing features, tolerance gaps, and representation issues.</p>
@@ -147,8 +149,8 @@
     </div>
     <!-- Sage -->
     <div class="card fade-in" style="--card-accent: #FFB300;">
-      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;">
-        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:64px;height:64px;"><defs><clipPath id="sageClipW"><circle cx="16" cy="16" r="14"/></clipPath><linearGradient id="sageBgW" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffca28"/><stop offset="100%" stop-color="#f57f17"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#sageBgW)"/><g clip-path="url(#sageClipW)"><circle cx="16" cy="13.5" r="5.2" fill="#ffe0b2"/><ellipse cx="14.2" cy="13" rx="1" ry="0.9" fill="#fff"/><ellipse cx="17.8" cy="13" rx="1" ry="0.9" fill="#fff"/><circle cx="14.2" cy="13" r="0.5" fill="#4e342e"/><circle cx="17.8" cy="13" r="0.5" fill="#4e342e"/><path d="M14.5 15.5q1.5 0.8 3 0" stroke="#c68a5c" stroke-width="0.5" fill="none" stroke-linecap="round"/><path d="M12 11.5h2.5" stroke="#5d4037" stroke-width="0.7" stroke-linecap="round"/><path d="M17.5 11.5h2.5" stroke="#5d4037" stroke-width="0.7" stroke-linecap="round"/><path d="M8.5 11q3-5 7.5-4t7.5 4v-2.5q-3-4.5-7.5-3.8T8.5 8.5z" fill="#5d4037"/><path d="M8 10.5q3.5-5.5 8-4.5t8 4.5v-1.5q-3.5-5.5-8-4.8T8 9z" fill="#4e342e"/><ellipse cx="16" cy="27" rx="7" ry="7" fill="#e65100"/><rect x="12" y="19" width="8" height="4" rx="1" fill="#ffe0b2"/><path d="M12 20.5q0 3 4 4t4-4" fill="#e65100"/></g></svg>
+      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;border:3px solid #FFB300;">
+        <img src="assets/images/avatar_sage.png" alt="Sage" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
       </div>
       <h3>Deviation Analysis</h3>
       <p>Reasons through assembly mates, fits, and tolerances. Provides scrap, rework, or accept decisions with engineering justification.</p>
@@ -156,8 +158,8 @@
     </div>
     <!-- Scout -->
     <div class="card fade-in" style="--card-accent: #00E676;">
-      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;">
-        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:64px;height:64px;"><defs><clipPath id="scoutClipW"><circle cx="16" cy="16" r="14"/></clipPath><linearGradient id="scoutBgW" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#66bb6a"/><stop offset="100%" stop-color="#2e7d32"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#scoutBgW)"/><g clip-path="url(#scoutClipW)"><circle cx="16" cy="13" r="5.2" fill="#ffe0b2"/><ellipse cx="14.2" cy="12.5" rx="1" ry="0.9" fill="#fff"/><ellipse cx="17.8" cy="12.5" rx="1" ry="0.9" fill="#fff"/><circle cx="14.2" cy="12.5" r="0.5" fill="#2e7d32"/><circle cx="17.8" cy="12.5" r="0.5" fill="#2e7d32"/><path d="M14 15q2 1.5 4 0" stroke="#c68a5c" stroke-width="0.5" fill="none" stroke-linecap="round"/><path d="M8 12q2-6 8-5.5t8 5.5" fill="#4e342e"/><path d="M7.5 12.5q2.5-7 8.5-6t8.5 6v-2q-3-6-8.5-5.2T7.5 10.5z" fill="#3e2723"/><path d="M9 9q3-3 7-2.5t7 2.5" fill="#4e342e"/><ellipse cx="16" cy="27" rx="7" ry="7" fill="#1b5e20"/><rect x="12" y="19" width="8" height="4" rx="1" fill="#ffe0b2"/><path d="M12 20.5q0 3 4 4t4-4" fill="#1b5e20"/></g></svg>
+      <div class="card-icon" style="background:transparent;width:64px;height:64px;border-radius:50%;overflow:hidden;border:3px solid #00E676;">
+        <img src="assets/images/avatar_scout.png" alt="Scout" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
       </div>
       <h3>Part Sourcing</h3>
       <p>Searches supplier websites in real time with specs matched to your drawing. Assembly-aware &mdash; surfaces relevant vendor options.</p>
@@ -176,13 +178,13 @@
       <div class="feature-label" style="color:#4fc3f7;">DRAWING VERIFICATION</div>
       <h3>Check drawings against the 3D model before they reach the floor.</h3>
       <p>Upload a drawing. InspectorPro compares it to the CAD model feature by feature &mdash; missing dimensions, tolerance gaps, incorrect views, uncalled-out holes. Each feature is identified from the 3D model, not inferred from the drawing. Results land in a findings table you can act on immediately.</p>
-      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
     </div>
     <div class="feature-media">
-      <!-- TODO: Replace with autoplay MP4 clip of drawing inspection in action -->
-      <div class="media-placeholder" data-label="Drawing inspection clip">
+      <div class="monitor-frame">
         <img src="assets/images/hero_app_screenshot.png" alt="Drawing verification against 3D model" loading="lazy">
       </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
     </div>
   </div>
 
@@ -192,13 +194,13 @@
       <div class="feature-label" style="color:#FF5252;">REVISION COMPARISON</div>
       <h3>See exactly what changed between revisions, down to the feature level.</h3>
       <p>Load Rev A and Rev B side by side. Removed features light up red, added green, modified amber. InspectorPro uses the CAD model&rsquo;s feature identity &mdash; not a pixel overlay &mdash; so it can tell you a specific flange was extended from 44.45mm to 76.2mm, not just that &ldquo;something moved.&rdquo;</p>
-      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
     </div>
     <div class="feature-media">
-      <!-- TODO: Replace with autoplay MP4 clip of revision comparison -->
-      <div class="media-placeholder" data-label="Revision comparison clip">
+      <div class="monitor-frame">
         <img src="assets/images/demo15_rev_compare.png" alt="Feature-level revision comparison" loading="lazy">
       </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
     </div>
   </div>
 
@@ -208,13 +210,13 @@
       <div class="feature-label" style="color:#FFB300;">DEVIATION ANALYSIS</div>
       <h3>Make scrap, rework, or accept decisions with assembly-aware reasoning.</h3>
       <p>When a dimension is out of tolerance, InspectorPro doesn&rsquo;t just flag it. It checks the assembly &mdash; mate relationships, fit interfaces, downstream parts &mdash; and tells you whether the part will still function, what risk you carry if you accept it, and what to do next. Engineering reasoning, not just a red cell.</p>
-      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
     </div>
     <div class="feature-media">
-      <!-- TODO: Replace with autoplay MP4 clip of Sage deviation analysis -->
-      <div class="media-placeholder" data-label="Deviation analysis clip">
+      <div class="monitor-frame">
         <img src="assets/images/demo12_opening_1920x1080.png" alt="Assembly-aware deviation analysis" loading="lazy">
       </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
     </div>
   </div>
 
@@ -224,13 +226,13 @@
       <div class="feature-label" style="color:#00E676;">FAI REPORTING</div>
       <h3>Generate first article reports without rebuilding the job in spreadsheets.</h3>
       <p>Numbered balloons on the drawing. Auto pass/fail evaluation as you type measurements. Enter &ldquo;all bores measured 25.003&rdquo; and eight cells fill at once. AI-generated verdicts explain each disposition. Print a clean report with header, characteristics table, and signature lines.</p>
-      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
     </div>
     <div class="feature-media">
-      <!-- TODO: Replace with poster image, optional play -->
-      <div class="media-placeholder" data-label="FAI report">
+      <div class="monitor-frame">
         <img src="assets/images/fai_mockup_overview.png" alt="First Article Inspection report" loading="lazy">
       </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
     </div>
   </div>
 
@@ -240,13 +242,13 @@
       <div class="feature-label" style="color:#4fc3f7;">TRAINING &amp; DESIGN REVIEW</div>
       <h3>Walk through the assembly with synced 3D narration and highlights.</h3>
       <p>Ask a question and the 3D model becomes a guided tour &mdash; voice narration, camera flying to each part, highlights tracking the explanation. Interrupt anytime with a follow-up. Resume where you left off. Onboard new techs and run design reviews without tying up a senior engineer.</p>
-      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
     </div>
     <div class="feature-media">
-      <!-- TODO: Replace with poster image, optional play -->
-      <div class="media-placeholder" data-label="Assembly walkthrough">
-        <img src="assets/images/demo11_opening_1920x1080.png" alt="Voice-guided assembly walkthrough" loading="lazy">
+      <div class="monitor-frame">
+        <video src="assets/videos/walkthrough.mp4" autoplay loop muted playsinline></video>
       </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
     </div>
   </div>
 
@@ -256,13 +258,13 @@
       <div class="feature-label" style="color:#00E676;">PART SOURCING</div>
       <h3>Search replacement parts using the specs already in the drawing.</h3>
       <p>When a part needs replacing, Scout pulls the dimensions, material, and thread specs from the drawing and searches supplier catalogs. It knows the assembly context &mdash; what the part connects to &mdash; so the options it surfaces actually fit.</p>
-      <a href="javascript:void(0)" class="btn-outline" data-demo-link>Watch Demo &rarr;</a>
     </div>
     <div class="feature-media">
-      <!-- TODO: Replace with static screenshot -->
-      <div class="media-placeholder" data-label="Part sourcing">
+      <div class="monitor-frame">
         <img src="assets/images/demo10_opening_1920x1080.png" alt="AI-powered part sourcing" loading="lazy">
       </div>
+      <div class="monitor-stand"></div>
+      <div class="monitor-base"></div>
     </div>
   </div>
 

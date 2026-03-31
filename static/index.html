@@ -22,10 +22,13 @@
 
         :root {
             --bg-main: #252B36;
-            --bg-panel: #171B23;
+            --bg-panel: #1C2029;
             --bg-toolbar: #0D1016;
-            --border: #323846;
-            --border-soft: rgba(255,255,255,0.06);
+            --bg-ribbon: #232931;
+            --bg-tab: #141820;
+            --border: rgba(255,255,255,0.06);
+            --border-soft: rgba(255,255,255,0.04);
+            --border-structure: rgba(255,255,255,0.08);
             --text-primary: #E3E6EB;
             --text-secondary: #9AA3AF;
             --accent: #4fc3f7;
@@ -79,14 +82,14 @@
 
         /* Toolbar — compact app bar */
         .toolbar {
-            height: 36px;
-            min-height: 36px;
+            height: 42px;
+            min-height: 42px;
             background: #0D1016;
             border-bottom: 1px solid #323846;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 10px;
+            padding: 0 12px;
             z-index: 100;
             position: relative;
         }
@@ -94,23 +97,23 @@
         .toolbar-left {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
         }
 
         .toolbar-logo svg {
-            width: 20px;
-            height: 20px;
-            opacity: 0.7;
+            width: 24px;
+            height: 24px;
+            opacity: 0.8;
         }
 
         .toolbar-brand {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            letter-spacing: -0.3px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #D8DEE6;
+            letter-spacing: -0.2px;
         }
         .toolbar-brand .pro {
-            color: var(--accent);
+            color: #69CEFF;
         }
 
         /* Toolbar Search Field — SolidWorks "Search Commands" style */
@@ -121,7 +124,7 @@
             border: 1px solid #323846;
             border-radius: 3px;
             padding: 0 6px;
-            height: 22px;
+            height: 24px;
             cursor: pointer;
             transition: border-color 0.15s;
             margin-left: 8px;
@@ -164,8 +167,8 @@
             border-left: 1px solid #323846;
         }
         .toolbar-control-btn {
-            width: 28px;
-            height: 28px;
+            width: 30px;
+            height: 30px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -193,8 +196,8 @@
             gap: 1px;
         }
         .icon-tb-btn {
-            width: 26px;
-            height: 26px;
+            width: 28px;
+            height: 28px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -224,13 +227,14 @@
         .right-activity-rail {
             width: 40px;
             min-width: 40px;
-            background: #0D1016;
-            border-left: 1px solid #323846;
+            background: linear-gradient(to bottom, #20262E 0%, #1B2129 100%);
+            border-left: 1px solid var(--border-soft);
             display: flex;
             flex-direction: column;
             align-items: center;
             padding-top: 6px;
             gap: 2px;
+            box-shadow: inset 1px 0 0 rgba(255,255,255,0.02);
         }
         .right-rail-icon {
             width: 36px;
@@ -462,16 +466,16 @@
             height: 16px;
         }
 
-        /* Breadcrumb Bar */
+        /* Breadcrumb Bar — hidden, reclaims vertical space */
         .breadcrumb-bar {
-            display: flex;
+            display: none !important;
             align-items: center;
             gap: 0;
-            padding: 0 12px;
-            height: 20px;
-            min-height: 20px;
-            background: #0F1319;
-            border-bottom: 1px solid #323846;
+            padding: 0;
+            height: 0;
+            min-height: 0;
+            background: transparent;
+            border-bottom: none;
             font-size: 10px;
             color: #737C89;
             overflow: hidden;
@@ -485,10 +489,14 @@
         .ribbon {
             display: flex;
             align-items: stretch;
-            height: 52px;
-            min-height: 52px;
-            background: #131820;
-            border-bottom: 1px solid #323846;
+            height: 66px;
+            min-height: 66px;
+            background: linear-gradient(to bottom, #262C35 0%, #20262E 100%);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.05),
+                0 1px 0 rgba(0,0,0,0.42),
+                0 2px 5px rgba(0,0,0,0.14);
             padding: 0;
             gap: 0;
             overflow: visible;
@@ -501,8 +509,8 @@
         .ribbon-group {
             display: flex;
             align-items: center;
-            gap: 4px;
-            padding: 4px 12px 14px;
+            gap: 6px;
+            padding: 6px 16px 16px;
             position: relative;
         }
         .ribbon-group-label {
@@ -512,7 +520,7 @@
             right: 0;
             text-align: center;
             font-size: 9px;
-            color: #737C89;
+            color: #5A6370;
             text-transform: uppercase;
             letter-spacing: 0.8px;
             font-weight: 600;
@@ -526,7 +534,7 @@
         }
         .ribbon-label {
             font-size: 10px;
-            color: #737C89;
+            color: #6D7785;
             text-transform: uppercase;
             letter-spacing: 0.8px;
             font-weight: 600;
@@ -552,16 +560,17 @@
         .ribbon-btn {
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            padding: 3px 10px;
-            background: none;
-            border: 1px solid #323846;
-            border-radius: 3px;
+            gap: 6px;
+            padding: 5px 12px;
+            background: transparent;
+            border: none;
+            border-radius: 4px;
             font-size: 11px;
-            color: #9AA3AF;
+            font-weight: 500;
+            color: #D4D9E0;
             cursor: pointer;
             font-family: inherit;
-            transition: background 0.1s, color 0.1s;
+            transition: background 0.12s, color 0.12s;
             white-space: nowrap;
         }
         .ribbon-btn:hover {
@@ -569,14 +578,26 @@
             color: #E3E6EB;
         }
         .ribbon-btn.active {
-            background: rgba(79,195,247,0.1);
-            border-color: rgba(79,195,247,0.3);
+            background: rgba(79,195,247,0.08);
             color: var(--accent);
         }
         .ribbon-btn.primary {
             background: var(--accent);
             color: #fff;
-            border-color: var(--accent);
+            border: none;
+        }
+        .ribbon-btn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+        }
+        .ribbon-btn-label {
+            display: inline-block;
+            line-height: 1;
+        }
+        .ribbon-btn svg {
+            width: 18px; height: 18px; flex: 0 0 18px;
         }
         .ribbon-btn.primary:hover {
             background: #39b0e6;
@@ -669,13 +690,14 @@
         .activity-bar {
             width: 40px;
             min-width: 40px;
-            background: #0D1016;
-            border-right: 1px solid #323846;
+            background: linear-gradient(to bottom, #20262E 0%, #1B2129 100%);
+            border-right: 1px solid var(--border-soft);
             display: flex;
             flex-direction: column;
             align-items: center;
             padding-top: 6px;
             gap: 2px;
+            box-shadow: inset -1px 0 0 rgba(255,255,255,0.02);
         }
         .activity-bar-icon {
             width: 36px;
@@ -977,8 +999,8 @@
         .left-panel {
             width: 240px;
             min-width: 240px;
-            background: #171B23;
-            border-right: 1px solid #323846;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
@@ -1254,8 +1276,8 @@
 
         .tab-bar {
             display: flex;
-            background: #0D1016;
-            border-bottom: 1px solid #323846;
+            background: var(--bg-tab);
+            border-bottom: 1px solid var(--border);
         }
         .tab {
             padding: 6px 16px;
@@ -1279,6 +1301,8 @@
             display: flex;
             overflow: hidden;
             position: relative;
+            background: radial-gradient(ellipse at 50% 40%, #2D3340 0%, #252B36 50%, #212730 100%);
+            box-shadow: inset 0 3px 6px rgba(0,0,0,0.25);
         }
         /* Split View: stack drawing on top, CAD strip on bottom */
         .viewport-content.split-layout {
@@ -2003,16 +2027,17 @@
         }
         .viewport-empty .brand-watermark {
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 14px;
-            opacity: 0.08;
+            gap: 16px;
+            opacity: 0.12;
         }
         .viewport-empty .brand-watermark svg {
-            width: 64px;
-            height: 64px;
+            width: 120px;
+            height: 120px;
         }
         .viewport-empty .brand-watermark .brand-name {
-            font-size: 38px;
+            font-size: 48px;
             font-weight: 600;
             letter-spacing: 1px;
             color: #ffffff;
@@ -2797,8 +2822,8 @@
         .status-bar {
             height: 22px;
             min-height: 22px;
-            background: #0D1016;
-            border-top: 1px solid #323846;
+            background: var(--bg-tab);
+            border-top: 1px solid var(--border);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -4719,11 +4744,16 @@
                 <div class="viewport-content" id="viewportContent">
                     <div class="viewport-empty" id="viewportEmpty">
                         <div class="brand-watermark">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" style="opacity:0.15;">
-                                <path d="M8 16h16M16 8v16" stroke="#888" stroke-width="2" stroke-linecap="round"/>
-                                <circle cx="16" cy="16" r="5" stroke="#888" stroke-width="1" fill="none"/>
-                                <circle cx="16" cy="16" r="9" stroke="#888" stroke-width="0.5" fill="none" stroke-dasharray="2 3"/>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+                                <circle cx="16" cy="16" r="12" stroke="currentColor" stroke-width="1" fill="none"/>
+                                <circle cx="16" cy="16" r="7" stroke="currentColor" stroke-width="0.7" fill="none"/>
+                                <line x1="16" y1="2" x2="16" y2="9" stroke="currentColor" stroke-width="1"/>
+                                <line x1="16" y1="23" x2="16" y2="30" stroke="currentColor" stroke-width="1"/>
+                                <line x1="2" y1="16" x2="9" y2="16" stroke="currentColor" stroke-width="1"/>
+                                <line x1="23" y1="16" x2="30" y2="16" stroke="currentColor" stroke-width="1"/>
+                                <circle cx="16" cy="16" r="2.5" fill="currentColor"/>
                             </svg>
+                            <div class="brand-name">Inspector<span style="color:var(--accent);">Pro</span></div>
                         </div>
                     </div>
                 </div>
@@ -8312,6 +8342,34 @@
             }
             return g;
         }
+
+        // Ribbon icon SVGs - 18px, duotone/tritone, tuned for dark ribbon
+        const _ribbonIcons = {
+            '3dmodel': '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke="#79B7E3" stroke-width="0.9" stroke-linejoin="round"><path d="M12 3.2 4.5 7.2 12 11.2 19.5 7.2 12 3.2Z" fill="#8FCDF2"/><path d="M4.5 7.2v7.4L12 18.8v-7.6L4.5 7.2Z" fill="#5A97C5"/><path d="M19.5 7.2v7.4L12 18.8v-7.6l7.5-4Z" fill="#35698F"/><path d="M12 6v5.2" fill="none" stroke="#B9E1F8" stroke-width="0.55"/><path d="M8.4 9.1 12 11.2 15.6 9.1" fill="none" stroke="#B9E1F8" stroke-width="0.5"/></g></svg>',
+            compare: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.9" stroke-linejoin="round"><path d="M4 8.8 8.7 5.7 13.4 8.8v4.8l-4.7 3-4.7-3v-4.8Z" fill="#4A81AC" stroke="#79B7E3"/><path d="M4 8.8 8.7 11.8v4.8l-4.7-3v-4.8Z" fill="#5E9BC8" stroke="#79B7E3"/><path d="M13.4 8.8 8.7 11.8v4.8l4.7-3v-4.8Z" fill="#2F627F" stroke="#79B7E3"/><path d="M10.6 8.8 15.3 5.7 20 8.8v4.8l-4.7 3-4.7-3v-4.8Z" fill="#355F82" stroke="#79B7E3" opacity="0.72"/><path d="M10.6 8.8 15.3 11.8v4.8l-4.7-3v-4.8Z" fill="#497EA6" stroke="#79B7E3" opacity="0.72"/><path d="M20 8.8 15.3 11.8v4.8l4.7-3v-4.8Z" fill="#274E66" stroke="#79B7E3" opacity="0.72"/></g></svg>',
+            featureDiff: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="3" width="8" height="18" rx="1" fill="#294764" stroke="#6FA9D4"/><rect x="13" y="3" width="8" height="18" rx="1" fill="#294764" stroke="#6FA9D4"/><path d="M5.2 7h3.8M5.2 9.3h2.7" stroke="#6FA9D4" stroke-width="0.55"/><path d="M15.2 7h3.8M15.2 9.3h2.7" stroke="#6FA9D4" stroke-width="0.55"/><rect x="4.6" y="12" width="4.8" height="2.8" rx="0.45" fill="#5A97C5" stroke="#7EB9E1" stroke-width="0.55"/><rect x="14.6" y="12" width="4.8" height="2.8" rx="0.45" fill="#5A97C5" stroke="#7EB9E1" stroke-width="0.55"/><rect x="14.6" y="16.3" width="4.8" height="2.8" rx="0.45" fill="#D88A34" stroke="#EDB25A" stroke-width="0.55"/><path d="M4.6 16.3h4.8v2.8H4.6z" fill="none" stroke="#6FA9D4" stroke-width="0.4" stroke-dasharray="1.3 1"/></g></svg>',
+            geometryDiff: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round"><path d="M7 6.1 3.6 8v4.8L7 14.7l3.4-1.9V8L7 6.1Z" fill="#3C6F95" stroke="#79B7E3"/><path d="M7 6.1 3.6 8 7 9.9 10.4 8 7 6.1Z" fill="#91D2F2" stroke="#79B7E3"/><path d="M3.6 8 7 9.9v4.8l-3.4-1.9V8Z" fill="#5B9BC7" stroke="#79B7E3"/><path d="M17 6.1 13.6 8v4.8l3.4 1.9 3.4-1.9V8L17 6.1Z" fill="#345D7C" stroke="#79B7E3"/><path d="M17 6.1 13.6 8 17 9.9 20.4 8 17 6.1Z" fill="#C7DCEA" stroke="#79B7E3"/><path d="M13.6 8 17 9.9v4.8l-3.4-1.9V8Z" fill="#4F84A9" stroke="#79B7E3"/><path d="M10.6 10 12 10.8v2.8l-1.4-.75V10Z" fill="#CC5D46" stroke="#ED9A8C" stroke-width="0.55"/><path d="M13.4 10 12 10.8v2.8l1.4-.75V10Z" fill="#CC5D46" stroke="#ED9A8C" stroke-width="0.55"/></g></svg>',
+            properties: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round"><rect x="3.5" y="2.7" width="9.6" height="12.8" rx="1" fill="#294764" stroke="#79B7E3"/><path d="M5.5 5.5h5.5M5.5 8h4.4M5.5 10.5h5.5" stroke="#6FA9D4" stroke-width="0.55"/><path d="M17 10.3 13.6 12.2V17l3.4 1.9 3.4-1.9v-4.8L17 10.3Z" fill="#3C6F95" stroke="#79B7E3"/><path d="M17 10.3 13.6 12.2 17 14.1l3.4-1.9-3.4-1.9Z" fill="#91D2F2" stroke="#79B7E3"/><path d="M13.6 12.2 17 14.1V19l-3.4-2v-4.8Z" fill="#5B9BC7" stroke="#79B7E3"/><path d="M20.4 12.2 17 14.1V19l3.4-2v-4.8Z" fill="#2F627F" stroke="#79B7E3"/></g></svg>',
+            features: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.4" fill="#D78C37" stroke="#EDB25A"/><path d="M12 7.4v3.1" stroke="#EDB25A" stroke-width="0.65" fill="none"/><rect x="9.6" y="10.5" width="4.8" height="2.8" rx="0.55" fill="#EDB25A" stroke="#BD8A2C"/><path d="M10 13.3V16" stroke="#79B7E3" stroke-width="0.65" fill="none"/><path d="M14 13.3V16" stroke="#79B7E3" stroke-width="0.65" fill="none"/><path d="M7.1 16l-2.3 1.15v2.5l2.3 1.15 2.3-1.15v-2.5L7.1 16Z" fill="#3C6F95" stroke="#6FA9D4" stroke-width="0.55"/><path d="M16.9 16l-2.3 1.15v2.5l2.3 1.15 2.3-1.15v-2.5L16.9 16Z" fill="#3C6F95" stroke="#6FA9D4" stroke-width="0.55"/><path d="M10 16h-2.9M14 16h2.9" stroke="#79B7E3" stroke-width="0.45"/></g></svg>',
+            bom: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1.1" fill="#294764" stroke="#79B7E3"/><rect x="3" y="3" width="18" height="4.3" rx="1.1" fill="#3C6F95" stroke="#79B7E3"/><path d="M9.3 7.3v13.7M15.3 7.3v13.7M3 12h18M3 16.4h18" stroke="#6FA9D4" stroke-width="0.5"/><rect x="4.5" y="8.8" width="2.8" height="1.9" rx="0.35" fill="#EDB25A" stroke="none"/><rect x="10.8" y="13.2" width="2.8" height="1.9" rx="0.35" fill="#5B9BC7" stroke="none"/><rect x="16.9" y="8.8" width="1.8" height="1.9" rx="0.35" fill="#9CC6E4" stroke="none"/></g></svg>',
+            relationships: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.8" stroke-linecap="round"><path d="M19 6.3l-2.2 1.3v2.2l2.2 1.3 2.2-1.3V7.6L19 6.3Z" fill="#486F90" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M19 6.3l-2.2 1.3L19 8.9l2.2-1.3L19 6.3Z" fill="#A8CAE2" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M13 16l-2.7 1.6v3.1l2.7 1.6 2.7-1.6v-3.1L13 16Z" fill="#587FA1" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M13 16l-2.7 1.6 2.7 1.6 2.7-1.6L13 16Z" fill="#B5D4EA" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M11 10.8V16M11.4 9.8 17 8M18.8 11.1 15.1 16" stroke="#79B7E3" stroke-width="0.55" fill="none"/></g></svg>',
+        };
+
+        function _ribbonIconBtn(iconKey, label, className) {
+            const btn = document.createElement('button');
+            btn.className = className || 'ribbon-btn';
+            if (_ribbonIcons[iconKey]) {
+                const iconWrap = document.createElement('span');
+                iconWrap.className = 'ribbon-btn-icon';
+                iconWrap.innerHTML = _ribbonIcons[iconKey];
+                btn.appendChild(iconWrap);
+            }
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'ribbon-btn-label';
+            labelSpan.textContent = label;
+            btn.appendChild(labelSpan);
+            return btn;
+        }
         function _ribbonSep() {
             return Object.assign(document.createElement('div'), {className:'ribbon-sep'});
         }
@@ -8829,9 +8887,9 @@
                 if (partDiffState.available) {
                     const g1 = _ribbonGroup('View');
                     ['3dmodel','compare'].forEach(id => {
-                        const btn = document.createElement('button');
-                        btn.className = 'ribbon-btn' + (partDiffState.activeSubtab === id ? ' active' : '');
-                        btn.textContent = id === '3dmodel' ? '3D Model' : 'Compare';
+                        const iconKey = id === '3dmodel' ? '3dmodel' : 'compare';
+                        const label = id === '3dmodel' ? '3D Model' : 'Compare';
+                        const btn = _ribbonIconBtn(iconKey, label, 'ribbon-btn' + (partDiffState.activeSubtab === id ? ' active' : ''));
                         btn.addEventListener('click', () => {
                             if (partDiffState.activeSubtab === id) return;
                             partDiffState.activeSubtab = id;
@@ -8878,6 +8936,46 @@
                         g2.appendChild(compareBtn);
                         ribbon.appendChild(g2);
 
+                        // COMPARE group: diff mode buttons
+                        ribbon.appendChild(_ribbonSep());
+                        const g3 = _ribbonGroup('Compare');
+
+                        const featDiffBtn = _ribbonIconBtn('featureDiff', 'Feature Diff');
+                        featDiffBtn.title = 'Compare features by name, type, and parameters';
+                        featDiffBtn.addEventListener('click', () => {
+                            if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
+                            if (state.partNumber) _loadPartCompareViewers(state.partNumber, selA.value, selB.value);
+                        });
+                        g3.appendChild(featDiffBtn);
+
+                        const geoDiffBtn = _ribbonIconBtn('geometryDiff', 'Geometry Diff');
+                        geoDiffBtn.title = 'Exact solid-body boolean diff (requires STEP files)';
+                        const geoDiffLabel = geoDiffBtn.querySelector('.ribbon-btn-label');
+                        geoDiffBtn.addEventListener('click', async () => {
+                            if (geoDiffBtn.disabled) return;
+                            geoDiffBtn.disabled = true;
+                            if (geoDiffLabel) geoDiffLabel.textContent = 'Computing...';
+                            try {
+                                const rA = selA.value;
+                                const rB = selB.value;
+                                const resp = await fetch(`/api/geometry-diff/${encodeURIComponent(state.partNumber)}?revA=${encodeURIComponent(rA)}&revB=${encodeURIComponent(rB)}`);
+                                if (!resp.ok) {
+                                    const err = await resp.json().catch(() => ({}));
+                                    throw new Error(err.detail || `HTTP ${resp.status}`);
+                                }
+                                const result = await resp.json();
+                                _showGeometryDiffResult(result, state.partNumber, rA, rB);
+                            } catch (e) {
+                                console.error('[GeoDiff] Error:', e);
+                                if (window._toast) window._toast(`Geometry diff failed: ${e.message}`, 'error');
+                            } finally {
+                                geoDiffBtn.disabled = false;
+                                if (geoDiffLabel) geoDiffLabel.textContent = 'Geometry Diff';
+                            }
+                        });
+                        g3.appendChild(geoDiffBtn);
+                        ribbon.appendChild(g3);
+
                     }
 
                 } else {
@@ -8900,9 +8998,7 @@
                     const gProps = _ribbonGroup('Properties');
                     const propsWrap = document.createElement('div');
                     propsWrap.style.cssText = 'position:relative;';
-                    const propsBtn = document.createElement('button');
-                    propsBtn.className = 'ribbon-btn';
-                    propsBtn.innerHTML = '⚖ Properties ▾';
+                    const propsBtn = _ribbonIconBtn('properties', 'Properties \u25BE');
                     propsBtn.title = 'Mass, Material, Bounding Box';
 
                     const propsDropdown = document.createElement('div');
@@ -8995,9 +9091,7 @@
                     const gFeat = _ribbonGroup('Features');
                     const featWrap = document.createElement('div');
                     featWrap.style.cssText = 'position:relative;';
-                    const featBtn = document.createElement('button');
-                    featBtn.className = 'ribbon-btn';
-                    featBtn.innerHTML = '📋 Features ▾';
+                    const featBtn = _ribbonIconBtn('features', 'Features \u25BE');
                     featBtn.title = 'Feature summary and hole details';
 
                     const featDropdown = document.createElement('div');
@@ -9085,9 +9179,9 @@
                     ribbon.appendChild(_ribbonSep());
                     const g2 = _ribbonGroup('View');
                     ['3dmodel','compare'].forEach(id => {
-                        const btn = document.createElement('button');
-                        btn.className = 'ribbon-btn' + (diffState.activeSubtab === id ? ' active' : '');
-                        btn.textContent = id === '3dmodel' ? '3D Model' : 'Compare';
+                        const iconKey = id === '3dmodel' ? '3dmodel' : 'compare';
+                        const label = id === '3dmodel' ? '3D Model' : 'Compare';
+                        const btn = _ribbonIconBtn(iconKey, label, 'ribbon-btn' + (diffState.activeSubtab === id ? ' active' : ''));
                         btn.addEventListener('click', () => {
                             if (diffState.activeSubtab === id) return;
                             diffState.activeSubtab = id;
@@ -9144,9 +9238,7 @@
                     const gAProps = _ribbonGroup('Properties');
                     const aPropsWrap = document.createElement('div');
                     aPropsWrap.style.cssText = 'position:relative;';
-                    const aPropsBtn = document.createElement('button');
-                    aPropsBtn.className = 'ribbon-btn';
-                    aPropsBtn.innerHTML = '⚖ Properties ▾';
+                    const aPropsBtn = _ribbonIconBtn('properties', 'Properties \u25BE');
 
                     const aPropsDropdown = document.createElement('div');
                     aPropsDropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:260px;max-height:300px;overflow-y:auto;';
@@ -9182,9 +9274,7 @@
                     const gRel = _ribbonGroup('Relationships');
                     const relWrap = document.createElement('div');
                     relWrap.style.cssText = 'position:relative;';
-                    const relBtn = document.createElement('button');
-                    relBtn.className = 'ribbon-btn';
-                    relBtn.innerHTML = '🔗 Relationships ▾';
+                    const relBtn = _ribbonIconBtn('relationships', 'Relationships \u25BE');
 
                     const relDropdown = document.createElement('div');
                     relDropdown.style.cssText = 'display:none;position:absolute;top:100%;right:0;background:#1B212B;border:1px solid #323846;border-radius:6px;padding:10px 14px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);width:300px;max-height:350px;overflow-y:auto;';
@@ -9234,9 +9324,7 @@
                     // BOM group
                     ribbon.appendChild(_ribbonSep());
                     const gBom = _ribbonGroup('BOM');
-                    const bomBtn = document.createElement('button');
-                    bomBtn.className = 'ribbon-btn';
-                    bomBtn.innerHTML = '📋 BOM';
+                    const bomBtn = _ribbonIconBtn('bom', 'BOM');
                     bomBtn.title = 'Bill of Materials';
                     bomBtn.addEventListener('click', () => {
                         const existing = document.getElementById('bomOverlay');
@@ -9841,7 +9929,7 @@
             const height = container.clientHeight || 400;
 
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x191919);
+            scene.background = new THREE.Color(0x22272F);
 
             const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
             const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -10780,7 +10868,7 @@
 
             // Scene Ã¢â‚¬â€ dark background per IDEAS.md
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x191919);
+            scene.background = new THREE.Color(0x22272F);
 
             // Camera
             const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
@@ -13603,7 +13691,7 @@
 
             // Scene
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x12121e);
+            scene.background = new THREE.Color(0x22272F);
 
             // Camera
             const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);

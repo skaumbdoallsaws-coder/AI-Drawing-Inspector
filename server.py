@@ -8,14 +8,20 @@ Thin wrapper around the SpatialInspector engine for engineering drawing QC inspe
 
 import os
 import re
+import io
 import base64
 import json
 import logging
 import math
 import shutil
+import threading
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
@@ -40,6 +46,74 @@ inspector: SpatialInspector = None
 
 # Scout browser search engine (populated at startup if Playwright available)
 search_engine = None  # Optional[BrowserSearchEngine]
+
+# Local STT: faster-whisper (lazy-loaded on first transcription)
+_whisper_models: Dict[str, Any] = {}  # device-keyed cache: "cpu" -> model, "cuda" -> model
+_whisper_lock = threading.Lock()
+_whisper_fallback_count = 0
+_whisper_bad_devices: set = set()  # devices that failed at runtime (e.g. "cuda" if cublas missing)
+
+
+def _resolve_whisper_device() -> str:
+    """Resolve the preferred whisper device from env or auto-detection."""
+    configured = os.getenv("WHISPER_DEVICE", "auto").lower()
+    if configured in ("cpu", "cuda"):
+        return configured
+    # auto: prefer CUDA only if torch reports it AND it hasn't failed before
+    if "cuda" not in _whisper_bad_devices:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+        except ImportError:
+            pass
+    return "cpu"
+
+
+def _get_whisper_model(device: str = None):
+    """Get or create a whisper model for the given device. Thread-safe, cached per device."""
+    if device is None:
+        device = _resolve_whisper_device()
+    if device in _whisper_models:
+        return _whisper_models[device], device
+    with _whisper_lock:
+        if device in _whisper_models:
+            return _whisper_models[device], device
+        from faster_whisper import WhisperModel
+        model_size = os.getenv("WHISPER_MODEL_SIZE", "base.en")
+        compute_type = "float16" if device == "cuda" else "int8"
+        logger.info(f"Loading faster-whisper model '{model_size}' on {device} ({compute_type})...")
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        _whisper_models[device] = model
+        logger.info(f"faster-whisper model loaded on {device}")
+        return model, device
+
+
+async def _fallback_openai_transcribe(audio_bytes, filename=None):
+    global _whisper_fallback_count
+    _whisper_fallback_count += 1
+    if _whisper_fallback_count == 1:
+        logger.warning("Local STT failed — falling back to OpenAI Whisper API")
+    elif _whisper_fallback_count == 5:
+        logger.error("Local STT has failed 5 times — check faster-whisper installation")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Local STT failed and no OPENAI_API_KEY for fallback")
+
+    try:
+        import openai
+        client = openai.OpenAI(api_key=api_key)
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = filename or "recording.webm"
+        transcript = await asyncio.to_thread(
+            client.audio.transcriptions.create,
+            model="whisper-1", file=audio_file, response_format="text",
+        )
+        return {"text": transcript.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
+
 
 # Assembly reverse-lookup data (populated at startup)
 assembly_part_lookup: Dict[str, List[str]] = {}   # part_number -> [assembly_number, ...]
@@ -178,9 +252,9 @@ def _load_assembly_profiles():
         part_data_cache = assy_data.get("partDataCache", {})
         for old_key, part_data in part_data_cache.items():
             ident = part_data.get("identity") or {}
-            new_pn = (ident.get("customProperties") or {}).get("PartNo", "")
+            new_pn = ((ident.get("customProperties") or {}).get("PartNo", "")).strip()
             if not new_pn:
-                new_pn = ident.get("partNumber") or ""
+                new_pn = (ident.get("partNumber") or "").strip()
             if new_pn and new_pn not in seen_parts:
                 seen_parts.add(new_pn)
                 if new_pn not in assembly_part_lookup:
@@ -497,6 +571,18 @@ async def run_inspection(
         if isinstance(result.get("findings"), dict):
             result["findings"]["features"] = enriched_features
 
+        # Resolve ASME references for inspection findings
+        asme_findings = []
+        seen_ft = set()
+        for feature in result.get("features", []):
+            refs = _resolve_asme_refs_for_finding(feature)
+            for ref in refs:
+                if ref["feature_type"] not in seen_ft:
+                    seen_ft.add(ref["feature_type"])
+                    asme_findings.append({"finding_name": feature.get("name", ""), **ref})
+        if asme_findings:
+            result["asme_checklist_findings"] = asme_findings
+
         return result
     except HTTPException:
         raise  # Re-raise HTTPExceptions as-is
@@ -684,7 +770,11 @@ async def get_part_glb_revision(part_number: str, revision: str = Query(...)):
 
     glb_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / f"{safe_pn}_colored.glb"
     if not glb_path.exists():
-        raise HTTPException(status_code=404, detail=f"No GLB for part '{part_number}' revision '{revision}'")
+        # Fallback: serve STL if GLB not available
+        stl_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / f"{safe_pn}.stl"
+        if stl_path.exists():
+            return FileResponse(stl_path, media_type="model/stl")
+        raise HTTPException(status_code=404, detail=f"No GLB or STL for part '{part_number}' revision '{revision}'")
 
     return FileResponse(path=str(glb_path), media_type="model/gltf-binary", filename=f"{safe_pn}_colored.glb")
 
@@ -1436,9 +1526,9 @@ async def get_assembly_context(part_number: str):
         hex_val = color if isinstance(color, str) else color.get("color", "#888")
         color_name = _HEX_TO_NAME.get(hex_val.upper(), hex_val)
         # Prefer customProperties.PartNo (stable across extractions) over identity.partNumber
-        pn = (identity.get("customProperties") or {}).get("PartNo", "")
+        pn = ((identity.get("customProperties") or {}).get("PartNo", "")).strip()
         if not pn:
-            pn = identity.get("partNumber") or old_key.replace(".sldprt", "").replace(".SLDPRT", "")
+            pn = (identity.get("partNumber") or old_key.replace(".sldprt", "").replace(".SLDPRT", "")).strip()
         part_color_legend.append({
             "old_key": old_key,
             "part_number": pn,
@@ -1607,9 +1697,9 @@ async def get_assembly_diff(assembly_number: str, revA: str = Query(...), revB: 
         source_keys = color_map.keys() if color_map else pdc.keys()
         for old_key in source_keys:
             identity = (pdc.get(old_key, {}).get("identity") or {})
-            pn = (identity.get("customProperties") or {}).get("PartNo", "")
+            pn = ((identity.get("customProperties") or {}).get("PartNo", "")).strip()
             if not pn:
-                pn = identity.get("partNumber") or old_key.replace(".sldprt", "").replace(".SLDPRT", "")
+                pn = (identity.get("partNumber") or old_key.replace(".sldprt", "").replace(".SLDPRT", "")).strip()
             legend.append({"old_key": old_key, "part_number": pn})
         return legend
     diff_result["legendA"] = _build_legend(assy_a)
@@ -1799,6 +1889,101 @@ RAG_KEYWORD_MAP = {
     "line": ["asme_feature_references/Line_Conventions"],
 }
 
+# ASME reference directory whitelist (for /api/asme-ref/ endpoint)
+ASME_REF_WHITELIST = {
+    "Hole", "Chamfer", "Counterbore", "Countersink", "TappedHole",
+    "Fillet_Radius", "Slot", "Keyseat", "Knurl", "ConicalTaper",
+    "Surface_Texture", "Dimension_Basics", "Line_Conventions", "Spotface",
+    "GDT_Datums", "GDT_Form", "GDT_Orientation", "GDT_Position",
+    "GDT_Profile", "GDT_Runout", "GDT_Symbology",
+    "04_Fundamental_Rules", "05_Tolerancing_Defaults", "06_Symbology",
+    "07_Datums", "08_Form_Tolerances", "09_Orientation_Tolerances",
+    "10_Position_Tolerances", "11_Profile_Tolerances", "12_Runout_Tolerances",
+}
+
+# Mapping from finding keywords to asme_feature_references/ folder names
+FINDING_TO_ASME_FEATURE = {
+    "hole": "Hole", "bore": "Hole", "thru": "Hole", "blind": "Hole", "depth": "Hole",
+    "chamfer": "Chamfer", "bevel": "Chamfer",
+    "counterbore": "Counterbore", "cbore": "Counterbore",
+    "countersink": "Countersink", "csink": "Countersink",
+    "thread": "TappedHole", "tapped": "TappedHole", "tap": "TappedHole",
+    "fillet": "Fillet_Radius", "radius": "Fillet_Radius", "round": "Fillet_Radius",
+    "slot": "Slot",
+    "keyseat": "Keyseat", "keyway": "Keyseat",
+    "knurl": "Knurl",
+    "taper": "ConicalTaper",
+    "surface finish": "Surface_Texture", "roughness": "Surface_Texture",
+    "datum": "GDT_Datums",
+    "position": "GDT_Position",
+    "flatness": "GDT_Form", "perpendicularity": "GDT_Orientation",
+    "parallelism": "GDT_Orientation",
+    "runout": "GDT_Runout", "profile": "GDT_Profile",
+    "tolerance": "05_Tolerancing_Defaults",
+    "dimension": "Dimension_Basics",
+    "gd&t": "GDT_Symbology", "feature control": "GDT_Symbology",
+}
+
+
+def _resolve_asme_refs_for_finding(finding: dict) -> List[dict]:
+    """Resolve ALL matching ASME references for an inspection finding.
+    Multi-match: 'hole missing position tolerance' returns refs for both Hole and GDT_Position.
+    Deterministic keyword lookup — no model call."""
+    text = ""
+    for key in ["name", "observation", "status", "feature_type"]:
+        val = finding.get(key, "")
+        if val:
+            text += " " + str(val).lower()
+
+    matched_features = set()
+    for keyword, feature_type in FINDING_TO_ASME_FEATURE.items():
+        if keyword in text:
+            matched_features.add(feature_type)
+
+    if not matched_features:
+        return []
+
+    refs = []
+    for matched_feature in matched_features:
+        checklist_path = Path("asme_feature_references") / matched_feature / "checklist.json"
+        if checklist_path.exists():
+            with open(checklist_path, "r", encoding="utf-8") as f:
+                checklist = json.load(f)
+            matched_rules = []
+            for rule in checklist.get("required", []):
+                finding_words = set(text.split())
+                rule_words = set(rule.lower().split())
+                if len(finding_words & rule_words) >= 2:
+                    matched_rules.append(rule)
+            if not matched_rules:
+                matched_rules = checklist.get("required", [])[:2]
+            ref_dir = Path("asme_feature_references") / matched_feature
+            pngs = sorted(ref_dir.glob("reference_*.png"))[:2]
+            images = []
+            for p in pngs:
+                page_match = re.search(r'P(\d+)', p.stem)
+                page_label = f"p.{page_match.group(1)}" if page_match else "ref"
+                images.append({"url": f"/api/asme-ref/{matched_feature}/{p.name}", "page": page_label})
+            refs.append({
+                "feature_type": matched_feature,
+                "section": checklist.get("asme_reference", ""),
+                "rules": matched_rules,
+                "common_errors": checklist.get("common_errors", [])[:2],
+                "images": images,
+            })
+        else:
+            rag_path = Path("rag_visual_db") / matched_feature
+            if rag_path.exists():
+                pngs = sorted(rag_path.glob("*.png"))[:2]
+                refs.append({
+                    "feature_type": matched_feature,
+                    "section": f"ASME Y14.5 — {matched_feature.replace('_', ' ')}",
+                    "rules": [], "common_errors": [],
+                    "images": [{"url": f"/api/asme-ref/{matched_feature}/{p.name}", "page": (lambda m: f"p.{m.group(1)}" if m else "ref")(re.search(r'P(\d+)', p.stem))} for p in pngs],
+                })
+    return refs
+
+
 AGENT_SYSTEM_PROMPT = """You are Iris, a senior engineer chatting with a colleague. You have inspection results and reference images (never mention having images). You know ASME Y14.5, SolidWorks, GD&T.
 If an uploaded drawing image is attached, reference it directly — do not ask the user to provide the drawing again.
 
@@ -1811,6 +1996,20 @@ RESPONSE FORMAT — MANDATORY:
 - ALWAYS end with a short follow-up question.
 
 If you write more than 3 sentences, you have failed. Rewrite shorter.
+
+ASME STANDARD REFERENCES:
+When you identify a representation issue, reference the specific ASME Y14.5 section in your response text.
+Each reference image sent to you is labeled with its source (e.g., "[Reference: ASME Y14.5-2018, Section 4.12-4.14 (page 41)]").
+Use these labels to cite accurately. Example: "The blind hole is missing the depth symbol — per ASME Y14.5 §4.12, blind holes require ↧ followed by the depth value."
+Do NOT invent section numbers. Only cite sections from the reference labels provided.
+
+ASME KNOWLEDGE QUESTIONS:
+When the user asks HOW a feature should be represented (e.g., "how should a blind hole be shown?", "what's the correct way to call out a chamfer?", "show me the standard for threads"), this is an EDUCATIONAL question, not an inspection query.
+- Answer using the ASME reference images provided to you
+- Cite the specific ASME section from the image labels
+- Do NOT emit HIGHLIGHT_DIMS or HIGHLIGHT_PARTS — the user is asking about the standard, not about their drawing
+- Do NOT reference or analyze the uploaded drawing for these questions
+- Keep the 3-sentence limit but focus on the ASME rule, not inspection findings
 
 Scope: drawings, CAD, ASME, GD&T, manufacturing. Off-topic? "That's outside my area — what drawing question can I help with?"
 
@@ -2024,6 +2223,19 @@ When REVISION CHANGES data is present in context, the user is comparing two asse
 - If mates changed, explain what the new constraint means for the assembly.
 - This mode activates when REVISION CHANGES is in the context AND the user asks about changes/differences.
 
+FAI TABLE COMMANDS:
+When FAI TABLE data is present in context, the user has a First Article Inspection table open.
+The user may provide measurement values or tolerances via chat or voice. When they do:
+- Parse their instruction and emit FAI_FILL: or FAI_TOL: markers on their own line.
+- FAI_FILL: #1: 25.003, #2: 25.001 — fills measured values for specific characteristics.
+- FAI_FILL: #all: 25.003 — fills ALL characteristics with the same measured value.
+- FAI_TOL: #all: 0.013 — sets ±tolerance for all characteristics.
+- FAI_TOL: #3: 0.050, #7: 0.025 — sets tolerance for specific characteristics.
+- Match the user's description to characteristic descriptions to find the right rows.
+- Convert units if needed: "13 thou" = 0.3302mm, "half a millimeter" = 0.500mm.
+- Always confirm what you filled in your text response.
+- You can fill AND provide engineering commentary in the same response.
+
 FEATURE HIGHLIGHTING ON 3D MODEL:
 When AVAILABLE CAD FEATURES data is present in context, you can highlight specific features on the part's 3D model.
 - When the user asks to see, show, or identify a specific feature type (holes, fillets, chamfers, extrudes), emit HIGHLIGHT_FEATURES with the matching cad_feature_ids.
@@ -2123,31 +2335,46 @@ def _find_relevant_rag_dirs(message: str, inspection_context: Optional[Dict] = N
 
 
 def _load_rag_images(directories: List[str], max_images: int = 4) -> List[Dict]:
-    """Load PNG images from directories as base64 for Claude Vision API."""
-    images = []
+    """Load PNG images from directories as base64 for Claude Vision API.
+    Each image is preceded by a text label identifying its source.
+    max_images counts actual images, not label+image pairs."""
+    content_blocks = []
+    image_count = 0
     for dir_path in directories:
         p = Path(dir_path)
         if not p.exists():
             continue
-        png_files = sorted(p.glob("*.png"))[:3]  # Max 3 per directory
+        checklist_label = p.name.replace("_", " ")
+        cl_path = p / "checklist.json"
+        if cl_path.exists():
+            try:
+                with open(cl_path, "r", encoding="utf-8") as f:
+                    cl = json.load(f)
+                checklist_label = cl.get("asme_reference", p.name)
+            except Exception:
+                pass
+        png_files = sorted(p.glob("*.png"))[:3]
         for png_file in png_files:
-            if len(images) >= max_images:
+            if image_count >= max_images:
                 break
             try:
-                b64 = base64.standard_b64encode(png_file.read_bytes()).decode("utf-8")
-                images.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": b64,
-                    }
+                page_match = re.search(r'P(\d+)', png_file.stem)
+                page_label = f" (page {page_match.group(1)})" if page_match else ""
+                content_blocks.append({
+                    "type": "text",
+                    "text": f"[Reference: {checklist_label}{page_label} — {p.name}/{png_file.name}]"
                 })
+                b64 = base64.standard_b64encode(png_file.read_bytes()).decode("utf-8")
+                content_blocks.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": b64}
+                })
+                image_count += 1
             except Exception as e:
                 logger.warning(f"Failed to load RAG image {png_file}: {e}")
-        if len(images) >= max_images:
+        if image_count >= max_images:
             break
-    return images
+    return content_blocks
 
 
 def _build_context_message(inspection_context: Optional[Dict]) -> str:
@@ -2642,6 +2869,70 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             rd_lines.append("Use HIGHLIGHT_PARTS: part_number to highlight individual parts on the single viewer when discussing them.")
 
         parts.append("\n".join(rd_lines))
+
+    # Geometry diff result (solid-body boolean comparison between part revisions)
+    geo_diff = inspection_context.get("geometry_diff")
+    if geo_diff and not geo_diff.get("identical", True):
+        gd_lines = ["GEOMETRY DIFF (solid-body comparison between part revisions):"]
+        gd_lines.append(f"  Part: {geo_diff.get('part_number', '?')} Rev {geo_diff.get('revA', '?')} vs Rev {geo_diff.get('revB', '?')}")
+        gd_lines.append(f"  Rev A volume: {geo_diff.get('volume_a_mm3', 0):.1f} mm³")
+        gd_lines.append(f"  Rev B volume: {geo_diff.get('volume_b_mm3', 0):.1f} mm³")
+        removed = geo_diff.get("removed_volume_mm3", 0)
+        added = geo_diff.get("added_volume_mm3", 0)
+        net = geo_diff.get("net_change_mm3", 0)
+        if removed > 0.001:
+            gd_lines.append(f"  Material REMOVED: {removed:.1f} mm³")
+        if added > 0.001:
+            gd_lines.append(f"  Material ADDED: {added:.1f} mm³")
+        gd_lines.append(f"  Net change: {'+' if net >= 0 else ''}{net:.1f} mm³")
+        centroids = geo_diff.get("changed_centroids", [])
+        for c in centroids:
+            ctype = c.get("type", "?")
+            pos = c.get("centroid", [0, 0, 0])
+            vol = c.get("volume_mm3", 0)
+            gd_lines.append(f"  {ctype.upper()} region: {vol:.1f} mm³ at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}) mm")
+        warnings = geo_diff.get("import_warnings", [])
+        if warnings:
+            gd_lines.append(f"  Import warnings: {'; '.join(warnings)}")
+        gd_lines.append("")
+        gd_lines.append("Use this data to explain the engineering impact of the geometry changes.")
+        gd_lines.append("Reference the volume, location, and type (added/removed) in your answer.")
+        gd_lines.append("If the user asks about the diff, you have the exact data — do not guess.")
+        parts.append("\n".join(gd_lines))
+
+    # FAI characteristics table state (for chat-driven fill commands)
+    fai_chars = inspection_context.get("fai_characteristics", [])
+    if fai_chars:
+        fai_lines = ["FAI TABLE (First Article Inspection characteristics currently loaded):"]
+        for c in fai_chars[:30]:
+            cn = c.get("char_number", "?")
+            desc = c.get("description", "")
+            nom = c.get("nominal")
+            tp = c.get("tol_plus")
+            tm = c.get("tol_minus")
+            meas = c.get("measured")
+            status = c.get("status", "PENDING")
+            line = f"  #{cn}: {desc} — nominal={nom}"
+            if tp is not None and tm is not None:
+                line += f" tol=+{tp}/-{tm}"
+            if meas:
+                line += f" measured={meas} [{status}]"
+            else:
+                line += " [PENDING]"
+            fai_lines.append(line)
+        fai_lines.append("")
+        fai_lines.append("FAI CHAT COMMANDS:")
+        fai_lines.append("When the user provides measurement values or tolerances via chat or voice, you MUST emit FAI_FILL or FAI_TOL markers.")
+        fai_lines.append("To fill measured values: FAI_FILL: #1: 25.003, #2: 25.001, #5: 12.450")
+        fai_lines.append("To fill ALL rows with the same value: FAI_FILL: #all: 25.003")
+        fai_lines.append("To set tolerances: FAI_TOL: #1: 0.013, #2: 0.050")
+        fai_lines.append("To set ALL tolerances: FAI_TOL: #all: 0.013")
+        fai_lines.append("Match the user's description to the characteristic descriptions above to determine which rows to fill.")
+        fai_lines.append("Example: 'all bores measured 25.003' → find chars with 'bore' or '⌀' in description, fill those.")
+        fai_lines.append("Example: 'set tolerance to plus minus 13 thou' → 13 thou = 0.3302mm → FAI_TOL: #all: 0.3302")
+        fai_lines.append("Example: 'characteristic 5 is 12.45' → FAI_FILL: #5: 12.450")
+        fai_lines.append("Always confirm what you filled in your text response (e.g. 'Filled 4 bore measurements with 25.003mm').")
+        parts.append("\n".join(fai_lines))
 
     return "\n\n".join(parts)
 
@@ -3141,13 +3432,17 @@ async def agent_chat(request: AgentChatRequest):
             dropped = [p for p in raw_parts if p not in compare_parts]
             if dropped:
                 logger.warning(f"[Compare] Invalid COMPARE_PARTS markers dropped: {dropped}")
+            if compare_parts:
+                logger.info(f"[Compare] COMPARE_PARTS parsed OK: {compare_parts}")
             response_text = re.sub(r'^COMPARE_PARTS:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
 
-        # Log parser miss: HIGHLIGHT_PARTS in compare-capable revision mode
+        # Log when agent omitted COMPARE_PARTS in revision-diff mode
         if not compare_parts and ctx and ctx.get("compare_mode_available") and ctx.get("revision_diff"):
             hp_check = re.search(r'^HIGHLIGHT_PARTS:', response_text, re.MULTILINE)
             if hp_check:
-                logger.debug("[Compare] Agent emitted HIGHLIGHT_PARTS in compare-capable revision mode — parser miss, dropping")
+                logger.warning("[Compare] Agent emitted HIGHLIGHT_PARTS instead of COMPARE_PARTS in revision mode")
+            else:
+                logger.warning("[Compare] Agent did NOT emit COMPARE_PARTS despite revision_diff in context")
 
         # Extract part highlight commands before cleaning
         highlight_parts = []
@@ -3259,12 +3554,91 @@ async def agent_chat(request: AgentChatRequest):
         if explode_level is not None:
             result["explode_level"] = explode_level
 
+        # Parse FAI_FILL markers (chat-driven measurement fills)
+        fai_fills = {}
+        fai_fill_match = re.search(r'^FAI_FILL:\s*(.+)$', response_text, re.MULTILINE)
+        if fai_fill_match:
+            raw = fai_fill_match.group(1).strip()
+            # Parse #N: value or #all: value
+            all_match = re.match(r'#all:\s*([\d.+-]+)', raw, re.I)
+            if all_match:
+                val = all_match.group(1)
+                fai_chars = ctx.get("fai_characteristics", []) if ctx else []
+                for c in fai_chars:
+                    fai_fills[str(c.get("char_number", 0))] = val
+            else:
+                for m in re.finditer(r'#(\d+):\s*([\d.+-]+)', raw):
+                    fai_fills[m.group(1)] = m.group(2)
+            if fai_fills:
+                logger.info(f"[FAI] Chat fill parsed: {len(fai_fills)} values")
+            response_text = re.sub(r'^FAI_FILL:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
+        # Parse FAI_TOL markers (chat-driven tolerance overrides)
+        fai_tol = {}
+        fai_tol_match = re.search(r'^FAI_TOL:\s*(.+)$', response_text, re.MULTILINE)
+        if fai_tol_match:
+            raw = fai_tol_match.group(1).strip()
+            all_match = re.match(r'#all:\s*([\d.+-]+)', raw, re.I)
+            if all_match:
+                val = all_match.group(1)
+                fai_chars = ctx.get("fai_characteristics", []) if ctx else []
+                for c in fai_chars:
+                    fai_tol[str(c.get("char_number", 0))] = val
+            else:
+                for m in re.finditer(r'#(\d+):\s*([\d.+-]+)', raw):
+                    fai_tol[m.group(1)] = m.group(2)
+            if fai_tol:
+                logger.info(f"[FAI] Chat tolerance parsed: {len(fai_tol)} values")
+            response_text = re.sub(r'^FAI_TOL:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
+        if fai_fills:
+            result["fai_fills"] = fai_fills
+        if fai_tol:
+            result["fai_tol"] = fai_tol
+
+        # Resolve ASME references for chat responses (deterministic, no model call)
+        # Message-keyword matching must work even when no inspection context is loaded.
+        asme_refs = []
+        if request.agent_type != "parts-finder":
+            seen_ft = set()
+            # Priority 1: focused_feature
+            focused = ctx.get("focused_feature") if isinstance(ctx, dict) else None
+            if focused and isinstance(focused, dict):
+                for ref in _resolve_asme_refs_for_finding(focused):
+                    if ref["feature_type"] not in seen_ft:
+                        seen_ft.add(ref["feature_type"])
+                        asme_refs.append(ref)
+            # Priority 2: user message keywords
+            if len(asme_refs) < 3:
+                for ref in _resolve_asme_refs_for_finding({"observation": request.message}):
+                    if ref["feature_type"] not in seen_ft:
+                        seen_ft.add(ref["feature_type"])
+                        asme_refs.append(ref)
+            # Priority 3: only MISSING/PARTIAL/DISCREPANT findings
+            if len(asme_refs) < 3 and isinstance(ctx, dict):
+                ctx_findings = ctx.get("findings", [])
+                if isinstance(ctx_findings, list):
+                    for finding in ctx_findings:
+                        if len(asme_refs) >= 3:
+                            break
+                        status = finding.get("status", "").upper() if isinstance(finding, dict) else ""
+                        if status in ("MISSING", "PARTIAL", "DISCREPANT"):
+                            for ref in _resolve_asme_refs_for_finding(finding):
+                                if ref["feature_type"] not in seen_ft:
+                                    seen_ft.add(ref["feature_type"])
+                                    asme_refs.append(ref)
+            asme_refs = asme_refs[:3]
+        if asme_refs:
+            result["asme_refs"] = asme_refs
+
         # Parse ANIMATE_MOTION marker
         animate_match = re.search(r'ANIMATE_MOTION:\s*(start|stop)', response_text, re.I)
         if animate_match:
             result["animate_motion"] = animate_match.group(1).lower()
             response_text = re.sub(r'ANIMATE_MOTION:\s*(start|stop)\s*', '', response_text, flags=re.I).strip()
-            result["response"] = response_text
+
+        # Always update response with final cleaned text
+        result["response"] = response_text
 
         return result
 
@@ -3892,6 +4266,80 @@ async def render_pdf_page(
 
 # ---------- Voice (STT + TTS) ----------
 
+# ── Geometry Diff endpoints (proxy to worker on :8001) ──
+
+def _sanitize_revision(rev: str) -> str:
+    """Strip revision strings to alphanumeric only."""
+    sanitized = re.sub(r'[^a-zA-Z0-9]', '', rev)
+    if not sanitized:
+        raise HTTPException(status_code=400, detail=f"Invalid revision: '{rev}'")
+    return sanitized
+
+
+@app.get("/api/geometry-diff/{part_number}")
+async def geometry_diff(part_number: str, revA: str = Query(...), revB: str = Query(...)):
+    """Compute or retrieve solid-body geometry diff between two part revisions.
+    Proxies to the geometry worker on :8001 if not cached."""
+    safe_pn = sanitize_part_number(part_number)
+    safe_revA = _sanitize_revision(revA)
+    safe_revB = _sanitize_revision(revB)
+
+    step_a = Path(f"400S_Sorted_Library/parts/{safe_pn}/rev{safe_revA}/{safe_pn}.stp")
+    step_b = Path(f"400S_Sorted_Library/parts/{safe_pn}/rev{safe_revB}/{safe_pn}.stp")
+    if not step_a.exists() or not step_b.exists():
+        raise HTTPException(status_code=404, detail="STEP file(s) not found for requested revisions")
+
+    cache_dir = Path(f"400S_Sorted_Library/parts/{safe_pn}/geometry_diff/{safe_revA}_vs_{safe_revB}")
+    result_path = cache_dir / "diff_result.json"
+
+    # Cache check with freshness validation (STEPs + sidecars)
+    if result_path.exists():
+        cache_mtime = result_path.stat().st_mtime
+        source_mtimes = [step_a.stat().st_mtime, step_b.stat().st_mtime]
+        for sc in [step_a.parent / f"{safe_pn}_step_meta.json", step_b.parent / f"{safe_pn}_step_meta.json"]:
+            if sc.exists():
+                source_mtimes.append(sc.stat().st_mtime)
+        if cache_mtime > max(source_mtimes):
+            with open(result_path, "r") as f:
+                return json.load(f)
+        else:
+            import shutil
+            shutil.rmtree(cache_dir, ignore_errors=True)
+
+    # Proxy to geometry worker
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post("http://localhost:8001/diff", json={
+                "step_a": str(step_a.resolve()),
+                "step_b": str(step_b.resolve()),
+                "output_dir": str(cache_dir.resolve()),
+                "part_number": safe_pn,
+                "revA": safe_revA, "revB": safe_revB,
+            })
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Geometry worker error: {resp.text}")
+        return resp.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Geometry worker not running. Start it with: conda run -n geo-env python geometry_worker.py")
+
+
+@app.get("/api/geometry-diff/{part_number}/{rev_pair}/{filename}")
+async def serve_geometry_diff_artifact(part_number: str, rev_pair: str, filename: str):
+    """Serve cached geometry diff artifacts (STL/GLB files)."""
+    safe_pn = sanitize_part_number(part_number)
+    if not re.match(r'^\w+_vs_\w+$', rev_pair):
+        raise HTTPException(status_code=400, detail="Invalid revision pair format")
+    if filename not in ("removed.stl", "added.stl", "removed.glb", "added.glb", "diff_result.json"):
+        raise HTTPException(status_code=400, detail="Invalid artifact name")
+    artifact = Path(f"400S_Sorted_Library/parts/{safe_pn}/geometry_diff/{rev_pair}/{filename}")
+    if not artifact.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    media_types = {".stl": "model/stl", ".glb": "model/gltf-binary", ".json": "application/json"}
+    media = media_types.get(artifact.suffix, "application/octet-stream")
+    return FileResponse(artifact, media_type=media)
+
+
 # Per-agent voice mapping (ElevenLabs voice IDs)
 AGENT_VOICE_MAP = {
     "inspector":         os.getenv("ELEVENLABS_VOICE_IRIS",  "21m00Tcm4TlvDq8ikWAM"),  # Rachel
@@ -3905,51 +4353,109 @@ class VoiceSynthesizeRequest(BaseModel):
     agent_type: str = "inspector"
 
 
+@app.get("/api/asme-ref/{folder}/{image_name}")
+async def get_asme_reference(folder: str, image_name: str):
+    """Serve an ASME reference page image. Whitelist-protected."""
+    if folder not in ASME_REF_WHITELIST:
+        raise HTTPException(status_code=404, detail="Unknown reference folder")
+    if not re.match(r'^[\w\-]+\.png$', image_name):
+        raise HTTPException(status_code=400, detail="Invalid image name")
+    for base in [Path("asme_feature_references"), Path("rag_visual_db")]:
+        img_path = base / folder / image_name
+        if img_path.exists() and img_path.is_file():
+            return FileResponse(img_path, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Image not found")
+
+
 @app.post("/api/voice/transcribe")
 async def voice_transcribe(audio: UploadFile = File(...)):
-    """Transcribe audio to text using OpenAI Whisper."""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
-
+    """Transcribe audio using local faster-whisper (CPU/CUDA), with OpenAI API fallback."""
     audio_bytes = await audio.read()
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=422, detail="Audio file is empty")
     if len(audio_bytes) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file exceeds 25MB limit")
 
+    # Force API mode if configured
+    if os.getenv("STT_BACKEND") == "api":
+        return await _fallback_openai_transcribe(audio_bytes, audio.filename)
+
+    desired_device = _resolve_whisper_device()
+    used_device = desired_device  # default before model load; updated on success
+
     try:
-        import io
-        import asyncio
-        import openai
-        client = openai.OpenAI(api_key=api_key)
-
+        model, used_device = _get_whisper_model(desired_device)
         audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = audio.filename or "recording.webm"
 
-        # Run sync Whisper call off the event loop
-        transcript = await asyncio.to_thread(
-            client.audio.transcriptions.create,
-            model="whisper-1",
-            file=audio_file,
-            response_format="text",
-        )
+        def _transcribe():
+            segments, info = model.transcribe(
+                audio_file,
+                beam_size=1,
+                language="en",
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=500),
+            )
+            text = " ".join(segment.text.strip() for segment in segments)
+            if not text.strip():
+                audio_file.seek(0)
+                segments2, _ = model.transcribe(audio_file, beam_size=1, language="en", vad_filter=False)
+                text = " ".join(s.text.strip() for s in segments2)
+            return text
 
-        text = transcript.strip()
+        text = await asyncio.to_thread(_transcribe)
+        text = text.strip()
+
         if not text:
             raise HTTPException(status_code=422, detail="No speech detected in audio")
 
-        logger.info(f"Whisper transcription: {len(audio_bytes)} bytes -> {len(text)} chars")
+        logger.info(f"Whisper transcription (local/{used_device}): {len(audio_bytes)} bytes -> {len(text)} chars")
         return {"text": text}
 
-    except openai.APIError as e:
-        logger.error(f"Whisper API error: {e}")
-        raise HTTPException(status_code=502, detail=f"Whisper transcription failed: {str(e)}")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Transcription error: {e}")
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        configured = os.getenv("WHISPER_DEVICE", "auto").lower()
+
+        # WHISPER_DEVICE=cuda: fail hard, no retry
+        if configured == "cuda":
+            logger.error(f"CUDA transcription failed (WHISPER_DEVICE=cuda, no fallback): {e}")
+            raise HTTPException(status_code=500, detail=f"CUDA transcription failed: {str(e)}")
+
+        # auto mode with CUDA failure: mark CUDA as bad, evict, retry CPU
+        if used_device == "cuda":
+            logger.warning(f"CUDA transcription failed ({e}), marking cuda as bad, retrying on CPU...")
+            _whisper_bad_devices.add("cuda")
+            _whisper_models.pop("cuda", None)
+            try:
+                model_cpu, _ = _get_whisper_model("cpu")
+                audio_file_retry = io.BytesIO(audio_bytes)
+
+                def _transcribe_cpu():
+                    segments, info = model_cpu.transcribe(
+                        audio_file_retry, beam_size=1, language="en",
+                        vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500),
+                    )
+                    text = " ".join(s.text.strip() for s in segments)
+                    if not text.strip():
+                        audio_file_retry.seek(0)
+                        segments2, _ = model_cpu.transcribe(audio_file_retry, beam_size=1, language="en", vad_filter=False)
+                        text = " ".join(s.text.strip() for s in segments2)
+                    return text
+
+                text = await asyncio.to_thread(_transcribe_cpu)
+                text = text.strip()
+                if not text:
+                    raise HTTPException(status_code=422, detail="No speech detected in audio")
+                logger.info(f"Whisper transcription (local/cpu after cuda fail): {len(audio_bytes)} bytes -> {len(text)} chars")
+                return {"text": text}
+            except HTTPException:
+                raise
+            except Exception as cpu_err:
+                logger.error(f"Local CPU transcription also failed: {cpu_err}")
+                return await _fallback_openai_transcribe(audio_bytes, audio.filename)
+        else:
+            logger.error(f"Local transcription error: {e}")
+            return await _fallback_openai_transcribe(audio_bytes, audio.filename)
 
 
 @app.post("/api/voice/synthesize")

@@ -6,8 +6,21 @@ transformers>=5.0.0       # LightOnOCR-2-1B support
 torch                     # PyTorch for model inference
 Pillow                    # Image processing
 numpy                     # Array operations
+scipy                     # Hungarian matching for dimension verification
 pyyaml                    # YAML parsing for datasets
 shapely                   # Polygon IoU in evaluation
+
+# ---------- Web Server (InspectorPro UI) ----------
+fastapi                   # REST API framework
+uvicorn[standard]         # ASGI server
+python-multipart          # File upload support
+playwright                # Browser automation for Scout web search
+elevenlabs                # TTS voice synthesis for agent voices
+anthropic                 # Claude API for agents
+openai                    # Whisper API fallback + FAI fill
+python-dotenv             # .env file loading
+PyMuPDF                   # PDF rendering
+faster-whisper>=1.1.0     # Local STT via CTranslate2
 
 # ---------- Optional / Development ----------
 # matplotlib              # Visualization in notebooks

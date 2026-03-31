@@ -455,9 +455,9 @@ def compute_assembly_diff(assy_a, assy_b, parts_dir_a=None, parts_dir_b=None):
         result = {}
         for key, val in pdc.items():
             ident = val.get("identity") or {}
-            pn = (ident.get("customProperties") or {}).get("PartNo", "")
+            pn = ((ident.get("customProperties") or {}).get("PartNo", "")).strip()
             if not pn:
-                pn = ident.get("partNumber") or ""
+                pn = (ident.get("partNumber") or "").strip()
             if pn:
                 result[pn] = key
         return result

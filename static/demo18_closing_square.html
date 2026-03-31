@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080">
+<title>InspectorPro — Assembly Compare Closing</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  .post-image {
+    width: 1080px; height: 1080px;
+    background-color: #141820;
+    background-image:
+      radial-gradient(ellipse at 50% 40%, rgba(45,51,64,0.6) 0%, transparent 70%),
+      linear-gradient(rgba(79,195,247,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,195,247,0.04) 1px, transparent 1px);
+    background-size: 100% 100%, 60px 60px, 60px 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px;
+    font-family: 'Inter', sans-serif;
+    color: #E3E6EB;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .headline {
+    font-size: 52px;
+    font-weight: 800;
+    text-align: center;
+    line-height: 1.15;
+    letter-spacing: -2px;
+    margin-bottom: 24px;
+  }
+  .headline .accent { color: #4fc3f7; }
+
+  .subhead {
+    font-size: 18px;
+    color: rgba(255,255,255,0.4);
+    text-align: center;
+    max-width: 640px;
+    line-height: 1.6;
+    margin-bottom: 48px;
+  }
+
+  .features {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+  .feature-line {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 16px;
+    color: rgba(255,255,255,0.55);
+  }
+  .feature-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .cta {
+    font-size: 15px;
+    color: rgba(255,255,255,0.3);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .logo {
+    position: absolute;
+    bottom: 40px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .logo .w { color: rgba(255,255,255,0.7); }
+  .logo .c { color: #4fc3f7; }
+</style>
+</head>
+<body>
+<div class="post-image">
+
+  <div class="headline">
+    Ask what <span class="accent">changed</span>.<br>
+    See it in 3D.
+  </div>
+
+  <div class="subhead">
+    Side-by-side assembly revision comparison with<br>
+    AI-guided change explanation.
+  </div>
+
+  <div class="features">
+    <div class="feature-line"><div class="feature-dot" style="background:#FF5252;"></div> Removed parts highlighted in red</div>
+    <div class="feature-line"><div class="feature-dot" style="background:#00E676;"></div> Added parts highlighted in green</div>
+    <div class="feature-line"><div class="feature-dot" style="background:#FFB300;"></div> Modified parts highlighted in amber</div>
+    <div class="feature-line"><div class="feature-dot" style="background:#4fc3f7;"></div> Sage explains what changed and why it matters</div>
+  </div>
+
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" style="width:24px;height:24px;"><circle cx="12" cy="12" r="9" stroke="#4fc3f7" stroke-width="1.5" fill="none"/><line x1="12" y1="1" x2="12" y2="7" stroke="#4fc3f7" stroke-width="1.5"/><line x1="12" y1="17" x2="12" y2="23" stroke="#4fc3f7" stroke-width="1.5"/><line x1="1" y1="12" x2="7" y2="12" stroke="#4fc3f7" stroke-width="1.5"/><line x1="17" y1="12" x2="23" y2="12" stroke="#4fc3f7" stroke-width="1.5"/><circle cx="12" cy="12" r="2" fill="#4fc3f7"/></svg>
+    <span><span class="w">Inspector</span><span class="c">Pro</span></span>
+  </div>
+</div>
+</body>
+</html>

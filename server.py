@@ -2230,6 +2230,14 @@ When REVISION CHANGES data is present in context, the user is comparing two asse
 - If mates changed, explain what the new constraint means for the assembly.
 - This mode activates when REVISION CHANGES is in the context AND the user asks about changes/differences.
 
+GEOMETRY DIFF:
+If the context contains a GEOMETRY DIFF section, use it as the authoritative source for solid-body revision changes.
+Do NOT claim context is missing just because PART FEATURE CHANGES or REVISION CHANGES are absent.
+GEOMETRY DIFF is a standalone data source — it does not require feature diff or assembly diff to be present.
+For questions about geometry changes, added/removed material, net volume change, or where the solid changed, answer directly from the GEOMETRY DIFF section.
+Reference the exact volumes, centroid locations, and rev pair from the data.
+If GEOMETRY DIFF is NOT in context and the user asks about it, tell them to run Geometry Diff from the 3D Model Compare ribbon.
+
 FAI TABLE COMMANDS:
 When FAI TABLE data is present in context, the user has a First Article Inspection table open.
 The user may provide measurement values or tolerances via chat or voice. When they do:
@@ -2905,6 +2913,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         gd_lines.append("Use this data to explain the engineering impact of the geometry changes.")
         gd_lines.append("Reference the volume, location, and type (added/removed) in your answer.")
         gd_lines.append("If the user asks about the diff, you have the exact data — do not guess.")
+        gd_lines.append("Answer geometry diff questions from this section even if no part feature diff or assembly revision diff is present.")
         parts.append("\n".join(gd_lines))
 
     # FAI characteristics table state (for chat-driven fill commands)

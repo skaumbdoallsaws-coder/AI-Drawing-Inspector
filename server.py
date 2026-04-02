@@ -2018,6 +2018,16 @@ When the user asks HOW a feature should be represented (e.g., "how should a blin
 - Do NOT reference or analyze the uploaded drawing for these questions
 - Keep the 3-sentence limit but focus on the ASME rule, not inspection findings
 
+INSPECTION TRIGGER:
+When the user asks you to run, check, or inspect the drawing:
+- Check context for inspection_can_run flag
+- Only emit RUN_INSPECTION on its own line if inspection_can_run is true
+- If no drawing file: tell the user to upload a drawing first
+- If no part number: tell the user to select a part number first
+- If inspection is already running: tell the user to wait
+- If ready: confirm ("Running inspection on {part_name}...") then emit RUN_INSPECTION
+- Do NOT emit RUN_INSPECTION for questions about inspection ("how does it work?", "what would you check?")
+
 Scope: drawings, CAD, ASME, GD&T, manufacturing. Off-topic? "That's outside my area — what drawing question can I help with?"
 
 PART FEATURE REVISION COMPARISON:
@@ -2952,6 +2962,25 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         fai_lines.append("Always confirm what you filled in your text response (e.g. 'Filled 4 bore measurements with 25.003mm').")
         parts.append("\n".join(fai_lines))
 
+    # Inspection readiness flags (for chat-triggered inspection)
+    has_drawing = bool(inspection_context.get("has_drawing_file"))
+    has_part = bool(inspection_context.get("has_part_number"))
+    in_progress = bool(inspection_context.get("inspection_in_progress"))
+    can_run = bool(inspection_context.get("inspection_can_run"))
+
+    status_lines = []
+    if can_run:
+        status_lines.append("INSPECTION READY: Drawing and part number are set. You can emit RUN_INSPECTION if the user asks.")
+    else:
+        if not has_drawing:
+            status_lines.append("NO DRAWING: Tell user to upload a drawing file first.")
+        if not has_part:
+            status_lines.append("NO PART: Tell user to select a part number first.")
+        if in_progress:
+            status_lines.append("INSPECTION RUNNING: Tell user to wait for current inspection to finish.")
+    if status_lines:
+        parts.append("\n".join(status_lines))
+
     return "\n\n".join(parts)
 
 
@@ -3654,6 +3683,12 @@ async def agent_chat(request: AgentChatRequest):
         if show_geo_diff:
             result["show_geometry_diff"] = True
             response_text = re.sub(r'^SHOW_GEOMETRY_DIFF\s*$', '', response_text, flags=re.MULTILINE).strip()
+
+        # Parse RUN_INSPECTION marker
+        run_insp_match = re.search(r'^RUN_INSPECTION\s*$', response_text, re.MULTILINE)
+        if run_insp_match:
+            result["run_inspection"] = True
+            response_text = re.sub(r'^RUN_INSPECTION\s*$', '', response_text, flags=re.MULTILINE).strip()
 
         # Parse ANIMATE_MOTION marker
         animate_match = re.search(r'ANIMATE_MOTION:\s*(start|stop)', response_text, re.I)

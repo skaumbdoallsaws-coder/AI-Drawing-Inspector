@@ -6685,7 +6685,7 @@
                         group.appendChild(rect);
                         const viewLabel = _friendlyViewName(view);
                         if (viewLabel) {
-                            const fontSize = Math.max(10, Math.min(16, vr.height * 0.08));
+                            const fontSize = Math.max(24, Math.min(38, vr.height * 0.18));
                             const padX = fontSize * 0.5;
                             const padY = fontSize * 0.35;
                             const lblW = viewLabel.length * fontSize * 0.62 + padX * 2;
@@ -7485,27 +7485,27 @@
                     const ring = _svgEl('circle');
                     ring.setAttribute('cx', anchor.x);
                     ring.setAttribute('cy', anchor.y);
-                    ring.setAttribute('r', '7');
+                    ring.setAttribute('r', '14');
                     ring.setAttribute('fill', 'none');
                     ring.setAttribute('stroke', color);
-                    ring.setAttribute('stroke-opacity', '0.3');
-                    ring.setAttribute('stroke-width', '1.5');
+                    ring.setAttribute('stroke-opacity', '0.4');
+                    ring.setAttribute('stroke-width', '2');
                     group.appendChild(ring);
 
-                    // Inner dot
+                    // Inner dot (larger, semi-transparent so dimensions show through)
                     const dot = _svgEl('circle');
                     dot.setAttribute('cx', anchor.x);
                     dot.setAttribute('cy', anchor.y);
-                    dot.setAttribute('r', '4');
+                    dot.setAttribute('r', '8');
                     dot.setAttribute('fill', color);
-                    dot.setAttribute('fill-opacity', '0.9');
+                    dot.setAttribute('fill-opacity', '0.5');
                     group.appendChild(dot);
 
                     // Invisible hit area (larger for easier clicking)
                     const hitArea = _svgEl('circle');
                     hitArea.setAttribute('cx', anchor.x);
                     hitArea.setAttribute('cy', anchor.y);
-                    hitArea.setAttribute('r', '12');
+                    hitArea.setAttribute('r', '18');
                     hitArea.setAttribute('fill', 'transparent');
                     hitArea.style.pointerEvents = 'all';
                     hitArea.style.cursor = 'pointer';
@@ -14870,6 +14870,39 @@
             renderViewport();
         }
 
+        // Chat-triggered inspection (called by agent response handler via window bridge)
+        function _requestInspectionFromChat() {
+            if (!state.file) {
+                console.log('[Inspection] Cannot run from chat — no drawing uploaded');
+                return;
+            }
+            if (!state.partNumber) {
+                console.log('[Inspection] Cannot run from chat — no part number');
+                return;
+            }
+            if (state.inspecting) {
+                console.log('[Inspection] Cannot run from chat — already in progress');
+                return;
+            }
+            // If previous results exist, reset state before re-running
+            if (state.results) {
+                state.results = null;
+                state.dimExplorerSelectedKeys = new Set();
+                state.dimExplorerAgentKeys = new Set();
+                state.faiCharacteristics = [];
+                state.faiMeasurements = {};
+                state.faiVerdicts = {};
+                state.faiTolOverrides = {};
+                if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
+                // Reset button state so handleRunInspection works
+                runBtn.textContent = 'Run Inspection';
+                runBtn.disabled = false;
+                runBtn.onclick = handleRunInspection;
+            }
+            handleRunInspection();
+        }
+        window._requestInspectionFromChat = _requestInspectionFromChat;
+
         // ---- Loading State ----
         const COT_STEPS = [
             'Drawing loaded',
@@ -15947,6 +15980,12 @@
             // Build inspection context from current app state
             function buildInspectionContext() {
                 const inspCtx = {};
+                // Inspection readiness flags
+                inspCtx.has_drawing_file = !!state.file;
+                inspCtx.has_part_number = !!state.partNumber;
+                inspCtx.inspection_in_progress = !!state.inspecting;
+                inspCtx.inspection_can_run = !!state.file && !!state.partNumber && !state.inspecting;
+
                 if (state.partNumber) {
                     inspCtx.part_number = state.partNumber;
                     inspCtx.part_name = state.partName;
@@ -17930,6 +17969,10 @@
                                 }
                                 _showGeometryDiffResult(gr, gr.part_number, gr.revA, gr.revB);
                             })();
+                        }
+                        // Agent-triggered inspection run (Iris only)
+                        if (data.run_inspection && currentAgent === 'inspector') {
+                            if (window._requestInspectionFromChat) window._requestInspectionFromChat();
                         }
                         // Agent-driven motion animation
                         if (data.animate_motion === 'start') {

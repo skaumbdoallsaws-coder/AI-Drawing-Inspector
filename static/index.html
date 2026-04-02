@@ -13472,7 +13472,19 @@
 
         function _showAsmeRefsFromResponse(asmeRefs) {
             if (!Array.isArray(asmeRefs) || !asmeRefs.length) return;
-            _showAsmeRefPopup(asmeRefs[0]);
+            // Show custom popup with first ref
+            try {
+                _showAsmeRefPopup(asmeRefs[0]);
+            } catch (e) {
+                console.error('[ASME] Popup failed, falling back to lightbox:', e);
+                // Fallback: open first image in lightbox
+                const firstImg = (asmeRefs[0].images || [])[0];
+                if (firstImg) {
+                    const lb = document.getElementById('lightbox');
+                    const lbImg = document.getElementById('lightboxImg');
+                    if (lb && lbImg) { lbImg.src = firstImg.url; lb.classList.add('open'); }
+                }
+            }
         }
 
         function _showGeometryDiffResult(result, partNumber, revA, revB) {
@@ -18242,7 +18254,8 @@
                         console.log('[Handler] Response keys:', Object.keys(data),
                             'highlight_parts:', data.highlight_parts,
                             'isolate_parts:', data.isolate_parts,
-                            'narration_segments:', data.narration_segments ? data.narration_segments.length : 'none');
+                            'narration_segments:', data.narration_segments ? data.narration_segments.length : 'none',
+                            'asme_refs:', data.asme_refs ? data.asme_refs.length : 'none');
                         // Agent-driven dimension highlighting
                         if (Array.isArray(data.highlight_dimensions) && data.highlight_dimensions.length > 0) {
                             applyAgentHighlights(data.highlight_dimensions);
@@ -18332,6 +18345,7 @@
                         }
                         // ASME reference popup from agent response
                         if (Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
+                            console.log('[ASME refs] Received:', data.asme_refs.length, 'refs, first:', data.asme_refs[0]?.feature_type);
                             _showAsmeRefsFromResponse(data.asme_refs);
                         }
                         // Agent-driven motion animation

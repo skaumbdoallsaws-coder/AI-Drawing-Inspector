@@ -18940,6 +18940,21 @@
                         loadSuggestions();
                     }
                 }
+
+                // Post ASME representation summary to Iris chat with clickable refs
+                if (state.results && state.results.asme_checklist_findings && state.results.asme_checklist_findings.length > 0) {
+                    const refs = state.results.asme_checklist_findings;
+                    const summaryText = 'Inspection found ' + refs.length + ' ASME representation reference(s). Click any link to view the standard.';
+                    // Build ref links HTML
+                    let refsHtml = '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">';
+                    refs.forEach(function(ref) {
+                        const label = ref.section || ref.feature_type || 'ASME Ref';
+                        const page = (ref.images && ref.images[0]) ? ref.images[0].page : '';
+                        refsHtml += '<button style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.2);border-radius:4px;font-size:11px;color:var(--accent);cursor:pointer;border:1px solid rgba(79,195,247,0.2);font-family:inherit;" onclick=\'_showAsmeRefPopup(' + JSON.stringify(ref).replace(/'/g, "\\'") + ')\'>\uD83D\uDCD6 ' + label + (page ? ' (' + page + ')' : '') + '</button>';
+                    });
+                    refsHtml += '</div>';
+                    addNotificationMessage(summaryText + refsHtml);
+                }
             };
 
             // Expose a method for external code to notify agent of part detection (pre-inspection)

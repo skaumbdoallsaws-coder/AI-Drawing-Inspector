@@ -13395,6 +13395,86 @@
             };
         }
 
+        // ASME Reference Popup — shows standard page images from agent responses
+        function _showAsmeRefPopup(ref) {
+            const existing = document.getElementById('asmeRefOverlay');
+            if (existing) existing.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'asmeRefOverlay';
+            overlay.style.cssText = 'position:fixed;top:60px;right:60px;width:420px;max-height:500px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 12px 40px rgba(0,0,0,0.5);z-index:200;overflow:hidden;';
+            const titlebar = document.createElement('div');
+            titlebar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg-tab);cursor:grab;user-select:none;border-bottom:1px solid var(--border);';
+            const title = document.createElement('span');
+            title.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-primary);';
+            title.textContent = ref.section || ('ASME Y14.5 — ' + ref.feature_type);
+            titlebar.appendChild(title);
+            const btns = document.createElement('div');
+            btns.style.cssText = 'display:flex;gap:6px;';
+            const minBtn = document.createElement('button');
+            minBtn.textContent = '\u2014';
+            minBtn.style.cssText = 'background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;padding:0 4px;';
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '\u00D7';
+            closeBtn.style.cssText = 'background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;padding:0 4px;';
+            btns.appendChild(minBtn);
+            btns.appendChild(closeBtn);
+            titlebar.appendChild(btns);
+            overlay.appendChild(titlebar);
+            const body = document.createElement('div');
+            body.style.cssText = 'padding:10px;overflow-y:auto;max-height:440px;';
+            if (ref.rules && ref.rules.length > 0) {
+                const ruleDiv = document.createElement('div');
+                ruleDiv.style.cssText = 'font-size:12px;color:var(--accent);padding:6px 10px;background:rgba(79,195,247,0.06);border-left:3px solid var(--accent);border-radius:0 4px 4px 0;margin-bottom:8px;line-height:1.5;';
+                ruleDiv.textContent = ref.rules[0];
+                body.appendChild(ruleDiv);
+            }
+            if (ref.images && ref.images.length > 0) {
+                ref.images.forEach(img => {
+                    const imgEl = document.createElement('img');
+                    imgEl.src = img.url;
+                    imgEl.alt = 'ASME reference ' + (img.page || '');
+                    imgEl.style.cssText = 'width:100%;border-radius:4px;margin-top:8px;';
+                    body.appendChild(imgEl);
+                });
+            }
+            overlay.appendChild(body);
+            document.body.appendChild(overlay);
+            closeBtn.addEventListener('click', () => overlay.remove());
+            minBtn.addEventListener('click', () => {
+                const collapsed = body.style.display !== 'none';
+                body.style.display = collapsed ? 'none' : 'block';
+                minBtn.textContent = collapsed ? '+' : '\u2014';
+            });
+            // Drag + resize
+            let dragX, dragY;
+            titlebar.addEventListener('mousedown', (e) => {
+                if (e.target.tagName === 'BUTTON') return;
+                dragX = e.clientX - overlay.offsetLeft;
+                dragY = e.clientY - overlay.offsetTop;
+                const onMove = (ev) => { overlay.style.left = (ev.clientX - dragX) + 'px'; overlay.style.top = (ev.clientY - dragY) + 'px'; overlay.style.right = 'auto'; };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+            const resizeHandle = document.createElement('div');
+            resizeHandle.style.cssText = 'position:absolute;bottom:0;right:0;width:16px;height:16px;cursor:nwse-resize;z-index:5;';
+            resizeHandle.innerHTML = '<svg viewBox="0 0 16 16" style="width:16px;height:16px;opacity:0.3;"><line x1="14" y1="4" x2="4" y2="14" stroke="currentColor" stroke-width="1"/><line x1="14" y1="8" x2="8" y2="14" stroke="currentColor" stroke-width="1"/><line x1="14" y1="12" x2="12" y2="14" stroke="currentColor" stroke-width="1"/></svg>';
+            overlay.appendChild(resizeHandle);
+            resizeHandle.addEventListener('mousedown', (e) => {
+                e.preventDefault(); e.stopPropagation();
+                const startX = e.clientX, startY = e.clientY, startW = overlay.offsetWidth, startH = overlay.offsetHeight;
+                const onMove = (ev) => { const w = Math.max(280, startW + (ev.clientX - startX)); const h = Math.max(200, startH + (ev.clientY - startY)); overlay.style.width = w + 'px'; overlay.style.maxHeight = h + 'px'; body.style.maxHeight = (h - 36) + 'px'; };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        }
+
+        function _showAsmeRefsFromResponse(asmeRefs) {
+            if (!Array.isArray(asmeRefs) || !asmeRefs.length) return;
+            _showAsmeRefPopup(asmeRefs[0]);
+        }
+
         function _showGeometryDiffResult(result, partNumber, revA, revB) {
             const stored = _storeGeometryDiffResults(result, partNumber, revA, revB);
             const visualResult = stored.visual || result;
@@ -18249,6 +18329,10 @@
                         // Agent-triggered inspection run (Iris only)
                         if (data.run_inspection && originAgent === 'inspector') {
                             if (window._requestInspectionFromChat) window._requestInspectionFromChat();
+                        }
+                        // ASME reference popup from agent response
+                        if (Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
+                            _showAsmeRefsFromResponse(data.asme_refs);
                         }
                         // Agent-driven motion animation
                         if (data.animate_motion === 'start') {

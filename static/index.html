@@ -14964,6 +14964,7 @@
 
         // Chat-triggered inspection with in-chat progress card
         function _requestInspectionFromChat() {
+            const agentMessagesEl = document.getElementById('agentMessages');
             if (!state.file) {
                 console.log('[Inspection] Cannot run from chat — no drawing uploaded');
                 return;
@@ -15006,8 +15007,10 @@
 
             // Build and insert progress card
             const card = _buildInspProgressCard();
-            agentMessages.appendChild(card);
-            agentMessages.scrollTop = agentMessages.scrollHeight;
+            if (agentMessagesEl) {
+                agentMessagesEl.appendChild(card);
+                agentMessagesEl.scrollTop = agentMessagesEl.scrollHeight;
+            }
 
             // Start elapsed timer + outcome detector
             state._inspCardInterval = setInterval(() => {
@@ -15036,8 +15039,8 @@
             card.className = 'agent-msg-row assistant';
             const avatar = document.createElement('div');
             avatar.className = 'agent-msg-avatar bot-avatar';
-            const agent = AGENTS['inspector'];
-            avatar.innerHTML = agent.avatar;
+            const agent = window._getAgentConfig ? window._getAgentConfig('inspector') : { name: 'Iris', color: '#4fc3f7', avatar: '' };
+            avatar.innerHTML = agent.avatar || '';
             avatar.style.background = 'transparent';
             avatar.style.border = '2px solid ' + agent.color;
             const content = document.createElement('div');
@@ -15067,12 +15070,15 @@
         }
 
         function _renderFinalInspCard() {
-            if (currentAgent !== 'inspector') return;
+            const currentAgentKey = window._getCurrentAgentKey ? window._getCurrentAgentKey() : 'inspector';
+            if (currentAgentKey !== 'inspector') return;
+            const agentMessagesEl = document.getElementById('agentMessages');
             const elapsed = state._inspCardElapsed || 0;
             let body = document.getElementById('inspectionProgressBody');
             if (!body) {
                 const card = _buildInspProgressCard();
-                agentMessages.appendChild(card);
+                if (!agentMessagesEl) return;
+                agentMessagesEl.appendChild(card);
                 body = document.getElementById('inspectionProgressBody');
             }
             if (!body) return;
@@ -15100,7 +15106,9 @@
                     '<div class="ipc-error">' + errMsg + '</div>' +
                     '<div class="ipc-actions"><button class="ipc-btn" onclick="document.getElementById(\'inspectionProgressCard\')?.remove();">Dismiss</button></div></div>';
             }
-            agentMessages.scrollTop = agentMessages.scrollHeight;
+            if (agentMessagesEl) {
+                agentMessagesEl.scrollTop = agentMessagesEl.scrollHeight;
+            }
             state._inspCardPendingFinalRender = false;
         }
 
@@ -16141,22 +16149,17 @@
             const agentCaptureDismiss = $('agentCaptureDismiss');
 
             // State preserved across open/close
-            let agentConversations = { 'inspector': [], 'deviation-analyst': [], 'parts-finder': [] };
-            let agentMessagesHtml = { 'inspector': '', 'deviation-analyst': '', 'parts-finder': '' };
             let agentPanelOpen = false;
             // Expose setter for right dock mode sync
             window._setAgentPanelOpen = (v) => { agentPanelOpen = v; };
             window._getAgentPanelOpen = () => agentPanelOpen;
-            let agentWaiting = false;
             let suggestionsVisible = false;
             let lastSuggestionsContext = null; // Track which results generated the suggestions
             let agentCapturedImage = null; // Base64 screenshot data URL
 
-            // Feature #142: Cross-agent context injection (accumulated from all agents)
-            let pendingCrossContext = null;
+            // Feature #142: Cross-agent context (summaries + pendingCrossContext live in sessions)
             let crossContextReady = Promise.resolve(); // resolves when summarize completes
             let crossContextSwitchId = 0; // monotonic counter to discard stale callbacks
-            let agentSummaries = { 'inspector': '', 'deviation-analyst': '', 'parts-finder': '' };
 
             // Voice chat state
             let voiceTriggered = false;
@@ -16169,10 +16172,41 @@
             let currentPlayback = null; // Audio element for TTS playback
             let currentPlaybackUrl = null; // Object URL to revoke on cleanup
 
-            // Feature #145: Scroll, input, and capture state preservation per agent
-            let agentScrollPositions = { 'inspector': 0, 'deviation-analyst': 0, 'parts-finder': 0 };
-            let agentPendingInput = { 'inspector': '', 'deviation-analyst': '', 'parts-finder': '' };
-            let agentPendingCapture = { 'inspector': null, 'deviation-analyst': null, 'parts-finder': null };
+            // === Session Engine (Phase 1) ===
+            // Single session object per agent replaces scattered parallel maps.
+            // UI is a projection of session state, not the source of truth.
+            function createAgentSession(agentKey) {
+                return {
+                    key: agentKey,
+                    messages: [],                // canonical conversation history
+                    summary: '',                 // cross-agent summary for this session
+                    scrollTop: 0,
+                    pendingInput: '',
+                    pendingCapture: null,
+                    waiting: false,
+                    requestId: 0,
+                    lastPayload: null,
+                    pendingCrossContext: null,
+                    ui: {
+                        htmlCache: '',           // temporary compatibility bridge
+                    },
+                };
+            }
+
+            const agentSessions = {
+                'inspector': createAgentSession('inspector'),
+                'deviation-analyst': createAgentSession('deviation-analyst'),
+                'parts-finder': createAgentSession('parts-finder'),
+            };
+
+            function getAgentSession(agentKey) {
+                return agentSessions[agentKey];
+            }
+
+            function getCurrentAgentSession() {
+                return agentSessions[currentAgent];
+            }
+            // === End Session Engine ===
 
             // Feature #146: Assembly reference views in chat panel
             let assemblyViewsLoaded = false;
@@ -16570,7 +16604,7 @@
                     agentToggleBtn.classList.add('active');
                     setTimeout(() => agentInput.focus(), 100);
                     updateGreeting();
-                    if (agentConversations[currentAgent].length === 0) {
+                    if (getCurrentAgentSession().messages.length === 0) {
                         loadSuggestions();
                     }
                 } else {
@@ -16618,6 +16652,10 @@
                 'parts-finder': { name: 'Scout', role: 'Part Sourcing', color: '#00E676', avatar: _partsFinderAvatar },
             };
 
+            // Expose agent config for code outside this closure
+            window._getAgentConfig = (key) => AGENTS[key];
+            window._getCurrentAgentKey = () => currentAgent;
+
             // Feature #139: Welcome messages per agent
             AGENTS['inspector']._welcome = 'Run an inspection first to get context-aware help, or ask me anything about ASME Y14.5 and SolidWorks annotations.';
             AGENTS['deviation-analyst']._welcome = 'I analyze how dimension deviations affect assembly fit and function. Load a drawing matched to an assembly part, then ask me about specific deviations.';
@@ -16659,17 +16697,9 @@
             }
 
             // Convenience getter for current agent's history
-            function getAgentHistory() { return agentConversations[currentAgent]; }
+            function getAgentHistory() { return getCurrentAgentSession().messages; }
 
-            function addMessage(text, role) {
-                // Remove welcome message if present
-                const welcome = agentMessages.querySelector('.agent-welcome');
-                if (welcome) welcome.remove();
-
-                // Remove suggestion chips when any message is sent
-                removeSuggestions();
-
-                // Build message row with avatar and name
+            function _buildMessageRow(text, role, agentKey) {
                 const row = document.createElement('div');
                 row.className = 'agent-msg-row ' + role;
 
@@ -16680,7 +16710,7 @@
                     avatar.innerHTML = '<img src="/static/avatar_user.png" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="User">';
                 } else {
                     avatar.classList.add('bot-avatar');
-                    const agent = AGENTS[currentAgent];
+                    const agent = AGENTS[agentKey];
                     avatar.innerHTML = agent.avatar;
                     avatar.style.background = 'transparent';
                     avatar.style.border = '2px solid ' + agent.color;
@@ -16691,7 +16721,7 @@
 
                 const name = document.createElement('div');
                 name.className = 'agent-msg-name';
-                name.textContent = role === 'user' ? 'Shadrack' : AGENTS[currentAgent].name;
+                name.textContent = role === 'user' ? 'Shadrack' : AGENTS[agentKey].name;
 
                 const msgEl = document.createElement('div');
                 msgEl.className = 'agent-msg ' + role;
@@ -16705,11 +16735,40 @@
                 content.appendChild(msgEl);
                 row.appendChild(avatar);
                 row.appendChild(content);
+                return row;
+            }
 
-                agentMessages.appendChild(row);
-                agentMessages.scrollTop = agentMessages.scrollHeight;
+            function addMessage(text, role, targetAgentKey) {
+                const agentKey = targetAgentKey || currentAgent;
+                const session = getAgentSession(agentKey);
+                const isVisible = (agentKey === currentAgent);
 
-                agentConversations[currentAgent].push({ role, text });
+                // Always push to canonical session messages
+                session.messages.push({ role, text });
+
+                if (isVisible) {
+                    // Live DOM path
+                    const welcome = agentMessages.querySelector('.agent-welcome');
+                    if (welcome) welcome.remove();
+                    removeSuggestions();
+
+                    const row = _buildMessageRow(text, role, agentKey);
+                    agentMessages.appendChild(row);
+                    agentMessages.scrollTop = agentMessages.scrollHeight;
+                } else {
+                    // Off-screen: update htmlCache via temporary container
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = session.ui.htmlCache;
+                    const welcome = tmp.querySelector('.agent-welcome');
+                    if (welcome) welcome.remove();
+                    // Remove stale typing indicator from cached HTML
+                    const ti = tmp.querySelector('#agentTypingIndicator');
+                    if (ti) ti.remove();
+
+                    const row = _buildMessageRow(text, role, agentKey);
+                    tmp.appendChild(row);
+                    session.ui.htmlCache = tmp.innerHTML;
+                }
             }
 
             function showTypingIndicator() {
@@ -16746,22 +16805,28 @@
                 if (typing) typing.remove();
             }
 
-            function setWaiting(waiting) {
-                agentWaiting = waiting;
-                agentSendBtn.disabled = waiting || !agentInput.value.trim();
-                agentInput.disabled = waiting;
-                // Keep mic enabled during narration barge-in states
-                const narrationActive = state.narrationState !== 'idle';
-                voiceMicBtn.disabled = narrationActive ? false : waiting;
-                if (!waiting) agentInput.focus();
+            function setWaiting(waiting, targetAgentKey) {
+                const agentKey = targetAgentKey || currentAgent;
+                const session = getAgentSession(agentKey);
+                session.waiting = waiting;
+                // Only update DOM if this agent is currently visible
+                if (agentKey === currentAgent) {
+                    agentSendBtn.disabled = waiting || !agentInput.value.trim();
+                    agentInput.disabled = waiting;
+                    // Keep mic enabled during narration barge-in states
+                    const narrationActive = state.narrationState !== 'idle';
+                    voiceMicBtn.disabled = narrationActive ? false : waiting;
+                    if (!waiting) agentInput.focus();
+                }
             }
 
             function updateSendButtonState() {
                 // Allow send if there's text OR a captured image
                 const hasText = agentInput.value.trim().length > 0;
                 const hasImage = !!agentCapturedImage;
-                agentSendBtn.disabled = agentWaiting || (!hasText && !hasImage);
-                voiceMicBtn.disabled = agentWaiting || micState === 'transcribing';
+                const _w = getCurrentAgentSession().waiting;
+                agentSendBtn.disabled = _w || (!hasText && !hasImage);
+                voiceMicBtn.disabled = _w || micState === 'transcribing';
             }
 
             // ---- Camera Capture ----
@@ -16897,7 +16962,7 @@
             }
 
             agentCameraBtn.addEventListener('click', async function() {
-                if (agentWaiting) return;
+                if (getCurrentAgentSession().waiting) return;
                 // Briefly show loading state on camera button for async capture
                 agentCameraBtn.style.opacity = '0.5';
                 agentCameraBtn.style.pointerEvents = 'none';
@@ -17084,7 +17149,7 @@
                     }
                     return;
                 }
-                if (agentWaiting) return;
+                if (getCurrentAgentSession().waiting) return;
                 if (micState === 'idle') {
                     await startRecording();
                 } else if (micState === 'recording') {
@@ -17936,6 +18001,7 @@
             window._handleAgentSend = handleAgentSend;
             window._agentInput = agentInput;
             window._agentPanel = agentPanel;
+            window._getCurrentAgentKey = () => currentAgent;
             // ── End narration helpers ──
 
             async function handleAgentSend() {
@@ -17949,21 +18015,29 @@
                 if (currentAgent === 'parts-finder') {
                     return handleScoutSearchSend();
                 }
+                // Pin turn to originating session before any async work
+                const originAgent = currentAgent;
+                const originSession = getCurrentAgentSession();
                 const text = agentInput.value.trim();
                 const hasImage = !!agentCapturedImage;
-                if ((!text && !hasImage) || (agentWaiting && !isBargeIn)) return;
+                if ((!text && !hasImage) || (originSession.waiting && !isBargeIn)) return;
+                const turnId = ++originSession.requestId;
 
-                // Build display text (show "Ã°Å¸â€œÂ· Screenshot" if image attached)
                 const displayText = text || (hasImage ? '\uD83D\uDCF7 [Screenshot attached]' : '');
-                addMessage(displayText, 'user');
+                addMessage(displayText, 'user', originAgent);
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
                 const imageToSend = await _resolveAutoImage();
-                clearAgentCapture();
-                agentInput.value = '';
-                updateSendButtonState();
-                setWaiting(true);
-                showTypingIndicator();
+                // Stale-turn guard: bail if another send happened during image resolution
+                if (originSession.requestId !== turnId) return;
+                // Only touch live UI if origin agent is still visible
+                if (currentAgent === originAgent) {
+                    clearAgentCapture();
+                    agentInput.value = '';
+                    updateSendButtonState();
+                    showTypingIndicator();
+                }
+                setWaiting(true, originAgent);
 
                 // Use a fallback message if text is empty but image is present
                 const messageText = text || 'What can you see in this screenshot?';
@@ -18055,23 +18129,24 @@
                     }
 
                     // Build history with 'content' field for backend
-                    const historyForApi = agentConversations[currentAgent].slice(0, -1).map(m => ({
+                    const historyForApi = originSession.messages.slice(0, -1).map(m => ({
                         role: m.role, content: m.text
                     }));
 
                     // POST to /api/agent/chat
                     // Wait for any in-flight cross-agent summarize to finish
                     await crossContextReady;
+                    if (originSession.requestId !== turnId) return; // stale after await
                     const payload = {
                         message: messageText,
                         history: historyForApi,
                         inspection_context: inspCtx,
-                        agent_type: currentAgent,
+                        agent_type: originAgent,
                     };
                     // Feature #142: Inject cross-agent context if available (one-time)
-                    if (pendingCrossContext) {
-                        payload.cross_agent_context = pendingCrossContext;
-                        pendingCrossContext = null;
+                    if (originSession.pendingCrossContext) {
+                        payload.cross_agent_context = originSession.pendingCrossContext;
+                        originSession.pendingCrossContext = null;
                     }
                     if (imageToSend) {
                         payload.image = imageToSend;
@@ -18172,7 +18247,7 @@
                             })();
                         }
                         // Agent-triggered inspection run (Iris only)
-                        if (data.run_inspection && currentAgent === 'inspector') {
+                        if (data.run_inspection && originAgent === 'inspector') {
                             if (window._requestInspectionFromChat) window._requestInspectionFromChat();
                         }
                         // Agent-driven motion animation
@@ -18214,7 +18289,15 @@
                     }
                 }
 
-                removeTypingIndicator();
+                // Stale-turn guard after fetch completes
+                if (originSession.requestId !== turnId) {
+                    setWaiting(false, originAgent);
+                    return;
+                }
+
+                // Only manipulate live DOM if origin agent is still visible
+                const originVisible = (currentAgent === originAgent);
+                if (originVisible) removeTypingIndicator();
 
                 // Handle narration vs normal response
                 if (response && typeof response === 'object' && response._isNarration) {
@@ -18224,8 +18307,7 @@
                     const walkthroughKeywords = /walk\s*(me\s+)?through|narrat|give\s*(me\s+)?a\s+tour|guided\s+tour|tour\s+of|explain\s+the\s+assembly|tell\s+me\s+about\s+(this|the)\s+assembly/i;
                     const isTypedWalkthrough = !voiceTriggered && !state.narrationTriggered && walkthroughKeywords.test(displayText);
                     const isAutoPlay = state.narrationTriggered || voiceTriggered || isTypedWalkthrough;
-                    addMessage(isAutoPlay ? '' : textResponse, 'assistant');
-                    _enhanceWithNarrationSegments(data.narration_segments, isAutoPlay);
+                    addMessage(isAutoPlay ? '' : textResponse, 'assistant', originAgent);
 
                     // Apply explode level for narration responses (stop motion first)
                     if (data.explode_level !== undefined && data.explode_level !== null) {
@@ -18237,21 +18319,27 @@
                         }
                     }
 
-                    if (isAutoPlay) {
+                    // Narration/voice rendering requires live DOM — skip if switched away
+                    if (originVisible) {
+                        _enhanceWithNarrationSegments(data.narration_segments, isAutoPlay);
+                        if (isAutoPlay) {
+                            state.narrationTriggered = false;
+                            voiceTriggered = false;
+                            playNarrationSequence(data.narration_segments);
+                        } else {
+                            playTypedNarrationSequence(data.narration_segments);
+                        }
+                    } else {
                         state.narrationTriggered = false;
                         voiceTriggered = false;
-                        playNarrationSequence(data.narration_segments);
-                    } else {
-                        // Non-walkthrough narration: show segments visually (no TTS)
-                        playTypedNarrationSequence(data.narration_segments);
                     }
                 } else {
-                    addMessage(response, 'assistant');
+                    addMessage(response, 'assistant', originAgent);
                     // Barge-in response: route through barge-in handler (plays TTS, then prompts resume)
                     // Guard: only if session is still valid (user didn't cancel during Sage API call)
-                    if (isBargeIn && response && bargeInSessionId === state.narrationSessionId) {
+                    if (isBargeIn && response && bargeInSessionId === state.narrationSessionId && originVisible) {
                         voiceTriggered = false;
-                        setWaiting(false);
+                        setWaiting(false, originAgent);
                         _handleBargeInResponse(response);
                         return;
                     }
@@ -18259,13 +18347,15 @@
                     if (isBargeIn) {
                         voiceTriggered = false;
                     }
-                    // Voice reply: synthesize and play if this was a voice-triggered message
-                    if (voiceTriggered && response) {
+                    // Voice reply: only if origin agent still visible (TTS decorates live DOM)
+                    if (voiceTriggered && response && originVisible) {
                         voiceTriggered = false;
-                        playVoiceReply(response, currentAgent);
+                        playVoiceReply(response, originAgent);
+                    } else {
+                        voiceTriggered = false;
                     }
                 }
-                setWaiting(false);
+                setWaiting(false, originAgent);
             }
 
             // === Scout Browser Search (SSE streaming with in-app browser overlay) ===
@@ -18480,20 +18570,29 @@
             async function handleScoutSearchSend() {
                 _restoreIfSnapshotted();
                 stopAnyPlayback();
+                // Pin turn to originating session before any async work
+                const originAgent = currentAgent;
+                const originSession = getCurrentAgentSession();
                 const text = agentInput.value.trim();
                 const hasImage = !!agentCapturedImage;
-                if ((!text && !hasImage) || agentWaiting) return;
+                if ((!text && !hasImage) || originSession.waiting) return;
+                const turnId = ++originSession.requestId;
 
                 const displayText = text || (hasImage ? '\ud83d\udcf7 [Screenshot attached]' : '');
-                addMessage(displayText, 'user');
+                addMessage(displayText, 'user', originAgent);
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
                 const imageToSend = await _resolveAutoImage();
-                clearAgentCapture();
-                agentInput.value = '';
-                updateSendButtonState();
-                setWaiting(true);
-                showTypingIndicator();
+                // Stale-turn guard: bail if another send happened during image resolution
+                if (originSession.requestId !== turnId) return;
+                // Only touch live UI if origin agent is still visible
+                if (currentAgent === originAgent) {
+                    clearAgentCapture();
+                    agentInput.value = '';
+                    updateSendButtonState();
+                    showTypingIndicator();
+                }
+                setWaiting(true, originAgent);
 
                 const messageText = text || 'What can you see in this screenshot?';
                 // Clear stale agent part highlights before building context (same as Iris/Sage path)
@@ -18514,21 +18613,22 @@
                     }
                 }
                 const inspCtx = buildInspectionContext();
-                const historyForApi = agentConversations[currentAgent].slice(0, -1).map(m => ({
+                const historyForApi = originSession.messages.slice(0, -1).map(m => ({
                     role: m.role, content: m.text
                 }));
 
                 // Wait for any in-flight cross-agent summarize to finish
                 await crossContextReady;
+                if (originSession.requestId !== turnId) return; // stale after await
                 const payload = {
                     message: messageText,
                     history: historyForApi,
                     inspection_context: inspCtx,
-                    agent_type: 'parts-finder',
+                    agent_type: originAgent,
                 };
-                if (pendingCrossContext) {
-                    payload.cross_agent_context = pendingCrossContext;
-                    pendingCrossContext = null;
+                if (originSession.pendingCrossContext) {
+                    payload.cross_agent_context = originSession.pendingCrossContext;
+                    originSession.pendingCrossContext = null;
                 }
                 if (imageToSend) payload.image = imageToSend;
 
@@ -18569,7 +18669,7 @@
 
                             switch (ev.type) {
                                 case 'search_start':
-                                    removeTypingIndicator();
+                                    if (currentAgent === originAgent) removeTypingIndicator();
                                     showScoutBrowser();
                                     searchActive = true;
                                     scoutStatusText.textContent = 'Searching: ' + (ev.query || '');
@@ -18639,28 +18739,28 @@
                                     break;
 
                                 case 'done':
-                                    if (!searchActive) removeTypingIndicator();
+                                    if (!searchActive && currentAgent === originAgent) removeTypingIndicator();
                                     const cards = formatPartCards(resultCards);
                                     const fullResponse = responseText + (cards ? '\n\n' + cards : '');
-                                    addMessage(fullResponse || 'Search completed.', 'assistant');
-                                    // Voice reply for Scout
-                                    if (voiceTriggered && responseText) {
-                                        playVoiceReply(responseText, 'parts-finder');
+                                    addMessage(fullResponse || 'Search completed.', 'assistant', originAgent);
+                                    // Voice reply for Scout — only if still visible
+                                    if (voiceTriggered && responseText && currentAgent === originAgent) {
+                                        playVoiceReply(responseText, originAgent);
                                     }
                                     voiceTriggered = false;
                                     break;
 
                                 case 'error':
-                                    removeTypingIndicator();
+                                    if (currentAgent === originAgent) removeTypingIndicator();
                                     if (searchActive) hideScoutBrowser();
-                                    addMessage('Search error: ' + (ev.message || 'Unknown error'), 'assistant');
+                                    addMessage('Search error: ' + (ev.message || 'Unknown error'), 'assistant', originAgent);
                                     voiceTriggered = false;
                                     break;
                             }
                         }
                     }
                 } catch (err) {
-                    removeTypingIndicator();
+                    if (currentAgent === originAgent) removeTypingIndicator();
                     hideScoutBrowser();
                     voiceTriggered = false;
                     // Fallback to non-streaming endpoint
@@ -18672,16 +18772,16 @@
                         });
                         if (fallbackRes.ok) {
                             const data = await fallbackRes.json();
-                            addMessage(data.response || 'No response.', 'assistant');
+                            addMessage(data.response || 'No response.', 'assistant', originAgent);
                         } else {
-                            addMessage('Scout is unavailable right now. Try again later.', 'assistant');
+                            addMessage('Scout is unavailable right now. Try again later.', 'assistant', originAgent);
                         }
                     } catch {
-                        addMessage('Scout is unavailable right now. Try again later.', 'assistant');
+                        addMessage('Scout is unavailable right now. Try again later.', 'assistant', originAgent);
                     }
                 }
 
-                setWaiting(false);
+                setWaiting(false, originAgent);
             }
 
             // Add a system-style notification message to the chat
@@ -18721,7 +18821,7 @@
                     state._inspectionFromChat = false;
                     return;
                 }
-                const hasConversation = agentConversations[currentAgent].length > 0;
+                const hasConversation = getCurrentAgentSession().messages.length > 0;
 
                 if (hasConversation) {
                     // Existing conversation: add notification message
@@ -18747,7 +18847,7 @@
             // Expose a method for external code to notify agent of part detection (pre-inspection)
             window._agentOnPartDetected = function() {
                 if (!state.profileData || !state.partNumber) return;
-                const hasConversation = agentConversations[currentAgent].length > 0;
+                const hasConversation = getCurrentAgentSession().messages.length > 0;
                 const featureCount = (state.profileData.features || []).length;
 
                 if (hasConversation) {
@@ -18794,26 +18894,25 @@
             function selectAgent(agentKey) {
                 if (agentKey === currentAgent) return;
 
-                // Feature #139: Save current agent's messages HTML before switching
-                agentMessagesHtml[currentAgent] = agentMessages.innerHTML;
-
-                // Feature #145: Save scroll position, pending input, and capture state
-                agentScrollPositions[currentAgent] = agentMessages.scrollTop;
-                agentPendingInput[currentAgent] = agentInput.value;
-                agentPendingCapture[currentAgent] = agentCapturedImage ? agentCapturedImage : null;
+                // Save leaving agent's UI state into its session
+                const leavingSession = getCurrentAgentSession();
+                leavingSession.ui.htmlCache = agentMessages.innerHTML;
+                leavingSession.scrollTop = agentMessages.scrollTop;
+                leavingSession.pendingInput = agentInput.value;
+                leavingSession.pendingCapture = agentCapturedImage ? agentCapturedImage : null;
 
                 // Feature #142: Cross-agent context Ã¢â‚¬â€ summarize leaving agent, then combine all.
                 // Uses switchId to discard stale callbacks from rapid A->B->C switching.
                 // Send handlers await crossContextReady (with 5s timeout) before dispatching.
                 const prevAgent = currentAgent;
-                const prevHistory = agentConversations[prevAgent];
+                const prevHistory = leavingSession.messages;
                 const thisSwitchId = ++crossContextSwitchId;
 
                 const buildCrossContext = (freshSummary, targetAgent) => {
                     // Discard if a newer switch has already started
                     if (thisSwitchId !== crossContextSwitchId) return;
 
-                    if (freshSummary) agentSummaries[prevAgent] = freshSummary;
+                    if (freshSummary) getAgentSession(prevAgent).summary = freshSummary;
 
                     // Combine summaries from Iris and Sage only Ã¢â‚¬â€ Scout's supplier
                     // results don't help engineering analysis, so exclude them.
@@ -18821,19 +18920,21 @@
                     for (const [key, agent] of Object.entries(AGENTS)) {
                         if (key === targetAgent) continue; // skip the target agent
                         if (key === 'parts-finder') continue; // Scout doesn't contribute
-                        if (agentSummaries[key]) {
-                            parts.push('[' + agent.name + '] ' + agentSummaries[key]);
+                        const sum = getAgentSession(key).summary;
+                        if (sum) {
+                            parts.push('[' + agent.name + '] ' + sum);
                         }
                     }
+                    const tgtSession = getAgentSession(targetAgent);
                     if (parts.length > 0) {
-                        pendingCrossContext = parts.join('\n\n');
+                        tgtSession.pendingCrossContext = parts.join('\n\n');
                         const names = [];
                         for (const [key, agent] of Object.entries(AGENTS)) {
-                            if (key !== targetAgent && key !== 'parts-finder' && agentSummaries[key]) names.push(agent.name);
+                            if (key !== targetAgent && key !== 'parts-finder' && getAgentSession(key).summary) names.push(agent.name);
                         }
                         showCrossContextBanner(names.join(' & '), AGENTS[prevAgent].color);
                     } else {
-                        pendingCrossContext = null; // clear stale context when nothing to inject
+                        tgtSession.pendingCrossContext = null;
                     }
                 };
 
@@ -18863,37 +18964,41 @@
                 }
 
                 currentAgent = agentKey;
+                const targetSession = getCurrentAgentSession();
 
-                // Feature #139: Restore target agent's messages HTML
-                if (agentMessagesHtml[currentAgent]) {
-                    agentMessages.innerHTML = agentMessagesHtml[currentAgent];
+                // Restore target agent's messages HTML from session
+                if (targetSession.ui.htmlCache) {
+                    agentMessages.innerHTML = targetSession.ui.htmlCache;
                     // Recovery: render deferred inspection progress card final state
                     if (agentKey === 'inspector' && state._inspCardPendingFinalRender) {
                         setTimeout(() => { if (typeof _renderFinalInspCard === 'function') _renderFinalInspCard(); }, 100);
                     }
                 } else {
-                    // Feature #141: Show agent-specific welcome for new agent
+                    // Show agent-specific welcome for new agent
                     agentMessages.innerHTML = '<div class="agent-welcome">' + (AGENTS[currentAgent]._welcome || 'How can I help?') + '</div>';
                 }
                 // Suggestion chips are Iris-only Ã¢â‚¬â€ strip from other agents
                 if (currentAgent !== 'inspector') {
                     removeSuggestions();
-                } else if (agentConversations[currentAgent].length === 0 && state.results) {
+                } else if (getCurrentAgentSession().messages.length === 0 && state.results) {
                     loadSuggestions();
                 }
 
-                // Feature #145: Restore scroll position
+                // Restore scroll position
                 setTimeout(() => {
-                    agentMessages.scrollTop = agentScrollPositions[currentAgent] || 0;
+                    agentMessages.scrollTop = targetSession.scrollTop || 0;
                 }, 50);
-                // Feature #145: Restore input
-                agentInput.value = agentPendingInput[currentAgent] || '';
-                // Feature #145: Restore capture
-                if (agentPendingCapture[currentAgent]) {
-                    setAgentCapture(agentPendingCapture[currentAgent]);
+                // Restore input
+                agentInput.value = targetSession.pendingInput || '';
+                // Restore capture
+                if (targetSession.pendingCapture) {
+                    setAgentCapture(targetSession.pendingCapture);
                 } else {
                     clearAgentCapture();
                 }
+                // Sync waiting state UI for target agent
+                agentSendBtn.disabled = targetSession.waiting || !agentInput.value.trim();
+                agentInput.disabled = targetSession.waiting;
                 updateSendButtonState();
                 setTimeout(() => agentInput.focus(), 100);
 

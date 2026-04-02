@@ -3086,6 +3086,76 @@
         .agent-panel-messages .agent-msg strong {
             font-weight: 700;
         }
+        /* Inspection progress card in chat */
+        .inspection-progress-card {
+            padding: 12px 16px;
+            border-radius: 8px;
+            background: rgba(79, 195, 247, 0.06);
+            border: 1px solid rgba(79, 195, 247, 0.15);
+        }
+        .inspection-progress-card.completed {
+            background: rgba(0, 230, 118, 0.06);
+            border-color: rgba(0, 230, 118, 0.15);
+        }
+        .inspection-progress-card.failed {
+            background: rgba(255, 23, 68, 0.06);
+            border-color: rgba(255, 23, 68, 0.15);
+        }
+        .ipc-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        .ipc-title.done { color: var(--present); }
+        .ipc-title.fail { color: var(--missing); }
+        .ipc-progress-bar {
+            height: 3px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            margin-bottom: 4px;
+            overflow: hidden;
+        }
+        .ipc-progress-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.8s ease;
+        }
+        .ipc-meta {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+        .ipc-summary {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+        .ipc-error {
+            font-size: 11px;
+            color: var(--missing);
+            margin-bottom: 8px;
+        }
+        .ipc-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .ipc-btn {
+            padding: 4px 14px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+        }
+        .ipc-btn.primary {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+        }
         /* Typing indicator */
         .agent-typing {
             display: flex;
@@ -14699,17 +14769,27 @@
                 // Toast notification — always fires regardless of agent state
                 const _findingCount = (state.results?.features || []).length;
                 if (window._toast) window._toast(`Inspection complete: ${_findingCount} finding${_findingCount !== 1 ? 's' : ''}`, _findingCount > 0 ? 'warning' : 'success');
+                // Set outcome for progress card
+                state._inspectionOutcome = 'completed';
+                state._inspCardElapsed = (Date.now() - (state._inspCardStartTime || Date.now())) / 1000;
                 // Notify agent panel of new inspection results
                 if (window._agentOnInspectionComplete) window._agentOnInspectionComplete();
             } catch (e) {
                 // If aborted (user clicked New Inspection), don't show error
                 if (e.name === 'AbortError') {
                     console.log('Inspection cancelled by user.');
+                    state._inspectionOutcome = 'cancelled';
+                    state._inspCardElapsed = (Date.now() - (state._inspCardStartTime || Date.now())) / 1000;
+                    state._inspectionFromChat = false;
                     return;
                 }
                 // If this request was superseded, ignore errors
                 if (currentRequestId !== state.inspectionRequestId) return;
                 console.error('Inspection error:', e);
+                state._inspectionOutcome = 'failed';
+                state._inspectionError = e.message || 'Unknown error';
+                state._inspCardElapsed = (Date.now() - (state._inspCardStartTime || Date.now())) / 1000;
+                state._inspectionFromChat = false;
                 showError(`Inspection failed: ${e.message}`);
                 hideLoadingState();
             } finally {
@@ -14870,7 +14950,7 @@
             renderViewport();
         }
 
-        // Chat-triggered inspection (called by agent response handler via window bridge)
+        // Chat-triggered inspection with in-chat progress card
         function _requestInspectionFromChat() {
             if (!state.file) {
                 console.log('[Inspection] Cannot run from chat — no drawing uploaded');
@@ -14884,7 +14964,7 @@
                 console.log('[Inspection] Cannot run from chat — already in progress');
                 return;
             }
-            // If previous results exist, reset state before re-running
+            // Reset previous results if any
             if (state.results) {
                 state.results = null;
                 state.dimExplorerSelectedKeys = new Set();
@@ -14894,14 +14974,123 @@
                 state.faiVerdicts = {};
                 state.faiTolOverrides = {};
                 if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
-                // Reset button state so handleRunInspection works
                 runBtn.textContent = 'Run Inspection';
                 runBtn.disabled = false;
                 runBtn.onclick = handleRunInspection;
             }
+
+            // Remove any previous progress card
+            const oldCard = document.getElementById('inspectionProgressCard');
+            if (oldCard) oldCard.remove();
+
+            // Init state
+            state._inspectionOutcome = null;
+            state._inspectionError = null;
+            state._inspectionFromChat = true;
+            state._inspCardStartTime = Date.now();
+            state._inspCardPendingFinalRender = false;
+            state._inspCardElapsed = null;
+            if (state._inspCardInterval) clearInterval(state._inspCardInterval);
+
+            // Build and insert progress card
+            const card = _buildInspProgressCard();
+            agentMessages.appendChild(card);
+            agentMessages.scrollTop = agentMessages.scrollHeight;
+
+            // Start elapsed timer + outcome detector
+            state._inspCardInterval = setInterval(() => {
+                if (state._inspectionOutcome && !state._inspCardPendingFinalRender) {
+                    clearInterval(state._inspCardInterval);
+                    state._inspCardPendingFinalRender = true;
+                    _renderFinalInspCard();
+                    return;
+                }
+                if (state.inspecting && !state._inspectionOutcome) {
+                    const body = document.getElementById('inspectionProgressBody');
+                    if (body) {
+                        const elapsed = (Date.now() - state._inspCardStartTime) / 1000;
+                        body.innerHTML = _inspCardRunningHTML(elapsed);
+                    }
+                }
+            }, 1000);
+
             handleRunInspection();
         }
         window._requestInspectionFromChat = _requestInspectionFromChat;
+
+        function _buildInspProgressCard() {
+            const card = document.createElement('div');
+            card.id = 'inspectionProgressCard';
+            card.className = 'agent-msg-row assistant';
+            const avatar = document.createElement('div');
+            avatar.className = 'agent-msg-avatar bot-avatar';
+            const agent = AGENTS['inspector'];
+            avatar.innerHTML = agent.avatar;
+            avatar.style.background = 'transparent';
+            avatar.style.border = '2px solid ' + agent.color;
+            const content = document.createElement('div');
+            content.className = 'agent-msg-content';
+            const name = document.createElement('div');
+            name.className = 'agent-msg-name';
+            name.textContent = agent.name;
+            const msgEl = document.createElement('div');
+            msgEl.className = 'agent-msg assistant';
+            msgEl.id = 'inspectionProgressBody';
+            msgEl.innerHTML = _inspCardRunningHTML(0);
+            content.appendChild(name);
+            content.appendChild(msgEl);
+            card.appendChild(avatar);
+            card.appendChild(content);
+            return card;
+        }
+
+        function _inspCardRunningHTML(elapsed) {
+            const pct = Math.min(95, (elapsed / 30) * 100);
+            const partLabel = state.partName || state.partNumber || 'part';
+            return '<div class="inspection-progress-card">' +
+                '<div class="ipc-title">\u27F3 Inspecting ' + partLabel + '</div>' +
+                '<div class="ipc-progress-bar"><div class="ipc-progress-fill" style="width:' + pct + '%"></div></div>' +
+                '<div class="ipc-meta">' + elapsed.toFixed(0) + 's</div>' +
+                '</div>';
+        }
+
+        function _renderFinalInspCard() {
+            if (currentAgent !== 'inspector') return;
+            const elapsed = state._inspCardElapsed || 0;
+            let body = document.getElementById('inspectionProgressBody');
+            if (!body) {
+                const card = _buildInspProgressCard();
+                agentMessages.appendChild(card);
+                body = document.getElementById('inspectionProgressBody');
+            }
+            if (!body) return;
+
+            if (state._inspectionOutcome === 'completed') {
+                const gs = state.results ? state.results.gap_summary || {} : {};
+                const fc = (state.results && state.results.features) ? state.results.features.length : 0;
+                const issues = (gs.missing || 0) + (gs.partial || 0) + (gs.discrepant || 0);
+                const present = gs.present || 0;
+                body.innerHTML = '<div class="inspection-progress-card completed">' +
+                    '<div class="ipc-title done">\u2713 Inspection complete \u2014 ' + elapsed.toFixed(1) + 's</div>' +
+                    '<div class="ipc-summary">' + fc + ' features \u00B7 ' + issues + ' issue' + (issues !== 1 ? 's' : '') + ' \u00B7 ' + present + ' present</div>' +
+                    '<div class="ipc-actions">' +
+                    '<button class="ipc-btn primary" onclick="switchTab(\'drawing\'); document.getElementById(\'rightRailResults\')?.click();">View Results</button>' +
+                    '<button class="ipc-btn" onclick="document.getElementById(\'inspectionProgressCard\')?.remove();">Dismiss</button>' +
+                    '</div></div>';
+            } else if (state._inspectionOutcome === 'cancelled') {
+                body.innerHTML = '<div class="inspection-progress-card cancelled">' +
+                    '<div class="ipc-title">\u2014 Inspection cancelled</div>' +
+                    '<div class="ipc-actions"><button class="ipc-btn" onclick="document.getElementById(\'inspectionProgressCard\')?.remove();">Dismiss</button></div></div>';
+            } else {
+                const errMsg = state._inspectionError || 'Unknown error';
+                body.innerHTML = '<div class="inspection-progress-card failed">' +
+                    '<div class="ipc-title fail">\u2717 Inspection failed \u2014 ' + elapsed.toFixed(1) + 's</div>' +
+                    '<div class="ipc-error">' + errMsg + '</div>' +
+                    '<div class="ipc-actions"><button class="ipc-btn" onclick="document.getElementById(\'inspectionProgressCard\')?.remove();">Dismiss</button></div></div>';
+            }
+            agentMessages.scrollTop = agentMessages.scrollHeight;
+            state._inspCardPendingFinalRender = false;
+        }
 
         // ---- Loading State ----
         const COT_STEPS = [
@@ -18515,6 +18704,11 @@
 
             // Expose a method for external code to notify agent of new inspection results
             window._agentOnInspectionComplete = function() {
+                // If triggered from chat, progress card handles completion
+                if (state._inspectionFromChat) {
+                    state._inspectionFromChat = false;
+                    return;
+                }
                 const hasConversation = agentConversations[currentAgent].length > 0;
 
                 if (hasConversation) {
@@ -18661,6 +18855,10 @@
                 // Feature #139: Restore target agent's messages HTML
                 if (agentMessagesHtml[currentAgent]) {
                     agentMessages.innerHTML = agentMessagesHtml[currentAgent];
+                    // Recovery: render deferred inspection progress card final state
+                    if (agentKey === 'inspector' && state._inspCardPendingFinalRender) {
+                        setTimeout(() => { if (typeof _renderFinalInspCard === 'function') _renderFinalInspCard(); }, 100);
+                    }
                 } else {
                     // Feature #141: Show agent-specific welcome for new agent
                     agentMessages.innerHTML = '<div class="agent-welcome">' + (AGENTS[currentAgent]._welcome || 'How can I help?') + '</div>';

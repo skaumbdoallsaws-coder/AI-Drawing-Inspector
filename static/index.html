@@ -14807,6 +14807,18 @@
         }
 
         function resetInspection() {
+            // Clear chat progress card state
+            if (state._inspCardInterval) clearInterval(state._inspCardInterval);
+            state._inspectionOutcome = null;
+            state._inspectionError = null;
+            state._inspectionFromChat = false;
+            state._inspCardStartTime = null;
+            state._inspCardPendingFinalRender = false;
+            state._inspCardElapsed = null;
+            state._inspCardInterval = null;
+            const progCard = document.getElementById('inspectionProgressCard');
+            if (progCard) progCard.remove();
+
             // Cancel any in-progress inspection
             if (state.inspecting) {
                 if (state.inspectionAbortController) {
@@ -15082,7 +15094,7 @@
                     '<div class="ipc-title">\u2014 Inspection cancelled</div>' +
                     '<div class="ipc-actions"><button class="ipc-btn" onclick="document.getElementById(\'inspectionProgressCard\')?.remove();">Dismiss</button></div></div>';
             } else {
-                const errMsg = state._inspectionError || 'Unknown error';
+                const errMsg = escapeHtml(state._inspectionError || 'Unknown error');
                 body.innerHTML = '<div class="inspection-progress-card failed">' +
                     '<div class="ipc-title fail">\u2717 Inspection failed \u2014 ' + elapsed.toFixed(1) + 's</div>' +
                     '<div class="ipc-error">' + errMsg + '</div>' +

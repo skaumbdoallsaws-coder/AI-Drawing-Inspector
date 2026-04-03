@@ -2410,6 +2410,136 @@ def build_tool_calls_from_result(result: dict) -> list:
     return calls
 
 
+def get_allowed_tool_names(agent_type: str) -> set:
+    """Return the set of tool names allowed for this agent type."""
+    specs = AGENT_TOOL_SPECS.get(agent_type, [])
+    return {s["name"] for s in specs}
+
+
+def sanitize_tool_calls(tool_calls: list, agent_type: str) -> list:
+    """Validate and filter tool calls against the agent's allowed set.
+    Drops unknown tools, ensures args is a dict, validates list/object fields."""
+    allowed = get_allowed_tool_names(agent_type)
+    sanitized = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            logger.warning(f"[ToolParse] Dropped non-dict tool call: {tc}")
+            continue
+        name = tc.get("name")
+        if not name or name not in allowed:
+            logger.warning(f"[ToolParse] Dropped unknown/disallowed tool '{name}' for {agent_type}")
+            continue
+        args = tc.get("args")
+        if not isinstance(args, dict):
+            args = {}
+        # Basic type checks for known list fields
+        for list_field in ("dim_keys", "view_names", "feature_ids", "part_numbers", "markers"):
+            if list_field in args and not isinstance(args[list_field], list):
+                logger.warning(f"[ToolParse] Coerced {list_field} to list in {name}")
+                args[list_field] = [args[list_field]] if args[list_field] else []
+        # Basic type check for known object fields
+        if "values" in args and not isinstance(args["values"], dict):
+            logger.warning(f"[ToolParse] Dropped non-dict 'values' in {name}")
+            args["values"] = {}
+        sanitized.append({"name": name, "args": args})
+    if len(sanitized) != len(tool_calls):
+        logger.info(f"[ToolParse] Sanitized {len(tool_calls)} -> {len(sanitized)} tool calls for {agent_type}")
+    return sanitized
+
+
+def extract_tool_calls_from_response(text: str, agent_type: str) -> tuple:
+    """Extract a <tool_calls> JSON block from the model's response text.
+    Returns (cleaned_text, tool_calls_list). If no valid block found, returns (text, [])."""
+    pattern = re.compile(r'<tool_calls>\s*(.*?)\s*</tool_calls>', re.DOTALL)
+    match = pattern.search(text)
+    if not match:
+        return text, []
+    json_str = match.group(1).strip()
+    # Strip the block from the text
+    cleaned = pattern.sub('', text).strip()
+    try:
+        raw = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        logger.warning(f"[ToolParse] Malformed <tool_calls> JSON for {agent_type}: {e}")
+        return cleaned, []
+    if not isinstance(raw, list):
+        logger.warning(f"[ToolParse] <tool_calls> is not a list for {agent_type}")
+        return cleaned, []
+    sanitized = sanitize_tool_calls(raw, agent_type)
+    if sanitized:
+        logger.info(f"[ToolParse] Native tool_calls parsed for {agent_type}: {[tc['name'] for tc in sanitized]}")
+    return cleaned, sanitized
+
+
+def apply_tool_calls_to_legacy_result(result: dict, tool_calls: list) -> None:
+    """Mirror canonical tool_calls back into legacy response fields for compatibility.
+    Only sets fields that are explicitly present in tool_calls."""
+    for tc in tool_calls:
+        name = tc["name"]
+        args = tc.get("args", {})
+        if name == "run_inspection":
+            result["run_inspection"] = True
+        elif name == "highlight_dimensions":
+            result["highlight_dimensions"] = args.get("dim_keys", [])
+        elif name == "highlight_views":
+            result["highlight_views"] = args.get("view_names", [])
+        elif name == "highlight_features":
+            result["highlight_features"] = args.get("feature_ids", [])
+        elif name == "highlight_parts":
+            result["highlight_parts"] = args.get("part_numbers", [])
+            if args.get("camera_view"):
+                result["camera_view"] = args["camera_view"]
+        elif name == "isolate_parts":
+            result["isolate_parts"] = args.get("part_numbers", [])
+        elif name == "compare_parts":
+            result["compare_parts"] = args.get("markers", [])
+        elif name == "compare_features":
+            result["compare_features"] = args.get("markers", [])
+        elif name == "show_geometry_diff":
+            result["show_geometry_diff"] = True
+        elif name == "animate_motion":
+            result["animate_motion"] = args.get("action", "start")
+        elif name == "set_explode_level":
+            result["explode_level"] = args.get("level", 0)
+        elif name == "fai_fill":
+            result["fai_fills"] = args.get("values", {})
+        elif name == "fai_tol":
+            result["fai_tol"] = args.get("values", {})
+
+
+def build_tool_appendix(agent_type: str) -> str:
+    """Build a compact tool appendix for the agent's system prompt."""
+    specs = AGENT_TOOL_SPECS.get(agent_type, [])
+    if not specs:
+        return ""
+    lines = [
+        "",
+        "",
+        "TOOL CALLS",
+        "You may optionally request UI actions by emitting a <tool_calls> JSON block at the end of your response.",
+        "",
+        "Rules:",
+        "- Use only the tools listed below.",
+        "- Emit valid JSON only, no markdown fences.",
+        "- Your normal text answer must stand on its own.",
+        "- Only emit tool calls when they directly help answer the user's request.",
+        "- Keep arguments minimal and specific.",
+        "- Do not emit duplicate or conflicting tool calls.",
+        "- Do not emit legacy markers (HIGHLIGHT_DIMS:, RUN_INSPECTION, etc.) when using <tool_calls>.",
+        "",
+        "Format:",
+        "<tool_calls>",
+        '[{"name":"tool_name","args":{"key":"value"}}]',
+        "</tool_calls>",
+        "",
+        "Available tools:",
+    ]
+    for spec in specs:
+        args_desc = ", ".join(f'{k}: {v}' for k, v in spec["args"].items()) if spec["args"] else "none"
+        lines.append(f"- {spec['name']}: {spec['description']} (args: {args_desc})")
+    return "\n".join(lines)
+
+
 def _find_relevant_rag_dirs(message: str, inspection_context: Optional[Dict] = None) -> List[str]:
     """Find relevant ASME reference directories based on message keywords."""
     text = message.lower()
@@ -3144,8 +3274,8 @@ async def agent_chat(request: AgentChatRequest):
     if request.agent_type not in AGENT_PROMPTS:
         raise HTTPException(status_code=400, detail=f"Invalid agent_type: '{request.agent_type}'. Must be one of: inspector, deviation-analyst, parts-finder")
 
-    # Select system prompt based on agent_type
-    system_prompt = AGENT_PROMPTS[request.agent_type]
+    # Select system prompt based on agent_type, with Phase 4C tool appendix
+    system_prompt = AGENT_PROMPTS[request.agent_type] + build_tool_appendix(request.agent_type)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -3486,6 +3616,11 @@ async def agent_chat(request: AgentChatRequest):
         logger.info(f"[Sage raw response] first 500 chars: {response_text[:500]}")
         logger.info(f"[Sage raw response] HIGHLIGHT_PARTS present: {'HIGHLIGHT_PARTS:' in response_text}, ISOLATE_PART present: {'ISOLATE_PART:' in response_text}")
 
+        # Phase 4C: Extract native <tool_calls> block before legacy marker parsing.
+        # Strip the block from text so markers don't double-parse the same actions.
+        native_tool_calls = []
+        response_text, native_tool_calls = extract_tool_calls_from_response(response_text, request.agent_type)
+
         # Extract dimension highlight commands before cleaning
         highlight_dims = []
         hl_match = re.search(r'^HIGHLIGHT_DIMS:\s*(.+)$', response_text, re.MULTILINE)
@@ -3821,10 +3956,25 @@ async def agent_chat(request: AgentChatRequest):
         # Always update response with final cleaned text
         result["response"] = response_text
 
-        # Phase 4B: Attach canonical tool_calls alongside legacy fields
-        tool_calls = build_tool_calls_from_result(result)
-        if tool_calls:
-            result["tool_calls"] = tool_calls
+        # Phase 4C: Native tool_calls take precedence over legacy-mirrored ones
+        if native_tool_calls:
+            result["tool_calls"] = native_tool_calls
+            result["tool_source"] = "native"
+            # Clear all action fields that markers may have populated,
+            # then re-populate only from native tool calls
+            for key in ("highlight_dimensions", "highlight_views", "highlight_features",
+                        "highlight_parts", "camera_view", "isolate_parts",
+                        "compare_parts", "compare_features", "show_geometry_diff",
+                        "run_inspection", "animate_motion", "explode_level",
+                        "fai_fills", "fai_tol"):
+                result.pop(key, None)
+            apply_tool_calls_to_legacy_result(result, native_tool_calls)
+        else:
+            # Fallback: build tool_calls from legacy marker-parsed fields
+            tool_calls = build_tool_calls_from_result(result)
+            if tool_calls:
+                result["tool_calls"] = tool_calls
+                result["tool_source"] = "legacy_mirror"
 
         return result
 
@@ -3912,6 +4062,7 @@ async def agent_chat_stream(request: AgentChatRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
+    # No tool appendix on the streaming route — Scout SSE stays unchanged for 4C
     system_prompt = AGENT_PROMPTS.get(request.agent_type, PARTS_FINDER_PROMPT)
 
     async def event_generator():

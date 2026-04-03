@@ -225,35 +225,45 @@
 
         /* Right Activity Rail — mirrors left activity bar */
         .right-activity-rail {
-            width: 40px;
-            min-width: 40px;
+            width: 46px;
+            min-width: 46px;
             background: linear-gradient(to bottom, #20262E 0%, #1B2129 100%);
             border-left: 1px solid var(--border-soft);
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding-top: 6px;
-            gap: 2px;
+            padding-top: 7px;
+            gap: 4px;
             box-shadow: inset 1px 0 0 rgba(255,255,255,0.02);
         }
         .right-rail-icon {
-            width: 36px;
-            height: 36px;
+            width: 38px;
+            height: 40px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 4px;
+            border-radius: 7px;
             cursor: pointer;
-            transition: background 0.1s;
+            transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.12s;
             position: relative;
-            color: #737C89;
+            color: #A8B2C0;
+            border: 1px solid rgba(255,255,255,0.04);
+            background: linear-gradient(to bottom, rgba(255,255,255,0.035), rgba(255,255,255,0.015));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
         }
         .right-rail-icon:hover {
-            background: rgba(255,255,255,0.05);
+            background: linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+            border-color: rgba(121,183,227,0.22);
             color: #E3E6EB;
+            transform: translateY(-1px);
         }
         .right-rail-icon.active {
             color: #E3E6EB;
+            background: linear-gradient(to bottom, rgba(65,103,134,0.34), rgba(40,64,86,0.26));
+            border-color: rgba(121,183,227,0.34);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.06),
+                0 0 0 1px rgba(79,195,247,0.05);
         }
         .right-rail-icon.active::before {
             content: '';
@@ -266,8 +276,8 @@
             border-radius: 0 1px 1px 0;
         }
         .right-rail-icon svg {
-            width: 20px;
-            height: 20px;
+            width: 24px;
+            height: 24px;
         }
         .right-rail-icon .right-rail-tooltip {
             display: none;
@@ -489,8 +499,8 @@
         .ribbon {
             display: flex;
             align-items: stretch;
-            height: 66px;
-            min-height: 66px;
+            height: 88px;
+            min-height: 88px;
             background: linear-gradient(to bottom, #262C35 0%, #20262E 100%);
             border-bottom: 1px solid rgba(255,255,255,0.08);
             box-shadow:
@@ -510,7 +520,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            padding: 6px 16px 16px;
+            padding: 8px 16px 18px;
             position: relative;
         }
         .ribbon-group-label {
@@ -573,6 +583,14 @@
             transition: background 0.12s, color 0.12s;
             white-space: nowrap;
         }
+        .ribbon-btn-iconic {
+            flex-direction: column;
+            justify-content: flex-start;
+            gap: 2px;
+            min-width: 84px;
+            min-height: 66px;
+            padding: 4px 10px 4px;
+        }
         .ribbon-btn:hover {
             background: rgba(255,255,255,0.06);
             color: #E3E6EB;
@@ -591,20 +609,33 @@
             align-items: center;
             justify-content: center;
             flex: 0 0 auto;
+            width: 46px;
+            height: 40px;
         }
         .ribbon-btn-label {
             display: inline-block;
-            line-height: 1;
+            line-height: 1.15;
         }
-        .ribbon-btn svg {
-            width: 18px; height: 18px; flex: 0 0 18px;
+        .ribbon-btn-iconic .ribbon-btn-label {
+            max-width: 84px;
+            text-align: center;
+            white-space: normal;
+            font-size: 9px;
+            line-height: 1.05;
+            letter-spacing: 0.1px;
+        }
+        .ribbon-btn-iconic svg {
+            width: 36px !important;
+            height: 36px !important;
+            flex: 0 0 36px;
+        }
+        .ribbon-btn:not(.ribbon-btn-iconic) svg {
+            width: 18px;
+            height: 18px;
+            flex: 0 0 18px;
         }
         .ribbon-btn.primary:hover {
             background: #39b0e6;
-        }
-        .ribbon-btn svg {
-            width: 14px;
-            height: 14px;
         }
         .ribbon-select {
             background: var(--bg-tab);
@@ -688,35 +719,45 @@
 
         /* Activity Bar — VS Code style */
         .activity-bar {
-            width: 40px;
-            min-width: 40px;
+            width: 46px;
+            min-width: 46px;
             background: linear-gradient(to bottom, #20262E 0%, #1B2129 100%);
             border-right: 1px solid var(--border-soft);
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding-top: 6px;
-            gap: 2px;
+            padding-top: 7px;
+            gap: 4px;
             box-shadow: inset -1px 0 0 rgba(255,255,255,0.02);
         }
         .activity-bar-icon {
-            width: 36px;
-            height: 36px;
+            width: 38px;
+            height: 40px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 4px;
+            border-radius: 7px;
             cursor: pointer;
-            transition: background 0.1s;
+            transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.12s;
             position: relative;
-            color: #737C89;
+            color: #A8B2C0;
+            border: 1px solid rgba(255,255,255,0.04);
+            background: linear-gradient(to bottom, rgba(255,255,255,0.035), rgba(255,255,255,0.015));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
         }
         .activity-bar-icon:hover {
-            background: rgba(255,255,255,0.05);
+            background: linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+            border-color: rgba(121,183,227,0.22);
             color: #E3E6EB;
+            transform: translateY(-1px);
         }
         .activity-bar-icon.active {
             color: #e0e0e0;
+            background: linear-gradient(to bottom, rgba(65,103,134,0.34), rgba(40,64,86,0.26));
+            border-color: rgba(121,183,227,0.34);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.06),
+                0 0 0 1px rgba(79,195,247,0.05);
         }
         .activity-bar-icon.active::before {
             content: '';
@@ -729,8 +770,8 @@
             border-radius: 0 1px 1px 0;
         }
         .activity-bar-icon svg {
-            width: 20px;
-            height: 20px;
+            width: 24px;
+            height: 24px;
         }
         .activity-bar-icon .activity-tooltip {
             display: none;
@@ -4566,16 +4607,24 @@
             <!-- Activity Bar -->
             <div class="activity-bar" id="activityBar">
                 <div class="activity-bar-icon active" data-panel="explorer" title="Explorer">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round">
+                            <path d="M3.2 8.1h6.5l1.8-2.2h9.1v10.7a1.7 1.7 0 0 1-1.7 1.7H4.9a1.7 1.7 0 0 1-1.7-1.7V8.1Z" fill="#354352" stroke="#95A9BD"/>
+                            <path d="M3.2 8.1h17.4v2.4H3.2z" fill="#5F7387" stroke="#95A9BD"/>
+                            <path d="M6.1 12.1h4.5M6.1 14.5h6.8M14.3 12.2h3.1v3.1h-3.1z" stroke="#D4DEE7" stroke-width="0.65" fill="none"/>
+                        </g>
                     </svg>
                     <span class="activity-tooltip">Explorer</span>
                 </div>
                 <div class="activity-bar-icon" data-panel="model" title="3D Model">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                        <path d="M2 17l10 5 10-5"/>
-                        <path d="M2 12l10 5 10-5"/>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <g stroke="#79B7E3" stroke-width="0.9" stroke-linejoin="round">
+                            <path d="M12 3.2 4.5 7.2 12 11.2 19.5 7.2 12 3.2Z" fill="#8FCDF2"/>
+                            <path d="M4.5 7.2v7.4L12 18.8v-7.6L4.5 7.2Z" fill="#5A97C5"/>
+                            <path d="M19.5 7.2v7.4L12 18.8v-7.6l7.5-4Z" fill="#35698F"/>
+                            <path d="M12 6v5.2" fill="none" stroke="#B9E1F8" stroke-width="0.55"/>
+                            <path d="M8.4 9.1 12 11.2 15.6 9.1" fill="none" stroke="#B9E1F8" stroke-width="0.5"/>
+                        </g>
                     </svg>
                     <span class="activity-tooltip">3D Model</span>
                 </div>
@@ -4875,6 +4924,16 @@
                         </svg>
                         InspectorPro Agent
                     </div>
+                    <div class="agent-conversation-bar" id="agentConversationBar" style="display:flex;align-items:center;gap:4px;padding:4px 10px;border-bottom:1px solid var(--border);font-size:12px;">
+                        <button class="agent-chat-switcher" id="agentChatSwitcher" type="button" style="flex:1;display:flex;align-items:center;gap:4px;background:none;border:1px solid var(--border);border-radius:4px;padding:3px 8px;color:var(--text-primary);cursor:pointer;font-size:12px;font-family:inherit;text-align:left;overflow:hidden;">
+                            <span id="agentChatTitle" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">New Chat</span>
+                            <span style="opacity:0.5;font-size:10px;flex-shrink:0;">&#9662;</span>
+                        </button>
+                        <button id="agentChatNewBtn" type="button" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;white-space:nowrap;font-family:inherit;">+ New</button>
+                        <button id="agentChatMenuBtn" type="button" style="background:none;border:1px solid var(--border);border-radius:4px;padding:3px 6px;color:var(--text-secondary);cursor:pointer;font-size:14px;line-height:1;">&#8943;</button>
+                    </div>
+                    <div id="agentChatDropdown" style="display:none;position:absolute;left:10px;right:10px;z-index:100;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.4);"></div>
+                    <div id="agentChatMenuDropdown" style="display:none;position:absolute;right:10px;z-index:100;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.4);"></div>
                     <div class="agent-assembly-views collapsed" id="agentAssemblyViews" style="display:none;">
                         <div class="agent-assembly-views-toggle" id="agentAssemblyViewsToggle">
                             <span id="agentAssemblyViewsArrow">&#9656;</span> Assembly Views
@@ -4912,11 +4971,25 @@
             <!-- Right Activity Rail -->
             <div class="right-activity-rail" id="rightActivityRail">
                 <div class="right-rail-icon" id="rightRailResults" title="Results">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round">
+                            <path d="M7 4.1h10l2.1 2.1v12a1.8 1.8 0 0 1-1.8 1.8H6.7a1.8 1.8 0 0 1-1.8-1.8V5.9A1.8 1.8 0 0 1 6.7 4.1H7Z" fill="#364454" stroke="#97ACBF"/>
+                            <path d="M8 4.1h8v3.2H8z" fill="#697D90" stroke="#97ACBF"/>
+                            <path d="m8.2 12.8 2.1 2.2 5.3-5.3" stroke="#7FE3A8" stroke-width="1.2" fill="none"/>
+                            <path d="M8 17.2h8.2" stroke="#C7D4DF" stroke-width="0.6" fill="none"/>
+                        </g>
+                    </svg>
                     <span class="right-rail-tooltip">Results</span>
                 </div>
                 <div class="right-rail-icon active" id="rightRailAgent" title="Agent">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round">
+                            <path d="M7.1 18.7v-2.1A3.7 3.7 0 0 1 10.8 13h2.4a3.7 3.7 0 0 1 3.7 3.6v2.1" fill="#4A5E73" stroke="#A6BACD"/>
+                            <circle cx="12" cy="8.5" r="3.1" fill="#D8A766" stroke="#E7C183"/>
+                            <path d="M8.5 8.6h.01M15.5 8.6h.01" stroke="#334150" stroke-width="1.1"/>
+                            <path d="M10.2 11.1c.5.35 1.03.52 1.8.52s1.3-.17 1.8-.52" stroke="#334150" stroke-width="0.7" fill="none"/>
+                        </g>
+                    </svg>
                     <span class="right-rail-tooltip">Agent</span>
                 </div>
             </div>
@@ -8450,7 +8523,7 @@
             return g;
         }
 
-        // Ribbon icon SVGs - 18px, duotone/tritone, tuned for dark ribbon
+        // Ribbon icon SVGs - CSS scales them to CAD-style ribbon size
         const _ribbonIcons = {
             '3dmodel': '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke="#79B7E3" stroke-width="0.9" stroke-linejoin="round"><path d="M12 3.2 4.5 7.2 12 11.2 19.5 7.2 12 3.2Z" fill="#8FCDF2"/><path d="M4.5 7.2v7.4L12 18.8v-7.6L4.5 7.2Z" fill="#5A97C5"/><path d="M19.5 7.2v7.4L12 18.8v-7.6l7.5-4Z" fill="#35698F"/><path d="M12 6v5.2" fill="none" stroke="#B9E1F8" stroke-width="0.55"/><path d="M8.4 9.1 12 11.2 15.6 9.1" fill="none" stroke="#B9E1F8" stroke-width="0.5"/></g></svg>',
             compare: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.9" stroke-linejoin="round"><path d="M4 8.8 8.7 5.7 13.4 8.8v4.8l-4.7 3-4.7-3v-4.8Z" fill="#4A81AC" stroke="#79B7E3"/><path d="M4 8.8 8.7 11.8v4.8l-4.7-3v-4.8Z" fill="#5E9BC8" stroke="#79B7E3"/><path d="M13.4 8.8 8.7 11.8v4.8l4.7-3v-4.8Z" fill="#2F627F" stroke="#79B7E3"/><path d="M10.6 8.8 15.3 5.7 20 8.8v4.8l-4.7 3-4.7-3v-4.8Z" fill="#355F82" stroke="#79B7E3" opacity="0.72"/><path d="M10.6 8.8 15.3 11.8v4.8l-4.7-3v-4.8Z" fill="#497EA6" stroke="#79B7E3" opacity="0.72"/><path d="M20 8.8 15.3 11.8v4.8l4.7-3v-4.8Z" fill="#274E66" stroke="#79B7E3" opacity="0.72"/></g></svg>',
@@ -8464,7 +8537,8 @@
 
         function _ribbonIconBtn(iconKey, label, className) {
             const btn = document.createElement('button');
-            btn.className = className || 'ribbon-btn';
+            const baseClass = className || 'ribbon-btn';
+            btn.className = `${baseClass} ribbon-btn-iconic`;
             if (_ribbonIcons[iconKey]) {
                 const iconWrap = document.createElement('span');
                 iconWrap.className = 'ribbon-btn-icon';
@@ -16457,10 +16531,16 @@
             }
             // === End Message Schema ===
 
-            // === Phase 5: Persistence + Recovery ===
-            const AGENT_STATE_STORAGE_KEY = 'inspectorpro.agent_state.v1';
+            // === Phase 8A: Chat Registry + Persistence ===
+            const AGENT_CHAT_REGISTRY_KEY = 'inspectorpro.chat_registry.v1';
+            const AGENT_STATE_STORAGE_KEY = 'inspectorpro.agent_state.v1'; // legacy, for migration
             const SNAPSHOT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
             let _saveTimer = null;
+            let _currentConversationId = null;
+            let _chatRegistry = null; // { version, currentConversationId, conversations, workspaceRecovery }
+
+            let _convIdSeq = 0;
+            function createConversationId() { return 'chat_' + Date.now().toString(36) + '_' + (++_convIdSeq); }
 
             function serializeMessageForPersistence(msg) {
                 const clone = JSON.parse(JSON.stringify(msg));
@@ -16488,10 +16568,7 @@
 
             function buildRecoveryState() {
                 return {
-                    part: {
-                        part_number: state.partNumber || null,
-                        part_name: state.partName || null,
-                    },
+                    part: { part_number: state.partNumber || null, part_name: state.partName || null },
                     inspection: {
                         from_chat: !!state._inspectionFromChat,
                         outcome: state._inspectionOutcome || null,
@@ -16501,59 +16578,6 @@
                         was_running_at_save: !!state.inspecting,
                     },
                 };
-            }
-
-            function buildAgentStateSnapshot() {
-                return {
-                    version: 1,
-                    savedAt: Date.now(),
-                    currentAgent: currentAgent,
-                    sessions: {
-                        'inspector': serializeSessionForPersistence(getAgentSession('inspector')),
-                        'deviation-analyst': serializeSessionForPersistence(getAgentSession('deviation-analyst')),
-                        'parts-finder': serializeSessionForPersistence(getAgentSession('parts-finder')),
-                    },
-                    recovery: buildRecoveryState(),
-                };
-            }
-
-            function saveAgentStateNow() {
-                try {
-                    const snapshot = buildAgentStateSnapshot();
-                    localStorage.setItem(AGENT_STATE_STORAGE_KEY, JSON.stringify(snapshot));
-                } catch (e) {
-                    console.warn('[Persist] Save failed:', e.message);
-                }
-            }
-
-            function scheduleAgentStateSave() {
-                if (_saveTimer) clearTimeout(_saveTimer);
-                _saveTimer = setTimeout(saveAgentStateNow, 500);
-            }
-
-            function loadAgentStateSnapshot() {
-                try {
-                    const raw = localStorage.getItem(AGENT_STATE_STORAGE_KEY);
-                    if (!raw) return null;
-                    const snapshot = JSON.parse(raw);
-                    if (!snapshot || snapshot.version !== 1) {
-                        localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
-                        return null;
-                    }
-                    if (Date.now() - snapshot.savedAt > SNAPSHOT_MAX_AGE_MS) {
-                        localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
-                        return null;
-                    }
-                    return snapshot;
-                } catch (e) {
-                    console.warn('[Persist] Load failed:', e.message);
-                    localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
-                    return null;
-                }
-            }
-
-            function clearPersistedAgentState() {
-                localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
             }
 
             function deserializePersistedMessage(raw) {
@@ -16582,29 +16606,293 @@
                 session.waiting = false;
                 session.requestId = 0;
                 session.pendingCapture = null;
-                // Keep _msgIdSeq ahead of restored IDs
                 for (const msg of session.messages) {
                     const num = parseInt((msg.id || '').replace('msg_', ''), 10);
                     if (!isNaN(num) && num >= _msgIdSeq) _msgIdSeq = num + 1;
                 }
             }
 
-            function restoreAgentStateSnapshot(snapshot) {
-                if (!snapshot || !snapshot.sessions) return false;
+            function resetAllSessions() {
                 for (const key of ['inspector', 'deviation-analyst', 'parts-finder']) {
-                    if (snapshot.sessions[key]) {
-                        restoreSessionFromSnapshot(key, snapshot.sessions[key]);
+                    const s = getAgentSession(key);
+                    s.messages = []; s.summary = ''; s.scrollTop = 0;
+                    s.pendingInput = ''; s.pendingCrossContext = null;
+                    s.waiting = false; s.requestId = 0; s.pendingCapture = null;
+                }
+            }
+
+            // -- Conversation snapshot --
+            function buildConversationSnapshot() {
+                return {
+                    id: _currentConversationId,
+                    title: _chatRegistry?.conversations?.[_currentConversationId]?.title || 'New Chat',
+                    createdAt: _chatRegistry?.conversations?.[_currentConversationId]?.createdAt || Date.now(),
+                    updatedAt: Date.now(),
+                    meta: {
+                        part_number: state.partNumber || null,
+                        part_name: state.partName || null,
+                        lastAgent: currentAgent,
+                    },
+                    state: {
+                        currentAgent: currentAgent,
+                        sessions: {
+                            'inspector': serializeSessionForPersistence(getAgentSession('inspector')),
+                            'deviation-analyst': serializeSessionForPersistence(getAgentSession('deviation-analyst')),
+                            'parts-finder': serializeSessionForPersistence(getAgentSession('parts-finder')),
+                        },
+                    },
+                };
+            }
+
+            function buildChatRegistrySnapshot() {
+                if (!_chatRegistry) _chatRegistry = { version: 1, currentConversationId: null, conversations: {}, workspaceRecovery: {} };
+                // Save current conversation state
+                if (_currentConversationId) {
+                    _chatRegistry.conversations[_currentConversationId] = buildConversationSnapshot();
+                }
+                _chatRegistry.currentConversationId = _currentConversationId;
+                _chatRegistry.workspaceRecovery = buildRecoveryState();
+                return _chatRegistry;
+            }
+
+            function saveChatRegistryNow() {
+                try {
+                    const reg = buildChatRegistrySnapshot();
+                    localStorage.setItem(AGENT_CHAT_REGISTRY_KEY, JSON.stringify(reg));
+                } catch (e) {
+                    console.warn('[ChatRegistry] Save failed:', e.message);
+                }
+            }
+
+            function scheduleChatRegistrySave() {
+                if (_saveTimer) clearTimeout(_saveTimer);
+                _saveTimer = setTimeout(saveChatRegistryNow, 500);
+            }
+
+            // Backward compat: old code calls these
+            function saveAgentStateNow() { saveChatRegistryNow(); }
+            function scheduleAgentStateSave() { scheduleChatRegistrySave(); }
+
+            function loadChatRegistrySnapshot() {
+                try {
+                    const raw = localStorage.getItem(AGENT_CHAT_REGISTRY_KEY);
+                    if (!raw) return null;
+                    const reg = JSON.parse(raw);
+                    if (!reg || reg.version !== 1) { localStorage.removeItem(AGENT_CHAT_REGISTRY_KEY); return null; }
+                    return reg;
+                } catch (e) {
+                    console.warn('[ChatRegistry] Load failed:', e.message);
+                    localStorage.removeItem(AGENT_CHAT_REGISTRY_KEY);
+                    return null;
+                }
+            }
+
+            function migrateLegacyAgentStateToRegistry() {
+                try {
+                    const raw = localStorage.getItem(AGENT_STATE_STORAGE_KEY);
+                    if (!raw) return null;
+                    const snapshot = JSON.parse(raw);
+                    if (!snapshot || snapshot.version !== 1) { localStorage.removeItem(AGENT_STATE_STORAGE_KEY); return null; }
+                    if (Date.now() - snapshot.savedAt > SNAPSHOT_MAX_AGE_MS) { localStorage.removeItem(AGENT_STATE_STORAGE_KEY); return null; }
+
+                    // Derive title
+                    const pn = snapshot.recovery?.part?.part_number;
+                    let title = pn ? `${pn} Chat` : 'Recovered Chat';
+                    const irisMessages = snapshot.sessions?.inspector?.messages || [];
+                    if (!pn && irisMessages.length > 0) {
+                        const first = irisMessages.find(m => m.role === 'user');
+                        if (first) {
+                            const txt = first.blocks ? first.blocks.filter(b => b.type === 'text').map(b => b.text).join(' ') : (first.text || '');
+                            if (txt) title = txt.substring(0, 40) + (txt.length > 40 ? '...' : '');
+                        }
+                    }
+
+                    const convId = createConversationId();
+                    const reg = {
+                        version: 1,
+                        currentConversationId: convId,
+                        conversations: {
+                            [convId]: {
+                                id: convId,
+                                title: title,
+                                createdAt: snapshot.savedAt,
+                                updatedAt: snapshot.savedAt,
+                                meta: { part_number: pn || null, part_name: snapshot.recovery?.part?.part_name || null, lastAgent: snapshot.currentAgent || 'inspector' },
+                                state: { currentAgent: snapshot.currentAgent || 'inspector', sessions: snapshot.sessions },
+                            },
+                        },
+                        workspaceRecovery: snapshot.recovery || {},
+                    };
+
+                    localStorage.setItem(AGENT_CHAT_REGISTRY_KEY, JSON.stringify(reg));
+                    localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
+                    console.log('[ChatRegistry] Migrated legacy snapshot to registry:', title);
+                    return reg;
+                } catch (e) {
+                    console.warn('[ChatRegistry] Migration failed:', e.message);
+                    localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
+                    return null;
+                }
+            }
+
+            function restoreConversationSnapshot(conv) {
+                if (!conv || !conv.state || !conv.state.sessions) return false;
+                for (const key of ['inspector', 'deviation-analyst', 'parts-finder']) {
+                    if (conv.state.sessions[key]) {
+                        restoreSessionFromSnapshot(key, conv.state.sessions[key]);
+                    } else {
+                        // Reset only this missing session, not all three
+                        const s = getAgentSession(key);
+                        s.messages = []; s.summary = ''; s.scrollTop = 0;
+                        s.pendingInput = ''; s.pendingCrossContext = null;
+                        s.waiting = false; s.requestId = 0; s.pendingCapture = null;
                     }
                 }
-                return snapshot;
+                return true;
+            }
+
+            function createEmptyConversation(meta) {
+                const id = createConversationId();
+                return {
+                    id: id,
+                    title: 'New Chat',
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    meta: meta || { part_number: null, part_name: null, lastAgent: 'inspector' },
+                    state: {
+                        currentAgent: 'inspector',
+                        sessions: {
+                            'inspector': serializeSessionForPersistence(createAgentSession('inspector')),
+                            'deviation-analyst': serializeSessionForPersistence(createAgentSession('deviation-analyst')),
+                            'parts-finder': serializeSessionForPersistence(createAgentSession('parts-finder')),
+                        },
+                    },
+                };
+            }
+
+            function isAnySessionWaiting() {
+                for (const key of ['inspector', 'deviation-analyst', 'parts-finder']) {
+                    if (getAgentSession(key).waiting) return true;
+                }
+                return false;
+            }
+
+            // Full UI sync after conversation/agent swap — mirrors selectAgent() restore steps
+            function _syncChatUI() {
+                const activeSession = getCurrentAgentSession();
+                // Render messages or welcome
+                if (activeSession.messages.length > 0) {
+                    agentMessages.innerHTML = '';
+                    agentMessages.appendChild(renderSession(activeSession));
+                } else {
+                    agentMessages.innerHTML = '<div class="agent-welcome">' + (AGENTS[currentAgent]._welcome || 'How can I help?') + '</div>';
+                }
+                // Restore input + clear capture
+                agentInput.value = activeSession.pendingInput || '';
+                clearAgentCapture();
+                // Sync send button / input disabled state
+                const w = activeSession.waiting;
+                agentSendBtn.disabled = w || !agentInput.value.trim();
+                agentInput.disabled = w;
+                updateSendButtonState();
+                // Suggestion chips: Iris-only
+                if (currentAgent !== 'inspector') {
+                    removeSuggestions();
+                } else if (activeSession.messages.length === 0 && state.results) {
+                    loadSuggestions();
+                }
+                // Scroll
+                setTimeout(() => { agentMessages.scrollTop = activeSession.scrollTop || 0; }, 50);
+                // Agent indicator + header + icons
+                updateAgentIndicator();
+                updateAgentPanelHeader();
+                buildAgentIconStrip();
+                updateChatBar();
+                // Inspector progress card reinjection
+                if (currentAgent === 'inspector') {
+                    if (state._inspCardPendingFinalRender) {
+                        setTimeout(() => { if (typeof _renderFinalInspCard === 'function') _renderFinalInspCard(); }, 100);
+                    } else if (state.inspecting && state._inspectionFromChat && window._buildInspProgressCard) {
+                        const card = window._buildInspProgressCard();
+                        agentMessages.appendChild(card);
+                        agentMessages.scrollTop = agentMessages.scrollHeight;
+                    }
+                }
+                // Assembly views section sync
+                updateAssemblyViewsSection();
+                setTimeout(() => agentInput.focus(), 100);
+            }
+
+            function switchConversation(convId) {
+                if (convId === _currentConversationId) return;
+                if (isAnySessionWaiting()) {
+                    if (window._toast) window._toast('Wait for the current response to finish before switching chats.', 'warning');
+                    return;
+                }
+                saveChatRegistryNow();
+                const conv = _chatRegistry.conversations[convId];
+                if (!conv) return;
+                _currentConversationId = convId;
+                restoreConversationSnapshot(conv);
+                currentAgent = conv.state.currentAgent || 'inspector';
+                _syncChatUI();
+                scheduleChatRegistrySave();
+            }
+
+            function createNewConversation() {
+                if (isAnySessionWaiting()) {
+                    if (window._toast) window._toast('Wait for the current response to finish before starting a new chat.', 'warning');
+                    return;
+                }
+                saveChatRegistryNow();
+                const meta = { part_number: state.partNumber || null, part_name: state.partName || null, lastAgent: 'inspector' };
+                const conv = createEmptyConversation(meta);
+                _chatRegistry.conversations[conv.id] = conv;
+                _currentConversationId = conv.id;
+                resetAllSessions();
+                currentAgent = 'inspector';
+                _syncChatUI();
+                saveChatRegistryNow();
+            }
+
+            function clearCurrentConversation() {
+                if (isAnySessionWaiting()) {
+                    if (window._toast) window._toast('Wait for the current response to finish.', 'warning');
+                    return;
+                }
+                resetAllSessions();
+                const conv = _chatRegistry.conversations[_currentConversationId];
+                if (conv) { conv.title = 'New Chat'; conv.updatedAt = Date.now(); }
+                _syncChatUI();
+                saveChatRegistryNow();
+            }
+
+            function getConversationList() {
+                if (!_chatRegistry || !_chatRegistry.conversations) return [];
+                return Object.values(_chatRegistry.conversations)
+                    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+            }
+
+            function deriveConversationTitle(conv) {
+                return conv.title || 'New Chat';
+            }
+
+            function maybeAutotitleFromMessage(text) {
+                if (!_chatRegistry || !_currentConversationId) return;
+                const conv = _chatRegistry.conversations[_currentConversationId];
+                if (!conv || (conv.title && conv.title !== 'New Chat')) return;
+                if (state.partNumber) {
+                    conv.title = state.partNumber + ' Chat';
+                } else if (text) {
+                    conv.title = text.substring(0, 40) + (text.length > 40 ? '...' : '');
+                }
+                updateChatBar();
             }
 
             function handleInterruptedRecovery(recovery) {
                 if (!recovery) return;
                 const insp = recovery.inspection;
                 if (!insp) return;
-
-                // Restore terminal inspection state into runtime for final-card rendering
                 if (insp.outcome) {
                     state._inspectionOutcome = insp.outcome;
                     state._inspectionError = insp.error || null;
@@ -16612,19 +16900,25 @@
                     state._inspCardPendingFinalRender = !!insp.pending_final_card;
                     state._inspectionFromChat = !!insp.from_chat;
                 }
-
-                // Interrupted (was running, no terminal outcome)
                 if (insp.was_running_at_save && !insp.outcome) {
                     const session = getAgentSession('inspector');
                     session.messages.push(createMessage('system', [
                         createNotificationBlock('Previous inspection was interrupted by a page reload. Re-run inspection if needed.')
                     ]));
-                    // Save immediately to prevent duplicate on re-reload
-                    scheduleAgentStateSave();
+                    scheduleChatRegistrySave();
                 }
             }
 
-            window.addEventListener('beforeunload', saveAgentStateNow);
+            // Placeholder — UI update function defined after DOM is ready
+            function updateChatBar() {
+                const titleEl = document.getElementById('agentChatTitle');
+                if (titleEl && _chatRegistry && _currentConversationId) {
+                    const conv = _chatRegistry.conversations[_currentConversationId];
+                    titleEl.textContent = conv ? deriveConversationTitle(conv) : 'New Chat';
+                }
+            }
+
+            window.addEventListener('beforeunload', saveChatRegistryNow);
             // === End Persistence ===
 
             // Feature #146: Assembly reference views in chat panel
@@ -18756,6 +19050,7 @@
 
                 const displayText = text || (hasImage ? '\uD83D\uDCF7 [Screenshot attached]' : '');
                 addMessage(displayText, 'user', originAgent);
+                maybeAutotitleFromMessage(text);
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
                 const imageToSend = await _resolveAutoImage();
@@ -19205,6 +19500,7 @@
 
                 const displayText = text || (hasImage ? '\ud83d\udcf7 [Screenshot attached]' : '');
                 addMessage(displayText, 'user', originAgent);
+                maybeAutotitleFromMessage(text);
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
                 const imageToSend = await _resolveAutoImage();
@@ -19677,16 +19973,21 @@
                 voiceControlsBar.style.display = 'none';
             }
 
-            // Phase 5: Boot restore from localStorage
+            // Phase 8A: Boot restore from chat registry
             {
-                const snapshot = loadAgentStateSnapshot();
-                if (snapshot) {
-                    const restored = restoreAgentStateSnapshot(snapshot);
-                    if (restored && snapshot.currentAgent && agentSessions[snapshot.currentAgent]) {
-                        currentAgent = snapshot.currentAgent;
+                let reg = loadChatRegistrySnapshot();
+                if (!reg) reg = migrateLegacyAgentStateToRegistry();
+                if (!reg) reg = loadChatRegistrySnapshot(); // reload after migration
+
+                if (reg && reg.conversations) {
+                    _chatRegistry = reg;
+                    _currentConversationId = reg.currentConversationId;
+                    const conv = reg.conversations[_currentConversationId];
+                    if (conv) {
+                        restoreConversationSnapshot(conv);
+                        currentAgent = conv.state.currentAgent || 'inspector';
                     }
-                    handleInterruptedRecovery(snapshot.recovery);
-                    // Render restored session into DOM
+                    handleInterruptedRecovery(reg.workspaceRecovery);
                     const activeSession = getCurrentAgentSession();
                     if (activeSession.messages.length > 0) {
                         agentMessages.innerHTML = '';
@@ -19694,10 +19995,78 @@
                         setTimeout(() => { agentMessages.scrollTop = activeSession.scrollTop || 0; }, 50);
                     }
                     agentInput.value = activeSession.pendingInput || '';
-                    console.log('[Persist] Restored agent state — agent:', currentAgent,
-                        'messages:', activeSession.messages.length);
+                    console.log('[ChatRegistry] Restored — conv:', _currentConversationId,
+                        'agent:', currentAgent, 'messages:', activeSession.messages.length);
                 }
+
+                // Initialize registry if none exists
+                if (!_chatRegistry) {
+                    const conv = createEmptyConversation({ part_number: null, part_name: null, lastAgent: 'inspector' });
+                    _chatRegistry = {
+                        version: 1,
+                        currentConversationId: conv.id,
+                        conversations: { [conv.id]: conv },
+                        workspaceRecovery: {},
+                    };
+                    _currentConversationId = conv.id;
+                }
+
+                updateChatBar();
             }
+
+            // Chat bar UI wiring
+            document.getElementById('agentChatNewBtn').addEventListener('click', createNewConversation);
+            document.getElementById('agentChatSwitcher').addEventListener('click', function() {
+                const dd = document.getElementById('agentChatDropdown');
+                const menuDd = document.getElementById('agentChatMenuDropdown');
+                menuDd.style.display = 'none';
+                if (dd.style.display !== 'none') { dd.style.display = 'none'; return; }
+                const convs = getConversationList();
+                dd.innerHTML = convs.map(c => {
+                    const active = c.id === _currentConversationId;
+                    const title = deriveConversationTitle(c);
+                    const pn = c.meta?.part_number || '';
+                    const ago = _timeAgo(c.updatedAt);
+                    const sub = [pn, ago].filter(Boolean).join(' \u2022 ');
+                    return '<div class="agent-chat-item' + (active ? ' active' : '') + '" data-conv-id="' + c.id + '" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);' + (active ? 'background:rgba(79,195,247,0.08);border-left:2px solid var(--accent);' : '') + '">'
+                        + '<div style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _escHtml(title) + '</div>'
+                        + (sub ? '<div style="font-size:10px;color:var(--text-secondary);margin-top:1px;">' + _escHtml(sub) + '</div>' : '')
+                        + '</div>';
+                }).join('');
+                dd.style.display = 'block';
+                dd.onclick = function(e) {
+                    const item = e.target.closest('[data-conv-id]');
+                    if (item) { dd.style.display = 'none'; switchConversation(item.dataset.convId); }
+                };
+            });
+            document.getElementById('agentChatMenuBtn').addEventListener('click', function() {
+                const menuDd = document.getElementById('agentChatMenuDropdown');
+                const dd = document.getElementById('agentChatDropdown');
+                dd.style.display = 'none';
+                if (menuDd.style.display !== 'none') { menuDd.style.display = 'none'; return; }
+                menuDd.innerHTML = '<div style="padding:6px 14px;cursor:pointer;font-size:12px;color:var(--text-primary);white-space:nowrap;" id="chatMenuClear">Clear Current Chat</div>';
+                menuDd.style.display = 'block';
+                menuDd.querySelector('#chatMenuClear').onclick = function() { menuDd.style.display = 'none'; clearCurrentConversation(); };
+            });
+            // Close dropdowns on outside click
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('#agentChatSwitcher') && !e.target.closest('#agentChatDropdown')) {
+                    document.getElementById('agentChatDropdown').style.display = 'none';
+                }
+                if (!e.target.closest('#agentChatMenuBtn') && !e.target.closest('#agentChatMenuDropdown')) {
+                    document.getElementById('agentChatMenuDropdown').style.display = 'none';
+                }
+            });
+            // Helper: time ago
+            function _timeAgo(ts) {
+                if (!ts) return '';
+                const s = Math.floor((Date.now() - ts) / 1000);
+                if (s < 60) return 'just now';
+                if (s < 3600) return Math.floor(s / 60) + 'm ago';
+                if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+                return Math.floor(s / 86400) + 'd ago';
+            }
+            function _escHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
             // Initialize agent indicator, panel header, and icon strip (after currentAgent is defined)
             updateAgentIndicator();

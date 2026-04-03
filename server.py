@@ -2403,8 +2403,50 @@ def _load_rag_images(directories: List[str], max_images: int = 4) -> List[Dict]:
     return content_blocks
 
 
+def normalize_agent_context(ctx: dict) -> dict:
+    """
+    Normalize incoming inspection_context into structured attachments + flat compat.
+    The frontend currently sends both flat keys AND nested attachments (Phase 3
+    transitional format). This function extracts both and ensures the flat dict
+    has the keys that agent-enrichment code reads directly (part_number,
+    selected_parts, available_parts, critical_issues, representation_gaps).
+    _build_context_message() reads all other flat keys from the flat dict as-is.
+    Full attachments-only support is NOT implemented yet — the frontend must
+    continue sending flat keys until all server reads are migrated.
+    Returns: { 'attachments': {...structured...}, 'flat': {...legacy keys...} }
+    """
+    if not ctx:
+        return {"attachments": {}, "flat": {}}
+
+    attachments = ctx.get("attachments", {})
+
+    # Build flat from everything except the attachments key itself
+    flat = {k: v for k, v in ctx.items() if k != "attachments"}
+
+    # If attachments are present, ensure flat has all the keys the server
+    # currently reads directly (part_number, selected_parts, etc.)
+    if attachments:
+        part = attachments.get("part", {})
+        if part.get("part_number") and "part_number" not in flat:
+            flat["part_number"] = part["part_number"]
+            flat["part_name"] = part.get("part_name")
+        sel = attachments.get("selection", {})
+        if sel.get("parts") and "selected_parts" not in flat:
+            flat["selected_parts"] = sel["parts"]
+        if sel.get("available_parts") and "available_parts" not in flat:
+            flat["available_parts"] = sel["available_parts"]
+        insp = attachments.get("inspection", {})
+        if insp.get("critical_issues") and "critical_issues" not in flat:
+            flat["critical_issues"] = insp["critical_issues"]
+        if insp.get("representation_gaps") and "representation_gaps" not in flat:
+            flat["representation_gaps"] = insp["representation_gaps"]
+
+    return {"attachments": attachments, "flat": flat}
+
+
 def _build_context_message(inspection_context: Optional[Dict]) -> str:
-    """Build a context string from inspection results or profile data."""
+    """Build a sectioned context string from inspection results or profile data.
+    Sections are only rendered when they have meaningful data."""
     if not inspection_context:
         return ""
 
@@ -2412,11 +2454,12 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     pn = inspection_context.get("part_number")
     pname = inspection_context.get("part_name")
     if pn:
-        parts.append(f"Current part: {pn} ({pname or 'unknown'})")
+        parts.append(f"[PART]\nCurrent part: {pn} ({pname or 'unknown'})")
 
+    # ── INSPECTION ──
     gs = inspection_context.get("gap_summary")
     if gs:
-        parts.append(f"Inspection results: {gs.get('completeness', 'N/A')}% complete, "
+        parts.append(f"[INSPECTION]\nInspection results: {gs.get('completeness', 'N/A')}% complete, "
                       f"Present: {gs.get('present', 0)}, Missing: {gs.get('missing', 0)}, "
                       f"Partial: {gs.get('partial', 0)}, Discrepant: {gs.get('discrepant', 0)}")
         ci = gs.get("critical_issues", [])
@@ -2482,7 +2525,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             ff_parts.append("  Representation gaps: " + "; ".join(ff_gaps))
         parts.append("\n".join(ff_parts))
 
-    # Selected dimensions from Dimension Explorer
+    # ── SELECTION ──
     selected_dims = inspection_context.get("selected_dimensions", [])
     if selected_dims:
         sd_lines = ["DIMENSIONS THE USER HAS SELECTED (highlighted on the drawing):"]
@@ -2525,7 +2568,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         )
         parts.append("\n".join(ad_lines))
 
-    # Available drawing views for agent-driven view highlighting
+    # ── DRAWING ──
     available_views = inspection_context.get("available_views", [])
     if available_views:
         av_lines = ["AVAILABLE DRAWING VIEWS (you can flash-highlight any of these on the drawing):"]
@@ -2571,7 +2614,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         cf_lines.append("The 3D model starts gray \u2014 your highlight reveals the feature's color.")
         parts.append("\n".join(cf_lines))
 
-    # All available parts for agent-driven highlighting
+    # ── ASSEMBLY ──
     available_parts = inspection_context.get("available_parts", [])
     if available_parts:
         ap_lines = ["AVAILABLE PARTS IN THIS ASSEMBLY (you can highlight any of these in 3D):"]
@@ -2703,7 +2746,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         pw_lines.append("Answer the user's question concisely (max 3 sentences). They may say 'continue' to resume the tour.")
         parts.append("\n".join(pw_lines))
 
-    # Part feature revision diff context
+    # ── COMPARE ──
     part_feature_diff = inspection_context.get("part_feature_diff")
     if part_feature_diff:
         pfd_lines = [f"PART FEATURE CHANGES (Rev {part_feature_diff.get('revA', '?')} \u2192 Rev {part_feature_diff.get('revB', '?')}):"]
@@ -2896,7 +2939,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
 
         parts.append("\n".join(rd_lines))
 
-    # Geometry diff result (solid-body boolean comparison between part revisions)
+    # ── GEOMETRY DIFF ──
     geo_diff = inspection_context.get("geometry_diff")
     if geo_diff and not geo_diff.get("identical", True):
         gd_lines = ["GEOMETRY DIFF (solid-body comparison between part revisions):"]
@@ -2962,7 +3005,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         fai_lines.append("Always confirm what you filled in your text response (e.g. 'Filled 4 bore measurements with 25.003mm').")
         parts.append("\n".join(fai_lines))
 
-    # Inspection readiness flags (for chat-triggered inspection)
+    # ── STATUS ──
     has_drawing = bool(inspection_context.get("has_drawing_file"))
     has_part = bool(inspection_context.get("has_part_number"))
     in_progress = bool(inspection_context.get("inspection_in_progress"))
@@ -3030,8 +3073,10 @@ async def agent_chat(request: AgentChatRequest):
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        # Merge inspection_context from either field name
-        ctx = request.inspection_context or request.context or {}
+        # Merge inspection_context from either field name, then normalize
+        raw_ctx = request.inspection_context or request.context or {}
+        normalized = normalize_agent_context(raw_ctx)
+        ctx = normalized["flat"]  # flat dict with all legacy keys
 
         # Enrich with proximity — Sage only, first 2 selected parts
         if request.agent_type == 'deviation-analyst':
@@ -3792,7 +3837,9 @@ async def agent_chat_stream(request: AgentChatRequest):
             client = anthropic.Anthropic(api_key=api_key)
 
             # Build context (same as agent_chat)
-            ctx = request.inspection_context or request.context or {}
+            raw_ctx = request.inspection_context or request.context or {}
+            normalized = normalize_agent_context(raw_ctx)
+            ctx = normalized["flat"]
             context_text = _build_context_message(ctx)
 
             if request.cross_agent_context:

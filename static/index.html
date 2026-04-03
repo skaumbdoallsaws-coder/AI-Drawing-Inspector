@@ -15150,6 +15150,7 @@
             card.appendChild(content);
             return card;
         }
+        window._buildInspProgressCard = _buildInspProgressCard;
 
         function _inspCardRunningHTML(elapsed) {
             const pct = Math.min(95, (elapsed / 30) * 100);
@@ -16300,27 +16301,303 @@
             }
             // === End Session Engine ===
 
+            // === Message Schema (Phase 2) ===
+            // Structured messages replace { role, text } in session.messages.
+            // Each message has an id, role, typed blocks, and metadata.
+            // The renderer produces DOM from messages; the flattener produces API history.
+            let _msgIdSeq = 0;
+            function _nextMsgId() { return 'msg_' + (++_msgIdSeq); }
+
+            // -- Constructors --
+            function createMessage(role, blocks, meta) {
+                return {
+                    id: _nextMsgId(),
+                    role: role,           // 'user' | 'assistant' | 'system'
+                    blocks: blocks || [],  // array of block objects
+                    meta: meta || {},      // arbitrary metadata
+                    ts: Date.now(),
+                };
+            }
+            function createTextBlock(text) {
+                return { type: 'text', text: text };
+            }
+            function createImageBlock(dataUrl, label) {
+                return { type: 'image', dataUrl: dataUrl, label: label || '' };
+            }
+            function createNotificationBlock(text, html) {
+                const block = { type: 'notification', text: text };
+                if (html) block.html = true;
+                return block;
+            }
+            function createProgressBlock(label, progressState, elapsed) {
+                return { type: 'progress', label: label, state: progressState || 'pending', elapsed: elapsed || null };
+            }
+            function createReferenceBlock(text, ref) {
+                return { type: 'reference', text: text, ref: ref || null };
+            }
+
+            // -- Renderers --
+            function renderBlockToDOM(block, role) {
+                switch (block.type) {
+                    case 'text': {
+                        const el = document.createElement('div');
+                        el.className = 'agent-msg ' + role;
+                        if (role === 'user') {
+                            el.textContent = block.text;
+                        } else {
+                            el.innerHTML = formatMessageText(block.text);
+                        }
+                        return el;
+                    }
+                    case 'notification': {
+                        const el = document.createElement('div');
+                        el.className = 'agent-msg assistant';
+                        el.style.cssText = 'font-style:italic; opacity:0.8; font-size:12px; border-left:2px solid var(--accent); padding-left:10px;';
+                        if (block.html) {
+                            el.innerHTML = block.text;  // trusted rich content (ASME refs)
+                        } else {
+                            el.textContent = block.text; // safe default
+                        }
+                        return el;
+                    }
+                    case 'image': {
+                        const el = document.createElement('div');
+                        el.className = 'agent-msg-image';
+                        const img = document.createElement('img');
+                        img.src = block.dataUrl;
+                        img.alt = block.label || 'Attached image';
+                        img.style.cssText = 'max-width:200px;border-radius:8px;';
+                        el.appendChild(img);
+                        if (block.label) {
+                            const lbl = document.createElement('div');
+                            lbl.style.cssText = 'font-size:11px;color:var(--text-secondary);';
+                            lbl.textContent = block.label;
+                            el.appendChild(lbl);
+                        }
+                        return el;
+                    }
+                    case 'progress': {
+                        const el = document.createElement('div');
+                        el.className = 'agent-msg assistant';
+                        el.style.cssText = 'font-style:italic; opacity:0.7; font-size:12px;';
+                        el.textContent = block.label + (block.state === 'completed' ? ' — done' : '');
+                        return el;
+                    }
+                    case 'reference': {
+                        const el = document.createElement('div');
+                        el.className = 'agent-msg assistant';
+                        el.innerHTML = formatMessageText(block.text);
+                        return el;
+                    }
+                    default: {
+                        const el = document.createElement('div');
+                        el.className = 'agent-msg assistant';
+                        el.textContent = block.text || '';
+                        return el;
+                    }
+                }
+            }
+
+            function renderMessageToDOM(msg, agentKey) {
+                const row = document.createElement('div');
+                // system messages render as assistant rows for styling
+                row.className = 'agent-msg-row ' + (msg.role === 'system' ? 'assistant' : msg.role);
+                row.dataset.msgId = msg.id;
+
+                const avatar = document.createElement('div');
+                avatar.className = 'agent-msg-avatar';
+                if (msg.role === 'user') {
+                    avatar.classList.add('user-avatar');
+                    avatar.innerHTML = '<img src="/static/avatar_user.png" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="User">';
+                } else {
+                    avatar.classList.add('bot-avatar');
+                    const agent = AGENTS[agentKey];
+                    avatar.innerHTML = agent.avatar;
+                    avatar.style.background = 'transparent';
+                    avatar.style.border = '2px solid ' + agent.color;
+                }
+
+                const content = document.createElement('div');
+                content.className = 'agent-msg-content';
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'agent-msg-name';
+                nameEl.textContent = msg.role === 'user' ? 'Shadrack' : AGENTS[agentKey].name;
+                content.appendChild(nameEl);
+
+                for (const block of msg.blocks) {
+                    content.appendChild(renderBlockToDOM(block, msg.role));
+                }
+
+                row.appendChild(avatar);
+                row.appendChild(content);
+                return row;
+            }
+
+            function renderSession(session) {
+                const frag = document.createDocumentFragment();
+                for (const msg of session.messages) {
+                    frag.appendChild(renderMessageToDOM(msg, session.key));
+                }
+                return frag;
+            }
+
+            function flattenMessagesForApi(messages) {
+                return messages
+                    .filter(m => m.role === 'user' || m.role === 'assistant')
+                    .map(m => {
+                        // Handle both new structured and legacy { role, text } formats
+                        if (m.blocks) {
+                            const text = m.blocks
+                                .filter(b => b.type === 'text')
+                                .map(b => b.text)
+                                .join('\n');
+                            return { role: m.role, content: text };
+                        }
+                        return { role: m.role, content: m.text || '' };
+                    })
+                    .filter(m => m.content);
+            }
+            // === End Message Schema ===
+
             // Feature #146: Assembly reference views in chat panel
             let assemblyViewsLoaded = false;
             let assemblyViewsData = null;
 
             // Build inspection context from current app state
-            function buildInspectionContext() {
-                const inspCtx = {};
-                // Inspection readiness flags
-                inspCtx.has_drawing_file = !!state.file;
-                inspCtx.has_part_number = !!state.partNumber;
-                inspCtx.inspection_in_progress = !!state.inspecting;
-                inspCtx.inspection_can_run = !!state.file && !!state.partNumber && !state.inspecting;
+            // === Phase 3: Structured Attachments ===
+            // buildAgentAttachments() produces clean structured context.
+            // flattenAttachmentsForLegacy() maps it to the flat keys the server still expects.
+            // buildInspectionContext() returns { ...flat, attachments } for backward compat.
 
-                if (state.partNumber) {
-                    inspCtx.part_number = state.partNumber;
-                    inspCtx.part_name = state.partName;
+            function _getSelectedDimensions() {
+                if (!state.dimExplorerSelectedKeys || state.dimExplorerSelectedKeys.size === 0) return [];
+                const groups = buildDimExplorerData();
+                const allDims = Object.values(groups).flat();
+                const selected = [];
+                state.dimExplorerSelectedKeys.forEach(key => {
+                    const dim = allDims.find(d => d.dimKey === key);
+                    if (dim) {
+                        selected.push({
+                            annotation: dim.annotationName,
+                            view: dim.viewName,
+                            callout: (dim.dimensionText || dim.foundCallout || '').replace(/<MOD-DIAM>/g, '\u2300').trim(),
+                            description: dim.description || '',
+                            status: dim.status || null,
+                        });
+                    }
+                });
+                return selected;
+            }
+
+            function _getAvailableDimensions() {
+                const groups = buildDimExplorerData();
+                const allDims = Object.values(groups).flat();
+                if (!allDims.length) return [];
+                return allDims.map(d => ({
+                    dim_key: d.dimKey,
+                    annotation: d.annotationName,
+                    view: d.viewName,
+                    callout: (d.dimensionText || d.foundCallout || '').replace(/<MOD-DIAM>/g, '\u2300').trim(),
+                    description: d.description || '',
+                }));
+            }
+
+            function _getAvailableViews() {
+                const dm = state.results?.drawing_map;
+                if (!dm?.sheets) return [];
+                const names = [];
+                for (const sheet of dm.sheets) {
+                    for (const view of (sheet.views || [])) {
+                        if (view.viewName) names.push(view.viewName);
+                    }
                 }
+                return names;
+            }
+
+            function _getSelectedParts() {
+                if (!assemblyContext?.part_color_legend || !state.partExplorerSelectedParts?.size) return [];
+                const parts = [];
+                state.partExplorerSelectedParts.forEach(pn => {
+                    const item = assemblyContext.part_color_legend.find(l => l.part_number === pn);
+                    if (item) parts.push({ part_number: item.part_number, description: item.description || '' });
+                });
+                return parts;
+            }
+
+            function _getAvailableParts() {
+                if (!assemblyContext?.part_color_legend) return [];
+                return assemblyContext.part_color_legend.map(item => ({
+                    part_number: item.part_number,
+                    description: item.description || '',
+                    color: item.color,
+                    centroid_mm: item.centroid_mm || null,
+                }));
+            }
+
+            function _getGeometryDiff() {
+                if (!state._geometryDiffResult || state._geometryDiffResult.part_number !== state.partNumber) return null;
+                const gRevA = partDiffState.activeRevA || (partDiffState.revisions && partDiffState.revisions[0]);
+                const gRevB = partDiffState.activeRevB || (partDiffState.revisions && partDiffState.revisions[partDiffState.revisions.length - 1]);
+                if (gRevA && gRevB && (state._geometryDiffResult.revA !== gRevA || state._geometryDiffResult.revB !== gRevB)) return null;
+                return state._geometryDiffResult;
+            }
+
+            function buildAgentAttachments(agentType) {
+                const att = { schema_version: 1 };
+
+                // SESSION
+                att.session = {
+                    agent: agentType || currentAgent,
+                    active_tab: state.activeTab || null,
+                };
+
+                // PART
+                att.part = {
+                    part_number: state.partNumber || null,
+                    part_name: state.partName || null,
+                    feature_count: state.featureCount ?? null,
+                    profile_loaded: !!state.profileData,
+                };
+                if (!state.results && state.profileData) {
+                    att.part.profile_features = (state.profileData.features || []).map(f => ({
+                        name: f.name, type: f.type, count: f.count,
+                        spatial_description: f.spatial_description || '',
+                    }));
+                    if (state.profileData.part_description) att.part.description = state.profileData.part_description;
+                    if (state.profileData.view_expectations) att.part.view_expectations = state.profileData.view_expectations;
+                }
+                if (state.focusedFeature) {
+                    const ff = state.focusedFeature;
+                    att.part.focused_feature = {
+                        name: ff.name, type: ff.type || null, status: ff.status || null,
+                        observation: ff.observation || '', found_callout: ff.found_callout || '',
+                        expected_count: ff.expected_count || null,
+                        representation_gaps: ff.representation_gaps || [],
+                        representation_score: ff.representation_score || null,
+                        asme_compliance: ff.asme_compliance || null,
+                    };
+                }
+
+                // DRAWING
+                att.drawing = {
+                    has_drawing_file: !!state.file,
+                    current_page: state.currentPage || 1,
+                    page_count: state.drawingPages || 1,
+                    available_views: _getAvailableViews(),
+                };
+
+                // INSPECTION
+                att.inspection = {
+                    can_run: !!state.file && !!state.partNumber && !state.inspecting,
+                    in_progress: !!state.inspecting,
+                    has_results: !!state.results,
+                };
                 if (state.results) {
-                    inspCtx.gap_summary = state.results.gap_summary || null;
-                    inspCtx.completeness_score = (state.results.gap_summary || {}).completeness || null;
-                    inspCtx.findings = (state.results.features || []).map(f => ({
+                    const gs = state.results.gap_summary || {};
+                    att.inspection.gap_summary = gs;
+                    att.inspection.completeness_score = gs.completeness || null;
+                    att.inspection.findings = (state.results.features || []).map(f => ({
                         name: f.name, type: f.type, status: f.status,
                         observation: f.observation || '', found_callout: f.found_callout || '',
                         representation_gaps: f.representation_gaps || []
@@ -16329,148 +16606,91 @@
                     (state.results.features || []).forEach(f => {
                         (f.representation_gaps || []).forEach(g => { if (!allGaps.includes(g)) allGaps.push(g); });
                     });
-                    inspCtx.representation_gaps = allGaps;
-                    inspCtx.critical_issues = (state.results.gap_summary || {}).critical_issues || [];
-                } else if (state.profileData) {
-                    // Pre-inspection: send profile features so agent has part awareness
-                    inspCtx.profile_features = (state.profileData.features || []).map(f => ({
-                        name: f.name,
-                        type: f.type,
-                        count: f.count,
-                        spatial_description: f.spatial_description || '',
-                    }));
-                    if (state.profileData.part_description) {
-                        inspCtx.part_description = state.profileData.part_description;
-                    }
-                    if (state.profileData.view_expectations) {
-                        inspCtx.view_expectations = state.profileData.view_expectations;
-                    }
-                }
-                // Include focused/selected feature if one is expanded
-                if (state.focusedFeature) {
-                    const ff = state.focusedFeature;
-                    inspCtx.focused_feature = {
-                        name: ff.name,
-                        type: ff.type || null,
-                        status: ff.status || null,
-                        observation: ff.observation || '',
-                        found_callout: ff.found_callout || '',
-                        expected_count: ff.expected_count || null,
-                        representation_gaps: ff.representation_gaps || [],
-                        representation_score: ff.representation_score || null,
-                        asme_compliance: ff.asme_compliance || null,
-                    };
+                    att.inspection.representation_gaps = allGaps;
+                    att.inspection.critical_issues = gs.critical_issues || [];
                 }
 
-                // Send geometry diff when it matches current part and rev pair
-                if (state._geometryDiffResult && state._geometryDiffResult.part_number === state.partNumber) {
-                    const gRevA = partDiffState.activeRevA || (partDiffState.revisions && partDiffState.revisions[0]);
-                    const gRevB = partDiffState.activeRevB || (partDiffState.revisions && partDiffState.revisions[partDiffState.revisions.length - 1]);
-                    console.log('[GeoDiff Context] guard:', 'stored:', state._geometryDiffResult.revA, state._geometryDiffResult.revB, 'current:', gRevA, gRevB);
-                    if (!gRevA || !gRevB || (state._geometryDiffResult.revA === gRevA && state._geometryDiffResult.revB === gRevB)) {
-                        console.log('[GeoDiff Context] INJECTED into inspCtx');
-                        inspCtx.geometry_diff = state._geometryDiffResult;
+                // SELECTION
+                att.selection = {
+                    dimensions: _getSelectedDimensions(),
+                    available_dimensions: _getAvailableDimensions(),
+                    parts: _getSelectedParts(),
+                    available_parts: _getAvailableParts(),
+                };
+
+                // COMPARE
+                att.compare = {};
+                const geoDiff = _getGeometryDiff();
+                if (geoDiff) att.compare.geometry_diff = geoDiff;
+
+                // ASSEMBLY
+                att.assembly = {
+                    context_available: !!assemblyContextAvailable,
+                    active_config: state.activeAssemblyConfig || null,
+                };
+                if (assemblyContext) {
+                    if (assemblyContext.all_mate_relationships?.length) {
+                        att.assembly.mate_relationships = assemblyContext.all_mate_relationships;
+                    }
+                    if (assemblyContext.configurations?.length) {
+                        att.assembly.configurations = assemblyContext.configurations.map(c => ({ name: c.name, parts: c.parts }));
+                    }
+                    if (assemblyContext.part_properties?.length) {
+                        att.assembly.part_properties = assemblyContext.part_properties;
+                    }
+                    if (assemblyContext.explode_steps?.length) {
+                        att.assembly.explode_steps = assemblyContext.explode_steps;
+                        att.assembly.part_color_legend = assemblyContext.part_color_legend;
                     }
                 }
 
-                // Include selected dimensions from Dimension Explorer
-                if (state.dimExplorerSelectedKeys.size > 0) {
-                    const groups = buildDimExplorerData();
-                    const allDims = Object.values(groups).flat();
-                    const selected = [];
-                    state.dimExplorerSelectedKeys.forEach(key => {
-                        const dim = allDims.find(d => d.dimKey === key);
-                        if (dim) {
-                            selected.push({
-                                annotation: dim.annotationName,
-                                view: dim.viewName,
-                                callout: (dim.dimensionText || dim.foundCallout || '').replace(/<MOD-DIAM>/g, '\u2300').trim(),
-                                description: dim.description || '',
-                                status: dim.status || null,
-                            });
-                        }
-                    });
-                    if (selected.length) {
-                        inspCtx.selected_dimensions = selected;
-                    }
-                }
+                return att;
+            }
 
-                // Send all available dimensions so agents can highlight them
-                const allGroups2 = buildDimExplorerData();
-                const allDimsList = Object.values(allGroups2).flat();
-                if (allDimsList.length > 0) {
-                    inspCtx.available_dimensions = allDimsList.map(d => ({
-                        dim_key: d.dimKey,
-                        annotation: d.annotationName,
-                        view: d.viewName,
-                        callout: (d.dimensionText || d.foundCallout || '').replace(/<MOD-DIAM>/g, '\u2300').trim(),
-                        description: d.description || '',
-                    }));
+            // Produce the flat keys the server still expects from inspection_context.
+            function flattenAttachmentsForLegacy(att) {
+                const flat = {};
+                // Readiness flags
+                flat.has_drawing_file = att.drawing.has_drawing_file;
+                flat.has_part_number = !!att.part.part_number;
+                flat.inspection_in_progress = att.inspection.in_progress;
+                flat.inspection_can_run = att.inspection.can_run;
+                // Part
+                if (att.part.part_number) { flat.part_number = att.part.part_number; flat.part_name = att.part.part_name; }
+                if (att.part.profile_features) flat.profile_features = att.part.profile_features;
+                if (att.part.description) flat.part_description = att.part.description;
+                if (att.part.view_expectations) flat.view_expectations = att.part.view_expectations;
+                if (att.part.focused_feature) flat.focused_feature = att.part.focused_feature;
+                // Inspection results
+                if (att.inspection.has_results) {
+                    flat.gap_summary = att.inspection.gap_summary;
+                    flat.completeness_score = att.inspection.completeness_score;
+                    flat.findings = att.inspection.findings;
+                    flat.representation_gaps = att.inspection.representation_gaps;
+                    flat.critical_issues = att.inspection.critical_issues;
                 }
+                // Selection
+                if (att.selection.dimensions.length) flat.selected_dimensions = att.selection.dimensions;
+                if (att.selection.available_dimensions.length) flat.available_dimensions = att.selection.available_dimensions;
+                if (att.selection.parts.length) flat.selected_parts = att.selection.parts;
+                if (att.selection.available_parts.length) flat.available_parts = att.selection.available_parts;
+                // Drawing views
+                if (att.drawing.available_views.length) flat.available_views = att.drawing.available_views;
+                // Compare
+                if (att.compare.geometry_diff) flat.geometry_diff = att.compare.geometry_diff;
+                // Assembly
+                if (att.assembly.mate_relationships) flat.mate_relationships = att.assembly.mate_relationships;
+                if (att.assembly.configurations) flat.assembly_configurations = att.assembly.configurations;
+                if (att.assembly.active_config) flat.active_assembly_config = att.assembly.active_config;
+                if (att.assembly.part_properties) flat.part_properties = att.assembly.part_properties;
+                if (att.assembly.explode_steps) { flat.explode_steps = att.assembly.explode_steps; flat.part_color_legend = att.assembly.part_color_legend; }
+                return flat;
+            }
 
-                // Available drawing views for agent-driven view highlighting
-                const _dmViews = state.results?.drawing_map;
-                if (_dmViews?.sheets) {
-                    const viewNames = [];
-                    for (const sheet of _dmViews.sheets) {
-                        for (const view of (sheet.views || [])) {
-                            if (view.viewName) viewNames.push(view.viewName);
-                        }
-                    }
-                    if (viewNames.length) {
-                        inspCtx.available_views = viewNames;
-                    }
-                }
-
-                // Part Explorer: send available and selected parts for agent awareness
-                if (assemblyContext && assemblyContext.part_color_legend) {
-                    const legend = assemblyContext.part_color_legend;
-                    inspCtx.available_parts = legend.map(item => ({
-                        part_number: item.part_number,
-                        description: item.description || '',
-                        color: item.color,
-                        centroid_mm: item.centroid_mm || null,
-                    }));
-                    if (state.partExplorerSelectedParts && state.partExplorerSelectedParts.size > 0) {
-                        const selectedParts = [];
-                        state.partExplorerSelectedParts.forEach(pn => {
-                            const item = legend.find(l => l.part_number === pn);
-                            if (item) {
-                                selectedParts.push({
-                                    part_number: item.part_number,
-                                    description: item.description || '',
-                                });
-                            }
-                        });
-                        if (selectedParts.length) {
-                            inspCtx.selected_parts = selectedParts;
-                        }
-                    }
-                    // Mate relationships for agent awareness
-                    if (assemblyContext.all_mate_relationships && assemblyContext.all_mate_relationships.length) {
-                        inspCtx.mate_relationships = assemblyContext.all_mate_relationships;
-                    }
-                    // Assembly configurations (advisory)
-                    if (assemblyContext.configurations && assemblyContext.configurations.length) {
-                        inspCtx.assembly_configurations = assemblyContext.configurations.map(c => ({
-                            name: c.name, parts: c.parts
-                        }));
-                        if (state.activeAssemblyConfig) {
-                            inspCtx.active_assembly_config = state.activeAssemblyConfig;
-                        }
-                    }
-                    // Part physical properties for semantic search
-                    if (assemblyContext.part_properties && assemblyContext.part_properties.length) {
-                        inspCtx.part_properties = assemblyContext.part_properties;
-                    }
-                    // SW explode steps for disassembly ordering
-                    if (assemblyContext.explode_steps && assemblyContext.explode_steps.length) {
-                        inspCtx.explode_steps = assemblyContext.explode_steps;
-                        inspCtx.part_color_legend = assemblyContext.part_color_legend;
-                    }
-                }
-
-                return inspCtx;
+            function buildInspectionContext() {
+                const attachments = buildAgentAttachments(currentAgent);
+                const legacy = flattenAttachmentsForLegacy(attachments);
+                return { ...legacy, attachments };
             }
 
             // Update greeting based on inspection results or profile data
@@ -16791,76 +17011,29 @@
             // Convenience getter for current agent's history
             function getAgentHistory() { return getCurrentAgentSession().messages; }
 
-            function _buildMessageRow(text, role, agentKey) {
-                const row = document.createElement('div');
-                row.className = 'agent-msg-row ' + role;
-
-                const avatar = document.createElement('div');
-                avatar.className = 'agent-msg-avatar';
-                if (role === 'user') {
-                    avatar.classList.add('user-avatar');
-                    avatar.innerHTML = '<img src="/static/avatar_user.png" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="User">';
-                } else {
-                    avatar.classList.add('bot-avatar');
-                    const agent = AGENTS[agentKey];
-                    avatar.innerHTML = agent.avatar;
-                    avatar.style.background = 'transparent';
-                    avatar.style.border = '2px solid ' + agent.color;
-                }
-
-                const content = document.createElement('div');
-                content.className = 'agent-msg-content';
-
-                const name = document.createElement('div');
-                name.className = 'agent-msg-name';
-                name.textContent = role === 'user' ? 'Shadrack' : AGENTS[agentKey].name;
-
-                const msgEl = document.createElement('div');
-                msgEl.className = 'agent-msg ' + role;
-                if (role === 'user') {
-                    msgEl.textContent = text;
-                } else {
-                    msgEl.innerHTML = formatMessageText(text);
-                }
-
-                content.appendChild(name);
-                content.appendChild(msgEl);
-                row.appendChild(avatar);
-                row.appendChild(content);
-                return row;
-            }
-
-            function addMessage(text, role, targetAgentKey) {
-                const agentKey = targetAgentKey || currentAgent;
+            // Append a structured message to a session and render it.
+            // Returns the created message object.
+            function appendTextMessage(text, role, agentKey) {
+                agentKey = agentKey || currentAgent;
                 const session = getAgentSession(agentKey);
-                const isVisible = (agentKey === currentAgent);
+                const msg = createMessage(role, [createTextBlock(text)]);
+                session.messages.push(msg);
 
-                // Always push to canonical session messages
-                session.messages.push({ role, text });
-
-                if (isVisible) {
-                    // Live DOM path
+                // Only render to live DOM if this agent is currently visible.
+                // Off-screen sessions are rebuilt from messages on switch.
+                if (agentKey === currentAgent) {
                     const welcome = agentMessages.querySelector('.agent-welcome');
                     if (welcome) welcome.remove();
                     removeSuggestions();
-
-                    const row = _buildMessageRow(text, role, agentKey);
-                    agentMessages.appendChild(row);
+                    agentMessages.appendChild(renderMessageToDOM(msg, agentKey));
                     agentMessages.scrollTop = agentMessages.scrollHeight;
-                } else {
-                    // Off-screen: update htmlCache via temporary container
-                    const tmp = document.createElement('div');
-                    tmp.innerHTML = session.ui.htmlCache;
-                    const welcome = tmp.querySelector('.agent-welcome');
-                    if (welcome) welcome.remove();
-                    // Remove stale typing indicator from cached HTML
-                    const ti = tmp.querySelector('#agentTypingIndicator');
-                    if (ti) ti.remove();
-
-                    const row = _buildMessageRow(text, role, agentKey);
-                    tmp.appendChild(row);
-                    session.ui.htmlCache = tmp.innerHTML;
                 }
+                return msg;
+            }
+
+            // Backward-compatible wrapper — delegates to appendTextMessage.
+            function addMessage(text, role, targetAgentKey) {
+                return appendTextMessage(text, role, targetAgentKey);
             }
 
             function showTypingIndicator() {
@@ -18096,6 +18269,248 @@
             window._getCurrentAgentKey = () => currentAgent;
             // ── End narration helpers ──
 
+            // === Phase 4: Tool Registry + Action Dispatcher ===
+            const TOOL_REGISTRY = {
+                run_inspection: {
+                    agents: ['inspector'],
+                    execute(args) {
+                        if (!state.file) return { ok: false, error: 'no_drawing' };
+                        if (!state.partNumber) return { ok: false, error: 'no_part_number' };
+                        if (state.inspecting) return { ok: false, error: 'already_running' };
+                        if (window._requestInspectionFromChat) window._requestInspectionFromChat();
+                        return { ok: true, status: 'started' };
+                    }
+                },
+                highlight_dimensions: {
+                    agents: ['inspector', 'deviation-analyst'],
+                    execute(args) {
+                        applyAgentHighlights(args.dim_keys);
+                        return { ok: true, applied: args.dim_keys.length };
+                    }
+                },
+                highlight_views: {
+                    agents: ['inspector', 'deviation-analyst'],
+                    execute(args) {
+                        flashViewBoundaries(args.view_names);
+                        return { ok: true, applied: args.view_names.length };
+                    }
+                },
+                highlight_features: {
+                    agents: ['inspector', 'deviation-analyst'],
+                    execute(args) {
+                        applyFeatureHighlight(args.feature_ids);
+                        return { ok: true, applied: args.feature_ids.length };
+                    }
+                },
+                highlight_parts: {
+                    agents: ['inspector', 'deviation-analyst', 'parts-finder'],
+                    execute(args) {
+                        applyAgentPartHighlights(args.part_numbers, args.camera_view || null);
+                        return { ok: true, applied: args.part_numbers.length };
+                    }
+                },
+                isolate_parts: {
+                    agents: ['inspector', 'deviation-analyst'],
+                    execute(args) {
+                        if (state.motionPlaying) _stopMotion();
+                        if (args.part_numbers[0] === 'RESET') {
+                            _resetIsolation();
+                            _resetExplode();
+                        } else if (state.assyPartMeshMap) {
+                            state.partExplorerSelectedParts.clear();
+                            state.partExplorerAgentParts.clear();
+                            applyPartHighlight3D();
+                            _animateIsolate(args.part_numbers, 800);
+                        }
+                        return { ok: true };
+                    }
+                },
+                compare_parts: {
+                    agents: ['deviation-analyst'],
+                    execute(args) {
+                        _autoOpenAssemblyCompareAndHighlight(args.markers);
+                        return { ok: true };
+                    }
+                },
+                compare_features: {
+                    agents: ['deviation-analyst'],
+                    execute(args) {
+                        _autoOpenPartCompareAndHighlight(args.markers);
+                        return { ok: true };
+                    }
+                },
+                show_geometry_diff: {
+                    agents: ['deviation-analyst'],
+                    async execute(args) {
+                        if (!state._geometryDiffResult || state._geometryDiffResult.identical) {
+                            return { ok: false, error: 'no_diff_data' };
+                        }
+                        if (state.activeTab !== '3dmodel' || partDiffState.activeSubtab !== 'compare') {
+                            partDiffState.activeSubtab = 'compare';
+                            switchTab('3dmodel');
+                        }
+                        await new Promise(resolve => {
+                            const check = setInterval(() => {
+                                if (partDiffState.viewerA && partDiffState.viewerB) { clearInterval(check); resolve(); }
+                            }, 100);
+                            setTimeout(() => { clearInterval(check); resolve(); }, 5000);
+                        });
+                        await _ensureGeometryDiffContext();
+                        const gr = state._geometryDiffVisualResult;
+                        if (!gr) return { ok: false, error: 'no_visual_payload' };
+                        _showGeometryDiffResult(gr, gr.part_number, gr.revA, gr.revB);
+                        return { ok: true };
+                    }
+                },
+                animate_motion: {
+                    agents: ['deviation-analyst'],
+                    execute(args) {
+                        if (args.action === 'start' && !state.motionPlaying) _toggleMotion();
+                        else if (args.action === 'stop' && state.motionPlaying) _stopMotion();
+                        return { ok: true };
+                    }
+                },
+                set_explode_level: {
+                    agents: ['deviation-analyst'],
+                    execute(args) {
+                        if (state.motionPlaying) _stopMotion();
+                        if (state.assyPartMeshMap && state.assyExplodeVectors) {
+                            _animateExplode(args.level);
+                        } else {
+                            state._pendingExplodeLevel = args.level;
+                        }
+                        return { ok: true };
+                    }
+                },
+                fai_fill: {
+                    agents: ['inspector'],
+                    execute(args) {
+                        const values = args.values || {};
+                        let applied = 0;
+                        for (const [key, val] of Object.entries(values)) {
+                            const c = state.faiCharacteristics.find(ch =>
+                                String(ch.charNumber) === key || ch.key === key
+                            );
+                            if (c) {
+                                state.faiMeasurements[c.key] = String(val);
+                                applied++;
+                            }
+                        }
+                        if (applied > 0 && typeof renderFaiTable === 'function') {
+                            const container = document.getElementById('faiTableContainer');
+                            if (container) { container.innerHTML = ''; renderFaiTable(container); }
+                        }
+                        return { ok: applied > 0, applied };
+                    }
+                },
+                fai_tol: {
+                    agents: ['inspector'],
+                    execute(args) {
+                        const values = args.values || {};
+                        let applied = 0;
+                        for (const [key, val] of Object.entries(values)) {
+                            const c = state.faiCharacteristics.find(ch =>
+                                String(ch.charNumber) === key || ch.key === key
+                            );
+                            if (c) {
+                                state.faiTolOverrides[c.key] = { plus: String(val), minus: String(val) };
+                                applied++;
+                            }
+                        }
+                        if (applied > 0 && typeof renderFaiTable === 'function') {
+                            const container = document.getElementById('faiTableContainer');
+                            if (container) { container.innerHTML = ''; renderFaiTable(container); }
+                        }
+                        return { ok: applied > 0, applied };
+                    }
+                },
+            };
+
+            // Convert legacy response fields into canonical tool_calls array.
+            function normalizeLegacyResponseToToolCalls(data, originAgent) {
+                const calls = [];
+                if (Array.isArray(data.highlight_dimensions) && data.highlight_dimensions.length > 0) {
+                    calls.push({ name: 'highlight_dimensions', args: { dim_keys: data.highlight_dimensions } });
+                }
+                if (Array.isArray(data.highlight_views) && data.highlight_views.length > 0) {
+                    calls.push({ name: 'highlight_views', args: { view_names: data.highlight_views } });
+                }
+                if (Array.isArray(data.highlight_features) && data.highlight_features.length > 0) {
+                    calls.push({ name: 'highlight_features', args: { feature_ids: data.highlight_features } });
+                }
+                if (Array.isArray(data.compare_features) && data.compare_features.length > 0) {
+                    calls.push({ name: 'compare_features', args: { markers: data.compare_features } });
+                }
+                // compare_parts takes precedence over highlight_parts
+                const hasCompareParts = Array.isArray(data.compare_parts) && data.compare_parts.length > 0;
+                const hasIsolate = Array.isArray(data.isolate_parts) && data.isolate_parts.length > 0;
+                const hasNarration = Array.isArray(data.narration_segments) && data.narration_segments.length > 1;
+                if (hasCompareParts) {
+                    calls.push({ name: 'compare_parts', args: { markers: data.compare_parts } });
+                } else if (!hasNarration && !hasIsolate
+                    && Array.isArray(data.highlight_parts) && data.highlight_parts.length > 0) {
+                    calls.push({ name: 'highlight_parts', args: { part_numbers: data.highlight_parts, camera_view: data.camera_view || null } });
+                }
+                if (hasIsolate) {
+                    calls.push({ name: 'isolate_parts', args: { part_numbers: data.isolate_parts } });
+                }
+                if (data.show_geometry_diff) {
+                    calls.push({ name: 'show_geometry_diff', args: {} });
+                }
+                if (data.run_inspection) {
+                    calls.push({ name: 'run_inspection', args: {} });
+                }
+                // Skip motion/explode for narration responses (narration block handles them)
+                if (!data._isNarration) {
+                    if (data.animate_motion === 'start') {
+                        calls.push({ name: 'animate_motion', args: { action: 'start' } });
+                    } else if (data.animate_motion === 'stop') {
+                        calls.push({ name: 'animate_motion', args: { action: 'stop' } });
+                    } else if (data.explode_level !== undefined && data.explode_level !== null) {
+                        calls.push({ name: 'set_explode_level', args: { level: data.explode_level } });
+                    }
+                }
+                // FAI chat actions
+                if (data.fai_fills && typeof data.fai_fills === 'object' && Object.keys(data.fai_fills).length > 0) {
+                    calls.push({ name: 'fai_fill', args: { values: data.fai_fills } });
+                }
+                if (data.fai_tol && typeof data.fai_tol === 'object' && Object.keys(data.fai_tol).length > 0) {
+                    calls.push({ name: 'fai_tol', args: { values: data.fai_tol } });
+                }
+                return calls;
+            }
+
+            // Execute a single tool call. Returns { ok, name, ... }.
+            async function executeToolCall(toolCall, originAgent) {
+                const tool = TOOL_REGISTRY[toolCall.name];
+                if (!tool) {
+                    console.warn('[ToolDispatch] Unknown tool:', toolCall.name);
+                    return { ok: false, name: toolCall.name, error: 'unknown_tool' };
+                }
+                if (tool.agents && !tool.agents.includes(originAgent)) {
+                    console.warn('[ToolDispatch] Tool not allowed for agent:', toolCall.name, originAgent);
+                    return { ok: false, name: toolCall.name, error: 'agent_not_allowed' };
+                }
+                try {
+                    const result = await tool.execute(toolCall.args || {});
+                    console.log('[ToolDispatch]', toolCall.name, result);
+                    return { ...result, name: toolCall.name };
+                } catch (err) {
+                    console.error('[ToolDispatch] Error in', toolCall.name, err);
+                    return { ok: false, name: toolCall.name, error: err.message };
+                }
+            }
+
+            // Execute all tool calls in order. Returns array of results.
+            async function executeToolCalls(toolCalls, originAgent) {
+                const results = [];
+                for (const tc of toolCalls) {
+                    results.push(await executeToolCall(tc, originAgent));
+                }
+                return results;
+            }
+            // === End Tool Registry ===
+
             async function handleAgentSend() {
                 const isBargeIn = state.narrationState === 'answering';
                 const bargeInSessionId = state.narrationSessionId;
@@ -18221,9 +18636,7 @@
                     }
 
                     // Build history with 'content' field for backend
-                    const historyForApi = originSession.messages.slice(0, -1).map(m => ({
-                        role: m.role, content: m.text
-                    }));
+                    const historyForApi = flattenMessagesForApi(originSession.messages.slice(0, -1));
 
                     // POST to /api/agent/chat
                     // Wait for any in-flight cross-agent summarize to finish
@@ -18256,116 +18669,29 @@
                             'isolate_parts:', data.isolate_parts,
                             'narration_segments:', data.narration_segments ? data.narration_segments.length : 'none',
                             'asme_refs:', data.asme_refs ? data.asme_refs.length : 'none');
-                        // Agent-driven dimension highlighting
-                        if (Array.isArray(data.highlight_dimensions) && data.highlight_dimensions.length > 0) {
-                            applyAgentHighlights(data.highlight_dimensions);
+                        // Detect narration BEFORE tool dispatch (narration owns its own explode_level)
+                        if (Array.isArray(data.narration_segments) && data.narration_segments.length > 1) {
+                            data._isNarration = true;
                         }
-                        // Agent-driven view highlighting (flash on drawing)
-                        if (Array.isArray(data.highlight_views) && data.highlight_views.length > 0) {
-                            flashViewBoundaries(data.highlight_views);
+                        // === Tool dispatch (Phase 4) ===
+                        // Use canonical tool_calls if server provides them, else convert legacy fields.
+                        // Pass _isNarration flag so normalizer can skip actions the narration block handles.
+                        const toolCalls = data.tool_calls || normalizeLegacyResponseToToolCalls(data, originAgent);
+                        if (toolCalls.length > 0) {
+                            await executeToolCalls(toolCalls, originAgent);
                         }
-                        // Agent-driven feature highlighting (per-feature on part 3D model)
-                        if (Array.isArray(data.highlight_features) && data.highlight_features.length > 0) {
-                            console.log('[Handler] Highlighting features:', data.highlight_features);
-                            applyFeatureHighlight(data.highlight_features);
-                        } else if (state.featureHighlightActive) {
+                        // Clear feature highlights if no highlight_features tool was dispatched
+                        if (state.featureHighlightActive && !toolCalls.some(tc => tc.name === 'highlight_features')) {
                             clearFeatureHighlights();
                         }
-                        // Agent-driven part compare highlighting (dual-view revision comparison)
-                        if (Array.isArray(data.compare_features) && data.compare_features.length > 0) {
-                            console.log('[Handler] Compare features:', data.compare_features);
-                            _autoOpenPartCompareAndHighlight(data.compare_features);
-                        }
-                        // Agent-driven assembly compare highlighting (dual-view revision comparison)
-                        // Takes precedence over highlight_parts when present
-                        if (Array.isArray(data.compare_parts) && data.compare_parts.length > 0) {
-                            console.log('[Handler] Compare parts:', data.compare_parts);
-                            _autoOpenAssemblyCompareAndHighlight(data.compare_parts);
-                        }
-                        // Multi-segment narration response
-                        else if (Array.isArray(data.narration_segments) && data.narration_segments.length > 1) {
-                            data._isNarration = true;
-                            console.log('[Handler] Narration mode:', data.narration_segments.length, 'segments');
-                        }
-                        // Agent-driven part highlighting (skip if isolation or compare_parts in same response)
-                        else if (Array.isArray(data.highlight_parts) && data.highlight_parts.length > 0
-                            && !(Array.isArray(data.isolate_parts) && data.isolate_parts.length > 0)) {
-                            console.log('[Handler] Highlighting parts:', data.highlight_parts, 'camera:', data.camera_view);
-                            applyAgentPartHighlights(data.highlight_parts, data.camera_view || null);
-                        }
-                        // Agent-driven part isolation (stop motion first for mutual exclusion)
-                        if (Array.isArray(data.isolate_parts) && data.isolate_parts.length > 0) {
-                            if (state.motionPlaying) _stopMotion();
-                            console.log('[Handler] Isolation requested:', data.isolate_parts,
-                                'meshMap:', !!state.assyPartMeshMap,
-                                'swSteps:', state.assyExplodeSteps ? state.assyExplodeSteps.length : 'null',
-                                'radialVecs:', state.assyExplodeVectors ? Object.keys(state.assyExplodeVectors).length : 'null');
-                            if (data.isolate_parts[0] === 'RESET') {
-                                _resetIsolation();
-                                _resetExplode();
-                            } else if (state.assyPartMeshMap) {
-                                // Clear any active highlights — isolation is clean separation only
-                                state.partExplorerSelectedParts.clear();
-                                state.partExplorerAgentParts.clear();
-                                applyPartHighlight3D();
-                                _animateIsolate(data.isolate_parts, 800);
-                            }
-                        }
-                        // Agent-driven geometry diff overlay
-                        if (data.show_geometry_diff && state._geometryDiffResult && !state._geometryDiffResult.identical) {
-                            (async () => {
-                                // Switch to Compare view if needed
-                                if (state.activeTab !== '3dmodel' || partDiffState.activeSubtab !== 'compare') {
-                                    partDiffState.activeSubtab = 'compare';
-                                    switchTab('3dmodel');
-                                }
-                                // Wait for compare viewers to load
-                                await new Promise(resolve => {
-                                    const check = setInterval(() => {
-                                        if (partDiffState.viewerA && partDiffState.viewerB) {
-                                            clearInterval(check);
-                                            resolve();
-                                        }
-                                    }, 100);
-                                    setTimeout(() => { clearInterval(check); resolve(); }, 5000);
-                                });
-                                // Ensure full visual payload is available for STL alignment.
-                                await _ensureGeometryDiffContext();
-                                const gr = state._geometryDiffVisualResult;
-                                if (!gr) {
-                                    console.warn('[GeoDiff] show_geometry_diff requested, but no visual payload is available.');
-                                    return;
-                                }
-                                _showGeometryDiffResult(gr, gr.part_number, gr.revA, gr.revB);
-                            })();
-                        }
-                        // Agent-triggered inspection run (Iris only)
-                        if (data.run_inspection && originAgent === 'inspector') {
-                            if (window._requestInspectionFromChat) window._requestInspectionFromChat();
-                        }
-                        // ASME reference popup from agent response
+                        // Non-tool actions outside the registry:
+                        // ASME reference popup (stays on its own path for now)
                         if (Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
-                            console.log('[ASME refs] Received:', data.asme_refs.length, 'refs, first:', data.asme_refs[0]?.feature_type);
                             _showAsmeRefsFromResponse(data.asme_refs);
                         }
-                        // Agent-driven motion animation
-                        if (data.animate_motion === 'start') {
-                            if (!state.motionPlaying) _toggleMotion();
-                        } else if (data.animate_motion === 'stop') {
-                            if (state.motionPlaying) _stopMotion();
-                        }
-                        // Agent-driven exploded view (stop motion first for mutual exclusion)
-                        else if (data.explode_level !== undefined && data.explode_level !== null) {
-                            if (state.motionPlaying) _stopMotion();
-                            if (state.assyPartMeshMap && state.assyExplodeVectors) {
-                                _animateExplode(data.explode_level);
-                            } else {
-                                state._pendingExplodeLevel = data.explode_level;
-                            }
-                        }
-                        // Store data for narration handling after try/catch
+                        // Store narration data for handling after try/catch
                         if (data._isNarration) {
-                            response = data; // pass full object for narration handling below
+                            response = data;
                         }
                     } else {
                         const errData = await res.json().catch(() => ({}));
@@ -18405,7 +18731,10 @@
                     const walkthroughKeywords = /walk\s*(me\s+)?through|narrat|give\s*(me\s+)?a\s+tour|guided\s+tour|tour\s+of|explain\s+the\s+assembly|tell\s+me\s+about\s+(this|the)\s+assembly/i;
                     const isTypedWalkthrough = !voiceTriggered && !state.narrationTriggered && walkthroughKeywords.test(displayText);
                     const isAutoPlay = state.narrationTriggered || voiceTriggered || isTypedWalkthrough;
-                    addMessage(isAutoPlay ? '' : textResponse, 'assistant', originAgent);
+                    // Always store the full text in the message (canonical data).
+                    // For auto-play, the DOM is cleared by _enhanceWithNarrationSegments —
+                    // but the session message retains the text for restore.
+                    const narrationMsg = addMessage(textResponse, 'assistant', originAgent);
 
                     // Apply explode level for narration responses (stop motion first)
                     if (data.explode_level !== undefined && data.explode_level !== null) {
@@ -18711,9 +19040,7 @@
                     }
                 }
                 const inspCtx = buildInspectionContext();
-                const historyForApi = originSession.messages.slice(0, -1).map(m => ({
-                    role: m.role, content: m.text
-                }));
+                const historyForApi = flattenMessagesForApi(originSession.messages.slice(0, -1));
 
                 // Wait for any in-flight cross-agent summarize to finish
                 await crossContextReady;
@@ -18883,32 +19210,14 @@
             }
 
             // Add a system-style notification message to the chat
-            function addNotificationMessage(text) {
-                const row = document.createElement('div');
-                row.className = 'agent-msg-row assistant';
-
-                const agent = AGENTS[currentAgent];
-                const avatar = document.createElement('div');
-                avatar.className = 'agent-msg-avatar bot-avatar';
-                avatar.innerHTML = agent.avatar;
-                avatar.style.background = 'transparent';
-                avatar.style.border = '2px solid ' + agent.color;
-
-                const content = document.createElement('div');
-                content.className = 'agent-msg-content';
-                const name = document.createElement('div');
-                name.className = 'agent-msg-name';
-                name.textContent = agent.name;
-                const msgEl = document.createElement('div');
-                msgEl.className = 'agent-msg assistant';
-                msgEl.style.cssText = 'font-style:italic; opacity:0.8; font-size:12px; border-left:2px solid var(--accent); padding-left:10px;';
-                msgEl.textContent = text;
-                content.appendChild(name);
-                content.appendChild(msgEl);
-                row.appendChild(avatar);
-                row.appendChild(content);
-
-                agentMessages.appendChild(row);
+            // Append a notification message to the current agent's session.
+            function addNotificationMessage(text, opts) {
+                const agentKey = currentAgent;
+                const session = getCurrentAgentSession();
+                const msg = createMessage('system', [createNotificationBlock(text, opts && opts.html)]);
+                session.messages.push(msg);
+                // Render into live DOM (notifications are always on the visible agent)
+                agentMessages.appendChild(renderMessageToDOM(msg, agentKey));
                 agentMessages.scrollTop = agentMessages.scrollHeight;
             }
 
@@ -18953,7 +19262,7 @@
                         refsHtml += '<button style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.2);border-radius:4px;font-size:11px;color:var(--accent);cursor:pointer;border:1px solid rgba(79,195,247,0.2);font-family:inherit;" onclick=\'_showAsmeRefPopup(' + JSON.stringify(ref).replace(/'/g, "\\'") + ')\'>\uD83D\uDCD6 ' + label + (page ? ' (' + page + ')' : '') + '</button>';
                     });
                     refsHtml += '</div>';
-                    addNotificationMessage(summaryText + refsHtml);
+                    addNotificationMessage(summaryText + refsHtml, { html: true });
                 }
             };
 
@@ -19009,7 +19318,6 @@
 
                 // Save leaving agent's UI state into its session
                 const leavingSession = getCurrentAgentSession();
-                leavingSession.ui.htmlCache = agentMessages.innerHTML;
                 leavingSession.scrollTop = agentMessages.scrollTop;
                 leavingSession.pendingInput = agentInput.value;
                 leavingSession.pendingCapture = agentCapturedImage ? agentCapturedImage : null;
@@ -19064,7 +19372,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            history: prevHistory.map(m => ({ role: m.role, text: m.text })),
+                            history: flattenMessagesForApi(prevHistory),
                             agent_name: AGENTS[prevAgent].name,
                             part_number: partNumber,
                         }),
@@ -19079,15 +19387,24 @@
                 currentAgent = agentKey;
                 const targetSession = getCurrentAgentSession();
 
-                // Restore target agent's messages HTML from session
-                if (targetSession.ui.htmlCache) {
-                    agentMessages.innerHTML = targetSession.ui.htmlCache;
-                    // Recovery: render deferred inspection progress card final state
-                    if (agentKey === 'inspector' && state._inspCardPendingFinalRender) {
-                        setTimeout(() => { if (typeof _renderFinalInspCard === 'function') _renderFinalInspCard(); }, 100);
+                // Restore target agent's chat from session messages (primary path)
+                if (targetSession.messages.length > 0) {
+                    agentMessages.innerHTML = '';
+                    agentMessages.appendChild(renderSession(targetSession));
+                    // Recovery: re-inject inspection progress card (DOM-only lifecycle)
+                    if (agentKey === 'inspector') {
+                        if (state._inspCardPendingFinalRender) {
+                            // Deferred final state
+                            setTimeout(() => { if (typeof _renderFinalInspCard === 'function') _renderFinalInspCard(); }, 100);
+                        } else if (state.inspecting && state._inspectionFromChat && window._buildInspProgressCard) {
+                            // Still running: re-inject the live card
+                            const card = window._buildInspProgressCard();
+                            agentMessages.appendChild(card);
+                            agentMessages.scrollTop = agentMessages.scrollHeight;
+                        }
                     }
                 } else {
-                    // Show agent-specific welcome for new agent
+                    // No messages yet: show agent-specific welcome
                     agentMessages.innerHTML = '<div class="agent-welcome">' + (AGENTS[currentAgent]._welcome || 'How can I help?') + '</div>';
                 }
                 // Suggestion chips are Iris-only Ã¢â‚¬â€ strip from other agents

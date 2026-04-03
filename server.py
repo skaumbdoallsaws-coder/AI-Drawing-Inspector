@@ -1777,7 +1777,8 @@ async def agent_suggestions(request: AgentSuggestionsRequest):
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        ctx = request.inspection_context
+        raw_ctx = request.inspection_context or {}
+        ctx = normalize_agent_context(raw_ctx)["flat"]
         # Build concise context for suggestion generation
         context_parts = []
         pn = ctx.get("part_number", "")
@@ -2516,7 +2517,7 @@ def build_tool_appendix(agent_type: str) -> str:
         "",
         "",
         "TOOL CALLS",
-        "You may optionally request UI actions by emitting a <tool_calls> JSON block at the end of your response.",
+        "When an action is needed, emit a <tool_calls> JSON block at the end of your response.",
         "",
         "Rules:",
         "- Use only the tools listed below.",
@@ -2525,7 +2526,7 @@ def build_tool_appendix(agent_type: str) -> str:
         "- Only emit tool calls when they directly help answer the user's request.",
         "- Keep arguments minimal and specific.",
         "- Do not emit duplicate or conflicting tool calls.",
-        "- Do not emit legacy markers (HIGHLIGHT_DIMS:, RUN_INSPECTION, etc.) when using <tool_calls>.",
+        "- Use <tool_calls> instead of legacy markers (HIGHLIGHT_DIMS:, RUN_INSPECTION, etc.).",
         "",
         "Format:",
         "<tool_calls>",
@@ -2613,40 +2614,104 @@ def _load_rag_images(directories: List[str], max_images: int = 4) -> List[Dict]:
 def normalize_agent_context(ctx: dict) -> dict:
     """
     Normalize incoming inspection_context into structured attachments + flat compat.
-    The frontend currently sends both flat keys AND nested attachments (Phase 3
-    transitional format). This function extracts both and ensures the flat dict
-    has the keys that agent-enrichment code reads directly (part_number,
-    selected_parts, available_parts, critical_issues, representation_gaps).
-    _build_context_message() reads all other flat keys from the flat dict as-is.
-    Full attachments-only support is NOT implemented yet — the frontend must
-    continue sending flat keys until all server reads are migrated.
-    Returns: { 'attachments': {...structured...}, 'flat': {...legacy keys...} }
+    Phase 6: the frontend now sends attachments-only. This function fully
+    reconstructs all flat keys from attachments so all server code works unchanged.
+    Also accepts legacy flat payloads for backward compat.
+    Returns: { 'attachments': {...structured...}, 'flat': {...all legacy keys...} }
     """
     if not ctx:
         return {"attachments": {}, "flat": {}}
 
     attachments = ctx.get("attachments", {})
 
-    # Build flat from everything except the attachments key itself
+    # Start with any non-attachments flat keys already present (legacy compat)
     flat = {k: v for k, v in ctx.items() if k != "attachments"}
 
-    # If attachments are present, ensure flat has all the keys the server
-    # currently reads directly (part_number, selected_parts, etc.)
+    # Reconstruct ALL flat keys from structured attachments
     if attachments:
         part = attachments.get("part", {})
-        if part.get("part_number") and "part_number" not in flat:
-            flat["part_number"] = part["part_number"]
-            flat["part_name"] = part.get("part_name")
-        sel = attachments.get("selection", {})
-        if sel.get("parts") and "selected_parts" not in flat:
-            flat["selected_parts"] = sel["parts"]
-        if sel.get("available_parts") and "available_parts" not in flat:
-            flat["available_parts"] = sel["available_parts"]
+        drawing = attachments.get("drawing", {})
         insp = attachments.get("inspection", {})
-        if insp.get("critical_issues") and "critical_issues" not in flat:
-            flat["critical_issues"] = insp["critical_issues"]
-        if insp.get("representation_gaps") and "representation_gaps" not in flat:
-            flat["representation_gaps"] = insp["representation_gaps"]
+        sel = attachments.get("selection", {})
+        compare = attachments.get("compare", {})
+        assembly = attachments.get("assembly", {})
+        session = attachments.get("session", {})
+
+        # Part
+        flat.setdefault("part_number", part.get("part_number"))
+        flat.setdefault("part_name", part.get("part_name"))
+        if part.get("profile_features"):
+            flat.setdefault("profile_features", part["profile_features"])
+        if part.get("description"):
+            flat.setdefault("part_description", part["description"])
+        if part.get("view_expectations"):
+            flat.setdefault("view_expectations", part["view_expectations"])
+        if part.get("focused_feature"):
+            flat.setdefault("focused_feature", part["focused_feature"])
+        if part.get("available_cad_features"):
+            flat.setdefault("available_cad_features", part["available_cad_features"])
+
+        # Drawing
+        flat.setdefault("has_drawing_file", drawing.get("has_drawing_file", False))
+        if drawing.get("available_views"):
+            flat.setdefault("available_views", drawing["available_views"])
+
+        # Inspection
+        flat.setdefault("has_part_number", bool(part.get("part_number")))
+        flat.setdefault("inspection_in_progress", insp.get("in_progress", False))
+        flat.setdefault("inspection_can_run", insp.get("can_run", False))
+        if insp.get("gap_summary"):
+            flat.setdefault("gap_summary", insp["gap_summary"])
+            flat.setdefault("completeness_score", insp.get("completeness_score"))
+        if insp.get("findings"):
+            flat.setdefault("findings", insp["findings"])
+        if insp.get("representation_gaps"):
+            flat.setdefault("representation_gaps", insp["representation_gaps"])
+        if insp.get("critical_issues"):
+            flat.setdefault("critical_issues", insp["critical_issues"])
+        if insp.get("fai_characteristics"):
+            flat.setdefault("fai_characteristics", insp["fai_characteristics"])
+
+        # Selection
+        if sel.get("dimensions"):
+            flat.setdefault("selected_dimensions", sel["dimensions"])
+        if sel.get("available_dimensions"):
+            flat.setdefault("available_dimensions", sel["available_dimensions"])
+        if sel.get("parts"):
+            flat.setdefault("selected_parts", sel["parts"])
+        if sel.get("available_parts"):
+            flat.setdefault("available_parts", sel["available_parts"])
+
+        # Compare
+        if compare.get("geometry_diff"):
+            flat.setdefault("geometry_diff", compare["geometry_diff"])
+        if compare.get("assembly_compare_available"):
+            flat.setdefault("compare_mode_available", True)
+            flat.setdefault("compare_mode_active", compare.get("assembly_compare_active", False))
+        if compare.get("revision_diff"):
+            flat.setdefault("revision_diff", compare["revision_diff"])
+        if compare.get("part_feature_diff"):
+            flat.setdefault("part_feature_diff", compare["part_feature_diff"])
+            flat.setdefault("part_compare_active", compare.get("part_compare_active", False))
+        if compare.get("part_revisions"):
+            flat.setdefault("part_revisions", compare["part_revisions"])
+
+        # Assembly
+        if assembly.get("mate_relationships"):
+            flat.setdefault("mate_relationships", assembly["mate_relationships"])
+        if assembly.get("configurations"):
+            flat.setdefault("assembly_configurations", assembly["configurations"])
+        if assembly.get("active_config"):
+            flat.setdefault("active_assembly_config", assembly["active_config"])
+        if assembly.get("part_properties"):
+            flat.setdefault("part_properties", assembly["part_properties"])
+        if assembly.get("explode_steps"):
+            flat.setdefault("explode_steps", assembly["explode_steps"])
+            flat.setdefault("part_color_legend", assembly.get("part_color_legend"))
+
+        # Session
+        if session.get("paused_walkthrough"):
+            flat.setdefault("paused_walkthrough", session["paused_walkthrough"])
 
     return {"attachments": attachments, "flat": flat}
 
@@ -3956,19 +4021,21 @@ async def agent_chat(request: AgentChatRequest):
         # Always update response with final cleaned text
         result["response"] = response_text
 
-        # Phase 4C: Native tool_calls take precedence over legacy-mirrored ones
+        # Phase 6: tool_calls is canonical. Native wins over legacy markers.
         if native_tool_calls:
             result["tool_calls"] = native_tool_calls
             result["tool_source"] = "native"
-            # Clear all action fields that markers may have populated,
-            # then re-populate only from native tool calls
+            # Clear conflicting marker-derived action fields
             for key in ("highlight_dimensions", "highlight_views", "highlight_features",
                         "highlight_parts", "camera_view", "isolate_parts",
                         "compare_parts", "compare_features", "show_geometry_diff",
                         "run_inspection", "animate_motion", "explode_level",
                         "fai_fills", "fai_tol"):
                 result.pop(key, None)
-            apply_tool_calls_to_legacy_result(result, native_tool_calls)
+            # Mirror back to legacy fields only for agents that still need them
+            # (Scout SSE consumers). Iris/Sage frontend uses tool_calls directly.
+            if request.agent_type == "parts-finder":
+                apply_tool_calls_to_legacy_result(result, native_tool_calls)
         else:
             # Fallback: build tool_calls from legacy marker-parsed fields
             tool_calls = build_tool_calls_from_result(result)

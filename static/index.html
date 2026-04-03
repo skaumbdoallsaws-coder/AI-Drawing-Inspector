@@ -16280,9 +16280,6 @@
                     requestId: 0,
                     lastPayload: null,
                     pendingCrossContext: null,
-                    ui: {
-                        htmlCache: '',           // temporary compatibility bridge
-                    },
                 };
             }
 
@@ -16460,6 +16457,176 @@
             }
             // === End Message Schema ===
 
+            // === Phase 5: Persistence + Recovery ===
+            const AGENT_STATE_STORAGE_KEY = 'inspectorpro.agent_state.v1';
+            const SNAPSHOT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+            let _saveTimer = null;
+
+            function serializeMessageForPersistence(msg) {
+                const clone = JSON.parse(JSON.stringify(msg));
+                if (clone.blocks) {
+                    for (const block of clone.blocks) {
+                        if (block.type === 'image' && block.dataUrl) {
+                            block.dataUrl = null;
+                            block._stripped = true;
+                        }
+                    }
+                }
+                return clone;
+            }
+
+            function serializeSessionForPersistence(session) {
+                return {
+                    key: session.key,
+                    messages: session.messages.map(serializeMessageForPersistence),
+                    summary: session.summary,
+                    scrollTop: session.scrollTop,
+                    pendingInput: session.pendingInput,
+                    pendingCrossContext: session.pendingCrossContext,
+                };
+            }
+
+            function buildRecoveryState() {
+                return {
+                    part: {
+                        part_number: state.partNumber || null,
+                        part_name: state.partName || null,
+                    },
+                    inspection: {
+                        from_chat: !!state._inspectionFromChat,
+                        outcome: state._inspectionOutcome || null,
+                        error: state._inspectionError || null,
+                        elapsed_s: state._inspCardElapsed || null,
+                        pending_final_card: !!state._inspCardPendingFinalRender,
+                        was_running_at_save: !!state.inspecting,
+                    },
+                };
+            }
+
+            function buildAgentStateSnapshot() {
+                return {
+                    version: 1,
+                    savedAt: Date.now(),
+                    currentAgent: currentAgent,
+                    sessions: {
+                        'inspector': serializeSessionForPersistence(getAgentSession('inspector')),
+                        'deviation-analyst': serializeSessionForPersistence(getAgentSession('deviation-analyst')),
+                        'parts-finder': serializeSessionForPersistence(getAgentSession('parts-finder')),
+                    },
+                    recovery: buildRecoveryState(),
+                };
+            }
+
+            function saveAgentStateNow() {
+                try {
+                    const snapshot = buildAgentStateSnapshot();
+                    localStorage.setItem(AGENT_STATE_STORAGE_KEY, JSON.stringify(snapshot));
+                } catch (e) {
+                    console.warn('[Persist] Save failed:', e.message);
+                }
+            }
+
+            function scheduleAgentStateSave() {
+                if (_saveTimer) clearTimeout(_saveTimer);
+                _saveTimer = setTimeout(saveAgentStateNow, 500);
+            }
+
+            function loadAgentStateSnapshot() {
+                try {
+                    const raw = localStorage.getItem(AGENT_STATE_STORAGE_KEY);
+                    if (!raw) return null;
+                    const snapshot = JSON.parse(raw);
+                    if (!snapshot || snapshot.version !== 1) {
+                        localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
+                        return null;
+                    }
+                    if (Date.now() - snapshot.savedAt > SNAPSHOT_MAX_AGE_MS) {
+                        localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
+                        return null;
+                    }
+                    return snapshot;
+                } catch (e) {
+                    console.warn('[Persist] Load failed:', e.message);
+                    localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
+                    return null;
+                }
+            }
+
+            function clearPersistedAgentState() {
+                localStorage.removeItem(AGENT_STATE_STORAGE_KEY);
+            }
+
+            function deserializePersistedMessage(raw) {
+                if (!raw.id) raw.id = _nextMsgId();
+                if (raw.blocks) {
+                    for (const block of raw.blocks) {
+                        if (block.type === 'image' && block._stripped) {
+                            block.type = 'notification';
+                            block.text = block.label || '[Image not restored after reload]';
+                            block.html = false;
+                            delete block._stripped;
+                            delete block.dataUrl;
+                        }
+                    }
+                }
+                return raw;
+            }
+
+            function restoreSessionFromSnapshot(agentKey, rawSession) {
+                const session = getAgentSession(agentKey);
+                session.messages = (rawSession.messages || []).map(deserializePersistedMessage);
+                session.summary = rawSession.summary || '';
+                session.scrollTop = rawSession.scrollTop || 0;
+                session.pendingInput = rawSession.pendingInput || '';
+                session.pendingCrossContext = rawSession.pendingCrossContext || null;
+                session.waiting = false;
+                session.requestId = 0;
+                session.pendingCapture = null;
+                // Keep _msgIdSeq ahead of restored IDs
+                for (const msg of session.messages) {
+                    const num = parseInt((msg.id || '').replace('msg_', ''), 10);
+                    if (!isNaN(num) && num >= _msgIdSeq) _msgIdSeq = num + 1;
+                }
+            }
+
+            function restoreAgentStateSnapshot(snapshot) {
+                if (!snapshot || !snapshot.sessions) return false;
+                for (const key of ['inspector', 'deviation-analyst', 'parts-finder']) {
+                    if (snapshot.sessions[key]) {
+                        restoreSessionFromSnapshot(key, snapshot.sessions[key]);
+                    }
+                }
+                return snapshot;
+            }
+
+            function handleInterruptedRecovery(recovery) {
+                if (!recovery) return;
+                const insp = recovery.inspection;
+                if (!insp) return;
+
+                // Restore terminal inspection state into runtime for final-card rendering
+                if (insp.outcome) {
+                    state._inspectionOutcome = insp.outcome;
+                    state._inspectionError = insp.error || null;
+                    state._inspCardElapsed = insp.elapsed_s || null;
+                    state._inspCardPendingFinalRender = !!insp.pending_final_card;
+                    state._inspectionFromChat = !!insp.from_chat;
+                }
+
+                // Interrupted (was running, no terminal outcome)
+                if (insp.was_running_at_save && !insp.outcome) {
+                    const session = getAgentSession('inspector');
+                    session.messages.push(createMessage('system', [
+                        createNotificationBlock('Previous inspection was interrupted by a page reload. Re-run inspection if needed.')
+                    ]));
+                    // Save immediately to prevent duplicate on re-reload
+                    scheduleAgentStateSave();
+                }
+            }
+
+            window.addEventListener('beforeunload', saveAgentStateNow);
+            // === End Persistence ===
+
             // Feature #146: Assembly reference views in chat panel
             let assemblyViewsLoaded = false;
             let assemblyViewsData = null;
@@ -16467,7 +16634,7 @@
             // Build inspection context from current app state
             // === Phase 3: Structured Attachments ===
             // buildAgentAttachments() produces clean structured context.
-            // flattenAttachmentsForLegacy() maps it to the flat keys the server still expects.
+            // Server normalize_agent_context() reconstructs flat keys from attachments.
             // buildInspectionContext() returns { ...flat, attachments } for backward compat.
 
             function _getSelectedDimensions() {
@@ -16609,6 +16776,27 @@
                     att.inspection.representation_gaps = allGaps;
                     att.inspection.critical_issues = gs.critical_issues || [];
                 }
+                // FAI characteristics for chat-driven fill/tolerance commands
+                if (state.faiCharacteristics && state.faiCharacteristics.length > 0) {
+                    att.inspection.fai_characteristics = state.faiCharacteristics.map(c => {
+                        const tolOv = state.faiTolOverrides[c.key];
+                        const measured = state.faiMeasurements[c.key] || null;
+                        const effPlus = tolOv ? parseFloat(tolOv.plus) || 0 : c.tolPlusMm;
+                        const effMinus = tolOv ? parseFloat(tolOv.minus) || 0 : c.tolMinusMm;
+                        return {
+                            char_number: c.charNumber,
+                            key: c.key,
+                            description: c.description || '',
+                            nominal: c.nominalMm,
+                            tol_plus: effPlus,
+                            tol_minus: effMinus,
+                            measured: measured,
+                            status: measured ? (typeof evaluateCharacteristic === 'function'
+                                ? evaluateCharacteristic(c.nominalMm, effPlus, effMinus, measured) : 'PENDING') : 'PENDING',
+                            is_reference: !!c.isReference,
+                        };
+                    });
+                }
 
                 // SELECTION
                 att.selection = {
@@ -16622,6 +16810,27 @@
                 att.compare = {};
                 const geoDiff = _getGeometryDiff();
                 if (geoDiff) att.compare.geometry_diff = geoDiff;
+                // Assembly revision compare
+                if (diffState.available && state.activeTab === 'assembly') {
+                    att.compare.assembly_compare_available = true;
+                    att.compare.assembly_compare_active = diffState.activeSubtab === 'compare';
+                    if (diffState.diffResult) att.compare.revision_diff = diffState.diffResult;
+                }
+                // Part feature revision compare
+                if (partDiffState.diffResult) {
+                    const pfd = JSON.parse(JSON.stringify(partDiffState.diffResult));
+                    (pfd.changed_features ? Object.values(pfd.changed_features) : []).forEach(f => { delete f.color_name; });
+                    (pfd.modified_features ? Object.values(pfd.modified_features) : []).forEach(f => { delete f.color_name_a; delete f.color_name_b; });
+                    (pfd.added_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
+                    (pfd.removed_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
+                    att.compare.part_feature_diff = pfd;
+                    att.compare.part_revisions = partDiffState.revisions;
+                    att.compare.part_compare_active = true;
+                }
+                // CAD features for highlighting
+                if (state.featureColorMap && state.featureColorMap.features) {
+                    att.part.available_cad_features = state.featureColorMap.features;
+                }
 
                 // ASSEMBLY
                 att.assembly = {
@@ -16647,50 +16856,8 @@
                 return att;
             }
 
-            // Produce the flat keys the server still expects from inspection_context.
-            function flattenAttachmentsForLegacy(att) {
-                const flat = {};
-                // Readiness flags
-                flat.has_drawing_file = att.drawing.has_drawing_file;
-                flat.has_part_number = !!att.part.part_number;
-                flat.inspection_in_progress = att.inspection.in_progress;
-                flat.inspection_can_run = att.inspection.can_run;
-                // Part
-                if (att.part.part_number) { flat.part_number = att.part.part_number; flat.part_name = att.part.part_name; }
-                if (att.part.profile_features) flat.profile_features = att.part.profile_features;
-                if (att.part.description) flat.part_description = att.part.description;
-                if (att.part.view_expectations) flat.view_expectations = att.part.view_expectations;
-                if (att.part.focused_feature) flat.focused_feature = att.part.focused_feature;
-                // Inspection results
-                if (att.inspection.has_results) {
-                    flat.gap_summary = att.inspection.gap_summary;
-                    flat.completeness_score = att.inspection.completeness_score;
-                    flat.findings = att.inspection.findings;
-                    flat.representation_gaps = att.inspection.representation_gaps;
-                    flat.critical_issues = att.inspection.critical_issues;
-                }
-                // Selection
-                if (att.selection.dimensions.length) flat.selected_dimensions = att.selection.dimensions;
-                if (att.selection.available_dimensions.length) flat.available_dimensions = att.selection.available_dimensions;
-                if (att.selection.parts.length) flat.selected_parts = att.selection.parts;
-                if (att.selection.available_parts.length) flat.available_parts = att.selection.available_parts;
-                // Drawing views
-                if (att.drawing.available_views.length) flat.available_views = att.drawing.available_views;
-                // Compare
-                if (att.compare.geometry_diff) flat.geometry_diff = att.compare.geometry_diff;
-                // Assembly
-                if (att.assembly.mate_relationships) flat.mate_relationships = att.assembly.mate_relationships;
-                if (att.assembly.configurations) flat.assembly_configurations = att.assembly.configurations;
-                if (att.assembly.active_config) flat.active_assembly_config = att.assembly.active_config;
-                if (att.assembly.part_properties) flat.part_properties = att.assembly.part_properties;
-                if (att.assembly.explode_steps) { flat.explode_steps = att.assembly.explode_steps; flat.part_color_legend = att.assembly.part_color_legend; }
-                return flat;
-            }
-
             function buildInspectionContext() {
-                const attachments = buildAgentAttachments(currentAgent);
-                const legacy = flattenAttachmentsForLegacy(attachments);
-                return { ...legacy, attachments };
+                return { attachments: buildAgentAttachments(currentAgent) };
             }
 
             // Update greeting based on inspection results or profile data
@@ -16724,7 +16891,12 @@
 
                 const inspCtx = buildInspectionContext();
                 // Check if we already generated suggestions for this exact context
-                const ctxKey = JSON.stringify({pn: inspCtx.part_number, ci: inspCtx.critical_issues, rg: inspCtx.representation_gaps});
+                const att = inspCtx.attachments || {};
+                const ctxKey = JSON.stringify({
+                    pn: (att.part || {}).part_number,
+                    ci: (att.inspection || {}).critical_issues,
+                    rg: (att.inspection || {}).representation_gaps
+                });
                 if (ctxKey === lastSuggestionsContext && suggestionsVisible) return;
 
                 removeSuggestions();
@@ -17018,6 +17190,7 @@
                 const session = getAgentSession(agentKey);
                 const msg = createMessage(role, [createTextBlock(text)]);
                 session.messages.push(msg);
+                scheduleAgentStateSave();
 
                 // Only render to live DOM if this agent is currently visible.
                 // Off-screen sessions are rebuilt from messages on switch.
@@ -18600,39 +18773,9 @@
 
                     const inspCtx = buildInspectionContext();
 
-                    // Inject paused walkthrough context for barge-in questions
+                    // Inject paused walkthrough context for barge-in questions (per-request state)
                     if (isBargeIn && state._bargeInContext) {
-                        inspCtx.paused_walkthrough = state._bargeInContext;
-                    }
-
-                    // Inject revision diff context for compare mode
-                    // Only send assembly revision diff when user is on the Assembly tab
-                    // When on 3D Model tab, part_feature_diff takes priority
-                    if (diffState.available && state.activeTab === 'assembly') {
-                        inspCtx.compare_mode_available = true;
-                        inspCtx.compare_mode_active = diffState.activeSubtab === 'compare';
-                        if (diffState.diffResult) {
-                            inspCtx.revision_diff = diffState.diffResult;
-                        }
-                    }
-
-                    // Inject available CAD features for feature highlighting
-                    if (state.featureColorMap && state.featureColorMap.features) {
-                        inspCtx.available_cad_features = state.featureColorMap.features;
-                    }
-
-                    // Inject part feature revision diff for agent-driven comparison
-                    if (partDiffState.diffResult) {
-                        // Strip color names from diff when in compare mode (viewers are gray)
-                        const pfd = JSON.parse(JSON.stringify(partDiffState.diffResult));
-                        // Remove color_name from all diff entries
-                        (pfd.changed_features ? Object.values(pfd.changed_features) : []).forEach(f => { delete f.color_name; });
-                        (pfd.modified_features ? Object.values(pfd.modified_features) : []).forEach(f => { delete f.color_name_a; delete f.color_name_b; });
-                        (pfd.added_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
-                        (pfd.removed_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
-                        inspCtx.part_feature_diff = pfd;
-                        inspCtx.part_revisions = partDiffState.revisions;
-                        inspCtx.part_compare_active = true;
+                        inspCtx.attachments.session.paused_walkthrough = state._bargeInContext;
                     }
 
                     // Build history with 'content' field for backend
@@ -18673,10 +18816,14 @@
                         if (Array.isArray(data.narration_segments) && data.narration_segments.length > 1) {
                             data._isNarration = true;
                         }
-                        // === Tool dispatch (Phase 4) ===
-                        // Use canonical tool_calls if server provides them, else convert legacy fields.
-                        // Pass _isNarration flag so normalizer can skip actions the narration block handles.
-                        const toolCalls = data.tool_calls || normalizeLegacyResponseToToolCalls(data, originAgent);
+                        // === Tool dispatch (Phase 6: tool_calls canonical) ===
+                        const toolCalls = data.tool_calls || (() => {
+                            // Legacy fallback — should rarely fire for Iris/Sage now
+                            if (originAgent !== 'parts-finder') {
+                                console.warn('[ToolDispatch] No tool_calls from server for', originAgent, '— using legacy fallback');
+                            }
+                            return normalizeLegacyResponseToToolCalls(data, originAgent);
+                        })();
                         if (toolCalls.length > 0) {
                             await executeToolCalls(toolCalls, originAgent);
                         }
@@ -19216,6 +19363,7 @@
                 const session = getCurrentAgentSession();
                 const msg = createMessage('system', [createNotificationBlock(text, opts && opts.html)]);
                 session.messages.push(msg);
+                scheduleAgentStateSave();
                 // Render into live DOM (notifications are always on the visible agent)
                 agentMessages.appendChild(renderMessageToDOM(msg, agentKey));
                 agentMessages.scrollTop = agentMessages.scrollHeight;
@@ -19357,6 +19505,7 @@
                     } else {
                         tgtSession.pendingCrossContext = null;
                     }
+                    scheduleAgentStateSave();
                 };
 
                 // Scout doesn't contribute summaries Ã¢â‚¬â€ skip the Haiku API call
@@ -19445,6 +19594,7 @@
                 updateAssemblyViewsSection();
                 // Rebuild icon strip to update active state
                 buildAgentIconStrip();
+                scheduleAgentStateSave();
             }
 
             agentToggleBtn.addEventListener('click', () => {
@@ -19465,11 +19615,37 @@
                     handleAgentSend();
                 }
             });
-            agentInput.addEventListener('input', updateSendButtonState);
+            agentInput.addEventListener('input', () => {
+                updateSendButtonState();
+                getCurrentAgentSession().pendingInput = agentInput.value;
+                scheduleAgentStateSave();
+            });
 
             // Hide voice controls bar if browser doesn't support audio recording
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
                 voiceControlsBar.style.display = 'none';
+            }
+
+            // Phase 5: Boot restore from localStorage
+            {
+                const snapshot = loadAgentStateSnapshot();
+                if (snapshot) {
+                    const restored = restoreAgentStateSnapshot(snapshot);
+                    if (restored && snapshot.currentAgent && agentSessions[snapshot.currentAgent]) {
+                        currentAgent = snapshot.currentAgent;
+                    }
+                    handleInterruptedRecovery(snapshot.recovery);
+                    // Render restored session into DOM
+                    const activeSession = getCurrentAgentSession();
+                    if (activeSession.messages.length > 0) {
+                        agentMessages.innerHTML = '';
+                        agentMessages.appendChild(renderSession(activeSession));
+                        setTimeout(() => { agentMessages.scrollTop = activeSession.scrollTop || 0; }, 50);
+                    }
+                    agentInput.value = activeSession.pendingInput || '';
+                    console.log('[Persist] Restored agent state — agent:', currentAgent,
+                        'messages:', activeSession.messages.length);
+                }
             }
 
             // Initialize agent indicator, panel header, and icon strip (after currentAgent is defined)

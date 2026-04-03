@@ -2332,6 +2332,83 @@ AGENT_PROMPTS = {
     "parts-finder": PARTS_FINDER_PROMPT,
 }
 
+# === Phase 4B: Tool Specs + Canonical Tool Calls ===
+
+AGENT_TOOL_SPECS = {
+    "inspector": [
+        {"name": "run_inspection", "description": "Run drawing inspection against the loaded profile", "args": {}},
+        {"name": "highlight_dimensions", "description": "Highlight dimensions on the drawing", "args": {"dim_keys": "list of dim_key strings"}},
+        {"name": "highlight_views", "description": "Flash-highlight drawing views", "args": {"view_names": "list of view name strings"}},
+        {"name": "highlight_features", "description": "Highlight CAD features on the 3D model", "args": {"feature_ids": "list of feature ID strings"}},
+        {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers", "camera_view": "optional: front/top/right/back/bottom/left"}},
+        {"name": "fai_fill", "description": "Fill FAI measured values", "args": {"values": "dict of char_number -> measured_value"}},
+        {"name": "fai_tol", "description": "Set FAI tolerances", "args": {"values": "dict of char_number -> tolerance_value"}},
+    ],
+    "deviation-analyst": [
+        {"name": "highlight_dimensions", "description": "Highlight dimensions on the drawing", "args": {"dim_keys": "list of dim_key strings"}},
+        {"name": "highlight_views", "description": "Flash-highlight drawing views", "args": {"view_names": "list of view name strings"}},
+        {"name": "highlight_features", "description": "Highlight CAD features on the 3D model", "args": {"feature_ids": "list of feature ID strings"}},
+        {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers", "camera_view": "optional: front/top/right/back/bottom/left"}},
+        {"name": "isolate_parts", "description": "Isolate parts in exploded view", "args": {"part_numbers": "list of part numbers, or ['RESET']"}},
+        {"name": "compare_parts", "description": "Highlight parts in dual-viewport assembly revision comparison", "args": {"markers": "list of compare markers"}},
+        {"name": "compare_features", "description": "Highlight features in dual-viewport part revision comparison", "args": {"markers": "list of compare markers"}},
+        {"name": "show_geometry_diff", "description": "Show geometry diff overlay on 3D compare viewer", "args": {}},
+        {"name": "animate_motion", "description": "Start or stop motion animation", "args": {"action": "start or stop"}},
+        {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
+    ],
+    "parts-finder": [
+        {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers"}},
+    ],
+}
+
+
+def build_tool_calls_from_result(result: dict) -> list:
+    """Convert the legacy result dict fields into canonical tool_calls array.
+    Applies the same precedence/suppression rules as the frontend normalizer:
+    - compare_parts suppresses highlight_parts
+    - isolate_parts suppresses highlight_parts
+    - narration suppresses animate_motion / set_explode_level
+    """
+    calls = []
+    has_compare_parts = bool(result.get("compare_parts"))
+    has_isolate = bool(result.get("isolate_parts"))
+    ns = result.get("narration_segments")
+    has_narration = isinstance(ns, list) and len(ns) > 1
+
+    if result.get("highlight_dimensions"):
+        calls.append({"name": "highlight_dimensions", "args": {"dim_keys": result["highlight_dimensions"]}})
+    if result.get("highlight_views"):
+        calls.append({"name": "highlight_views", "args": {"view_names": result["highlight_views"]}})
+    if result.get("highlight_features"):
+        calls.append({"name": "highlight_features", "args": {"feature_ids": result["highlight_features"]}})
+    if result.get("compare_features"):
+        calls.append({"name": "compare_features", "args": {"markers": result["compare_features"]}})
+    if has_compare_parts:
+        calls.append({"name": "compare_parts", "args": {"markers": result["compare_parts"]}})
+    # highlight_parts suppressed by compare_parts, isolate_parts, or narration
+    if result.get("highlight_parts") and not has_compare_parts and not has_isolate and not has_narration:
+        args = {"part_numbers": result["highlight_parts"]}
+        if result.get("camera_view"):
+            args["camera_view"] = result["camera_view"]
+        calls.append({"name": "highlight_parts", "args": args})
+    if has_isolate:
+        calls.append({"name": "isolate_parts", "args": {"part_numbers": result["isolate_parts"]}})
+    if result.get("show_geometry_diff"):
+        calls.append({"name": "show_geometry_diff", "args": {}})
+    if result.get("run_inspection"):
+        calls.append({"name": "run_inspection", "args": {}})
+    # animate_motion / set_explode_level suppressed during narration
+    if not has_narration:
+        if result.get("animate_motion"):
+            calls.append({"name": "animate_motion", "args": {"action": result["animate_motion"]}})
+        elif result.get("explode_level") is not None:
+            calls.append({"name": "set_explode_level", "args": {"level": result["explode_level"]}})
+    if result.get("fai_fills"):
+        calls.append({"name": "fai_fill", "args": {"values": result["fai_fills"]}})
+    if result.get("fai_tol"):
+        calls.append({"name": "fai_tol", "args": {"values": result["fai_tol"]}})
+    return calls
+
 
 def _find_relevant_rag_dirs(message: str, inspection_context: Optional[Dict] = None) -> List[str]:
     """Find relevant ASME reference directories based on message keywords."""
@@ -3743,6 +3820,11 @@ async def agent_chat(request: AgentChatRequest):
 
         # Always update response with final cleaned text
         result["response"] = response_text
+
+        # Phase 4B: Attach canonical tool_calls alongside legacy fields
+        tool_calls = build_tool_calls_from_result(result)
+        if tool_calls:
+            result["tool_calls"] = tool_calls
 
         return result
 

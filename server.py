@@ -2411,41 +2411,147 @@ def build_tool_calls_from_result(result: dict) -> list:
     return calls
 
 
+# === Phase 7: Guardrail Policy Maps ===
+MAX_TOOL_CALLS_PER_TURN = {
+    "inspector": 4,
+    "deviation-analyst": 4,
+    "parts-finder": 1,
+}
+
+MAX_TOOL_ARG_ITEMS = {
+    "dim_keys": 25,
+    "view_names": 12,
+    "feature_ids": 30,
+    "part_numbers": 30,
+    "markers": 30,
+}
+
+VALID_ENUM_VALUES = {
+    "animate_motion": {"action": {"start", "stop"}},
+}
+
+# Tools that require non-empty list args to be meaningful
+REQUIRED_LIST_ARGS = {
+    "highlight_dimensions": "dim_keys",
+    "highlight_views": "view_names",
+    "highlight_features": "feature_ids",
+    "highlight_parts": "part_numbers",
+    "isolate_parts": "part_numbers",
+    "compare_parts": "markers",
+    "compare_features": "markers",
+}
+
+
 def get_allowed_tool_names(agent_type: str) -> set:
     """Return the set of tool names allowed for this agent type."""
     specs = AGENT_TOOL_SPECS.get(agent_type, [])
     return {s["name"] for s in specs}
 
 
+def _tool_signature(tc: dict) -> str:
+    """Stable JSON signature for deduplication."""
+    return json.dumps({"name": tc["name"], "args": tc.get("args", {})}, sort_keys=True)
+
+
 def sanitize_tool_calls(tool_calls: list, agent_type: str) -> list:
-    """Validate and filter tool calls against the agent's allowed set.
-    Drops unknown tools, ensures args is a dict, validates list/object fields."""
+    """Validate, type-check, and clamp tool calls against agent specs."""
     allowed = get_allowed_tool_names(agent_type)
     sanitized = []
     for tc in tool_calls:
         if not isinstance(tc, dict):
-            logger.warning(f"[ToolParse] Dropped non-dict tool call: {tc}")
+            logger.warning(f"[ToolGuard] Dropped non-dict tool call: {tc}")
             continue
         name = tc.get("name")
         if not name or name not in allowed:
-            logger.warning(f"[ToolParse] Dropped unknown/disallowed tool '{name}' for {agent_type}")
+            logger.warning(f"[ToolGuard] Dropped disallowed tool '{name}' for {agent_type}")
             continue
         args = tc.get("args")
         if not isinstance(args, dict):
             args = {}
-        # Basic type checks for known list fields
+
+        # List field coercion + capping
         for list_field in ("dim_keys", "view_names", "feature_ids", "part_numbers", "markers"):
-            if list_field in args and not isinstance(args[list_field], list):
-                logger.warning(f"[ToolParse] Coerced {list_field} to list in {name}")
-                args[list_field] = [args[list_field]] if args[list_field] else []
-        # Basic type check for known object fields
+            if list_field in args:
+                if not isinstance(args[list_field], list):
+                    args[list_field] = [args[list_field]] if args[list_field] else []
+                cap = MAX_TOOL_ARG_ITEMS.get(list_field, 50)
+                if len(args[list_field]) > cap:
+                    logger.warning(f"[ToolGuard] Capped {list_field} from {len(args[list_field])} to {cap} in {name}")
+                    args[list_field] = args[list_field][:cap]
+
+        # Object field check
         if "values" in args and not isinstance(args["values"], dict):
-            logger.warning(f"[ToolParse] Dropped non-dict 'values' in {name}")
+            logger.warning(f"[ToolGuard] Dropped non-dict 'values' in {name}")
             args["values"] = {}
+
+        # Numeric clamping
+        if name == "set_explode_level" and "level" in args:
+            try:
+                args["level"] = max(0.0, min(1.0, float(args["level"])))
+            except (TypeError, ValueError):
+                logger.warning(f"[ToolGuard] Invalid level in set_explode_level, defaulting to 0")
+                args["level"] = 0.0
+
+        # Enum validation — drop entire tool call if invalid
+        enum_invalid = False
+        if name in VALID_ENUM_VALUES:
+            for field, valid in VALID_ENUM_VALUES[name].items():
+                if field in args and args[field] not in valid:
+                    logger.warning(f"[ToolGuard] Invalid {field}='{args.get(field)}' in {name}, dropping tool call")
+                    enum_invalid = True
+                    break
+        if enum_invalid:
+            continue
+
+        # Drop tools with empty required list args
+        req_field = REQUIRED_LIST_ARGS.get(name)
+        if req_field and not args.get(req_field):
+            logger.warning(f"[ToolGuard] Dropped {name} with empty {req_field}")
+            continue
+
         sanitized.append({"name": name, "args": args})
-    if len(sanitized) != len(tool_calls):
-        logger.info(f"[ToolParse] Sanitized {len(tool_calls)} -> {len(sanitized)} tool calls for {agent_type}")
     return sanitized
+
+
+def apply_tool_guardrails(tool_calls: list, agent_type: str, source: str = "unknown") -> tuple:
+    """Canonical guardrail: dedupe, resolve conflicts, enforce budget.
+    Returns (guarded_calls, warnings). Applied to both native and legacy paths."""
+    warnings = []
+
+    # 1. Sanitize shapes/types
+    calls = sanitize_tool_calls(tool_calls, agent_type)
+
+    # 2. Dedupe exact duplicates
+    seen_sigs = set()
+    deduped = []
+    for tc in calls:
+        sig = _tool_signature(tc)
+        if sig in seen_sigs:
+            warnings.append(f"deduped:{tc['name']}")
+            continue
+        seen_sigs.add(sig)
+        deduped.append(tc)
+    calls = deduped
+
+    # 3. Resolve conflicts
+    names = {tc["name"] for tc in calls}
+    if "compare_parts" in names and "highlight_parts" in names:
+        calls = [tc for tc in calls if tc["name"] != "highlight_parts"]
+        warnings.append("conflict:highlight_parts_suppressed_by_compare_parts")
+    if "isolate_parts" in names and "highlight_parts" in names:
+        calls = [tc for tc in calls if tc["name"] != "highlight_parts"]
+        warnings.append("conflict:highlight_parts_suppressed_by_isolate_parts")
+
+    # 4. Truncate to budget
+    max_calls = MAX_TOOL_CALLS_PER_TURN.get(agent_type, 4)
+    if len(calls) > max_calls:
+        warnings.append(f"truncated:{len(calls)}_to_{max_calls}")
+        calls = calls[:max_calls]
+
+    if warnings:
+        logger.info(f"[ToolGuard] {source} for {agent_type}: {warnings}")
+
+    return calls, warnings
 
 
 def extract_tool_calls_from_response(text: str, agent_type: str) -> tuple:
@@ -2526,6 +2632,10 @@ def build_tool_appendix(agent_type: str) -> str:
         "- Only emit tool calls when they directly help answer the user's request.",
         "- Keep arguments minimal and specific.",
         "- Do not emit duplicate or conflicting tool calls.",
+        "- Emit at most 3 tool calls unless truly necessary.",
+        "- Prefer one precise tool call over several broad ones.",
+        "- If no action is needed, emit no tool calls.",
+        "- Do not emit highlight_parts if compare_parts or isolate_parts is the better fit.",
         "- Use <tool_calls> instead of legacy markers (HIGHLIGHT_DIMS:, RUN_INSPECTION, etc.).",
         "",
         "Format:",
@@ -4021,9 +4131,10 @@ async def agent_chat(request: AgentChatRequest):
         # Always update response with final cleaned text
         result["response"] = response_text
 
-        # Phase 6: tool_calls is canonical. Native wins over legacy markers.
+        # Phase 7: All tool_calls go through canonical guardrails.
         if native_tool_calls:
-            result["tool_calls"] = native_tool_calls
+            guarded, warnings = apply_tool_guardrails(native_tool_calls, request.agent_type, "native")
+            result["tool_calls"] = guarded
             result["tool_source"] = "native"
             # Clear conflicting marker-derived action fields
             for key in ("highlight_dimensions", "highlight_views", "highlight_features",
@@ -4032,16 +4143,20 @@ async def agent_chat(request: AgentChatRequest):
                         "run_inspection", "animate_motion", "explode_level",
                         "fai_fills", "fai_tol"):
                 result.pop(key, None)
-            # Mirror back to legacy fields only for agents that still need them
-            # (Scout SSE consumers). Iris/Sage frontend uses tool_calls directly.
             if request.agent_type == "parts-finder":
-                apply_tool_calls_to_legacy_result(result, native_tool_calls)
+                apply_tool_calls_to_legacy_result(result, guarded)
         else:
-            # Fallback: build tool_calls from legacy marker-parsed fields
-            tool_calls = build_tool_calls_from_result(result)
-            if tool_calls:
-                result["tool_calls"] = tool_calls
+            raw_calls = build_tool_calls_from_result(result)
+            if raw_calls:
+                guarded, warnings = apply_tool_guardrails(raw_calls, request.agent_type, "legacy_mirror")
+                result["tool_calls"] = guarded
                 result["tool_source"] = "legacy_mirror"
+            else:
+                guarded, warnings = [], []
+        # Guardrail diagnostics
+        if warnings:
+            result["tool_guardrail_warnings"] = warnings
+        result["tool_call_count"] = len(guarded) if guarded else 0
 
         return result
 

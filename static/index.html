@@ -18653,32 +18653,83 @@
                 return calls;
             }
 
-            // Execute a single tool call. Returns { ok, name, ... }.
+            // Phase 7: Frontend guardrails (lightweight defense-in-depth; server owns canonical validation)
+            const FE_MAX_TOOL_CALLS = { 'inspector': 4, 'deviation-analyst': 4, 'parts-finder': 1 };
+            const TOOL_TIMEOUT_MS = {
+                run_inspection: 3000, show_geometry_diff: 8000,
+                compare_parts: 5000, compare_features: 5000,
+                highlight_dimensions: 3000, highlight_views: 3000,
+                highlight_features: 3000, highlight_parts: 3000,
+                isolate_parts: 4000, animate_motion: 3000,
+                set_explode_level: 3000, fai_fill: 3000, fai_tol: 3000,
+            };
+            const DEFAULT_TOOL_TIMEOUT_MS = 3000;
+
+            function applyFrontendToolGuardrails(toolCalls, originAgent) {
+                let calls = toolCalls.filter(tc => {
+                    const tool = TOOL_REGISTRY[tc.name];
+                    if (!tool) { console.warn('[ToolGuard] Unknown tool:', tc.name); return false; }
+                    if (tool.agents && !tool.agents.includes(originAgent)) { console.warn('[ToolGuard] Disallowed:', tc.name); return false; }
+                    return true;
+                });
+                // Dedupe
+                const seen = new Set();
+                calls = calls.filter(tc => {
+                    const sig = JSON.stringify({ name: tc.name, args: tc.args || {} });
+                    if (seen.has(sig)) return false;
+                    seen.add(sig);
+                    return true;
+                });
+                // Conflict resolution
+                const names = new Set(calls.map(tc => tc.name));
+                if (names.has('compare_parts') || names.has('isolate_parts')) {
+                    calls = calls.filter(tc => tc.name !== 'highlight_parts');
+                }
+                // Budget
+                const max = FE_MAX_TOOL_CALLS[originAgent] || 4;
+                if (calls.length > max) {
+                    console.warn('[ToolGuard] Truncated', calls.length, 'to', max);
+                    calls = calls.slice(0, max);
+                }
+                return calls;
+            }
+
+            // Execute a single tool call with timeout. Returns { ok, name, ... }.
             async function executeToolCall(toolCall, originAgent) {
                 const tool = TOOL_REGISTRY[toolCall.name];
-                if (!tool) {
-                    console.warn('[ToolDispatch] Unknown tool:', toolCall.name);
-                    return { ok: false, name: toolCall.name, error: 'unknown_tool' };
-                }
-                if (tool.agents && !tool.agents.includes(originAgent)) {
-                    console.warn('[ToolDispatch] Tool not allowed for agent:', toolCall.name, originAgent);
-                    return { ok: false, name: toolCall.name, error: 'agent_not_allowed' };
-                }
+                if (!tool) return { ok: false, name: toolCall.name, error: 'unknown_tool' };
+                if (tool.agents && !tool.agents.includes(originAgent)) return { ok: false, name: toolCall.name, error: 'agent_not_allowed' };
+                const timeout = TOOL_TIMEOUT_MS[toolCall.name] || DEFAULT_TOOL_TIMEOUT_MS;
+                const t0 = performance.now();
                 try {
-                    const result = await tool.execute(toolCall.args || {});
-                    console.log('[ToolDispatch]', toolCall.name, result);
-                    return { ...result, name: toolCall.name };
+                    const result = await Promise.race([
+                        Promise.resolve(tool.execute(toolCall.args || {})),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout)),
+                    ]);
+                    const dur = Math.round(performance.now() - t0);
+                    console.log('[ToolDispatch]', toolCall.name, result, dur + 'ms');
+                    return { ...result, name: toolCall.name, duration_ms: dur };
                 } catch (err) {
-                    console.error('[ToolDispatch] Error in', toolCall.name, err);
-                    return { ok: false, name: toolCall.name, error: err.message };
+                    const dur = Math.round(performance.now() - t0);
+                    console.error('[ToolDispatch]', toolCall.name, err.message, dur + 'ms');
+                    return { ok: false, name: toolCall.name, error: err.message, duration_ms: dur };
                 }
             }
 
-            // Execute all tool calls in order. Returns array of results.
+            // Execute all tool calls in order with guardrails. Returns array of results.
             async function executeToolCalls(toolCalls, originAgent) {
+                const guarded = applyFrontendToolGuardrails(toolCalls, originAgent);
                 const results = [];
-                for (const tc of toolCalls) {
+                for (const tc of guarded) {
                     results.push(await executeToolCall(tc, originAgent));
+                }
+                if (guarded.length > 0) {
+                    console.log('[ToolDispatch] Summary:', {
+                        agent: originAgent,
+                        raw: toolCalls.length,
+                        guarded: guarded.length,
+                        results: results.map(r => `${r.name}:${r.ok ? 'ok' : r.error}`)
+                    });
                 }
                 return results;
             }

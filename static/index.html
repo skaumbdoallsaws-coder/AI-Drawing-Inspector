@@ -532,6 +532,10 @@
             padding: 8px 16px 18px;
             position: relative;
         }
+        .ribbon-group.overlay-mode-group {
+            align-items: flex-start;
+            padding: 6px 14px 8px 10px;
+        }
         .ribbon-group-label {
             position: absolute;
             bottom: 2px;
@@ -655,6 +659,58 @@
             font-size: 11px;
             font-family: inherit;
             cursor: pointer;
+        }
+        .ribbon-overlay-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 142px;
+        }
+        .ribbon-overlay-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 1px 8px 1px 4px;
+            background: transparent;
+            border: none;
+            border-radius: 3px;
+            color: #CCD3DC;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 10px;
+            text-align: left;
+            transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+            white-space: nowrap;
+        }
+        .ribbon-overlay-row:hover {
+            background: rgba(255,255,255,0.055);
+            color: #F1F5F9;
+        }
+        .ribbon-overlay-row.active {
+            background: rgba(79,195,247,0.1);
+            color: #F7FBFF;
+            box-shadow: inset 2px 0 0 var(--accent);
+        }
+        .ribbon-overlay-icon {
+            width: 22px;
+            height: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 22px;
+        }
+        .ribbon-overlay-icon svg {
+            width: 22px;
+            height: 22px;
+            display: block;
+        }
+        .ribbon-overlay-label {
+            display: inline-flex;
+            align-items: center;
+            min-height: 18px;
+            font-size: 10px;
+            font-weight: 500;
+            line-height: 1;
         }
         .ribbon-legend-dot {
             width: 8px;
@@ -3273,9 +3329,10 @@
             gap: 2px;
         }
         .agent-msg-name {
-            font-size: 11px;
-            color: var(--text-secondary);
+            font-size: 10px;
+            color: #98a3b3;
             padding: 0 4px;
+            letter-spacing: 0.01em;
         }
         .agent-msg-row.user .agent-msg-name {
             text-align: right;
@@ -3283,8 +3340,8 @@
         .agent-panel-messages .agent-msg {
             padding: 8px 12px;
             border-radius: 8px;
-            font-size: 13px;
-            line-height: 1.5;
+            font-size: 14px;
+            line-height: 1.58;
             white-space: pre-wrap;
             word-wrap: break-word;
         }
@@ -3432,7 +3489,7 @@
             border-radius: 6px;
             padding: 8px 12px;
             color: var(--text-primary);
-            font-size: 13px;
+            font-size: 14px;
             font-family: inherit;
             outline: none;
             box-shadow:
@@ -3451,7 +3508,7 @@
                 rgba(24, 30, 39, 0.98);
         }
         .agent-panel-input input::placeholder {
-            color: #b0b9c6;
+            color: #bcc5d1;
         }
         .agent-panel-input button {
             background: var(--primary-btn);
@@ -5202,7 +5259,7 @@
                         </label>
                         <select id="findingsOverlayMode" class="findings-mode-select" title="Overlay style">
                             <option value="highlights">Highlights</option>
-                            <option value="notes">Notes</option>
+                            <option value="notes">Findings</option>
                             <option value="fai">FAI</option>
                         </select>
                         <label class="anno-findings-toggle" title="Show sketch dimension overlay" style="margin-left:6px;">
@@ -5480,8 +5537,8 @@
             renderedPdfPages: {},
             pendingPdfRenderKey: null,
             pdfRenderRequestId: 0,
-            findingsOverlayVisible: false,
-            findingsOverlayMode: 'highlights',  // 'highlights', 'notes', or 'fai'
+            findingsOverlayVisible: true,
+            findingsOverlayMode: 'notes',  // 'highlights', 'notes', or 'fai'
             dimsOverlayVisible: false,
             faiCharacteristics: [],       // built from drawing_map annotations
             faiMeasurements: {},          // key -> measured value string
@@ -5569,6 +5626,12 @@
             assyInstanceMeshMap: null,
             _lastMotionTime: null,
         };
+
+        function normalizeFindingsOverlayMode(mode) {
+            return (mode === 'highlights' || mode === 'notes' || mode === 'fai')
+                ? mode
+                : 'highlights';
+        }
 
         // DOM Elements
         const $ = (id) => document.getElementById(id);
@@ -6149,7 +6212,7 @@
         function switchTab(tab) {
             // Restore overlay mode when leaving Report tab
             if (state.activeTab === 'report' && tab !== 'report' && state.faiPreviousOverlayMode !== null) {
-                state.findingsOverlayMode = state.faiPreviousOverlayMode;
+                state.findingsOverlayMode = normalizeFindingsOverlayMode(state.faiPreviousOverlayMode);
                 const modeSelect = document.getElementById('findingsOverlayMode');
                 if (modeSelect) modeSelect.value = state.findingsOverlayMode;
                 state.faiPreviousOverlayMode = null;
@@ -8083,7 +8146,7 @@
                         rectEl.setAttribute('stroke-width', '1.5');
                         rectEl.setAttribute('rx', '3');
                         rectEl.style.cursor = 'pointer';
-                        rectEl.style.pointerEvents = 'all';
+                        rectEl.style.pointerEvents = 'none';
 
                         const noteData = {
                             color: color,
@@ -8091,10 +8154,20 @@
                             feature: featureInfo.name,
                             text: featureInfo.observation || featureInfo.found_callout || '',
                         };
-                        rectEl.addEventListener('contextmenu', (e) => { _showNoteContextMenu(e, noteData); });
-                        rectEl.addEventListener('click', (e) => { _showNoteContextMenu(e, noteData); });
+                        const hitPad = 8;
+                        const hitEl = _svgEl('rect');
+                        hitEl.setAttribute('x', rect.left - hitPad);
+                        hitEl.setAttribute('y', rect.top - hitPad);
+                        hitEl.setAttribute('width', rect.width + hitPad * 2);
+                        hitEl.setAttribute('height', rect.height + hitPad * 2);
+                        hitEl.setAttribute('fill', 'transparent');
+                        hitEl.style.pointerEvents = 'all';
+                        hitEl.style.cursor = 'pointer';
+                        hitEl.addEventListener('contextmenu', (e) => { _showNoteContextMenu(e, noteData); });
+                        hitEl.addEventListener('click', (e) => { _showNoteContextMenu(e, noteData); });
 
                         overlay.appendChild(rectEl);
+                        overlay.appendChild(hitEl);
                         notesRendered++;
                     });
 
@@ -9280,42 +9353,124 @@
 
             if (state.activeTab === 'drawing') {
                 // Drawing ribbon: Overlay | Zoom | File
-                const g1 = _ribbonGroup('Overlay');
+                const g1 = _ribbonGroup();
+                g1.classList.add('overlay-mode-group');
                 const overlaySelect = document.getElementById('findingsOverlayMode');
                 if (overlaySelect) {
-                    const sel = document.createElement('select');
-                    sel.className = 'ribbon-select';
-                    ['balloons','highlights','notes','fai','none'].forEach(v => {
-                        const opt = document.createElement('option');
-                        opt.value = v;
-                        opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
-                        if (state.findingsOverlayMode === v) opt.selected = true;
-                        sel.appendChild(opt);
+                    const currentOverlayMode = normalizeFindingsOverlayMode(state.findingsOverlayMode);
+                    const modeList = document.createElement('div');
+                    modeList.className = 'ribbon-overlay-list';
+                    const overlayModes = [
+                        {
+                            value: 'highlights',
+                            label: 'Highlights',
+                            icon: `
+                                <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                                  <defs>
+                                    <linearGradient id="overlayHlPencilBody" x1="0" y1="0" x2="1" y2="1">
+                                      <stop offset="0%" stop-color="#F7F7F7"/>
+                                      <stop offset="55%" stop-color="#E9E9EC"/>
+                                      <stop offset="100%" stop-color="#CFCFD4"/>
+                                    </linearGradient>
+                                    <linearGradient id="overlayHlMetalTip" x1="0" y1="0" x2="1" y2="1">
+                                      <stop offset="0%" stop-color="#F2F2F2"/>
+                                      <stop offset="100%" stop-color="#BFC2C8"/>
+                                    </linearGradient>
+                                    <linearGradient id="overlayHlGreenBar" x1="0" y1="0" x2="1" y2="0">
+                                      <stop offset="0%" stop-color="#41FF1A"/>
+                                      <stop offset="100%" stop-color="#00E600"/>
+                                    </linearGradient>
+                                    <filter id="overlayHlShadow" x="-40%" y="-40%" width="180%" height="180%">
+                                      <feDropShadow dx="0" dy="2.5" stdDeviation="2.2" flood-color="#000000" flood-opacity="0.22"/>
+                                    </filter>
+                                  </defs>
+                                  <g filter="url(#overlayHlShadow)">
+                                    <rect x="14" y="45" width="32" height="7" rx="3.5" fill="#012F68"/>
+                                    <rect x="15.8" y="46.6" width="28.4" height="3.8" rx="1.9" fill="url(#overlayHlGreenBar)"/>
+                                    <path d="M17 47.2H42.5C41.5 47.7 40.2 47.9 38.8 47.9H20.2C18.8 47.9 17.7 47.7 17 47.2Z"
+                                          fill="#B8FF9F" opacity="0.55"/>
+                                    <g transform="rotate(-45 31 30)">
+                                      <rect x="24" y="17" width="10" height="28" rx="1.8" fill="url(#overlayHlPencilBody)" stroke="#012F68" stroke-width="2"/>
+                                      <rect x="24" y="13" width="10" height="7" rx="3.2" fill="url(#overlayHlPencilBody)" stroke="#012F68" stroke-width="2"/>
+                                      <line x1="24.8" y1="21" x2="33.2" y2="21" stroke="#012F68" stroke-width="1.6"/>
+                                      <line x1="24.8" y1="23.5" x2="33.2" y2="23.5" stroke="#012F68" stroke-width="1.6"/>
+                                      <path d="M24 45H34L29 53Z" fill="url(#overlayHlMetalTip)" stroke="#012F68" stroke-width="2" stroke-linejoin="round"/>
+                                      <path d="M27.6 50.5L29 53L30.4 50.5Z" fill="#6D7077" stroke="#012F68" stroke-width="1"/>
+                                      <path d="M25.4 18.5H28V43.5L25.4 46.8Z" fill="#FFFFFF" opacity="0.35"/>
+                                      <path d="M25.2 14.6H31.5C30.8 15.4 29.8 16 28.6 16H25.2Z" fill="#FFFFFF" opacity="0.45"/>
+                                    </g>
+                                  </g>
+                                </svg>
+                            `
+                        },
+                        {
+                            value: 'notes',
+                            label: 'Findings',
+                            icon: `
+                                <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                                  <defs>
+                                    <linearGradient id="overlayNotesCubeBlue" x1="0" y1="0" x2="1" y2="1">
+                                      <stop offset="0%" stop-color="#7FD0FF"/>
+                                      <stop offset="55%" stop-color="#2FA7F3"/>
+                                      <stop offset="100%" stop-color="#0078D7"/>
+                                    </linearGradient>
+                                    <filter id="overlayNotesShadow" x="-30%" y="-30%" width="180%" height="180%">
+                                      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000000" flood-opacity="0.16"/>
+                                    </filter>
+                                  </defs>
+                                  <g filter="url(#overlayNotesShadow)" stroke="#012F68" stroke-width="2.2" stroke-linejoin="round">
+                                    <path d="M32 14L47 23V41L32 50L17 41V23Z" fill="#F8FBFE"/>
+                                    <path d="M32 14V50" fill="none"/>
+                                    <path d="M17 23L32 32L47 23" fill="none"/>
+                                    <path d="M32 32L47 23V41L32 50Z" fill="url(#overlayNotesCubeBlue)"/>
+                                  </g>
+                                </svg>
+                            `
+                        },
+                        {
+                            value: 'fai',
+                            label: 'FAI',
+                            icon: `
+                                <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                                  <defs>
+                                    <filter id="overlayFaiShadow" x="-30%" y="-30%" width="180%" height="180%">
+                                      <feDropShadow dx="0" dy="2.2" stdDeviation="2" flood-color="#000000" flood-opacity="0.16"/>
+                                    </filter>
+                                    <linearGradient id="overlayFaiBlueStroke" x1="0" y1="0" x2="1" y2="1">
+                                      <stop offset="0%" stop-color="#6EC6FF"/>
+                                      <stop offset="55%" stop-color="#249BEE"/>
+                                      <stop offset="100%" stop-color="#006FCE"/>
+                                    </linearGradient>
+                                  </defs>
+                                  <g filter="url(#overlayFaiShadow)" fill="none" stroke="url(#overlayFaiBlueStroke)" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M18 42 L34 28" stroke-width="2.8"/>
+                                    <path d="M15.2 39.6 L19.2 44.2" stroke-width="2.8"/>
+                                    <path d="M17.6 42.1 L12.8 46.8" stroke-width="2.8"/>
+                                    <circle cx="40" cy="24" r="10.5" stroke-width="2.8"/>
+                                    <path d="M38.2 20.2 L40.1 18.5 L40.1 29.8" stroke-width="2.8"/>
+                                  </g>
+                                </svg>
+                            `
+                        }
+                    ];
+                    overlayModes.forEach(mode => {
+                        const row = document.createElement('button');
+                        row.type = 'button';
+                        row.className = 'ribbon-overlay-row' + (currentOverlayMode === mode.value ? ' active' : '');
+                        row.setAttribute('aria-pressed', currentOverlayMode === mode.value ? 'true' : 'false');
+                        row.innerHTML = `
+                            <span class="ribbon-overlay-icon" aria-hidden="true">${mode.icon}</span>
+                            <span class="ribbon-overlay-label">${mode.label}</span>
+                        `;
+                        row.addEventListener('click', () => {
+                            overlaySelect.value = mode.value;
+                            overlaySelect.dispatchEvent(new Event('change'));
+                        });
+                        modeList.appendChild(row);
                     });
-                    sel.addEventListener('change', () => {
-                        overlaySelect.value = sel.value;
-                        overlaySelect.dispatchEvent(new Event('change'));
-                    });
-                    g1.appendChild(sel);
+                    g1.appendChild(modeList);
                 }
                 ribbon.appendChild(g1);
-
-                ribbon.appendChild(_ribbonSep());
-
-                // Zoom group
-                const g2 = _ribbonGroup('Zoom');
-                [
-                    {label:'Fit', action:() => { if (window._fitDrawingToViewport) window._fitDrawingToViewport(); }},
-                    {label:'+', action:() => { if (window._zoomDrawing) window._zoomDrawing(1.25); }},
-                    {label:'−', action:() => { if (window._zoomDrawing) window._zoomDrawing(0.8); }},
-                ].forEach(b => {
-                    const btn = document.createElement('button');
-                    btn.className = 'ribbon-btn';
-                    btn.textContent = b.label;
-                    btn.addEventListener('click', b.action);
-                    g2.appendChild(btn);
-                });
-                ribbon.appendChild(g2);
 
                 // Annotation tools — only when a drawing is loaded
                 if (state.fileDataUrl) {
@@ -9327,7 +9482,7 @@
                     // Select tool
                     const selectBtn = document.createElement('button');
                     selectBtn.className = 'ribbon-btn';
-                    selectBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M3 2l3 12 2.5-4.5L13 7z"/></svg>';
+                    selectBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.5" style="width:14px;height:14px;"><path d="M3 2l3 12 2.5-4.5L13 7z"/></svg>';
                     selectBtn.title = 'Select / Move (V)';
                     selectBtn.addEventListener('click', () => document.querySelector('.anno-tool-btn[data-tool="select"]')?.click());
                     gIll.appendChild(selectBtn);
@@ -9336,8 +9491,37 @@
                     const shapesWrap = document.createElement('div');
                     shapesWrap.style.cssText = 'position:relative;';
                     const shapesBtn = document.createElement('button');
-                    shapesBtn.className = 'ribbon-btn';
-                    shapesBtn.innerHTML = '○ Shapes ▾';
+                    shapesBtn.className = 'ribbon-btn ribbon-btn-iconic';
+                    shapesBtn.innerHTML = `
+                        <span class="ribbon-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                                <defs>
+                                    <linearGradient id="shapeSqFillRibbon" x1="0" y1="0" x2="1" y2="1">
+                                        <stop offset="0%" stop-color="#9BD8FF"/>
+                                        <stop offset="55%" stop-color="#3DA7F5"/>
+                                        <stop offset="100%" stop-color="#1187E6"/>
+                                    </linearGradient>
+                                    <radialGradient id="shapeSqGlossRibbon" cx="0.2" cy="0.15" r="0.9">
+                                        <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.75"/>
+                                        <stop offset="55%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+                                        <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+                                    </radialGradient>
+                                    <filter id="shapeShadowRibbon" x="-40%" y="-40%" width="180%" height="180%">
+                                        <feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.22"/>
+                                    </filter>
+                                </defs>
+                                <g filter="url(#shapeShadowRibbon)">
+                                    <rect x="18" y="14" width="26" height="26" rx="1.8"
+                                          fill="url(#shapeSqFillRibbon)" stroke="#012F68" stroke-width="2.2"/>
+                                    <path d="M20.5 17.5H41.5V26.5C38.5 20.5 31 18 20.5 17.5Z"
+                                          fill="url(#shapeSqGlossRibbon)" opacity="0.85"/>
+                                    <circle cx="42" cy="40" r="14"
+                                            fill="#F7F7F7" stroke="#012F68" stroke-width="2.2"/>
+                                </g>
+                            </svg>
+                        </span>
+                        <span class="ribbon-btn-label">Shapes ▾</span>
+                    `;
                     shapesBtn.title = 'Shapes';
 
                     const shapesDropdown = document.createElement('div');
@@ -16689,10 +16873,12 @@
 
             const findingsModeSelect = document.getElementById('findingsOverlayMode');
             if (findingsModeSelect) {
-                findingsModeSelect.value = state.findingsOverlayMode || 'balloons';
+                state.findingsOverlayMode = normalizeFindingsOverlayMode(state.findingsOverlayMode);
+                findingsModeSelect.value = state.findingsOverlayMode;
                 findingsModeSelect.addEventListener('change', () => {
-                    state.findingsOverlayMode = findingsModeSelect.value;
+                    state.findingsOverlayMode = normalizeFindingsOverlayMode(findingsModeSelect.value);
                     renderViewport();
+                    if (state.activeTab === 'drawing') renderRibbon();
                 });
             }
 
@@ -19806,6 +19992,17 @@
                 }
                 return results;
             }
+
+            function shouldSuppressAssistantResponseForToolCalls(response, toolCalls) {
+                if (!Array.isArray(toolCalls) || !toolCalls.some(tc => tc && tc.name === 'run_inspection')) {
+                    return false;
+                }
+                if (typeof response !== 'string') return false;
+                const text = response.trim();
+                if (!text) return true;
+                if (text.length > 220) return false;
+                return /running inspection|starting inspection|inspection (is )?running|checking .*drawing/i.test(text);
+            }
             // === End Tool Registry ===
 
             async function handleAgentSend() {
@@ -19848,6 +20045,7 @@
                 const messageText = text || 'What can you see in this screenshot?';
 
                 let response = '';
+                let toolCalls = [];
                 try {
                     // Clear stale agent part highlights BEFORE building context
                     // so they don't appear as "user selected" in the next request
@@ -19942,7 +20140,6 @@
                             data._isNarration = true;
                         }
                         // === Tool dispatch (Phase 6: tool_calls canonical) ===
-                        let toolCalls = [];
                         try {
                             toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : (() => {
                             // Legacy fallback — should rarely fire for Iris/Sage now
@@ -20044,10 +20241,13 @@
                         voiceTriggered = false;
                     }
                 } else {
-                    addMessage(response, 'assistant', originAgent);
+                    const suppressAssistantResponse = shouldSuppressAssistantResponseForToolCalls(response, toolCalls);
+                    if (!suppressAssistantResponse) {
+                        addMessage(response, 'assistant', originAgent);
+                    }
                     // Barge-in response: route through barge-in handler (plays TTS, then prompts resume)
                     // Guard: only if session is still valid (user didn't cancel during Sage API call)
-                    if (isBargeIn && response && bargeInSessionId === state.narrationSessionId && originVisible) {
+                    if (!suppressAssistantResponse && isBargeIn && response && bargeInSessionId === state.narrationSessionId && originVisible) {
                         voiceTriggered = false;
                         setWaiting(false, originAgent);
                         _handleBargeInResponse(response);
@@ -20058,7 +20258,7 @@
                         voiceTriggered = false;
                     }
                     // Voice reply: only if origin agent still visible (TTS decorates live DOM)
-                    if (voiceTriggered && response && originVisible) {
+                    if (!suppressAssistantResponse && voiceTriggered && response && originVisible) {
                         voiceTriggered = false;
                         playVoiceReply(response, originAgent);
                     } else {
@@ -21297,11 +21497,9 @@
                 { label: 'Start Assembly Walkthrough', category: 'Agent', shortcut: '', action: () => { const inp = document.getElementById('agentInput'); const btn = document.getElementById('agentSendBtn'); if (inp && btn) { inp.value = 'Give me a guided walkthrough of this assembly'; btn.disabled = false; btn.click(); } } },
 
                 // Overlay — use findingsOverlayMode <select>
-                { label: 'Overlay: Balloons', category: 'Overlay', shortcut: '', action: () => { const sel = document.getElementById('findingsOverlayMode'); if (sel) { sel.value = 'balloons'; sel.dispatchEvent(new Event('change')); } } },
                 { label: 'Overlay: Highlights', category: 'Overlay', shortcut: '', action: () => { const sel = document.getElementById('findingsOverlayMode'); if (sel) { sel.value = 'highlights'; sel.dispatchEvent(new Event('change')); } } },
-                { label: 'Overlay: Notes', category: 'Overlay', shortcut: '', action: () => { const sel = document.getElementById('findingsOverlayMode'); if (sel) { sel.value = 'notes'; sel.dispatchEvent(new Event('change')); } } },
+                { label: 'Overlay: Findings', category: 'Overlay', shortcut: '', action: () => { const sel = document.getElementById('findingsOverlayMode'); if (sel) { sel.value = 'notes'; sel.dispatchEvent(new Event('change')); } } },
                 { label: 'Overlay: FAI', category: 'Overlay', shortcut: '', action: () => { const sel = document.getElementById('findingsOverlayMode'); if (sel) { sel.value = 'fai'; sel.dispatchEvent(new Event('change')); } } },
-                { label: 'Overlay: Off', category: 'Overlay', shortcut: '', action: () => { const sel = document.getElementById('findingsOverlayMode'); if (sel) { sel.value = 'none'; sel.dispatchEvent(new Event('change')); } } },
             ];
 
             function render() {
@@ -21519,6 +21717,7 @@
     </script>
 </body>
 </html>
+
 
 
 

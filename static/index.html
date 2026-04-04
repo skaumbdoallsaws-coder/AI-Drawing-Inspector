@@ -187,6 +187,10 @@
             width: 16px;
             height: 16px;
         }
+        #helpBtn svg {
+            width: 20px;
+            height: 20px;
+        }
 
         /* Inline Toolbar Icons — SolidWorks style */
         .toolbar-icons {
@@ -306,8 +310,13 @@
             width: 280px;
             min-width: 180px;
             max-width: 500px;
-            background: var(--bg-panel);
-            border-left: 1px solid var(--border);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.028) 0%, rgba(255,255,255,0.008) 14%, rgba(0,0,0,0) 100%),
+                linear-gradient(180deg, #1d232c 0%, #171b23 100%);
+            border-left: 1px solid rgba(255,255,255,0.09);
+            box-shadow:
+                inset 1px 0 0 rgba(255,255,255,0.025),
+                -12px 0 26px rgba(0,0,0,0.18);
             overflow: hidden;
             position: relative;
         }
@@ -1040,8 +1049,13 @@
         .left-panel {
             width: 240px;
             min-width: 240px;
-            background: var(--bg-panel);
-            border-right: 1px solid var(--border);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 16%, rgba(0,0,0,0) 100%),
+                linear-gradient(180deg, #202632 0%, #1a1f28 100%);
+            border-right: 1px solid rgba(255,255,255,0.09);
+            box-shadow:
+                inset -1px 0 0 rgba(0,0,0,0.28),
+                10px 0 24px rgba(0,0,0,0.14);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
@@ -1049,8 +1063,9 @@
         }
 
         .panel-section {
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.07);
+            padding: 11px 13px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, rgba(255,255,255,0.014) 0%, rgba(255,255,255,0.006) 100%);
         }
 
         .panel-section-title {
@@ -1064,21 +1079,42 @@
 
         /* Upload Zone — docked pane style */
         .upload-zone {
-            border: 1px solid rgba(255,255,255,0.07);
-            border-radius: 3px;
-            padding: 12px 8px;
+            border: 1px solid rgba(79, 195, 247, 0.16);
+            border-radius: 6px;
+            padding: 14px 10px;
+            min-height: 82px;
             text-align: center;
             cursor: pointer;
-            transition: border-color 0.2s, background 0.2s;
-            background: rgba(255,255,255,0.015);
+            transition: border-color 0.2s, background 0.2s, box-shadow 0.2s, transform 0.2s;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.02) 100%),
+                rgba(15, 20, 28, 0.65);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.04),
+                0 0 0 1px rgba(0,0,0,0.16);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
         .upload-zone:hover {
             border-color: var(--accent);
-            background: rgba(79, 195, 247, 0.05);
+            background:
+                linear-gradient(180deg, rgba(79, 195, 247, 0.12) 0%, rgba(79, 195, 247, 0.05) 100%),
+                rgba(15, 20, 28, 0.76);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.05),
+                0 0 0 1px rgba(79, 195, 247, 0.12);
+            transform: translateY(-1px);
         }
         .upload-zone.dragover {
             border-color: var(--accent);
-            background: rgba(79, 195, 247, 0.1);
+            background:
+                linear-gradient(180deg, rgba(79, 195, 247, 0.18) 0%, rgba(79, 195, 247, 0.08) 100%),
+                rgba(15, 20, 28, 0.82);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.06),
+                0 0 0 1px rgba(79, 195, 247, 0.18);
         }
         .upload-zone.loaded {
             border-color: var(--present);
@@ -1086,11 +1122,14 @@
         }
         .upload-zone-text {
             font-size: 13px;
-            color: var(--text-secondary);
+            color: #bcc6d2;
+            line-height: 1.45;
         }
         .upload-zone-icon {
-            font-size: 28px;
-            margin-bottom: 8px;
+            font-size: 30px;
+            margin-bottom: 9px;
+            color: #d8e0ea;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.18));
         }
         .upload-filename {
             font-size: 12px;
@@ -1127,13 +1166,14 @@
         .search-dropdown input {
             width: 100%;
             padding: 8px 10px;
-            background: var(--bg-main);
-            border: 1px solid var(--border);
+            background: linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.018) 100%);
+            border: 1px solid rgba(255,255,255,0.08);
             border-radius: 4px;
             color: var(--text-primary);
             font-size: 13px;
             font-family: inherit;
             outline: none;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }
         .search-dropdown input:focus {
             border-color: var(--accent);
@@ -2092,41 +2132,112 @@
             transform: translateX(-50%);
             z-index: 10;
             display: flex;
-            gap: 4px;
-            padding: 4px 8px;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
             background: rgba(18, 18, 30, 0.85);
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 8px;
             backdrop-filter: blur(6px);
             pointer-events: auto;
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.03),
+                0 8px 18px rgba(0,0,0,0.18);
         }
         .three-toolbar button {
-            background: var(--surface);
+            background: transparent;
             color: var(--text-secondary);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            padding: 4px 10px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            padding: 5px 10px;
             font-size: 11px;
             font-family: inherit;
             cursor: pointer;
             transition: all 0.15s ease;
             white-space: nowrap;
             letter-spacing: 0.3px;
+            box-shadow: none;
         }
         .three-toolbar button:hover {
-            background: var(--hover);
+            background: linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.028) 100%);
             color: var(--text-primary);
-            border-color: var(--accent);
+            border-color: rgba(79,195,247,0.22);
         }
         .three-toolbar button:active {
-            background: var(--accent);
-            color: #000;
+            background: linear-gradient(180deg, rgba(79,195,247,0.18) 0%, rgba(79,195,247,0.075) 100%);
+            color: #fff;
         }
         .three-toolbar .tb-separator {
             width: 1px;
             background: var(--border);
             margin: 2px 4px;
             align-self: stretch;
+        }
+        .three-toolbar-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 34px;
+            min-width: 34px;
+        }
+        .three-toolbar-btn.icon-only {
+            padding: 5px 7px;
+        }
+        .three-toolbar-btn.active {
+            background: linear-gradient(180deg, rgba(79,195,247,0.2) 0%, rgba(79,195,247,0.08) 100%);
+            border-color: rgba(79,195,247,0.28);
+            color: var(--text-primary);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.035),
+                0 0 0 1px rgba(79,195,247,0.05);
+        }
+        .three-toolbar-icon {
+            width: 22px;
+            height: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .three-toolbar-icon svg {
+            width: 22px;
+            height: 22px;
+            display: block;
+        }
+        .three-toolbar-caret {
+            color: #8ea0b6;
+            font-size: 9px;
+            line-height: 1;
+            margin-left: -2px;
+        }
+        .three-toolbar-menu {
+            position: relative;
+        }
+        .three-toolbar-popup {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            min-width: 124px;
+            padding: 4px;
+            display: none;
+            flex-direction: column;
+            gap: 3px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 100%),
+                rgba(20, 24, 32, 0.96);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.28);
+            z-index: 20;
+        }
+        .three-toolbar-popup.open {
+            display: flex;
+        }
+        .three-toolbar-popup .three-toolbar-menu-item {
+            justify-content: flex-start;
+            width: 100%;
+            padding: 7px 10px;
         }
 
         /* Assembly 3D Settings Panel */
@@ -2144,6 +2255,21 @@
             overflow: hidden;
             transition: height 0.2s ease;
         }
+        .assy-settings-panel.toolbar-linked {
+            top: 50px;
+        }
+        .assy-settings-panel.toolbar-linked .assy-settings-toggle {
+            display: none;
+        }
+        .assy-settings-panel.toolbar-linked .assy-settings-body {
+            display: flex;
+        }
+        .assy-settings-panel.toolbar-linked.collapsed {
+            display: none;
+        }
+        .assy-settings-panel.collapsed {
+            width: auto;
+        }
         .assy-settings-panel.collapsed .assy-settings-body {
             display: none;
         }
@@ -2154,7 +2280,7 @@
             padding: 6px 10px;
             cursor: pointer;
             border: none;
-            background: transparent;
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.012) 100%);
             color: var(--text-secondary);
             font-size: 11px;
             font-family: inherit;
@@ -2162,12 +2288,30 @@
             text-align: left;
             letter-spacing: 0.3px;
             border-bottom: 1px solid transparent;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }
         .assy-settings-toggle:hover {
             color: var(--text-primary);
         }
         .assy-settings-panel:not(.collapsed) .assy-settings-toggle {
             border-bottom-color: var(--border);
+        }
+        .assy-settings-toggle .display-toggle-icon {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .assy-settings-toggle .display-toggle-icon svg {
+            width: 20px;
+            height: 20px;
+            display: block;
+        }
+        .assy-settings-toggle .display-toggle-label {
+            font-weight: 600;
+            color: var(--text-primary);
         }
         .assy-settings-body {
             padding: 8px 10px 10px;
@@ -2523,7 +2667,9 @@
         /* Right Panel */
         .right-panel {
             flex: 1;
-            background: var(--bg-panel);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.006) 18%, rgba(0,0,0,0) 100%),
+                linear-gradient(180deg, #1c212a 0%, #171b23 100%);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
@@ -2550,6 +2696,7 @@
             flex-direction: column;
             align-items: center;
             padding: 24px 16px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.006) 100%);
         }
         .loading-state.active {
             display: flex;
@@ -2683,6 +2830,7 @@
             flex-direction: column;
             padding: 16px;
             animation: fadeIn 0.5s ease-in;
+            background: linear-gradient(180deg, rgba(255,255,255,0.016) 0%, rgba(255,255,255,0.004) 100%);
         }
         .results-state.active {
             display: flex;
@@ -2692,10 +2840,22 @@
             to { opacity: 1; }
         }
 
+        .results-surface {
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.07);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.014) 100%),
+                rgba(20, 25, 33, 0.9);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.035),
+                0 10px 22px rgba(0,0,0,0.14);
+        }
+
         /* Completeness Gauge */
         .gauge-container {
             text-align: center;
-            padding: 16px 0;
+            padding: 18px 16px 14px;
+            margin-bottom: 14px;
         }
         .gauge-svg {
             width: 120px;
@@ -2715,9 +2875,14 @@
         .metric-row {
             display: flex;
             align-items: center;
-            padding: 6px 0;
+            padding: 10px 12px;
             gap: 8px;
+            border-radius: 8px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.012) 100%);
+            border: 1px solid rgba(255,255,255,0.05);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
         }
+        .metric-row + .metric-row { margin-top: 8px; }
         .metric-dot {
             width: 8px;
             height: 8px;
@@ -2735,8 +2900,7 @@
         /* Critical Issues */
         .critical-section {
             margin-top: 16px;
-            border-top: 1px solid var(--border);
-            padding-top: 12px;
+            padding: 14px 14px 12px;
         }
         .critical-header {
             display: flex;
@@ -2757,9 +2921,11 @@
         .critical-item {
             font-size: 12px;
             color: var(--text-secondary);
-            padding: 4px 0 4px 16px;
+            padding: 8px 10px 8px 12px;
             border-left: 2px solid var(--missing);
-            margin-bottom: 4px;
+            margin-bottom: 8px;
+            background: linear-gradient(180deg, rgba(255,23,68,0.07) 0%, rgba(255,23,68,0.025) 100%);
+            border-radius: 0 8px 8px 0;
         }
 
         /* View Assessment Tags */
@@ -2788,9 +2954,8 @@
 
         /* QC Report Preview */
         .report-section {
-            margin-top: 12px;
-            border-top: 1px solid var(--border);
-            padding-top: 12px;
+            margin-top: 16px;
+            padding: 14px;
         }
         .report-preview {
             font-size: 12px;
@@ -2893,7 +3058,9 @@
         .agent-panel {
             flex: 1;
             overflow: hidden;
-            background: var(--bg-panel);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.006) 18%, rgba(0,0,0,0) 100%),
+                linear-gradient(180deg, #1c212a 0%, #171b23 100%);
             display: none;
             flex-direction: column;
         }
@@ -2908,10 +3075,13 @@
             flex-direction: column;
             overflow: hidden;
             min-height: 0;
+            position: relative;
         }
         .agent-panel-header {
             padding: 12px 16px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.012) 100%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
             font-size: 13px;
             font-weight: 600;
             color: var(--text-primary);
@@ -2932,6 +3102,9 @@
             flex-direction: column;
             gap: 12px;
             scroll-behavior: smooth;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.014) 0%, rgba(255,255,255,0.004) 100%),
+                transparent;
         }
         .agent-panel-messages .agent-welcome {
             color: var(--text-secondary);
@@ -2994,7 +3167,8 @@
             align-items: center;
             justify-content: space-evenly;
             padding: 6px 12px;
-            border-top: 1px solid var(--border);
+            border-top: 1px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.006) 100%);
         }
         /* LED chase ring on active agent icon */
         @keyframes led-ring {
@@ -3120,9 +3294,15 @@
             border-bottom-right-radius: 2px;
         }
         .agent-panel-messages .agent-msg.assistant {
-            background: var(--bg-panel);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.075) 0%, rgba(255,255,255,0.032) 100%),
+                rgba(26, 32, 42, 0.96);
             color: var(--text-primary);
             border-bottom-left-radius: 2px;
+            border: 1px solid rgba(255,255,255,0.085);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.05),
+                0 8px 18px rgba(0,0,0,0.16);
         }
         .agent-panel-messages .agent-msg strong {
             font-weight: 700;
@@ -3131,16 +3311,25 @@
         .inspection-progress-card {
             padding: 12px 16px;
             border-radius: 8px;
-            background: rgba(79, 195, 247, 0.06);
-            border: 1px solid rgba(79, 195, 247, 0.15);
+            background:
+                linear-gradient(180deg, rgba(79, 195, 247, 0.11) 0%, rgba(79, 195, 247, 0.045) 100%),
+                rgba(24, 30, 39, 0.96);
+            border: 1px solid rgba(79, 195, 247, 0.22);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.03),
+                0 8px 18px rgba(0,0,0,0.14);
         }
         .inspection-progress-card.completed {
-            background: rgba(0, 230, 118, 0.06);
-            border-color: rgba(0, 230, 118, 0.15);
+            background:
+                linear-gradient(180deg, rgba(0, 230, 118, 0.1) 0%, rgba(0, 230, 118, 0.04) 100%),
+                rgba(24, 30, 39, 0.96);
+            border-color: rgba(0, 230, 118, 0.22);
         }
         .inspection-progress-card.failed {
-            background: rgba(255, 23, 68, 0.06);
-            border-color: rgba(255, 23, 68, 0.15);
+            background:
+                linear-gradient(180deg, rgba(255, 23, 68, 0.1) 0%, rgba(255, 23, 68, 0.04) 100%),
+                rgba(24, 30, 39, 0.96);
+            border-color: rgba(255, 23, 68, 0.22);
         }
         .ipc-title {
             font-size: 13px;
@@ -3204,9 +3393,15 @@
             align-items: center;
             align-self: flex-start;
             padding: 10px 16px;
-            background: var(--bg-panel);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.03) 100%),
+                rgba(26, 32, 42, 0.96);
             border-radius: 8px;
             border-bottom-left-radius: 2px;
+            border: 1px solid rgba(255,255,255,0.085);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.05),
+                0 6px 16px rgba(0,0,0,0.14);
         }
         .agent-typing-dot {
             width: 6px;
@@ -3223,26 +3418,40 @@
         }
         .agent-panel-input {
             padding: 12px;
-            border-top: 1px solid var(--border);
+            border-top: 1px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.008) 100%);
             display: flex;
             gap: 8px;
         }
         .agent-panel-input input {
             flex: 1;
-            background: var(--bg-main);
-            border: 1px solid var(--border);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.065) 0%, rgba(255,255,255,0.028) 100%),
+                rgba(24, 30, 39, 0.96);
+            border: 1px solid rgba(255,255,255,0.11);
             border-radius: 6px;
             padding: 8px 12px;
             color: var(--text-primary);
             font-size: 13px;
             font-family: inherit;
             outline: none;
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.045),
+                0 1px 0 rgba(0,0,0,0.16);
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
         }
         .agent-panel-input input:focus {
             border-color: var(--accent);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.055),
+                0 0 0 1px rgba(79,195,247,0.16),
+                0 0 0 4px rgba(79,195,247,0.08);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.075) 0%, rgba(255,255,255,0.032) 100%),
+                rgba(24, 30, 39, 0.98);
         }
         .agent-panel-input input::placeholder {
-            color: var(--text-secondary);
+            color: #b0b9c6;
         }
         .agent-panel-input button {
             background: var(--primary-btn);
@@ -3262,6 +3471,31 @@
             opacity: 0.4;
             cursor: not-allowed;
         }
+        #agentSendBtn {
+            width: 42px;
+            min-width: 42px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            background: linear-gradient(180deg, #2a87df 0%, #1565c0 100%);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.14),
+                0 4px 10px rgba(21,101,192,0.22);
+        }
+        #agentSendBtn svg {
+            width: 22px;
+            height: 22px;
+            display: block;
+        }
+        #agentSendBtn:hover {
+            opacity: 1;
+            filter: brightness(1.04);
+        }
+        #agentSendBtn:disabled:hover {
+            filter: none;
+        }
         .agent-beta-disclaimer {
             padding: 4px 12px 8px;
             text-align: center;
@@ -3274,10 +3508,50 @@
             font-weight: 600;
             color: var(--accent);
         }
+
+        #rightPanelEmpty {
+            margin: 16px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.07);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 100%),
+                rgba(18, 23, 31, 0.78);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.03),
+                0 8px 18px rgba(0,0,0,0.12);
+        }
+
+        #agentConversationBar {
+            background: linear-gradient(180deg, rgba(255,255,255,0.022) 0%, rgba(255,255,255,0.008) 100%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+        }
+
+        #agentChatSwitcher,
+        #agentChatMenuBtn {
+            background: linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(255,255,255,0.014) 100%) !important;
+            border-color: rgba(255,255,255,0.08) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+
+        #agentChatNewBtn {
+            background: linear-gradient(180deg, #2a87df 0%, #1565c0 100%) !important;
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.14),
+                0 4px 10px rgba(21,101,192,0.28);
+        }
+
+        #agentChatDropdown,
+        #agentChatMenuDropdown {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 100%),
+                #1b2029 !important;
+            border-color: rgba(255,255,255,0.08) !important;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.32) !important;
+        }
         /* Camera capture button */
         .agent-camera-btn {
-            background: transparent;
-            border: 1px solid var(--border);
+            background: linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 100%);
+            border: 1px solid rgba(255,255,255,0.08);
             border-radius: 6px;
             color: var(--text-secondary);
             padding: 6px 8px;
@@ -3288,6 +3562,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }
         .agent-camera-btn:hover {
             color: var(--accent);
@@ -3304,14 +3579,15 @@
             align-items: center;
             justify-content: space-between;
             padding: 6px 24px;
-            border-top: 1px solid var(--border);
+            border-top: 1px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.006) 100%);
         }
         .voice-mic-btn {
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            border: 2px solid var(--border);
-            background: transparent;
+            border: 2px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.012) 100%);
             color: var(--text-secondary);
             cursor: pointer;
             font-size: 16px;
@@ -3320,6 +3596,7 @@
             justify-content: center;
             transition: all 0.2s;
             position: relative;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }
         .voice-mic-btn:hover {
             color: var(--accent);
@@ -4535,34 +4812,87 @@
                 <div class="toolbar-icons">
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Home" id="iconHome">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                        <svg viewBox="0 0 96 96" aria-hidden="true">
+                            <polygon points="48,10 84,40 80,44 48,16 16,44 12,40" fill="#00A2E8" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round"/>
+                            <line x1="22" y1="39" x2="22" y2="78" stroke="#FFFFFF" stroke-width="1.5"/>
+                            <line x1="74" y1="39" x2="74" y2="78" stroke="#FFFFFF" stroke-width="1.5"/>
+                            <line x1="22" y1="78" x2="74" y2="78" stroke="#FFFFFF" stroke-width="1.5"/>
+                            <rect x="37" y="48" width="18" height="30" fill="none" stroke="#FFFFFF" stroke-width="1.4"/>
+                            <circle cx="51" cy="64" r="1.8" fill="#FFFFFF"/>
+                        </svg>
                     </button>
                     <button class="icon-tb-btn" title="Open Drawing" id="iconOpen">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <svg viewBox="0 0 96 96" aria-hidden="true">
+                            <path d="M16,8 L64,8 L82,26 L82,82 Q82,88 76,88 L16,88 Q10,88 10,82 L10,14 Q10,8 16,8 Z"
+                                fill="#FFFFFF" stroke="#1565c0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+                            <path d="M64,8 L64,20 Q64,26 70,26 L82,26"
+                                fill="none" stroke="#1565c0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+                            <path d="M64,8 L64,20 Q64,26 70,26 L82,26 Z" fill="#1565c0" opacity="0.15"/>
+                        </svg>
                     </button>
                     <button class="icon-tb-btn" title="Save / Export" id="iconSave">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        <svg viewBox="0 0 96 96" aria-hidden="true">
+                            <defs>
+                                <linearGradient id="saveFloppyBody" x1="0" y1="0" x2="1" y2="0">
+                                    <stop offset="0%" stop-color="#2090CC"/>
+                                    <stop offset="100%" stop-color="#40AADD"/>
+                                </linearGradient>
+                            </defs>
+                            <rect width="96" height="96" rx="8" fill="#2A2A2A"/>
+                            <path d="M14,8 L68,8 L80,20 L80,82 Q80,88 74,88 L14,88 Q8,88 8,82 L8,14 Q8,8 14,8 Z"
+                                fill="#1A5A9A" stroke="#FFF" stroke-width="1.5" stroke-linejoin="round"/>
+                            <path d="M16,12 L66,12 L76,22 L76,78 Q76,84 70,84 L16,84 Q12,84 12,78 L12,18 Q12,12 16,12 Z"
+                                fill="url(#saveFloppyBody)" stroke="#FFF" stroke-width="1.5" stroke-linejoin="round"/>
+                            <rect x="20" y="14" width="44" height="34" rx="2" fill="#F0EDE8" stroke="#FFF" stroke-width="1.2"/>
+                            <line x1="26" y1="24" x2="58" y2="24" stroke="#8A8580" stroke-width="2" stroke-linecap="round"/>
+                            <line x1="26" y1="31" x2="58" y2="31" stroke="#8A8580" stroke-width="2" stroke-linecap="round"/>
+                            <line x1="26" y1="38" x2="58" y2="38" stroke="#8A8580" stroke-width="2" stroke-linecap="round"/>
+                            <rect x="28" y="54" width="30" height="28" rx="2" fill="#6A6A70" stroke="#FFF" stroke-width="1.2"/>
+                            <rect x="29" y="55" width="12" height="26" rx="1" fill="#555560"/>
+                            <rect x="43" y="55" width="14" height="26" rx="1" fill="#7A7A80"/>
+                            <rect x="33" y="60" width="12" height="12" rx="1" fill="#4A4A55" stroke="#FFF" stroke-width="0.8"/>
+                            <rect x="35" y="62" width="8" height="8" rx="0.5" fill="#3A3A45"/>
+                        </svg>
                     </button>
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Print FAI Report" id="iconPrint">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                        <svg viewBox="0 0 96 96" aria-hidden="true">
+                            <defs>
+                                <linearGradient id="printPrinterBody" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="#50B0E0"/>
+                                    <stop offset="100%" stop-color="#2088C0"/>
+                                </linearGradient>
+                            </defs>
+                            <rect x="24" y="10" width="42" height="36" rx="2" fill="#F4F4F4" stroke="#2A2A2A" stroke-width="2" stroke-linejoin="round"/>
+                            <rect x="10" y="36" width="72" height="30" rx="4" fill="url(#printPrinterBody)" stroke="#2A2A2A" stroke-width="2" stroke-linejoin="round"/>
+                            <rect x="16" y="52" width="50" height="8" rx="3" fill="#1A4A6A" stroke="#2A2A2A" stroke-width="0.8"/>
+                            <circle cx="70" cy="46" r="2.5" fill="#E8F4FF" stroke="#2A2A2A" stroke-width="0.5"/>
+                            <circle cx="62" cy="46" r="2.5" fill="#E8F4FF" stroke="#2A2A2A" stroke-width="0.5"/>
+                            <path d="M6,66 L4,82 Q4,84 6,84 L86,84 Q88,84 88,82 L86,66 Z"
+                                fill="#F4F4F4" stroke="#2A2A2A" stroke-width="2" stroke-linejoin="round"/>
+                        </svg>
                     </button>
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Undo (Ctrl+Z)" id="iconUndo">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
                     </button>
                     <button class="icon-tb-btn" title="Redo (Ctrl+Y)" id="iconRedo">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.13-9.36L23 10"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.13-9.36L23 10"/></svg>
                     </button>
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Select Tool (V)" id="iconSelect">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
                     </button>
                     <button class="icon-tb-btn" title="News & Updates" id="iconNews">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
                     </button>
                     <button class="icon-tb-btn" title="Settings" id="iconSettings">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001.08 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1.08z"/></svg>
+                        <svg viewBox="0 0 96 96" aria-hidden="true">
+                            <rect width="96" height="96" rx="8" fill="#2A2A2A"/>
+                            <path d="M42,21 L41,11 L55,11 L54,21 A28,28 0 0,1 63,25 L70,17 L79,26 L72,33 A28,28 0 0,1 75,42 L85,41 L85,55 L75,54 A28,28 0 0,1 72,63 L79,70 L70,79 L63,72 A28,28 0 0,1 54,75 L55,85 L41,85 L42,75 A28,28 0 0,1 33,72 L26,79 L17,70 L25,63 A28,28 0 0,1 21,54 L11,55 L11,41 L21,42 A28,28 0 0,1 25,33 L17,26 L26,17 L33,25 A28,28 0 0,1 42,21 Z"
+                                fill="#00A2E8" stroke="#FFFFFF" stroke-width="2.5" stroke-linejoin="round"/>
+                            <circle cx="48" cy="48" r="13" fill="#00A2E8" stroke="#FFFFFF" stroke-width="3"/>
+                        </svg>
                     </button>
                 </div>
             </div>
@@ -4585,7 +4915,34 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                     </button>
                     <button class="toolbar-control-btn" id="helpBtn" title="Help">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <svg viewBox="0 0 96 96" aria-hidden="true">
+                            <defs>
+                                <radialGradient id="helpSphereBase" cx="50%" cy="45%" r="50%">
+                                    <stop offset="0%" stop-color="#5BA8E0"/>
+                                    <stop offset="70%" stop-color="#2878C0"/>
+                                    <stop offset="100%" stop-color="#1A5A9A"/>
+                                </radialGradient>
+                                <radialGradient id="helpGlossTop" cx="50%" cy="30%" r="40%">
+                                    <stop offset="0%" stop-color="rgba(255,255,255,0.55)"/>
+                                    <stop offset="60%" stop-color="rgba(255,255,255,0.15)"/>
+                                    <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+                                </radialGradient>
+                                <radialGradient id="helpSpecDot" cx="50%" cy="50%" r="50%">
+                                    <stop offset="0%" stop-color="#FFFFFF"/>
+                                    <stop offset="60%" stop-color="rgba(255,255,255,0.6)"/>
+                                    <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+                                </radialGradient>
+                                <radialGradient id="helpRimGrad" cx="50%" cy="45%" r="50%">
+                                    <stop offset="85%" stop-color="#2070B0"/>
+                                    <stop offset="100%" stop-color="#15508A"/>
+                                </radialGradient>
+                            </defs>
+                            <circle cx="48" cy="48" r="44" fill="url(#helpRimGrad)"/>
+                            <circle cx="48" cy="48" r="40" fill="url(#helpSphereBase)"/>
+                            <ellipse cx="48" cy="34" rx="30" ry="22" fill="url(#helpGlossTop)"/>
+                            <ellipse cx="40" cy="22" rx="12" ry="6" fill="url(#helpSpecDot)" opacity="0.8"/>
+                            <text x="48" y="62" text-anchor="middle" font-family="Georgia,serif" font-size="40" font-weight="bold" fill="#FFF" opacity="0.95">?</text>
+                        </svg>
                     </button>
                 </div>
                 <div class="window-controls">
@@ -4607,24 +4964,23 @@
             <!-- Activity Bar -->
             <div class="activity-bar" id="activityBar">
                 <div class="activity-bar-icon active" data-panel="explorer" title="Explorer">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round">
-                            <path d="M3.2 8.1h6.5l1.8-2.2h9.1v10.7a1.7 1.7 0 0 1-1.7 1.7H4.9a1.7 1.7 0 0 1-1.7-1.7V8.1Z" fill="#354352" stroke="#95A9BD"/>
-                            <path d="M3.2 8.1h17.4v2.4H3.2z" fill="#5F7387" stroke="#95A9BD"/>
-                            <path d="M6.1 12.1h4.5M6.1 14.5h6.8M14.3 12.2h3.1v3.1h-3.1z" stroke="#D4DEE7" stroke-width="0.65" fill="none"/>
-                        </g>
+                    <svg viewBox="0 0 96 96" aria-hidden="true">
+                        <rect x="10" y="14" width="68" height="52" rx="4" fill="none" stroke="#00A2E8" stroke-width="2.5"/>
+                        <line x1="32" y1="14" x2="32" y2="66" stroke="#00A2E8" stroke-width="2.5"/>
                     </svg>
                     <span class="activity-tooltip">Explorer</span>
                 </div>
                 <div class="activity-bar-icon" data-panel="model" title="3D Model">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <g stroke="#79B7E3" stroke-width="0.9" stroke-linejoin="round">
-                            <path d="M12 3.2 4.5 7.2 12 11.2 19.5 7.2 12 3.2Z" fill="#8FCDF2"/>
-                            <path d="M4.5 7.2v7.4L12 18.8v-7.6L4.5 7.2Z" fill="#5A97C5"/>
-                            <path d="M19.5 7.2v7.4L12 18.8v-7.6l7.5-4Z" fill="#35698F"/>
-                            <path d="M12 6v5.2" fill="none" stroke="#B9E1F8" stroke-width="0.55"/>
-                            <path d="M8.4 9.1 12 11.2 15.6 9.1" fill="none" stroke="#B9E1F8" stroke-width="0.5"/>
-                        </g>
+                    <svg viewBox="2 42 44 48" aria-hidden="true">
+                        <rect width="96" height="96" rx="8" fill="#2A2A2A"/>
+                        <polygon points="18,46 30,52 30,64 42,70 42,82 30,88 18,82 6,76 6,52" fill="#0077AA"/>
+                        <polygon points="6,52 6,64 18,70 18,58" fill="#0077AA" stroke="#FFF" stroke-width="1.8" stroke-linejoin="round"/>
+                        <polygon points="6,64 6,76 18,82 18,70" fill="#0077AA" stroke="#FFF" stroke-width="1.8" stroke-linejoin="round"/>
+                        <polygon points="18,70 18,82 30,88 30,76" fill="#0077AA" stroke="#FFF" stroke-width="1.8" stroke-linejoin="round"/>
+                        <polygon points="30,52 30,64 18,70 18,58" fill="#00A2E8" stroke="#FFF" stroke-width="1.8" stroke-linejoin="round"/>
+                        <polygon points="42,70 42,82 30,88 30,76" fill="#00A2E8" stroke="#FFF" stroke-width="1.8" stroke-linejoin="round"/>
+                        <polygon points="6,52 18,46 30,52 18,58" fill="#44BBEE" stroke="#FFF" stroke-width="1.8" stroke-linejoin="round"/>
+                        <line x1="30" y1="64" x2="42" y2="70" stroke="#FFF" stroke-width="1.8" stroke-linecap="round"/>
                     </svg>
                     <span class="activity-tooltip">3D Model</span>
                 </div>
@@ -4954,7 +5310,12 @@
                     <div class="agent-panel-input">
                         <input type="text" id="agentInput" placeholder="Type a message..." autocomplete="off">
                         <button class="agent-camera-btn" id="agentCameraBtn" title="Capture screenshot of current viewport">&#x1F4F7;</button>
-                        <button id="agentSendBtn" disabled>Send</button>
+                        <button id="agentSendBtn" type="button" aria-label="Send message" title="Send message" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M12 17V7" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round"></path>
+                                <path d="M7.8 11.2L12 7l4.2 4.2" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
                     </div>
                     <div class="voice-controls-bar" id="voiceControlsBar">
                         <button class="voice-mic-btn" id="voiceMicBtn" title="Voice message">&#x1F3A4;</button>
@@ -4971,13 +5332,16 @@
             <!-- Right Activity Rail -->
             <div class="right-activity-rail" id="rightActivityRail">
                 <div class="right-rail-icon" id="rightRailResults" title="Results">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round">
-                            <path d="M7 4.1h10l2.1 2.1v12a1.8 1.8 0 0 1-1.8 1.8H6.7a1.8 1.8 0 0 1-1.8-1.8V5.9A1.8 1.8 0 0 1 6.7 4.1H7Z" fill="#364454" stroke="#97ACBF"/>
-                            <path d="M8 4.1h8v3.2H8z" fill="#697D90" stroke="#97ACBF"/>
-                            <path d="m8.2 12.8 2.1 2.2 5.3-5.3" stroke="#7FE3A8" stroke-width="1.2" fill="none"/>
-                            <path d="M8 17.2h8.2" stroke="#C7D4DF" stroke-width="0.6" fill="none"/>
-                        </g>
+                    <svg viewBox="0 0 96 96" aria-hidden="true">
+                        <rect x="12" y="10" width="66" height="72" rx="2" fill="#FFFFFF" stroke="#2A2A2A" stroke-width="1.5"/>
+                        <rect x="12" y="10" width="66" height="13" rx="2" fill="#1E88E5" stroke="#2A2A2A" stroke-width="1.3"/>
+                        <rect x="12" y="18" width="66" height="5" fill="#1E88E5"/>
+                        <rect x="18" y="30" width="10" height="10" rx="1.5" fill="#33AADD" stroke="#2A2A2A" stroke-width="1"/>
+                        <line x1="34" y1="35" x2="68" y2="35" stroke="#B0B0B0" stroke-width="2" stroke-linecap="round"/>
+                        <rect x="18" y="46" width="10" height="10" rx="1.5" fill="#33AADD" stroke="#2A2A2A" stroke-width="1"/>
+                        <line x1="34" y1="51" x2="68" y2="51" stroke="#B0B0B0" stroke-width="2" stroke-linecap="round"/>
+                        <rect x="18" y="62" width="10" height="10" rx="1.5" fill="#33AADD" stroke="#2A2A2A" stroke-width="1"/>
+                        <line x1="34" y1="67" x2="58" y2="67" stroke="#B0B0B0" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                     <span class="right-rail-tooltip">Results</span>
                 </div>
@@ -7481,9 +7845,12 @@
                         });
                     });
                 });
+                const highlightableTypes = new Set(['displayDimension', 'balloon', 'note', 'gtol']);
                 const dimensionAnnotations = visibleAnnotations.filter(annotation => {
                     const keys = _buildHighlightLookupKeys(annotation?.annotationName, annotation?.viewName);
-                    return keys.some(key => drawingAnnotationMeta[key]?.annotationType === 'displayDimension');
+                    const meta = keys.find(key => drawingAnnotationMeta[key]) ? drawingAnnotationMeta[keys.find(key => drawingAnnotationMeta[key])] : null;
+                    // Show if annotation type is highlightable, OR if no meta exists (trust the highlight_boxes entry)
+                    return !meta || highlightableTypes.has(meta.annotationType);
                 });
 
                 console.log('[HL] highlight_boxes data:', hlData ? `${hlAnnotations.length} annotations` : 'MISSING');
@@ -10370,7 +10737,7 @@
 
             const toggle = document.createElement('button');
             toggle.className = 'assy-settings-toggle';
-            toggle.innerHTML = '\u2699 Display';
+            _setDisplayToggleContent(toggle);
             toggle.addEventListener('click', () => {
                 panel.classList.toggle('collapsed');
             });
@@ -11151,10 +11518,8 @@
             resizeObserver.observe(container);
 
             // Toolbar (Fit, Front, Top, Right, Iso)
-            _createAssembly3DToolbar(container);
-
-            // Display & Lighting settings panel
             _createAssemblySettingsPanel(container);
+            _createAssembly3DToolbar(container);
 
             // Load GLB
             if (state.assyLoadedNumber === assemblyNumber && state.assyGlbAvailable && state.assyGltfScene) {
@@ -11292,27 +11657,20 @@
         function _createAssembly3DToolbar(container) {
             const toolbar = document.createElement('div');
             toolbar.className = 'three-toolbar';
-            const buttons = [
-                { label: 'Fit', title: 'Fit to View', action: 'fit' },
-                { label: '|', separator: true },
-                { label: 'Front', title: 'Front view', action: 'front' },
-                { label: 'Top', title: 'Top view', action: 'top' },
-                { label: 'Right', title: 'Right view', action: 'right' },
-                { label: 'Iso', title: 'Isometric view', action: 'iso' },
-            ];
-            buttons.forEach(b => {
-                if (b.separator) {
-                    const sep = document.createElement('div');
-                    sep.className = 'tb-separator';
-                    toolbar.appendChild(sep);
-                    return;
-                }
-                const btn = document.createElement('button');
-                btn.textContent = b.label;
-                btn.title = b.title;
-                btn.addEventListener('click', () => _handleAssemblyPresetView(b.action));
-                toolbar.appendChild(btn);
-            });
+            const settingsPanel = container.querySelector('.assy-settings-panel.toolbar-linked');
+            if (settingsPanel) {
+                toolbar.appendChild(_createDisplayToolbarButton(settingsPanel, (open) => {
+                    state.assySettingsOpen = !!open;
+                }));
+            }
+            toolbar.appendChild(_createViewPaletteMenu(action => _handleAssemblyPresetView(action)));
+            toolbar.appendChild(_createThreeToolbarButton({
+                title: 'Zoom to fit',
+                ariaLabel: 'Zoom to fit',
+                icon: 'zoomfit',
+                iconOnly: true,
+                onClick: () => _handleAssemblyPresetView('fit'),
+            }));
 
             // Revision diff dropdown (only if revisions available)
             if (diffState.available && diffState.revisions.length >= 2) {
@@ -11475,17 +11833,7 @@
 
         function _createAssemblySettingsPanel(container) {
             const panel = document.createElement('div');
-            panel.className = 'assy-settings-panel collapsed';
-
-            // Toggle header
-            const toggle = document.createElement('button');
-            toggle.className = 'assy-settings-toggle';
-            toggle.innerHTML = '\u2699 Display';
-            toggle.addEventListener('click', () => {
-                panel.classList.toggle('collapsed');
-                state.assySettingsOpen = !panel.classList.contains('collapsed');
-            });
-            panel.appendChild(toggle);
+            panel.className = 'assy-settings-panel toolbar-linked collapsed';
 
             // Restore open state
             if (state.assySettingsOpen) panel.classList.remove('collapsed');
@@ -13475,21 +13823,21 @@
             if (existing) existing.remove();
             const overlay = document.createElement('div');
             overlay.id = 'asmeRefOverlay';
-            overlay.style.cssText = 'position:fixed;top:60px;right:60px;width:420px;max-height:500px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 12px 40px rgba(0,0,0,0.5);z-index:200;overflow:hidden;';
+            overlay.style.cssText = 'position:fixed;top:60px;right:60px;width:420px;max-height:500px;background:linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.008) 100%), var(--bg-panel);border:1px solid rgba(255,255,255,0.08);border-radius:8px;box-shadow:0 16px 44px rgba(0,0,0,0.46);z-index:200;overflow:hidden;';
             const titlebar = document.createElement('div');
-            titlebar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg-tab);cursor:grab;user-select:none;border-bottom:1px solid var(--border);';
+            titlebar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:linear-gradient(180deg, #2d8fe8 0%, #1565c0 100%);cursor:grab;user-select:none;border-bottom:1px solid rgba(255,255,255,0.14);box-shadow:inset 0 1px 0 rgba(255,255,255,0.18);';
             const title = document.createElement('span');
-            title.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-primary);';
+            title.style.cssText = 'font-size:11px;font-weight:700;color:#f7fbff;text-shadow:0 1px 0 rgba(0,0,0,0.16);';
             title.textContent = ref.section || ('ASME Y14.5 — ' + ref.feature_type);
             titlebar.appendChild(title);
             const btns = document.createElement('div');
             btns.style.cssText = 'display:flex;gap:6px;';
             const minBtn = document.createElement('button');
             minBtn.textContent = '\u2014';
-            minBtn.style.cssText = 'background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;padding:0 4px;';
+            minBtn.style.cssText = 'width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:4px;color:rgba(255,255,255,0.9);cursor:pointer;font-size:14px;padding:0;transition:background 0.15s,color 0.15s;';
             const closeBtn = document.createElement('button');
             closeBtn.textContent = '\u00D7';
-            closeBtn.style.cssText = 'background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;padding:0 4px;';
+            closeBtn.style.cssText = 'width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:4px;color:rgba(255,255,255,0.92);cursor:pointer;font-size:14px;padding:0;transition:background 0.15s,color 0.15s;';
             btns.appendChild(minBtn);
             btns.appendChild(closeBtn);
             titlebar.appendChild(btns);
@@ -13498,7 +13846,7 @@
             body.style.cssText = 'padding:10px;overflow-y:auto;max-height:440px;';
             if (ref.rules && ref.rules.length > 0) {
                 const ruleDiv = document.createElement('div');
-                ruleDiv.style.cssText = 'font-size:12px;color:var(--accent);padding:6px 10px;background:rgba(79,195,247,0.06);border-left:3px solid var(--accent);border-radius:0 4px 4px 0;margin-bottom:8px;line-height:1.5;';
+                ruleDiv.style.cssText = 'font-size:12px;color:#8fd5ff;padding:8px 10px;background:linear-gradient(180deg, rgba(79,195,247,0.11) 0%, rgba(79,195,247,0.045) 100%);border-left:3px solid #4fc3f7;border-radius:0 6px 6px 0;margin-bottom:8px;line-height:1.5;';
                 ruleDiv.textContent = ref.rules[0];
                 body.appendChild(ruleDiv);
             }
@@ -13514,6 +13862,22 @@
             overlay.appendChild(body);
             document.body.appendChild(overlay);
             closeBtn.addEventListener('click', () => overlay.remove());
+            closeBtn.addEventListener('mouseenter', () => {
+                closeBtn.style.background = 'rgba(255, 59, 48, 0.2)';
+                closeBtn.style.color = '#ffd8d6';
+            });
+            closeBtn.addEventListener('mouseleave', () => {
+                closeBtn.style.background = 'transparent';
+                closeBtn.style.color = 'rgba(255,255,255,0.92)';
+            });
+            minBtn.addEventListener('mouseenter', () => {
+                minBtn.style.background = 'rgba(255,255,255,0.14)';
+                minBtn.style.color = '#ffffff';
+            });
+            minBtn.addEventListener('mouseleave', () => {
+                minBtn.style.background = 'transparent';
+                minBtn.style.color = 'rgba(255,255,255,0.9)';
+            });
             minBtn.addEventListener('click', () => {
                 const collapsed = body.style.display !== 'none';
                 body.style.display = collapsed ? 'none' : 'block';
@@ -13544,20 +13908,36 @@
             });
         }
 
-        function _showAsmeRefsFromResponse(asmeRefs) {
+        function _escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function _buildAsmeRefsHtml(asmeRefs) {
             if (!Array.isArray(asmeRefs) || !asmeRefs.length) return;
-            // Show custom popup with first ref
-            try {
-                _showAsmeRefPopup(asmeRefs[0]);
-            } catch (e) {
-                console.error('[ASME] Popup failed, falling back to lightbox:', e);
-                // Fallback: open first image in lightbox
-                const firstImg = (asmeRefs[0].images || [])[0];
-                if (firstImg) {
-                    const lb = document.getElementById('lightbox');
-                    const lbImg = document.getElementById('lightboxImg');
-                    if (lb && lbImg) { lbImg.src = firstImg.url; lb.classList.add('open'); }
-                }
+            let refsHtml = '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">';
+            asmeRefs.forEach(function(ref) {
+                const label = ref.section || ref.feature_type || 'ASME Ref';
+                const page = (ref.images && ref.images[0]) ? ref.images[0].page : '';
+                const payload = encodeURIComponent(JSON.stringify(ref));
+                refsHtml += '<button style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.2);border-radius:4px;font-size:11px;color:var(--accent);cursor:pointer;font-family:inherit;" data-asme-ref="' + payload + '">\uD83D\uDCD6 ' + _escapeHtml(label) + (page ? ' (' + _escapeHtml(page) + ')' : '') + '</button>';
+            });
+            refsHtml += '</div>';
+            return refsHtml;
+        }
+
+        function _showAsmeRefsFromResponse(asmeRefs, targetAgentKey) {
+            if (!Array.isArray(asmeRefs) || !asmeRefs.length) return;
+            if (window._addAgentReferencesMessage) {
+                window._addAgentReferencesMessage(
+                    'ASME reference pages are available. Click a reference to open it.',
+                    asmeRefs,
+                    targetAgentKey
+                );
             }
         }
 
@@ -14281,10 +14661,8 @@
             resizeObserver.observe(container);
 
             // Feature #122: Add 3D viewer toolbar
-            _create3DToolbar(container);
-
-            // Display settings panel for part 3D viewer
             _createPartSettingsPanel(container);
+            _create3DToolbar(container);
 
             // Load 3D model: try GLB (feature-colored) first, fall back to STL
             if (state.threeLoadedPart === state.partNumber && (state.threeStlAvailable === true || state.threePartGlbAvailable === true)) {
@@ -14518,17 +14896,195 @@
 
         // ---- Feature #122: 3D Viewer Toolbar & Preset Views ----
 
+        let _viewerToolbarIconSeq = 0;
+        function _nextViewerToolbarId(prefix) {
+            _viewerToolbarIconSeq += 1;
+            return `${prefix}_${_viewerToolbarIconSeq}`;
+        }
+
+        function _viewerToolbarIconMarkup(kind) {
+            if (kind === 'display') {
+                const gloss = _nextViewerToolbarId('ballGloss');
+                const spec = _nextViewerToolbarId('ballSpec');
+                const clip = _nextViewerToolbarId('ballClip');
+                return `<svg viewBox="0 0 96 96" aria-hidden="true">
+                    <defs>
+                        <radialGradient id="${gloss}" cx="38%" cy="32%" r="55%">
+                            <stop offset="0%" stop-color="rgba(255,255,255,0.55)"/>
+                            <stop offset="60%" stop-color="rgba(255,255,255,0.08)"/>
+                            <stop offset="100%" stop-color="rgba(0,0,0,0.12)"/>
+                        </radialGradient>
+                        <radialGradient id="${spec}" cx="50%" cy="50%" r="50%">
+                            <stop offset="0%" stop-color="#FFFFFF"/>
+                            <stop offset="50%" stop-color="rgba(255,255,255,0.8)"/>
+                            <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+                        </radialGradient>
+                        <clipPath id="${clip}"><circle cx="48" cy="48" r="28"/></clipPath>
+                    </defs>
+                    <g clip-path="url(#${clip})">
+                        <circle cx="48" cy="48" r="28" fill="#1D6AE5"/>
+                        <path d="M48,46 L54,18 L78,18 L78,64 Z" fill="#E03030"/>
+                        <path d="M48,46 L78,64 L56,78 L42,78 Z" fill="#2DB844"/>
+                        <path d="M48,46 L42,78 L18,64 L18,44 Z" fill="#E8CC08"/>
+                    </g>
+                    <circle cx="48" cy="48" r="28" fill="url(#${gloss})"/>
+                    <circle cx="40" cy="38" r="7" fill="url(#${spec})" opacity="0.9"/>
+                    <circle cx="41" cy="39" r="3.5" fill="#FFF" opacity="0.95"/>
+                    <circle cx="48" cy="48" r="28" fill="none" stroke="#2A2A2A" stroke-width="1.5"/>
+                </svg>`;
+            }
+            if (kind === 'views') {
+                const cubeGrad = _nextViewerToolbarId('cubeGrad');
+                return `<svg viewBox="0 0 96 96" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="${cubeGrad}" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="#88D4F8"/>
+                            <stop offset="100%" stop-color="#3098D0"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M8,28 L30,4 L86,4" fill="none" stroke="#0E3050" stroke-width="3" stroke-dasharray="8,6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M64,28 L86,4 L86,60" fill="none" stroke="#0E3050" stroke-width="3" stroke-dasharray="8,6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M30,60 L86,60 L64,84" fill="none" stroke="#0E3050" stroke-width="3" stroke-dasharray="8,6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8,84 L30,60 L30,4" fill="none" stroke="#0E3050" stroke-width="3" stroke-dasharray="8,6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <rect x="8" y="28" width="56" height="56" rx="8" fill="url(#${cubeGrad})" stroke="#0E3050" stroke-width="3"/>
+                    <path d="M14,34 Q14,34 20,34 L40,34 Q34,56 14,56 Z" fill="rgba(255,255,255,0.25)"/>
+                </svg>`;
+            }
+            if (kind === 'zoomfit') {
+                const rimGrad = _nextViewerToolbarId('rimGrad');
+                const lensGrad = _nextViewerToolbarId('lensGrad');
+                const lensGloss = _nextViewerToolbarId('lensGloss');
+                const handleGrad = _nextViewerToolbarId('handleGrad');
+                return `<svg viewBox="0 0 96 96" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="${rimGrad}" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#40B0E8"/>
+                            <stop offset="100%" stop-color="#1060A0"/>
+                        </linearGradient>
+                        <radialGradient id="${lensGrad}" cx="40%" cy="35%" r="50%">
+                            <stop offset="0%" stop-color="#FFFFFF"/>
+                            <stop offset="60%" stop-color="#E8F4FC"/>
+                            <stop offset="100%" stop-color="#C8E0F0"/>
+                        </radialGradient>
+                        <radialGradient id="${lensGloss}" cx="35%" cy="25%" r="35%">
+                            <stop offset="0%" stop-color="rgba(255,255,255,0.9)"/>
+                            <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+                        </radialGradient>
+                        <linearGradient id="${handleGrad}" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stop-color="#40B0E8"/>
+                            <stop offset="100%" stop-color="#2080C0"/>
+                        </linearGradient>
+                    </defs>
+                    <g transform="rotate(-45, 48, 40)">
+                        <rect x="40" y="64" width="16" height="30" rx="4" fill="url(#${handleGrad})" stroke="#0E3050" stroke-width="2.5"/>
+                        <circle cx="48" cy="36" r="32" fill="url(#${rimGrad})" stroke="#0E3050" stroke-width="2.5"/>
+                        <circle cx="48" cy="36" r="24" fill="url(#${lensGrad})" stroke="#0E3050" stroke-width="1.5"/>
+                        <ellipse cx="40" cy="26" rx="12" ry="8" fill="url(#${lensGloss})"/>
+                        <line x1="48" y1="22" x2="48" y2="50" stroke="#0E3050" stroke-width="2.5" stroke-linecap="round"/>
+                        <line x1="34" y1="36" x2="62" y2="36" stroke="#0E3050" stroke-width="2.5" stroke-linecap="round"/>
+                    </g>
+                </svg>`;
+            }
+            return '';
+        }
+
+        function _createThreeToolbarButton(opts) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'three-toolbar-btn' + (opts.iconOnly ? ' icon-only' : '');
+            btn.title = opts.title || '';
+            btn.setAttribute('aria-label', opts.ariaLabel || opts.title || '');
+            btn.innerHTML =
+                `<span class="three-toolbar-icon">${_viewerToolbarIconMarkup(opts.icon)}</span>` +
+                (opts.label ? `<span class="three-toolbar-label">${opts.label}</span>` : '') +
+                (opts.caret ? `<span class="three-toolbar-caret">&#9662;</span>` : '');
+            if (opts.onClick) btn.addEventListener('click', opts.onClick);
+            return btn;
+        }
+
+        function _createViewPaletteMenu(onSelect) {
+            const wrap = document.createElement('div');
+            wrap.className = 'three-toolbar-menu';
+
+            const btn = _createThreeToolbarButton({
+                title: 'Standard views',
+                ariaLabel: 'Standard views',
+                icon: 'views',
+                caret: true,
+                iconOnly: true,
+            });
+            const menu = document.createElement('div');
+            menu.className = 'three-toolbar-popup';
+
+            [
+                { label: 'Front', action: 'front' },
+                { label: 'Top', action: 'top' },
+                { label: 'Right', action: 'right' },
+                { label: 'Iso', action: 'iso' },
+            ].forEach(opt => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'three-toolbar-menu-item';
+                item.textContent = opt.label;
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    menu.classList.remove('open');
+                    onSelect(opt.action);
+                });
+                menu.appendChild(item);
+            });
+
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                menu.classList.toggle('open');
+            });
+            document.addEventListener('click', (e) => {
+                if (!wrap.contains(e.target)) menu.classList.remove('open');
+            });
+
+            wrap.appendChild(btn);
+            wrap.appendChild(menu);
+            return wrap;
+        }
+
+        function _createDisplayToolbarButton(panel, onToggle) {
+            const btn = _createThreeToolbarButton({
+                title: 'Display settings',
+                ariaLabel: 'Display settings',
+                icon: 'display',
+                iconOnly: true,
+            });
+            const sync = () => {
+                btn.classList.toggle('active', !panel.classList.contains('collapsed'));
+            };
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                panel.classList.toggle('collapsed');
+                sync();
+                if (onToggle) onToggle(!panel.classList.contains('collapsed'));
+            });
+            document.addEventListener('click', (e) => {
+                if (!panel.classList.contains('collapsed') && !panel.contains(e.target) && !btn.contains(e.target)) {
+                    panel.classList.add('collapsed');
+                    sync();
+                    if (onToggle) onToggle(false);
+                }
+            });
+            sync();
+            return btn;
+        }
+
+        function _setDisplayToggleContent(toggle) {
+            toggle.title = 'Display settings';
+            toggle.setAttribute('aria-label', 'Display settings');
+            toggle.innerHTML =
+                `<span class="display-toggle-icon">${_viewerToolbarIconMarkup('display')}</span>` +
+                `<span class="display-toggle-label">Display</span>`;
+        }
+
         function _createPartSettingsPanel(container) {
             const panel = document.createElement('div');
-            panel.className = 'assy-settings-panel collapsed';
-
-            const toggle = document.createElement('button');
-            toggle.className = 'assy-settings-toggle';
-            toggle.innerHTML = '\u2699 Display';
-            toggle.addEventListener('click', () => {
-                panel.classList.toggle('collapsed');
-            });
-            panel.appendChild(toggle);
+            panel.className = 'assy-settings-panel toolbar-linked collapsed';
 
             const body = document.createElement('div');
             body.className = 'assy-settings-body';
@@ -14626,29 +15182,18 @@
         function _create3DToolbar(container) {
             const toolbar = document.createElement('div');
             toolbar.className = 'three-toolbar';
-
-            const buttons = [
-                { label: 'Fit', title: 'Fit to View \u2014 show entire model', action: 'fit' },
-                { label: '|', separator: true },
-                { label: 'Front', title: 'Front view', action: 'front' },
-                { label: 'Top', title: 'Top view', action: 'top' },
-                { label: 'Right', title: 'Right view', action: 'right' },
-                { label: 'Iso', title: 'Isometric view', action: 'iso' },
-            ];
-
-            buttons.forEach(b => {
-                if (b.separator) {
-                    const sep = document.createElement('div');
-                    sep.className = 'tb-separator';
-                    toolbar.appendChild(sep);
-                    return;
-                }
-                const btn = document.createElement('button');
-                btn.textContent = b.label;
-                btn.title = b.title;
-                btn.addEventListener('click', () => _handle3DPresetView(b.action));
-                toolbar.appendChild(btn);
-            });
+            const settingsPanel = container.querySelector('.assy-settings-panel.toolbar-linked');
+            if (settingsPanel) {
+                toolbar.appendChild(_createDisplayToolbarButton(settingsPanel));
+            }
+            toolbar.appendChild(_createViewPaletteMenu(action => _handle3DPresetView(action)));
+            toolbar.appendChild(_createThreeToolbarButton({
+                title: 'Zoom to fit',
+                ariaLabel: 'Zoom to fit',
+                icon: 'zoomfit',
+                iconOnly: true,
+                onClick: () => _handle3DPresetView('fit'),
+            }));
 
             container.appendChild(toolbar);
         }
@@ -15425,7 +15970,7 @@
             const offset = circumference - (completeness / 100) * circumference;
 
             let html = `
-                <div class="gauge-container">
+                <div class="gauge-container results-surface">
                     <svg class="gauge-svg" viewBox="0 0 120 120">
                         <circle cx="60" cy="60" r="${radius}" stroke="var(--border)" stroke-width="8" fill="none"/>
                         <circle cx="60" cy="60" r="${radius}" stroke="var(--gauge-amber)" stroke-width="8" fill="none"
@@ -15436,7 +15981,7 @@
                     </svg>
                 </div>
 
-                <div style="padding:0 4px;">
+                <div class="results-surface" style="padding:12px;">
                     <div class="metric-row">
                         <div class="metric-dot" style="background:var(--present);"></div>
                         <span class="metric-label">Present</span>
@@ -15463,7 +16008,7 @@
             // Critical issues
             if (gs.critical_issues && gs.critical_issues.length > 0) {
                 html += `
-                    <div class="critical-section">
+                    <div class="critical-section results-surface">
                         <div class="critical-header">
                             <div class="critical-dot"></div>
                             Critical Issues (${gs.critical_issues.length})
@@ -16406,6 +16951,9 @@
             function createReferenceBlock(text, ref) {
                 return { type: 'reference', text: text, ref: ref || null };
             }
+            function createReferencesBlock(intro, refs) {
+                return { type: 'references', intro: intro || '', refs: Array.isArray(refs) ? refs : [] };
+            }
 
             // -- Renderers --
             function renderBlockToDOM(block, role) {
@@ -16458,6 +17006,32 @@
                         const el = document.createElement('div');
                         el.className = 'agent-msg assistant';
                         el.innerHTML = formatMessageText(block.text);
+                        return el;
+                    }
+                    case 'references': {
+                        const el = document.createElement('div');
+                        el.className = 'agent-msg assistant';
+                        el.style.cssText = 'font-style:italic; opacity:0.8; font-size:12px; border-left:2px solid var(--accent); padding-left:10px;';
+                        if (block.intro) {
+                            const introEl = document.createElement('div');
+                            introEl.textContent = block.intro;
+                            el.appendChild(introEl);
+                        }
+                        if (block.refs && block.refs.length) {
+                            const wrap = document.createElement('div');
+                            wrap.style.cssText = 'margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;';
+                            for (const ref of block.refs) {
+                                const btn = document.createElement('button');
+                                btn.type = 'button';
+                                const label = ref.section || ref.feature_type || 'ASME Ref';
+                                const page = (ref.images && ref.images[0]) ? ref.images[0].page : '';
+                                btn.textContent = '\uD83D\uDCD6 ' + label + (page ? ' (' + page + ')' : '');
+                                btn.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.2);border-radius:4px;font-size:11px;color:var(--accent);cursor:pointer;font-family:inherit;';
+                                btn.addEventListener('click', () => _showAsmeRefPopup(ref));
+                                wrap.appendChild(btn);
+                            }
+                            el.appendChild(wrap);
+                        }
                         return el;
                     }
                     default: {
@@ -16777,8 +17351,43 @@
                 return false;
             }
 
+            function buildEmptyConversationState() {
+                return {
+                    currentAgent: 'inspector',
+                    sessions: {
+                        'inspector': serializeSessionForPersistence(createAgentSession('inspector')),
+                        'deviation-analyst': serializeSessionForPersistence(createAgentSession('deviation-analyst')),
+                        'parts-finder': serializeSessionForPersistence(createAgentSession('parts-finder')),
+                    },
+                };
+            }
+
+            let chatUiEpoch = 0;
+
+            function _clearChatTransientState() {
+                removeSuggestions();
+                const loading = document.getElementById('agentSuggestionsLoading');
+                if (loading) loading.remove();
+                const progCard = document.getElementById('inspectionProgressCard');
+                if (progCard) progCard.remove();
+                removeTypingIndicator();
+                const asmeOverlay = document.getElementById('asmeRefOverlay');
+                if (asmeOverlay) asmeOverlay.remove();
+                const lightbox = document.getElementById('lightbox');
+                if (lightbox) lightbox.classList.remove('open');
+                if (state._inspCardInterval) { clearInterval(state._inspCardInterval); state._inspCardInterval = null; }
+                state._inspectionFromChat = false;
+                state._inspCardPendingFinalRender = false;
+                state._inspectionOutcome = null;
+                state._inspectionError = null;
+                state._inspCardElapsed = null;
+                lastSuggestionsContext = null;
+            }
+
             // Full UI sync after conversation/agent swap — mirrors selectAgent() restore steps
-            function _syncChatUI() {
+            function _syncChatUI(opts) {
+                const suppressSuggestions = !!(opts && opts.suppressSuggestions);
+                const suppressInspectionCard = !!(opts && opts.suppressInspectionCard);
                 const activeSession = getCurrentAgentSession();
                 // Render messages or welcome
                 if (activeSession.messages.length > 0) {
@@ -16796,7 +17405,9 @@
                 agentInput.disabled = w;
                 updateSendButtonState();
                 // Suggestion chips: Iris-only
-                if (currentAgent !== 'inspector') {
+                if (suppressSuggestions) {
+                    removeSuggestions();
+                } else if (currentAgent !== 'inspector') {
                     removeSuggestions();
                 } else if (activeSession.messages.length === 0 && state.results) {
                     loadSuggestions();
@@ -16809,7 +17420,7 @@
                 buildAgentIconStrip();
                 updateChatBar();
                 // Inspector progress card reinjection
-                if (currentAgent === 'inspector') {
+                if (!suppressInspectionCard && currentAgent === 'inspector') {
                     if (state._inspCardPendingFinalRender) {
                         setTimeout(() => { if (typeof _renderFinalInspCard === 'function') _renderFinalInspCard(); }, 100);
                     } else if (state.inspecting && state._inspectionFromChat && window._buildInspProgressCard) {
@@ -16830,6 +17441,7 @@
                     return;
                 }
                 saveChatRegistryNow();
+                chatUiEpoch++;
                 const conv = _chatRegistry.conversations[convId];
                 if (!conv) return;
                 _currentConversationId = convId;
@@ -16845,13 +17457,15 @@
                     return;
                 }
                 saveChatRegistryNow();
+                chatUiEpoch++;
                 const meta = { part_number: state.partNumber || null, part_name: state.partName || null, lastAgent: 'inspector' };
                 const conv = createEmptyConversation(meta);
                 _chatRegistry.conversations[conv.id] = conv;
                 _currentConversationId = conv.id;
                 resetAllSessions();
+                _clearChatTransientState();
                 currentAgent = 'inspector';
-                _syncChatUI();
+                _syncChatUI({ suppressSuggestions: true, suppressInspectionCard: true });
                 saveChatRegistryNow();
             }
 
@@ -16860,11 +17474,38 @@
                     if (window._toast) window._toast('Wait for the current response to finish.', 'warning');
                     return;
                 }
-                resetAllSessions();
-                const conv = _chatRegistry.conversations[_currentConversationId];
-                if (conv) { conv.title = 'New Chat'; conv.updatedAt = Date.now(); }
-                _syncChatUI();
-                saveChatRegistryNow();
+                const conv = _chatRegistry?.conversations?.[_currentConversationId];
+                if (!conv) return;
+
+                // Invalidate async work that could repaint cleared chat
+                chatUiEpoch++;
+                crossContextSwitchId++;
+                crossContextReady = Promise.resolve();
+
+                // Registry-first: overwrite the conversation record authoritatively
+                conv.title = 'New Chat';
+                conv.updatedAt = Date.now();
+                conv.meta = { ...(conv.meta || {}), lastAgent: 'inspector' };
+                conv.state = buildEmptyConversationState();
+
+                // Restore from the cleared snapshot into live session objects
+                restoreConversationSnapshot(conv);
+                currentAgent = conv.state.currentAgent || 'inspector';
+
+                // Clear transient DOM/runtime state, then sync UI
+                _clearChatTransientState();
+                _syncChatUI({ suppressSuggestions: true, suppressInspectionCard: true });
+
+                // Direct persist — write the already-cleared registry without rebuilding from live state
+                _chatRegistry.currentConversationId = _currentConversationId;
+                _chatRegistry.workspaceRecovery = buildRecoveryState();
+                try { localStorage.setItem(AGENT_CHAT_REGISTRY_KEY, JSON.stringify(_chatRegistry)); }
+                catch (e) { console.warn('[ClearChat] Save failed:', e.message); }
+
+                console.log('[ClearChat] done', {
+                    convId: _currentConversationId,
+                    msgCounts: { iris: getAgentSession('inspector').messages.length, sage: getAgentSession('deviation-analyst').messages.length, scout: getAgentSession('parts-finder').messages.length }
+                });
             }
 
             function getConversationList() {
@@ -17192,21 +17833,18 @@
                     rg: (att.inspection || {}).representation_gaps
                 });
                 if (ctxKey === lastSuggestionsContext && suggestionsVisible) return;
+                const epoch = chatUiEpoch;
 
                 removeSuggestions();
+                if (epoch !== chatUiEpoch) return;
 
                 // Show loading
                 const loadingEl = document.createElement('div');
                 loadingEl.className = 'agent-suggestions-loading';
                 loadingEl.id = 'agentSuggestionsLoading';
                 loadingEl.textContent = 'Generating suggestions...';
-                // Insert after welcome if present, otherwise at start
                 const welcome = agentMessages.querySelector('.agent-welcome');
-                if (welcome) {
-                    welcome.after(loadingEl);
-                } else {
-                    agentMessages.prepend(loadingEl);
-                }
+                if (welcome) { welcome.after(loadingEl); } else { agentMessages.prepend(loadingEl); }
 
                 try {
                     const res = await fetch('/api/agent/suggestions', {
@@ -17214,13 +17852,21 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ inspection_context: inspCtx, agent_type: currentAgent })
                     });
+                    // Stale epoch: chat was cleared/switched during fetch
+                    if (epoch !== chatUiEpoch) {
+                        const ld = document.getElementById('agentSuggestionsLoading');
+                        if (ld) ld.remove();
+                        return;
+                    }
                     // Remove loading
                     const ld = document.getElementById('agentSuggestionsLoading');
                     if (ld) ld.remove();
 
                     if (res.ok) {
                         const data = await res.json();
+                        if (epoch !== chatUiEpoch) return;
                         const suggestions = data.suggestions || [];
+                        if (epoch !== chatUiEpoch) return;
                         if (suggestions.length > 0) {
                             renderSuggestionChips(suggestions);
                             lastSuggestionsContext = ctxKey;
@@ -19163,24 +19809,35 @@
                             data._isNarration = true;
                         }
                         // === Tool dispatch (Phase 6: tool_calls canonical) ===
-                        const toolCalls = data.tool_calls || (() => {
+                        let toolCalls = [];
+                        try {
+                            toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : (() => {
                             // Legacy fallback — should rarely fire for Iris/Sage now
                             if (originAgent !== 'parts-finder') {
                                 console.warn('[ToolDispatch] No tool_calls from server for', originAgent, '— using legacy fallback');
                             }
                             return normalizeLegacyResponseToToolCalls(data, originAgent);
-                        })();
-                        if (toolCalls.length > 0) {
-                            await executeToolCalls(toolCalls, originAgent);
-                        }
-                        // Clear feature highlights if no highlight_features tool was dispatched
-                        if (state.featureHighlightActive && !toolCalls.some(tc => tc.name === 'highlight_features')) {
-                            clearFeatureHighlights();
+                            })();
+                            if (!Array.isArray(toolCalls)) toolCalls = [];
+                            if (toolCalls.length > 0) {
+                                await executeToolCalls(toolCalls, originAgent);
+                            }
+                            // Clear feature highlights if no highlight_features tool was dispatched
+                            if (state.featureHighlightActive && !toolCalls.some(tc => tc.name === 'highlight_features')) {
+                                clearFeatureHighlights();
+                            }
+                        } catch (postResponseErr) {
+                            console.error('[ToolDispatch] Post-response handling failed:', postResponseErr);
+                            toolCalls = [];
                         }
                         // Non-tool actions outside the registry:
                         // ASME reference popup (stays on its own path for now)
                         if (Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
-                            _showAsmeRefsFromResponse(data.asme_refs);
+                            try {
+                                _showAsmeRefsFromResponse(data.asme_refs, originAgent);
+                            } catch (asmeErr) {
+                                console.error('[ASME Refs] Notification render failed:', asmeErr);
+                            }
                         }
                         // Store narration data for handling after try/catch
                         if (data._isNarration) {
@@ -19706,15 +20363,29 @@
             // Add a system-style notification message to the chat
             // Append a notification message to the current agent's session.
             function addNotificationMessage(text, opts) {
-                const agentKey = currentAgent;
-                const session = getCurrentAgentSession();
+                const agentKey = (opts && opts.agentKey) || currentAgent;
+                const session = getAgentSession(agentKey);
                 const msg = createMessage('system', [createNotificationBlock(text, opts && opts.html)]);
                 session.messages.push(msg);
                 scheduleAgentStateSave();
-                // Render into live DOM (notifications are always on the visible agent)
-                agentMessages.appendChild(renderMessageToDOM(msg, agentKey));
-                agentMessages.scrollTop = agentMessages.scrollHeight;
+                if (agentKey === currentAgent) {
+                    agentMessages.appendChild(renderMessageToDOM(msg, agentKey));
+                    agentMessages.scrollTop = agentMessages.scrollHeight;
+                }
             }
+
+            function addReferencesMessage(intro, refs, targetAgentKey) {
+                const agentKey = targetAgentKey || currentAgent;
+                const session = getAgentSession(agentKey);
+                const msg = createMessage('system', [createReferencesBlock(intro, refs)]);
+                session.messages.push(msg);
+                scheduleAgentStateSave();
+                if (agentKey === currentAgent) {
+                    agentMessages.appendChild(renderMessageToDOM(msg, agentKey));
+                    agentMessages.scrollTop = agentMessages.scrollHeight;
+                }
+            }
+            window._addAgentReferencesMessage = addReferencesMessage;
 
             // Expose a method for external code to notify agent of new inspection results
             window._agentOnInspectionComplete = function() {
@@ -19747,17 +20418,10 @@
 
                 // Post ASME representation summary to Iris chat with clickable refs
                 if (state.results && state.results.asme_checklist_findings && state.results.asme_checklist_findings.length > 0) {
-                    const refs = state.results.asme_checklist_findings;
-                    const summaryText = 'Inspection found ' + refs.length + ' ASME representation reference(s). Click any link to view the standard.';
-                    // Build ref links HTML
-                    let refsHtml = '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">';
-                    refs.forEach(function(ref) {
-                        const label = ref.section || ref.feature_type || 'ASME Ref';
-                        const page = (ref.images && ref.images[0]) ? ref.images[0].page : '';
-                        refsHtml += '<button style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.2);border-radius:4px;font-size:11px;color:var(--accent);cursor:pointer;border:1px solid rgba(79,195,247,0.2);font-family:inherit;" onclick=\'_showAsmeRefPopup(' + JSON.stringify(ref).replace(/'/g, "\\'") + ')\'>\uD83D\uDCD6 ' + label + (page ? ' (' + page + ')' : '') + '</button>';
-                    });
-                    refsHtml += '</div>';
-                    addNotificationMessage(summaryText + refsHtml, { html: true });
+                    addReferencesMessage(
+                        'Inspection found ' + state.results.asme_checklist_findings.length + ' ASME representation reference(s). Click any link to view the standard.',
+                        state.results.asme_checklist_findings
+                    );
                 }
             };
 
@@ -19944,6 +20608,19 @@
                 scheduleAgentStateSave();
             }
 
+            agentMessages.addEventListener('click', (e) => {
+                const btn = e.target.closest('[data-asme-ref]');
+                if (!btn) return;
+                const payload = btn.getAttribute('data-asme-ref');
+                if (!payload) return;
+                try {
+                    const ref = JSON.parse(decodeURIComponent(payload));
+                    _showAsmeRefPopup(ref);
+                } catch (err) {
+                    console.error('[ASME Refs] Failed to open reference:', err);
+                }
+            });
+
             agentToggleBtn.addEventListener('click', () => {
                 toggleAgentPanel();
             });
@@ -20044,9 +20721,21 @@
                 const dd = document.getElementById('agentChatDropdown');
                 dd.style.display = 'none';
                 if (menuDd.style.display !== 'none') { menuDd.style.display = 'none'; return; }
-                menuDd.innerHTML = '<div style="padding:6px 14px;cursor:pointer;font-size:12px;color:var(--text-primary);white-space:nowrap;" id="chatMenuClear">Clear Current Chat</div>';
+                menuDd.innerHTML = '';
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.id = 'chatMenuClear';
+                clearBtn.textContent = 'Clear Current Chat';
+                clearBtn.style.cssText = 'display:block;width:100%;padding:8px 14px;text-align:left;background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-primary);font-family:inherit;white-space:nowrap;';
+                clearBtn.addEventListener('click', function(ev) {
+                    ev.stopPropagation();
+                    menuDd.style.display = 'none';
+                    clearCurrentConversation();
+                });
+                clearBtn.addEventListener('mouseenter', function() { this.style.background = 'rgba(255,255,255,0.05)'; });
+                clearBtn.addEventListener('mouseleave', function() { this.style.background = 'none'; });
+                menuDd.appendChild(clearBtn);
                 menuDd.style.display = 'block';
-                menuDd.querySelector('#chatMenuClear').onclick = function() { menuDd.style.display = 'none'; clearCurrentConversation(); };
             });
             // Close dropdowns on outside click
             document.addEventListener('click', function(e) {
@@ -20697,6 +21386,8 @@
     </script>
 </body>
 </html>
+
+
 
 
 

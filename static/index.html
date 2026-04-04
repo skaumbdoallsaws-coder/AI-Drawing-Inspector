@@ -7964,9 +7964,72 @@
                     return;
                 }
 
-                // Store note data for right-click context menu
-                state._noteDotsData = [];
+                // Try rectangle-based Notes using highlight_boxes
+                const notesHlData = state.results?.highlight_boxes;
+                const notesHlAnnotations = Array.isArray(notesHlData?.annotations) ? notesHlData.annotations : [];
+                const notesHlRender = notesHlData?.render || {};
 
+                if (notesHlAnnotations.length > 0) {
+                    // Build feature-to-annotation map using f.location (canonical)
+                    const featureByAnnotationKey = {};
+                    noteFeatures.forEach(f => {
+                        const loc = f.location;
+                        if (!loc || !loc.annotationName) return;
+                        const keys = _buildHighlightLookupKeys(loc.annotationName, loc.viewName);
+                        keys.forEach(key => {
+                            featureByAnnotationKey[key] = {
+                                status: f.status || 'PENDING',
+                                observation: f.observation || '',
+                                name: f.name || '',
+                                found_callout: f.found_callout || '',
+                            };
+                        });
+                    });
+
+                    let notesRendered = 0;
+                    notesHlAnnotations.forEach(hlEntry => {
+                        // Only render annotations that map to an inspection feature
+                        const keys = _buildHighlightLookupKeys(hlEntry?.annotationName, hlEntry?.viewName);
+                        const featureInfo = keys.reduce((found, k) => found || featureByAnnotationKey[k], null);
+                        if (!featureInfo) return;
+
+                        const rect = _highlightEntryToPixels(hlEntry, notesHlRender, imageWidth, imageHeight);
+                        if (!rect || !rect.width || !rect.height) return;
+
+                        const color = _statusColor(featureInfo.status);
+
+                        const rectEl = _svgEl('rect');
+                        rectEl.setAttribute('x', rect.left);
+                        rectEl.setAttribute('y', rect.top);
+                        rectEl.setAttribute('width', rect.width);
+                        rectEl.setAttribute('height', rect.height);
+                        rectEl.setAttribute('fill', color);
+                        rectEl.setAttribute('fill-opacity', '0.15');
+                        rectEl.setAttribute('stroke', color);
+                        rectEl.setAttribute('stroke-width', '1.5');
+                        rectEl.setAttribute('rx', '3');
+                        rectEl.style.cursor = 'pointer';
+                        rectEl.style.pointerEvents = 'all';
+
+                        rectEl.addEventListener('contextmenu', (e) => {
+                            _showNoteContextMenu(e, {
+                                color: color,
+                                status: featureInfo.status,
+                                feature: featureInfo.name,
+                                text: featureInfo.observation || featureInfo.found_callout || '',
+                            });
+                        });
+
+                        overlay.appendChild(rectEl);
+                        notesRendered++;
+                    });
+
+                    console.log(`[Notes] Rendered ${notesRendered} rectangles for ${noteFeatures.length} features`);
+                    return;
+                }
+
+                // Fallback: old dot rendering for parts without highlight_boxes
+                state._noteDotsData = [];
                 noteFeatures.forEach((feature) => {
                     const targetSpec = _featureTargetSpec(feature, imageWidth, imageHeight);
                     if (!targetSpec) return;
@@ -7977,7 +8040,6 @@
                     const obs = feature.observation || feature.found_callout || feature.status || '';
                     const noteText = obs.length > 60 ? obs.substring(0, 57) + '...' : obs;
 
-                    // Store for context menu lookup
                     state._noteDotsData.push({
                         x: anchor.x, y: anchor.y,
                         color: color,
@@ -7991,7 +8053,6 @@
                     group.style.pointerEvents = 'all';
                     group.style.cursor = 'pointer';
 
-                    // Outer pulse ring
                     const ring = _svgEl('circle');
                     ring.setAttribute('cx', anchor.x);
                     ring.setAttribute('cy', anchor.y);
@@ -8002,7 +8063,6 @@
                     ring.setAttribute('stroke-width', '2');
                     group.appendChild(ring);
 
-                    // Inner dot (larger, semi-transparent so dimensions show through)
                     const dot = _svgEl('circle');
                     dot.setAttribute('cx', anchor.x);
                     dot.setAttribute('cy', anchor.y);
@@ -8011,7 +8071,6 @@
                     dot.setAttribute('fill-opacity', '0.5');
                     group.appendChild(dot);
 
-                    // Invisible hit area (larger for easier clicking)
                     const hitArea = _svgEl('circle');
                     hitArea.setAttribute('cx', anchor.x);
                     hitArea.setAttribute('cy', anchor.y);
@@ -8030,7 +8089,7 @@
                     overlay.appendChild(group);
                 });
 
-                console.log(`[Notes] Rendered ${state._noteDotsData.length} dots for ${noteFeatures.length} issues`);
+                console.log(`[Notes] Rendered ${state._noteDotsData.length} dots (fallback) for ${noteFeatures.length} features`);
                 return;
             }
             // === FAI MODE: numbered dimension balloons from drawing_map ===

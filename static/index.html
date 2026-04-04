@@ -6770,10 +6770,12 @@
                 ? sourceAnnotations.filter(a => !a?.sheetName || a.sheetName === currentSheetName)
                 : sourceAnnotations;
 
-            // Keep only displayDimension types
+            // Keep highlightable annotation types (dimensions, balloons, notes, gtol)
+            const highlightableTypes = new Set(['displayDimension', 'balloon', 'note', 'gtol']);
             const dimensions = visible.filter(ann => {
                 const keys = _buildHighlightLookupKeys(ann?.annotationName, ann?.viewName);
-                return keys.some(k => annotationMeta[k]?.annotationType === 'displayDimension');
+                const meta = keys.find(k => annotationMeta[k]) ? annotationMeta[keys.find(k => annotationMeta[k])] : null;
+                return !meta || highlightableTypes.has(meta.annotationType);
             });
 
             // Build feature lookup for status + found_callout (use location fields)

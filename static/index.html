@@ -7986,6 +7986,74 @@
                         });
                     });
 
+                    // Fallback: if no location-based mappings found, build from found_callout text matching
+                    // This handles cases where the inspection engine doesn't populate f.location
+                    if (Object.keys(featureByAnnotationKey).length === 0) {
+                        // Build annotation text lookup from drawing map
+                        const dmSheets = state.results?.drawing_map?.sheets || [];
+                        const annTextByKey = {};
+                        dmSheets.forEach(sheet => {
+                            (sheet.views || []).forEach(view => {
+                                (view.annotations || []).forEach(ann => {
+                                    if (!ann.dimensionText && !ann.dimensionValue) return;
+                                    const keys = _buildHighlightLookupKeys(ann.annotationName, ann.viewName || view.viewName);
+                                    const text = (ann.dimensionText || '').replace(/<[^>]+>/g, '').trim();
+                                    const val = ann.dimensionValue ? (ann.dimensionValue * 1000).toFixed(2) : '';
+                                    keys.forEach(k => { annTextByKey[k] = { text, val, ann }; });
+                                });
+                            });
+                        });
+
+                        // For each feature, try to match its found_callout or name to annotation text/values
+                        noteFeatures.forEach(f => {
+                            const callout = (f.found_callout || f.name || '').toLowerCase();
+                            // Match all highlight box annotations — color by overall inspection status
+                            notesHlAnnotations.forEach(hlEntry => {
+                                const keys = _buildHighlightLookupKeys(hlEntry?.annotationName, hlEntry?.viewName);
+                                const annInfo = keys.reduce((found, k) => found || annTextByKey[k], null);
+                                if (!annInfo) return;
+                                // Check if this annotation's text/value relates to this feature
+                                const aText = (annInfo.text || '').toLowerCase();
+                                const aVal = annInfo.val || '';
+                                if (callout && (aText.includes(callout.substring(0, 5)) || callout.includes(aVal))) {
+                                    keys.forEach(key => {
+                                        if (!featureByAnnotationKey[key]) {
+                                            featureByAnnotationKey[key] = {
+                                                status: f.status || 'PENDING',
+                                                observation: f.observation || '',
+                                                name: f.name || '',
+                                                found_callout: f.found_callout || '',
+                                            };
+                                        }
+                                    });
+                                }
+                            });
+                        });
+
+                        // If still no mappings, show all dimension annotations with overall status
+                        if (Object.keys(featureByAnnotationKey).length === 0) {
+                            const overallStatus = noteFeatures.some(f => f.status === 'MISSING') ? 'MISSING'
+                                : noteFeatures.some(f => f.status === 'PARTIAL') ? 'PARTIAL'
+                                : noteFeatures.some(f => f.status === 'DISCREPANT') ? 'DISCREPANT'
+                                : 'PRESENT';
+                            notesHlAnnotations.forEach(hlEntry => {
+                                const aType = hlEntry.annotationType || '';
+                                // Skip center marks and labels — only show dimension-like annotations
+                                if (hlEntry.annotationName && !hlEntry.annotationName.startsWith('DetailItem')) {
+                                    const keys = _buildHighlightLookupKeys(hlEntry.annotationName, hlEntry.viewName);
+                                    keys.forEach(key => {
+                                        featureByAnnotationKey[key] = {
+                                            status: overallStatus,
+                                            observation: 'All features ' + overallStatus.toLowerCase(),
+                                            name: hlEntry.annotationName,
+                                            found_callout: '',
+                                        };
+                                    });
+                                }
+                            });
+                        }
+                    }
+
                     let notesRendered = 0;
                     notesHlAnnotations.forEach(hlEntry => {
                         // Only render annotations that map to an inspection feature

@@ -6770,12 +6770,17 @@
                 ? sourceAnnotations.filter(a => !a?.sheetName || a.sheetName === currentSheetName)
                 : sourceAnnotations;
 
-            // Keep highlightable annotation types (dimensions, balloons, notes, gtol)
-            const highlightableTypes = new Set(['displayDimension', 'balloon', 'note', 'gtol']);
+            // Keep highlightable annotation types (dimensions, balloons with text, gtol)
+            // Exclude bare view labels (note type with no dimension text/value)
+            const highlightableTypes = new Set(['displayDimension', 'balloon', 'gtol']);
             const dimensions = visible.filter(ann => {
                 const keys = _buildHighlightLookupKeys(ann?.annotationName, ann?.viewName);
                 const meta = keys.find(k => annotationMeta[k]) ? annotationMeta[keys.find(k => annotationMeta[k])] : null;
-                return !meta || highlightableTypes.has(meta.annotationType);
+                if (!meta) return true;
+                if (highlightableTypes.has(meta.annotationType)) return true;
+                // Include notes only if they have meaningful text (not view labels)
+                if (meta.annotationType === 'note' && meta.dimensionText && meta.dimensionText.trim() && meta.dimensionText !== 'None') return true;
+                return false;
             });
 
             // Build feature lookup for status + found_callout (use location fields)

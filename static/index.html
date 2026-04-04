@@ -8079,14 +8079,14 @@
                         rectEl.style.cursor = 'pointer';
                         rectEl.style.pointerEvents = 'all';
 
-                        rectEl.addEventListener('contextmenu', (e) => {
-                            _showNoteContextMenu(e, {
-                                color: color,
-                                status: featureInfo.status,
-                                feature: featureInfo.name,
-                                text: featureInfo.observation || featureInfo.found_callout || '',
-                            });
-                        });
+                        const noteData = {
+                            color: color,
+                            status: featureInfo.status,
+                            feature: featureInfo.name,
+                            text: featureInfo.observation || featureInfo.found_callout || '',
+                        };
+                        rectEl.addEventListener('contextmenu', (e) => { _showNoteContextMenu(e, noteData); });
+                        rectEl.addEventListener('click', (e) => { _showNoteContextMenu(e, noteData); });
 
                         overlay.appendChild(rectEl);
                         notesRendered++;

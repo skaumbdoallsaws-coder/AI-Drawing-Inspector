@@ -1609,9 +1609,6 @@
             100% { fill-opacity: 0.25; }
         }
         .dim-explorer-highlight {
-            fill: #4fc3f7;
-            fill-opacity: 0.20;
-            stroke: none;
             pointer-events: none;
         }
         .dim-explorer-highlight.pulsing {
@@ -2094,6 +2091,339 @@
         .diff-panel-sage-loading {
             color: var(--text-secondary);
             font-style: italic;
+        }
+        /* ---- Drawing Revision Diff ---- */
+        .dwg-diff-rev-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 14px;
+            background: var(--bg-toolbar);
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        .dwg-diff-rev-bar select {
+            background: var(--bg-toolbar);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .dwg-diff-split {
+            flex: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 3px minmax(0, 1fr);
+            min-height: 0;
+            position: relative;
+        }
+        .dwg-diff-gutter {
+            background: rgba(79, 195, 247, 0.25);
+            box-shadow: 0 0 6px rgba(79, 195, 247, 0.15);
+            cursor: col-resize;
+            z-index: 5;
+        }
+        .dwg-diff-pane {
+            position: relative;
+            overflow: hidden;
+            background: var(--bg-main);
+            min-width: 0;
+            min-height: 0;
+            cursor: grab;
+        }
+        .dwg-diff-pane-inner {
+            position: relative;
+            display: inline-block;
+            transform-origin: top left;
+        }
+        .dwg-diff-pane-inner img {
+            display: block;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        .dwg-diff-navigator {
+            display: inline-flex;
+            gap: 3px;
+            padding: 1px 4px;
+            margin-left: 8px;
+            overflow-x: auto;
+            max-width: 50%;
+            flex-shrink: 1;
+            min-width: 0;
+        }
+        .dwg-diff-nav-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            font-size: 10px;
+            font-weight: 500;
+            border-radius: 3px;
+            cursor: pointer;
+            white-space: nowrap;
+            border: 1px solid transparent;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .dwg-diff-nav-pill:hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .dwg-diff-nav-pill.unchanged {
+            color: var(--text-secondary);
+        }
+        .dwg-diff-nav-pill.changed {
+            color: #FFB300;
+            border-color: rgba(255,179,0,0.3);
+        }
+        .dwg-diff-nav-pill.added {
+            color: #00E676;
+            border-color: rgba(0,230,118,0.3);
+        }
+        .dwg-diff-nav-pill.removed {
+            color: #FF5252;
+            border-color: rgba(255,82,82,0.3);
+        }
+        .dwg-diff-nav-pill.ambiguous {
+            color: #AB47BC;
+            border-color: rgba(171,71,188,0.3);
+        }
+        .dwg-diff-nav-pill.active {
+            background: rgba(79,195,247,0.15);
+            border-color: rgba(79,195,247,0.4);
+        }
+        .dwg-diff-priority-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            padding: 1px 5px;
+            border-radius: 999px;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            line-height: 1.2;
+            border: 1px solid transparent;
+        }
+        .dwg-diff-priority-badge.extract-now {
+            color: #D7FFF0;
+            background: rgba(0, 184, 148, 0.18);
+            border-color: rgba(0, 184, 148, 0.35);
+        }
+        .dwg-diff-priority-badge.consider {
+            color: #FFF2C4;
+            background: rgba(255, 179, 0, 0.16);
+            border-color: rgba(255, 179, 0, 0.3);
+        }
+        .dwg-diff-priority-badge.skip {
+            color: #C7D0DB;
+            background: rgba(148, 163, 184, 0.12);
+            border-color: rgba(148, 163, 184, 0.22);
+        }
+        .dwg-diff-summary-bar {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 5px 14px;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        .dwg-diff-summary-bar .stat {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .dwg-diff-summary-bar .stat-count {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .dwg-diff-toggles {
+            display: flex;
+            gap: 12px;
+            margin-left: auto;
+        }
+        .dwg-diff-toggles label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+        .dwg-diff-toggles input { width: 12px; height: 12px; }
+        /* Annotation change overlay markers */
+        .dwg-diff-ann-marker {
+            position: absolute;
+            pointer-events: none;
+            border-radius: 3px;
+            min-width: 20px;
+            min-height: 20px;
+        }
+        .dwg-diff-ann-marker.ann-added {
+            border: 3px solid #00E676;
+            background: rgba(0,230,118,0.15);
+            box-shadow: 0 0 8px rgba(0,230,118,0.35), inset 0 0 4px rgba(0,230,118,0.1);
+        }
+        .dwg-diff-ann-marker.ann-removed {
+            border: 3px dashed #FF5252;
+            background: rgba(255,82,82,0.12);
+            box-shadow: 0 0 8px rgba(255,82,82,0.3), inset 0 0 4px rgba(255,82,82,0.08);
+        }
+        .dwg-diff-ann-marker.ann-modified {
+            border: 3px solid #FFB300;
+            background: rgba(255,179,0,0.2);
+            box-shadow: 0 0 10px rgba(255,179,0,0.42), inset 0 0 5px rgba(255,179,0,0.14);
+        }
+        .dwg-diff-badge {
+            position: absolute;
+            top: -9px;
+            left: -9px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 16px;
+            text-align: center;
+            color: #000;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .ann-added .dwg-diff-badge { background: #00E676; }
+        .ann-removed .dwg-diff-badge { background: #FF5252; color: #fff; }
+        .ann-modified .dwg-diff-badge { background: #FFB300; }
+        .dwg-diff-view-dim {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.3);
+            pointer-events: none;
+            z-index: 0;
+            transition: opacity 0.25s;
+        }
+        .dwg-diff-proj-marker {
+            position: absolute;
+            pointer-events: none;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            border: 2px dashed #AB47BC;
+            background: rgba(171,71,188,0.08);
+            box-shadow: 0 0 10px rgba(171,71,188,0.24);
+            transform: translate(-50%, -50%);
+        }
+        .dwg-diff-proj-marker::before {
+            content: "\0394";
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #D7A6E2;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .dwg-diff-proj-region {
+            position: absolute;
+            pointer-events: none;
+            border: 2px dashed #AB47BC;
+            background: rgba(171,71,188,0.12);
+            box-shadow: 0 0 10px rgba(171,71,188,0.28), inset 0 0 5px rgba(171,71,188,0.08);
+            border-radius: 4px;
+        }
+        .dwg-diff-proj-region::before {
+            content: "\0394";
+            position: absolute;
+            top: -9px;
+            left: -9px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #C77ED4;
+            color: #1E0F23;
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 16px;
+            text-align: center;
+            box-shadow: 0 0 6px rgba(171,71,188,0.28);
+        }
+        .dwg-diff-native-layer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: visible;
+        }
+        .dwg-diff-native-halo {
+            fill: none;
+            stroke: rgba(15, 23, 42, 0.22);
+            stroke-width: 6px;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .dwg-diff-native-added {
+            fill: none;
+            stroke: #24C8FF;
+            stroke-width: 2.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            filter: drop-shadow(0 0 5px rgba(36, 200, 255, 0.42));
+        }
+        .dwg-diff-native-removed {
+            fill: none;
+            stroke: #FF5A5F;
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 6 3;
+            filter: drop-shadow(0 0 6px rgba(255, 90, 95, 0.45));
+        }
+        .dwg-diff-native-legend {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 8px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+            color: #E6EEF8;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            line-height: 1;
+            pointer-events: none;
+            z-index: 14;
+        }
+        .dwg-diff-native-legend.right {
+            left: auto;
+            right: 10px;
+        }
+        .dwg-diff-native-legend-swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex: 0 0 auto;
+            background: transparent;
+            border: 2px solid currentColor;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+        }
+        .dwg-diff-native-legend.added {
+            color: #7FDFFF;
+        }
+        .dwg-diff-native-legend.removed {
+            color: #FF9D9D;
+        }
+        .dwg-diff-native-legend.removed .dwg-diff-native-legend-swatch {
+            border-style: dashed;
         }
         .assembly-header {
             display: none !important; /* Hidden — ribbon shows assembly info as chips */
@@ -5930,6 +6260,49 @@
             _diffResizeObs: null,
         };
 
+        const DRAWING_COMPARE_DEV_PREVIEW = true;
+
+        // Drawing revision diff state
+        let drawingDiffState = {
+            available: false,
+            revisions: [],
+            activeRevA: null,
+            activeRevB: null,
+            activeSubtab: 'drawing',  // 'drawing' | 'compare'
+            diffResult: null,
+            loading: false,
+            // Compare camera — shared logical state (sheet-space normalized)
+            logicalZoom: 1.0,     // 1.0 = fit, >1 = zoomed in
+            logicalPanX: 0,       // pixels at fit-scale
+            logicalPanY: 0,
+            isPanning: false,
+            _panMouseStartX: 0,
+            _panMouseStartY: 0,
+            _panLogicalStartX: 0,
+            _panLogicalStartY: 0,
+            // Per-pane base fit (computed independently per image)
+            baseFitA: null,       // { scale, offsetX, offsetY, imgW, imgH }
+            baseFitB: null,
+            // Overlay toggles
+            showAnnotationChanges: true,
+            showProjectedDelta: false,
+            // Navigator
+            selectedView: null,
+        };
+
+        function _drawingCompareUiEnabled() {
+            return !!(drawingDiffState.available || DRAWING_COMPARE_DEV_PREVIEW);
+        }
+
+        function _drawingCompareHasRealRevisions() {
+            return !!(drawingDiffState.available && Array.isArray(drawingDiffState.revisions) && drawingDiffState.revisions.length >= 2);
+        }
+
+        function _drawingCompareRevisionOptions() {
+            if (_drawingCompareHasRealRevisions()) return drawingDiffState.revisions;
+            return DRAWING_COMPARE_DEV_PREVIEW ? ['A', 'B'] : [];
+        }
+
         // Feature #144: Assembly context auto-load
         async function checkAssemblyContext(partNumber) {
             try {
@@ -6166,6 +6539,46 @@
                 })
                 .catch(() => { partDiffState.available = false; partDiffState.revisions = []; });
 
+            // Fetch drawing revisions for drawing compare mode
+            drawingDiffState.available = false;
+            drawingDiffState.revisions = [];
+            drawingDiffState.activeRevA = null;
+            drawingDiffState.activeRevB = null;
+            drawingDiffState.activeSubtab = 'drawing';
+            drawingDiffState.diffResult = null;
+            drawingDiffState.loading = false;
+            drawingDiffState.selectedView = null;
+
+            fetch(`/api/drawing-revisions/${encodeURIComponent(pn)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data && state.partNumber === pn) {
+                        drawingDiffState.revisions = data.revisions || [];
+                        drawingDiffState.available = drawingDiffState.revisions.length >= 2;
+                        const revOptions = _drawingCompareRevisionOptions();
+                        if (revOptions.length >= 2) {
+                            drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
+                            drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
+                        }
+                        // Re-render drawing tab to show Compare subtab if available
+                        if (_drawingCompareUiEnabled() && state.activeTab === 'drawing') {
+                            renderRibbon();
+                        }
+                    }
+                })
+                .catch(() => {
+                    drawingDiffState.available = false;
+                    drawingDiffState.revisions = [];
+                    const revOptions = _drawingCompareRevisionOptions();
+                    if (revOptions.length >= 2) {
+                        drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
+                        drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
+                    }
+                    if (_drawingCompareUiEnabled() && state.activeTab === 'drawing') {
+                        renderRibbon();
+                    }
+                });
+
             // Feature #144: Check assembly context for this part
             checkAssemblyContext(pn);
         }
@@ -6312,7 +6725,7 @@
         function _statusColor(status) {
             switch ((status || '').toUpperCase()) {
                 case 'PRESENT': return '#00E676';
-                case 'PARTIAL': return '#FFD600';
+                case 'PARTIAL': return '#FFB300';
                 case 'DISCREPANT': return '#FF6D00';
                 case 'MISSING': return '#FF1744';
                 default: return '#4fc3f7';
@@ -6470,6 +6883,42 @@
                 });
             });
             return keys;
+        }
+
+        function _buildStrictHighlightLookupKeys(annotationName, viewName) {
+            const rawName = String(annotationName || '').trim();
+            const shortName = _simplifyAnnotationName(rawName);
+            const rawView = String(viewName || '').trim();
+
+            const nameVariants = [];
+            if (rawName) nameVariants.push(rawName);
+            if (shortName && shortName !== rawName) {
+                nameVariants.push(shortName);
+            }
+
+            const keys = [];
+            const seen = new Set();
+            nameVariants.forEach(name => {
+                const normalizedName = _normalizeHighlightKeyPart(name);
+                if (!normalizedName) return;
+                const key = `${normalizedName}|${_normalizeHighlightKeyPart(rawView)}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    keys.push(key);
+                }
+            });
+            return keys;
+        }
+
+        function _cleanCalloutMarkupText(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/<MOD-DIAM>/gi, 'Ø')
+                .replace(/<MOD-PLUSMINUS>/gi, '±')
+                .replace(/<MOD-DEG>/gi, '°')
+                .replace(/<[^>]+>/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
         }
 
         function _highlightRectFromPixels(boxPx, renderWidth, renderHeight, imageWidth, imageHeight) {
@@ -7019,24 +7468,46 @@
             renderDimExplorerHighlight();
         }
 
+        function _resolveDimExplorerKeyToken(rawKey, allDims) {
+            const token = String(rawKey || '').trim();
+            if (!token) return null;
+            const exact = allDims.find(d => d.dimKey === token);
+            if (exact) return exact;
+            const bracketMatch = token.match(/\[([^\]]+)\]/);
+            if (bracketMatch) {
+                const bracketKey = bracketMatch[1].trim();
+                const bracketExact = allDims.find(d => d.dimKey === bracketKey);
+                if (bracketExact) return bracketExact;
+            }
+            const substringMatches = allDims.filter(d => token.includes(d.dimKey) || d.dimKey.includes(token));
+            return substringMatches.length === 1 ? substringMatches[0] : null;
+        }
+
         function applyAgentHighlights(dimKeys) {
             const groups = buildDimExplorerData();
             const allDims = Object.values(groups).flat();
             if (!allDims.length) return;
 
-            // Clear previous agent-driven highlights (keep manual selections)
-            state.dimExplorerAgentKeys.forEach(key => {
-                state.dimExplorerSelectedKeys.delete(key);
+            const resolvedKeys = [];
+            dimKeys.forEach(key => {
+                const match = _resolveDimExplorerKeyToken(key, allDims);
+                if (match && !resolvedKeys.includes(match.dimKey)) {
+                    resolvedKeys.push(match.dimKey);
+                }
             });
+
+            if (!resolvedKeys.length) return;
+
+            // Chat-driven "show me X" should replace the current dim selection.
+            // Merging with stale/manual selections causes overlapping or incorrect
+            // callouts (for example 76.20 persisting when the user asks for 152.40).
+            state.dimExplorerSelectedKeys.clear();
             state.dimExplorerAgentKeys.clear();
 
             let changed = true;
-            dimKeys.forEach(key => {
-                const match = allDims.find(d => d.dimKey === key);
-                if (match) {
-                    state.dimExplorerSelectedKeys.add(match.dimKey);
-                    state.dimExplorerAgentKeys.add(match.dimKey);
-                }
+            resolvedKeys.forEach(dimKey => {
+                state.dimExplorerSelectedKeys.add(dimKey);
+                state.dimExplorerAgentKeys.add(dimKey);
             });
 
             if (changed) {
@@ -7054,6 +7525,23 @@
             }
         }
 
+        function _synthesizeBoxSheet(annotation) {
+            if (Array.isArray(annotation?.boundsSheet) && annotation.boundsSheet.length >= 4) {
+                return annotation.boundsSheet;
+            }
+            const pos = annotation?.positionSheet;
+            const ext = annotation?.textExtent;
+            if (!pos || !ext) return null;
+            const px = typeof pos === 'object' && !Array.isArray(pos) ? pos.x : (pos?.[0] ?? null);
+            const py = typeof pos === 'object' && !Array.isArray(pos) ? pos.y : (pos?.[1] ?? null);
+            const ew = ext?.[0] ?? 0;
+            const eh = ext?.[1] ?? 0;
+            if (px == null || py == null || ew <= 0 || eh <= 0) return null;
+            // positionSheet is upper-left in sheet coords (Y-up),
+            // text extends right and down → bottom = y - height
+            return [px, py - eh, px + ew, py];
+        }
+
         function renderDimExplorerHighlight() {
             const wrapper = document.getElementById('drawingWrapper');
             if (!wrapper) return;
@@ -7069,46 +7557,38 @@
                 ? hlData.annotations : (Array.isArray(hlData) ? hlData : []);
             const hlRender = hlData?.render || {};
 
-            // Drawing map fallback: synthesize highlight entries from boundsSheet
+            // Build drawing-map metadata lookup unconditionally.
+            // For displayDimension annotations, drawing-map text geometry is the
+            // primary source — it is deterministic and immune to VLM box swaps.
             const dmSheets = state.results?.drawing_map?.sheets || [];
             const dmSheetW = _coerceNumber(state.results?.drawing_map?.sheetWidth);
             const dmSheetH = _coerceNumber(state.results?.drawing_map?.sheetHeight);
-            let dmAnnotations = [];
-            if (!hlAnnotations.length && dmSheets.length) {
+            const dmMetaByKey = new Map();
+            if (dmSheets.length) {
                 const currentSheet = dmSheets[(state.currentPage || 1) - 1];
                 const sheetScope = currentSheet ? [currentSheet] : dmSheets;
                 sheetScope.forEach(sheet => {
                     (sheet?.views || []).forEach(view => {
                         (view?.annotations || []).forEach(ann => {
-                            if (ann?.annotationType !== 'displayDimension') return;
-                            // Synthesize bounds from positionSheet + textExtent when boundsSheet is absent
-                            let box = ann.boundsSheet;
-                            if ((!box || !Array.isArray(box) || box.length < 4) && ann.positionSheet && ann.textExtent) {
-                                const pos = ann.positionSheet;
-                                const ext = ann.textExtent;
-                                const px = typeof pos === 'object' && !Array.isArray(pos) ? pos.x : (pos?.[0] ?? null);
-                                const py = typeof pos === 'object' && !Array.isArray(pos) ? pos.y : (pos?.[1] ?? null);
-                                const ew = ext?.[0] ?? 0;
-                                const eh = ext?.[1] ?? 0;
-                                if (px != null && py != null && ew > 0 && eh > 0) {
-                                    // positionSheet is upper-left in sheet coords (Y-up),
-                                    // text extends right and down → bottom = y - height
-                                    box = [px, py - eh, px + ew, py];
-                                }
-                            }
-                            dmAnnotations.push({
+                            const entry = {
                                 annotationName: ann.annotationName,
                                 viewName: ann.viewName || view.viewName || '',
                                 sheetName: sheet.sheetName || '',
-                                boxSheet: box || null,
-                                positionSheet: ann.positionSheet || null,
+                                annotationType: ann.annotationType,
+                                synthesizedBox: _synthesizeBoxSheet(ann),
+                            };
+                            const keys = _buildHighlightLookupKeys(entry.annotationName, entry.viewName);
+                            const sheetPrefix = entry.sheetName ? entry.sheetName + '/' : '';
+                            keys.forEach(k => {
+                                if (!dmMetaByKey.has(k)) dmMetaByKey.set(k, entry);
+                                if (sheetPrefix && !dmMetaByKey.has(sheetPrefix + k)) {
+                                    dmMetaByKey.set(sheetPrefix + k, entry);
+                                }
                             });
                         });
                     });
                 });
             }
-            const allAnnotations = hlAnnotations.length ? hlAnnotations : dmAnnotations;
-            const useDmFallback = !hlAnnotations.length && dmAnnotations.length > 0;
 
             const img = wrapper.querySelector('img');
             if (!img) return;
@@ -7134,25 +7614,56 @@
             overlay.setAttribute('viewBox', '0 0 ' + imageWidth + ' ' + imageHeight);
             overlay.setAttribute('preserveAspectRatio', 'none');
 
-            const pad = useDmFallback ? 12 : 6; // larger pad for text-only bounds
             let hasRects = false;
 
             // Draw a highlight rect for each selected dimension
             state.dimExplorerSelectedKeys.forEach(selectedKey => {
-                const match = allAnnotations.find(ann => {
+                // Resolve VLM highlight_boxes entry
+                const hlMatch = hlAnnotations.length ? hlAnnotations.find(ann => {
                     const sheetPrefix = ann?.sheetName ? ann.sheetName + '/' : '';
                     const keys = _buildHighlightLookupKeys(ann?.annotationName, ann?.viewName);
                     const scopedKeys = keys.map(k => sheetPrefix + k);
                     return scopedKeys.includes(selectedKey) || keys.includes(selectedKey);
-                });
-                if (!match) return;
+                }) : null;
 
-                // Resolve pixel rect: highlight_boxes path or drawing_map boundsSheet path
+                // Resolve drawing-map metadata entry
+                const dmMatch = dmMetaByKey.get(selectedKey) || null;
+
+                // Priority: drawing-map text geometry for displayDimension,
+                //           VLM box for everything else, drawing-map as last fallback
                 let rect;
-                if (useDmFallback) {
-                    rect = _sheetRectToPixels(match.boxSheet, dmSheetW, dmSheetH, imageWidth, imageHeight);
-                } else {
-                    rect = _highlightEntryToPixels(match, hlRender, imageWidth, imageHeight);
+                let pad = 6;
+                if (dmMatch && dmMatch.annotationType === 'displayDimension' && dmMatch.synthesizedBox) {
+                    rect = _sheetRectToPixels(dmMatch.synthesizedBox, dmSheetW, dmSheetH, imageWidth, imageHeight);
+                    if (rect) {
+                        pad = 12; // text-only bounds need larger padding
+                    } else if (hlMatch) {
+                        // Drawing-map geometry failed (missing sheet dims) — fall through to VLM
+                        rect = _highlightEntryToPixels(hlMatch, hlRender, imageWidth, imageHeight);
+                    }
+
+                    // Warn when VLM box points to a different annotation than drawing-map
+                    // (catches swapped/miswired highlight_boxes entries)
+                    if (hlMatch && dmMatch) {
+                        const hlAnnName = (hlMatch.annotationName || '').trim();
+                        const dmAnnName = (dmMatch.annotationName || '').trim();
+                        const hlViewName = (hlMatch.viewName || '').trim();
+                        const dmViewName = (dmMatch.viewName || '').trim();
+                        if (hlAnnName && dmAnnName && (hlAnnName !== dmAnnName || hlViewName !== dmViewName)) {
+                            console.warn('[DimHighlight] displayDimension identity mismatch', {
+                                selectedKey,
+                                drawingMap: dmAnnName + ' / ' + dmViewName,
+                                highlightBox: hlAnnName + ' / ' + hlViewName,
+                            });
+                        }
+                    }
+                } else if (hlMatch) {
+                    // Non-displayDimension (balloon, note, gtol) or no drawing-map geometry
+                    rect = _highlightEntryToPixels(hlMatch, hlRender, imageWidth, imageHeight);
+                } else if (dmMatch && dmMatch.synthesizedBox) {
+                    // Pure drawing-map fallback (no VLM boxes at all)
+                    rect = _sheetRectToPixels(dmMatch.synthesizedBox, dmSheetW, dmSheetH, imageWidth, imageHeight);
+                    pad = 12;
                 }
                 if (!rect || !rect.width || !rect.height) return;
 
@@ -7165,21 +7676,27 @@
                 hlRect.setAttribute('rx', 4);
                 hlRect.setAttribute('ry', 4);
 
-                // Post-inspection: use status color (match both scoped and unscoped keys)
+                // Post-inspection: only draw selections that map to a feature/status.
+                // The old blue fallback is intentionally removed because stale/manual
+                // boxes are more misleading than helpful.
                 const featureMatch = (state.results?.features || []).find(f => {
                     const fSheet = f?.location?.sheetName || '';
                     const fPrefix = fSheet ? fSheet + '/' : '';
-                    const keys = _buildHighlightLookupKeys(
+                    const keys = _buildStrictHighlightLookupKeys(
                         f?.location?.annotationName || f?.name,
                         f?.location?.viewName
                     );
                     const scopedKeys = fPrefix ? keys.map(k => fPrefix + k) : [];
                     return keys.includes(selectedKey) || scopedKeys.includes(selectedKey);
                 });
-                if (featureMatch?.status) {
-                    const color = _statusColor(featureMatch.status);
-                    hlRect.setAttribute('fill', color);
-                }
+                if (!featureMatch?.status) return;
+
+                const color = _statusColor(featureMatch.status);
+                const isPartial = String(featureMatch.status || '').toUpperCase() === 'PARTIAL';
+                hlRect.setAttribute('fill', color);
+                hlRect.setAttribute('fill-opacity', isPartial ? '0.22' : '0.17');
+                hlRect.setAttribute('stroke', color);
+                hlRect.setAttribute('stroke-width', isPartial ? '2' : '1.5');
 
                 overlay.appendChild(hlRect);
                 hasRects = true;
@@ -8015,7 +8532,9 @@
             // Build view rects from drawing map for view-aware placement
             // === NOTES MODE: brief fix-needed labels pinned to issue locations ===
             if (state.findingsOverlayMode === 'notes') {
-                const noteFeatures = features.filter(f => {
+                // Use raw features (not pre-filtered by location) so the text-matching
+                // compatibility fallback remains reachable for parts without backend mapping
+                const noteFeatures = (state.results?.features || []).filter(f => {
                     const s = (f.status || '').toUpperCase();
                     return s === 'MISSING' || s === 'DISCREPANT' || s === 'PARTIAL' || s === 'PRESENT';
                 });
@@ -8035,8 +8554,15 @@
 
                 // Try rectangle-based Notes using highlight_boxes
                 const notesHlData = state.results?.highlight_boxes;
-                const notesHlAnnotations = Array.isArray(notesHlData?.annotations) ? notesHlData.annotations : [];
+                const notesHlAll = Array.isArray(notesHlData?.annotations) ? notesHlData.annotations : [];
                 const notesHlRender = notesHlData?.render || {};
+                // Filter to current sheet (matches Highlights mode behavior)
+                const notesDmSheets = Array.isArray(state.results?.drawing_map?.sheets) ? state.results.drawing_map.sheets : [];
+                const notesCurrentSheet = notesDmSheets[(state.currentPage || 1) - 1] || null;
+                const notesCurrentSheetName = notesCurrentSheet?.sheetName || '';
+                const notesHlAnnotations = notesCurrentSheetName
+                    ? notesHlAll.filter(a => !a?.sheetName || a.sheetName === notesCurrentSheetName)
+                    : notesHlAll;
 
                 if (notesHlAnnotations.length > 0) {
                     // Build feature-to-annotation map using f.location (canonical)
@@ -8044,14 +8570,17 @@
                     noteFeatures.forEach(f => {
                         const loc = f.location;
                         if (!loc || !loc.annotationName) return;
-                        const keys = _buildHighlightLookupKeys(loc.annotationName, loc.viewName);
+                        const keys = _buildStrictHighlightLookupKeys(loc.annotationName, loc.viewName);
+                        const sheetPrefix = loc.sheetName ? loc.sheetName + '/' : '';
+                        const featureData = {
+                            status: f.status || 'PENDING',
+                            observation: f.observation || '',
+                            name: f.name || '',
+                            found_callout: f.found_callout || '',
+                        };
                         keys.forEach(key => {
-                            featureByAnnotationKey[key] = {
-                                status: f.status || 'PENDING',
-                                observation: f.observation || '',
-                                name: f.name || '',
-                                found_callout: f.found_callout || '',
-                            };
+                            featureByAnnotationKey[key] = featureData;
+                            if (sheetPrefix) featureByAnnotationKey[sheetPrefix + key] = featureData;
                         });
                     });
 
@@ -8062,13 +8591,18 @@
                         const dmSheets = state.results?.drawing_map?.sheets || [];
                         const annTextByKey = {};
                         dmSheets.forEach(sheet => {
+                            const sp = sheet.sheetName ? sheet.sheetName + '/' : '';
                             (sheet.views || []).forEach(view => {
                                 (view.annotations || []).forEach(ann => {
                                     if (!ann.dimensionText && !ann.dimensionValue) return;
                                     const keys = _buildHighlightLookupKeys(ann.annotationName, ann.viewName || view.viewName);
                                     const text = (ann.dimensionText || '').replace(/<[^>]+>/g, '').trim();
                                     const val = ann.dimensionValue ? (ann.dimensionValue * 1000).toFixed(2) : '';
-                                    keys.forEach(k => { annTextByKey[k] = { text, val, ann }; });
+                                    const entry = { text, val, ann };
+                                    keys.forEach(k => {
+                                        annTextByKey[k] = entry;
+                                        if (sp) annTextByKey[sp + k] = entry;
+                                    });
                                 });
                             });
                         });
@@ -8078,62 +8612,112 @@
                             const callout = (f.found_callout || f.name || '').toLowerCase();
                             // Match all highlight box annotations — color by overall inspection status
                             notesHlAnnotations.forEach(hlEntry => {
-                                const keys = _buildHighlightLookupKeys(hlEntry?.annotationName, hlEntry?.viewName);
-                                const annInfo = keys.reduce((found, k) => found || annTextByKey[k], null);
+                                const hlSp = hlEntry?.sheetName ? hlEntry.sheetName + '/' : '';
+                                const keys = _buildStrictHighlightLookupKeys(hlEntry?.annotationName, hlEntry?.viewName);
+                                const scopedKeys = hlSp ? keys.map(k => hlSp + k) : [];
+                                const annInfo = scopedKeys.concat(keys).reduce((found, k) => found || annTextByKey[k], null);
                                 if (!annInfo) return;
                                 // Check if this annotation's text/value relates to this feature
                                 const aText = (annInfo.text || '').toLowerCase();
                                 const aVal = annInfo.val || '';
                                 if (callout && (aText.includes(callout.substring(0, 5)) || callout.includes(aVal))) {
+                                    const featureData = {
+                                        status: f.status || 'PENDING',
+                                        observation: f.observation || '',
+                                        name: f.name || '',
+                                        found_callout: f.found_callout || '',
+                                    };
                                     keys.forEach(key => {
-                                        if (!featureByAnnotationKey[key]) {
-                                            featureByAnnotationKey[key] = {
-                                                status: f.status || 'PENDING',
-                                                observation: f.observation || '',
-                                                name: f.name || '',
-                                                found_callout: f.found_callout || '',
-                                            };
-                                        }
+                                        if (!featureByAnnotationKey[key]) featureByAnnotationKey[key] = featureData;
+                                        if (hlSp && !featureByAnnotationKey[hlSp + key]) featureByAnnotationKey[hlSp + key] = featureData;
                                     });
                                 }
                             });
                         });
 
-                        // If still no mappings, show all dimension annotations with overall status
-                        if (Object.keys(featureByAnnotationKey).length === 0) {
-                            const overallStatus = noteFeatures.some(f => f.status === 'MISSING') ? 'MISSING'
-                                : noteFeatures.some(f => f.status === 'PARTIAL') ? 'PARTIAL'
-                                : noteFeatures.some(f => f.status === 'DISCREPANT') ? 'DISCREPANT'
-                                : 'PRESENT';
-                            notesHlAnnotations.forEach(hlEntry => {
-                                const aType = hlEntry.annotationType || '';
-                                // Skip center marks and labels — only show dimension-like annotations
-                                if (hlEntry.annotationName && !hlEntry.annotationName.startsWith('DetailItem')) {
-                                    const keys = _buildHighlightLookupKeys(hlEntry.annotationName, hlEntry.viewName);
-                                    keys.forEach(key => {
-                                        featureByAnnotationKey[key] = {
-                                            status: overallStatus,
-                                            observation: 'All features ' + overallStatus.toLowerCase(),
-                                            name: hlEntry.annotationName,
-                                            found_callout: '',
-                                        };
-                                    });
-                                }
+                    }
+
+                    // Build supporting annotation map: other displayDimensions in views
+                    // that already have a primary feature mapping. This fills in related
+                    // green dimensions without reintroducing cross-view false positives.
+                    const supportingByAnnotationKey = {};
+                    if (Object.keys(featureByAnnotationKey).length > 0) {
+                        // Collect which views have primary mappings and their features
+                        const viewPrimaryFeatures = {};
+                        noteFeatures.forEach(f => {
+                            const loc = f.location;
+                            if (!loc || !loc.annotationName || !loc.viewName) return;
+                            const vn = loc.viewName;
+                            if (!viewPrimaryFeatures[vn]) viewPrimaryFeatures[vn] = [];
+                            viewPrimaryFeatures[vn].push({
+                                status: f.status || 'PENDING',
+                                observation: f.observation || '',
+                                name: f.name || '',
+                                found_callout: f.found_callout || '',
                             });
-                        }
+                        });
+
+                        // For each view with primaries, link unmapped displayDimensions as supporting
+                        const supportSheetScope = notesCurrentSheet ? [notesCurrentSheet] : notesDmSheets;
+                        supportSheetScope.forEach(sheet => {
+                            const sp = sheet.sheetName ? sheet.sheetName + '/' : '';
+                            (sheet.views || []).forEach(view => {
+                                const vn = view.viewName || '';
+                                const vPrimaries = viewPrimaryFeatures[vn];
+                                if (!vPrimaries || !vPrimaries.length) return;
+
+                                // Prefer a PRESENT feature for supporting color (avoid spreading amber)
+                                const bestFeature = vPrimaries.find(fp => fp.status === 'PRESENT') || vPrimaries[0];
+
+                                (view.annotations || []).forEach(ann => {
+                                    if (ann.annotationType !== 'displayDimension') return;
+                                    // Skip if already a primary match
+                                    const sKeys = _buildStrictHighlightLookupKeys(ann.annotationName, vn);
+                                    const alreadyPrimary = sKeys.some(k =>
+                                        featureByAnnotationKey[k] || featureByAnnotationKey[sp + k]
+                                    );
+                                    if (alreadyPrimary) return;
+
+                                    const supportData = {
+                                        status: bestFeature.status,
+                                        observation: bestFeature.observation,
+                                        name: bestFeature.name,
+                                        found_callout: bestFeature.found_callout,
+                                        _supporting: true,
+                                    };
+                                    sKeys.forEach(k => {
+                                        supportingByAnnotationKey[k] = supportData;
+                                        if (sp) supportingByAnnotationKey[sp + k] = supportData;
+                                    });
+                                });
+                            });
+                        });
                     }
 
                     let notesRendered = 0;
                     notesHlAnnotations.forEach(hlEntry => {
-                        // Only render annotations that map to an inspection feature
-                        const keys = _buildHighlightLookupKeys(hlEntry?.annotationName, hlEntry?.viewName);
-                        const featureInfo = keys.reduce((found, k) => found || featureByAnnotationKey[k], null);
+                        // Check primary first, then supporting
+                        const sheetPrefix = hlEntry?.sheetName ? hlEntry.sheetName + '/' : '';
+                        const keys = _buildStrictHighlightLookupKeys(hlEntry?.annotationName, hlEntry?.viewName);
+                        const scopedKeys = sheetPrefix ? keys.map(k => sheetPrefix + k) : [];
+                        const allKeys = scopedKeys.concat(keys);
+                        let featureInfo = allKeys.reduce((found, k) => found || featureByAnnotationKey[k], null);
+                        let isSupporting = false;
+                        if (!featureInfo) {
+                            featureInfo = allKeys.reduce((found, k) => found || supportingByAnnotationKey[k], null);
+                            isSupporting = true;
+                        }
                         if (!featureInfo) return;
 
                         const rect = _highlightEntryToPixels(hlEntry, notesHlRender, imageWidth, imageHeight);
                         if (!rect || !rect.width || !rect.height) return;
 
                         const color = _statusColor(featureInfo.status);
+                        const isPartial = String(featureInfo.status || '').toUpperCase() === 'PARTIAL';
+                        const baseFillOpacity = isSupporting ? '0.08' : (isPartial ? '0.20' : '0.15');
+                        const baseStrokeWidth = isSupporting ? '1' : (isPartial ? '1.9' : '1.5');
+                        const hoverFillOpacity = isSupporting ? '0.14' : (isPartial ? '0.28' : '0.22');
+                        const hoverStrokeWidth = isSupporting ? '1.4' : (isPartial ? '2.3' : '2');
 
                         const rectEl = _svgEl('rect');
                         rectEl.setAttribute('x', rect.left);
@@ -8141,10 +8725,11 @@
                         rectEl.setAttribute('width', rect.width);
                         rectEl.setAttribute('height', rect.height);
                         rectEl.setAttribute('fill', color);
-                        rectEl.setAttribute('fill-opacity', '0.15');
+                        rectEl.setAttribute('fill-opacity', baseFillOpacity);
                         rectEl.setAttribute('stroke', color);
-                        rectEl.setAttribute('stroke-width', '1.5');
+                        rectEl.setAttribute('stroke-width', baseStrokeWidth);
                         rectEl.setAttribute('rx', '3');
+                        if (isSupporting) rectEl.setAttribute('stroke-dasharray', '4 2');
                         rectEl.style.cursor = 'pointer';
                         rectEl.style.pointerEvents = 'none';
 
@@ -8152,9 +8737,9 @@
                             color: color,
                             status: featureInfo.status,
                             feature: featureInfo.name,
-                            text: featureInfo.observation || featureInfo.found_callout || '',
+                            text: _cleanCalloutMarkupText(featureInfo.observation || featureInfo.found_callout || ''),
                         };
-                        const hitPad = 8;
+                        const hitPad = 16;
                         const hitEl = _svgEl('rect');
                         hitEl.setAttribute('x', rect.left - hitPad);
                         hitEl.setAttribute('y', rect.top - hitPad);
@@ -8163,6 +8748,14 @@
                         hitEl.setAttribute('fill', 'transparent');
                         hitEl.style.pointerEvents = 'all';
                         hitEl.style.cursor = 'pointer';
+                        hitEl.addEventListener('mouseenter', () => {
+                            rectEl.setAttribute('fill-opacity', hoverFillOpacity);
+                            rectEl.setAttribute('stroke-width', hoverStrokeWidth);
+                        });
+                        hitEl.addEventListener('mouseleave', () => {
+                            rectEl.setAttribute('fill-opacity', baseFillOpacity);
+                            rectEl.setAttribute('stroke-width', baseStrokeWidth);
+                        });
                         hitEl.addEventListener('contextmenu', (e) => { _showNoteContextMenu(e, noteData); });
                         hitEl.addEventListener('click', (e) => { _showNoteContextMenu(e, noteData); });
 
@@ -8184,7 +8777,7 @@
                     if (!anchor || anchor.x == null || anchor.y == null) return;
 
                     const color = _statusColor(feature.status);
-                    const obs = feature.observation || feature.found_callout || feature.status || '';
+                    const obs = _cleanCalloutMarkupText(feature.observation || feature.found_callout || feature.status || '');
                     const noteText = obs.length > 60 ? obs.substring(0, 57) + '...' : obs;
 
                     state._noteDotsData.push({
@@ -9100,6 +9693,7 @@
         const _ribbonIcons = {
             '3dmodel': '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke="#79B7E3" stroke-width="0.9" stroke-linejoin="round"><path d="M12 3.2 4.5 7.2 12 11.2 19.5 7.2 12 3.2Z" fill="#8FCDF2"/><path d="M4.5 7.2v7.4L12 18.8v-7.6L4.5 7.2Z" fill="#5A97C5"/><path d="M19.5 7.2v7.4L12 18.8v-7.6l7.5-4Z" fill="#35698F"/><path d="M12 6v5.2" fill="none" stroke="#B9E1F8" stroke-width="0.55"/><path d="M8.4 9.1 12 11.2 15.6 9.1" fill="none" stroke="#B9E1F8" stroke-width="0.5"/></g></svg>',
             compare: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.9" stroke-linejoin="round"><path d="M4 8.8 8.7 5.7 13.4 8.8v4.8l-4.7 3-4.7-3v-4.8Z" fill="#4A81AC" stroke="#79B7E3"/><path d="M4 8.8 8.7 11.8v4.8l-4.7-3v-4.8Z" fill="#5E9BC8" stroke="#79B7E3"/><path d="M13.4 8.8 8.7 11.8v4.8l4.7-3v-4.8Z" fill="#2F627F" stroke="#79B7E3"/><path d="M10.6 8.8 15.3 5.7 20 8.8v4.8l-4.7 3-4.7-3v-4.8Z" fill="#355F82" stroke="#79B7E3" opacity="0.72"/><path d="M10.6 8.8 15.3 11.8v4.8l-4.7-3v-4.8Z" fill="#497EA6" stroke="#79B7E3" opacity="0.72"/><path d="M20 8.8 15.3 11.8v4.8l4.7-3v-4.8Z" fill="#274E66" stroke="#79B7E3" opacity="0.72"/></g></svg>',
+            drawingCompare: '<svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="drawCompareBlueRibbon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7EC6FF"/><stop offset="100%" stop-color="#258FFF"/></linearGradient></defs><path d="M6.2 4.8H12.6L15.1 7.3V15.6C15.1 16.2 14.6 16.7 14 16.7H6.2C5.6 16.7 5.1 16.2 5.1 15.6V5.9C5.1 5.3 5.6 4.8 6.2 4.8Z" fill="#F4F7FA" stroke="#7D90A6" stroke-width="1.1" stroke-linejoin="round"/><path d="M12.6 4.8V6.7C12.6 7.3 13.1 7.8 13.7 7.8H15.1" fill="none" stroke="#7D90A6" stroke-width="1.1" stroke-linejoin="round"/><path d="M10 7.2H16.4L18.9 9.7V18C18.9 18.6 18.4 19.1 17.8 19.1H10C9.4 19.1 8.9 18.6 8.9 18V8.3C8.9 7.7 9.4 7.2 10 7.2Z" fill="#FBFDFF" stroke="#0B1F33" stroke-width="1.25" stroke-linejoin="round"/><path d="M16.4 7.2V9.1C16.4 9.7 16.9 10.2 17.5 10.2H18.9" fill="none" stroke="#0B1F33" stroke-width="1.25" stroke-linejoin="round"/><rect x="11.2" y="11.4" width="4.5" height="1.7" rx="0.3" fill="url(#drawCompareBlueRibbon)"/><rect x="11.2" y="14.3" width="6" height="2.3" rx="0.3" fill="url(#drawCompareBlueRibbon)"/><rect x="16.1" y="11.4" width="1.6" height="1.7" rx="0.2" fill="url(#drawCompareBlueRibbon)"/></svg>',
             featureDiff: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="3" width="8" height="18" rx="1" fill="#294764" stroke="#6FA9D4"/><rect x="13" y="3" width="8" height="18" rx="1" fill="#294764" stroke="#6FA9D4"/><path d="M5.2 7h3.8M5.2 9.3h2.7" stroke="#6FA9D4" stroke-width="0.55"/><path d="M15.2 7h3.8M15.2 9.3h2.7" stroke="#6FA9D4" stroke-width="0.55"/><rect x="4.6" y="12" width="4.8" height="2.8" rx="0.45" fill="#5A97C5" stroke="#7EB9E1" stroke-width="0.55"/><rect x="14.6" y="12" width="4.8" height="2.8" rx="0.45" fill="#5A97C5" stroke="#7EB9E1" stroke-width="0.55"/><rect x="14.6" y="16.3" width="4.8" height="2.8" rx="0.45" fill="#D88A34" stroke="#EDB25A" stroke-width="0.55"/><path d="M4.6 16.3h4.8v2.8H4.6z" fill="none" stroke="#6FA9D4" stroke-width="0.4" stroke-dasharray="1.3 1"/></g></svg>',
             geometryDiff: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round"><path d="M7 6.1 3.6 8v4.8L7 14.7l3.4-1.9V8L7 6.1Z" fill="#3C6F95" stroke="#79B7E3"/><path d="M7 6.1 3.6 8 7 9.9 10.4 8 7 6.1Z" fill="#91D2F2" stroke="#79B7E3"/><path d="M3.6 8 7 9.9v4.8l-3.4-1.9V8Z" fill="#5B9BC7" stroke="#79B7E3"/><path d="M17 6.1 13.6 8v4.8l3.4 1.9 3.4-1.9V8L17 6.1Z" fill="#345D7C" stroke="#79B7E3"/><path d="M17 6.1 13.6 8 17 9.9 20.4 8 17 6.1Z" fill="#C7DCEA" stroke="#79B7E3"/><path d="M13.6 8 17 9.9v4.8l-3.4-1.9V8Z" fill="#4F84A9" stroke="#79B7E3"/><path d="M10.6 10 12 10.8v2.8l-1.4-.75V10Z" fill="#CC5D46" stroke="#ED9A8C" stroke-width="0.55"/><path d="M13.4 10 12 10.8v2.8l1.4-.75V10Z" fill="#CC5D46" stroke="#ED9A8C" stroke-width="0.55"/></g></svg>',
             properties: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round"><rect x="3.5" y="2.7" width="9.6" height="12.8" rx="1" fill="#294764" stroke="#79B7E3"/><path d="M5.5 5.5h5.5M5.5 8h4.4M5.5 10.5h5.5" stroke="#6FA9D4" stroke-width="0.55"/><path d="M17 10.3 13.6 12.2V17l3.4 1.9 3.4-1.9v-4.8L17 10.3Z" fill="#3C6F95" stroke="#79B7E3"/><path d="M17 10.3 13.6 12.2 17 14.1l3.4-1.9-3.4-1.9Z" fill="#91D2F2" stroke="#79B7E3"/><path d="M13.6 12.2 17 14.1V19l-3.4-2v-4.8Z" fill="#5B9BC7" stroke="#79B7E3"/><path d="M20.4 12.2 17 14.1V19l3.4-2v-4.8Z" fill="#2F627F" stroke="#79B7E3"/></g></svg>',
@@ -9694,57 +10288,80 @@
                     gStyle.appendChild(styleWrap);
                     ribbon.appendChild(gStyle);
 
-                    // Edit group — undo, clear
-                    ribbon.appendChild(_ribbonSep());
-                    const gEdit = _ribbonGroup('Edit');
-                    const undoBtn2 = document.createElement('button');
-                    undoBtn2.className = 'ribbon-btn';
-                    undoBtn2.textContent = '↩ Undo';
-                    undoBtn2.title = 'Undo last shape (Ctrl+Z)';
-                    undoBtn2.addEventListener('click', () => document.getElementById('annoUndoBtn')?.click());
-                    gEdit.appendChild(undoBtn2);
-                    const clearBtn2 = document.createElement('button');
-                    clearBtn2.className = 'ribbon-btn';
-                    clearBtn2.textContent = '✕ Clear';
-                    clearBtn2.title = 'Clear all annotations';
-                    clearBtn2.addEventListener('click', () => document.getElementById('annoClearAllBtn')?.click());
-                    gEdit.appendChild(clearBtn2);
-                    ribbon.appendChild(gEdit);
+                    // Edit/Display markup controls are intentionally hidden while
+                    // drawing revision compare is active. Compare mode gets its own
+                    // dedicated top bar controls.
+                    if (drawingDiffState.activeSubtab !== 'compare') {
+                        // Edit group — undo, clear
+                        ribbon.appendChild(_ribbonSep());
+                        const gEdit = _ribbonGroup('Edit');
+                        const undoBtn2 = document.createElement('button');
+                        undoBtn2.className = 'ribbon-btn';
+                        undoBtn2.textContent = '↩ Undo';
+                        undoBtn2.title = 'Undo last shape (Ctrl+Z)';
+                        undoBtn2.addEventListener('click', () => document.getElementById('annoUndoBtn')?.click());
+                        gEdit.appendChild(undoBtn2);
+                        const clearBtn2 = document.createElement('button');
+                        clearBtn2.className = 'ribbon-btn';
+                        clearBtn2.textContent = '✕ Clear';
+                        clearBtn2.title = 'Clear all annotations';
+                        clearBtn2.addEventListener('click', () => document.getElementById('annoClearAllBtn')?.click());
+                        gEdit.appendChild(clearBtn2);
+                        ribbon.appendChild(gEdit);
 
-                    // Display group — findings, dims toggles
-                    ribbon.appendChild(_ribbonSep());
-                    const gDisp = _ribbonGroup('Display');
-                    // Findings checkbox — sync from hidden toggle
-                    const hiddenFindings = document.getElementById('annoFindingsToggle');
-                    const findingsLabel = document.createElement('label');
-                    findingsLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#9AA3AF;cursor:pointer;';
-                    const findingsCb = document.createElement('input');
-                    findingsCb.type = 'checkbox';
-                    findingsCb.checked = hiddenFindings ? hiddenFindings.checked : true;
-                    findingsCb.addEventListener('change', () => {
-                        if (hiddenFindings && hiddenFindings.checked !== findingsCb.checked) {
-                            hiddenFindings.click();
-                        }
-                    });
-                    findingsLabel.appendChild(findingsCb);
-                    findingsLabel.appendChild(document.createTextNode('Findings'));
-                    gDisp.appendChild(findingsLabel);
-                    // Dims checkbox — sync from hidden toggle
-                    const hiddenDims = document.getElementById('annoDimsToggle');
-                    const dimsLabel = document.createElement('label');
-                    dimsLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#9AA3AF;cursor:pointer;';
-                    const dimsCb = document.createElement('input');
-                    dimsCb.type = 'checkbox';
-                    dimsCb.checked = hiddenDims ? hiddenDims.checked : false;
-                    dimsCb.addEventListener('change', () => {
-                        if (hiddenDims && hiddenDims.checked !== dimsCb.checked) {
-                            hiddenDims.click();
-                        }
-                    });
-                    dimsLabel.appendChild(dimsCb);
-                    dimsLabel.appendChild(document.createTextNode('Dims'));
-                    gDisp.appendChild(dimsLabel);
-                    ribbon.appendChild(gDisp);
+                        // Display group — findings, dims toggles
+                        ribbon.appendChild(_ribbonSep());
+                        const gDisp = _ribbonGroup('Display');
+                        // Findings checkbox — sync from hidden toggle
+                        const hiddenFindings = document.getElementById('annoFindingsToggle');
+                        const findingsLabel = document.createElement('label');
+                        findingsLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#9AA3AF;cursor:pointer;';
+                        const findingsCb = document.createElement('input');
+                        findingsCb.type = 'checkbox';
+                        findingsCb.checked = hiddenFindings ? hiddenFindings.checked : true;
+                        findingsCb.addEventListener('change', () => {
+                            if (hiddenFindings && hiddenFindings.checked !== findingsCb.checked) {
+                                hiddenFindings.click();
+                            }
+                        });
+                        findingsLabel.appendChild(findingsCb);
+                        findingsLabel.appendChild(document.createTextNode('Findings'));
+                        gDisp.appendChild(findingsLabel);
+                        // Dims checkbox — sync from hidden toggle
+                        const hiddenDims = document.getElementById('annoDimsToggle');
+                        const dimsLabel = document.createElement('label');
+                        dimsLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#9AA3AF;cursor:pointer;';
+                        const dimsCb = document.createElement('input');
+                        dimsCb.type = 'checkbox';
+                        dimsCb.checked = hiddenDims ? hiddenDims.checked : false;
+                        dimsCb.addEventListener('change', () => {
+                            if (hiddenDims && hiddenDims.checked !== dimsCb.checked) {
+                                hiddenDims.click();
+                            }
+                        });
+                        dimsLabel.appendChild(dimsCb);
+                        dimsLabel.appendChild(document.createTextNode('Dims'));
+                        gDisp.appendChild(dimsLabel);
+                        ribbon.appendChild(gDisp);
+                    }
+
+                    // Drawing Compare button — shown when real revisions exist or dev preview is enabled
+                    if (_drawingCompareUiEnabled()) {
+                        ribbon.appendChild(_ribbonSep());
+                        const gCmp = _ribbonGroup('Compare');
+                        const cmpBtn = _ribbonIconBtn(
+                            'drawingCompare',
+                            drawingDiffState.activeSubtab === 'compare' ? 'Back to Drawing' : 'Compare Revisions',
+                            'ribbon-btn' + (drawingDiffState.activeSubtab === 'compare' ? ' active' : '')
+                        );
+                        cmpBtn.title = 'Drawing Revision Compare';
+                        cmpBtn.addEventListener('click', () => {
+                            drawingDiffState.activeSubtab = drawingDiffState.activeSubtab === 'compare' ? 'drawing' : 'compare';
+                            switchTab('drawing');
+                        });
+                        gCmp.appendChild(cmpBtn);
+                        ribbon.appendChild(gCmp);
+                    }
                 }
 
             } else if (state.activeTab === '3dmodel') {
@@ -10318,6 +10935,15 @@
             }
 
 // Split View removed — Drawing is the default tab
+
+            // Drawing Compare subtab — intercept before normal drawing render
+            if (showDrawing && drawingDiffState.activeSubtab === 'compare' && _drawingCompareUiEnabled()) {
+                const wrapper = document.createElement('div');
+                wrapper.style.cssText = 'display:flex;flex-direction:column;flex:1;min-height:0;';
+                _renderDrawingCompareSubtab(wrapper);
+                viewportContent.appendChild(wrapper);
+                return;
+            }
 
             if (showDrawing && state.fileDataUrl) {
                 const drawingDiv = document.createElement('div');
@@ -14096,6 +14722,1119 @@
             }
         }
 
+        // ═══════ Drawing Revision Compare ═══════════════════════════════
+        function _renderDrawingCompareSubtab(container) {
+            const pn = state.partNumber;
+            const revOptions = _drawingCompareRevisionOptions();
+            const hasRealRevisions = _drawingCompareHasRealRevisions();
+            const defaultA = drawingDiffState.activeRevA || revOptions[0] || 'A';
+            const defaultB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1] || defaultA;
+            drawingDiffState.activeRevA = defaultA;
+            drawingDiffState.activeRevB = defaultB;
+
+            // Revision bar
+            const revBar = document.createElement('div');
+            revBar.className = 'dwg-diff-rev-bar';
+
+            const selectA = document.createElement('select');
+            selectA.setAttribute('aria-label', 'Base revision');
+            selectA.title = 'Base revision';
+            revOptions.forEach(rev => {
+                const opt = document.createElement('option');
+                opt.value = rev; opt.textContent = 'Rev ' + rev;
+                if (rev === defaultA) opt.selected = true;
+                selectA.appendChild(opt);
+            });
+            selectA.disabled = !hasRealRevisions;
+            revBar.appendChild(selectA);
+            revBar.appendChild(Object.assign(document.createElement('span'), { textContent: ' vs ' }));
+
+            const selectB = document.createElement('select');
+            selectB.setAttribute('aria-label', 'Compare revision');
+            selectB.title = 'Compare revision';
+            revOptions.forEach(rev => {
+                const opt = document.createElement('option');
+                opt.value = rev; opt.textContent = 'Rev ' + rev;
+                if (rev === defaultB) opt.selected = true;
+                selectB.appendChild(opt);
+            });
+            selectB.disabled = !hasRealRevisions;
+            revBar.appendChild(selectB);
+
+            const compareBtn = document.createElement('button');
+            compareBtn.textContent = drawingDiffState.loading ? 'Comparing...' : 'Compare';
+            compareBtn.disabled = drawingDiffState.loading || !hasRealRevisions;
+            compareBtn.style.cssText = 'background:var(--accent);color:#fff;border:none;border-radius:3px;padding:3px 12px;font-size:11px;cursor:pointer;font-weight:600;';
+            compareBtn.addEventListener('click', () => {
+                const newA = selectA.value;
+                const newB = selectB.value;
+                const revsChanged = newA !== drawingDiffState.activeRevA || newB !== drawingDiffState.activeRevB;
+                drawingDiffState.activeRevA = newA;
+                drawingDiffState.activeRevB = newB;
+                // Reload pane images when revisions change
+                if (revsChanged) {
+                    _reloadDwgDiffPaneImages();
+                }
+                _loadDrawingDiff(pn, newA, newB);
+            });
+            compareBtn.title = hasRealRevisions
+                ? 'Run drawing revision compare'
+                : 'Development preview only — no real drawing revisions detected yet';
+            revBar.appendChild(compareBtn);
+
+            const topToggles = document.createElement('div');
+            topToggles.className = 'dwg-diff-toggles';
+            topToggles.style.marginLeft = '10px';
+
+            const annToggle = document.createElement('label');
+            const annCb = document.createElement('input');
+            annCb.type = 'checkbox';
+            annCb.checked = drawingDiffState.showAnnotationChanges;
+            annCb.addEventListener('change', () => {
+                drawingDiffState.showAnnotationChanges = annCb.checked;
+                _renderDwgDiffOverlays();
+            });
+            annToggle.appendChild(annCb);
+            annToggle.appendChild(document.createTextNode('Annotations'));
+            topToggles.appendChild(annToggle);
+
+            const projToggle = document.createElement('label');
+            const projCb = document.createElement('input');
+            projCb.type = 'checkbox';
+            projCb.checked = drawingDiffState.showProjectedDelta;
+            projCb.addEventListener('change', () => {
+                drawingDiffState.showProjectedDelta = projCb.checked;
+                _renderDwgDiffOverlays();
+            });
+            projToggle.appendChild(projCb);
+            projToggle.appendChild(document.createTextNode('Model Delta'));
+            topToggles.appendChild(projToggle);
+
+            revBar.appendChild(topToggles);
+
+            const summarySpan = document.createElement('span');
+            summarySpan.style.cssText = 'margin-left:auto;color:var(--text-secondary);font-size:11px;white-space:nowrap;';
+            summarySpan.id = 'dwgDiffSummaryText';
+            if (drawingDiffState.diffResult) {
+                summarySpan.textContent = _getDwgDiffDisplaySummaryText(drawingDiffState.diffResult);
+            } else if (!hasRealRevisions) {
+                summarySpan.textContent = 'Development preview only — no revision datasets detected yet';
+            }
+            revBar.appendChild(summarySpan);
+
+            // Changed-view navigator — inline in the rev bar
+            const nav = document.createElement('div');
+            nav.className = 'dwg-diff-navigator';
+            nav.id = 'dwgDiffNavigator';
+            if (drawingDiffState.diffResult) {
+                _renderDwgDiffNavigator(nav);
+            } else {
+                nav.style.display = 'none';
+            }
+            revBar.appendChild(nav);
+            container.appendChild(revBar);
+
+            // Split viewport
+            const splitViewport = document.createElement('div');
+            splitViewport.className = 'dwg-diff-split';
+            splitViewport.style.position = 'relative';
+
+            // Pane A
+            const paneA = document.createElement('div');
+            paneA.className = 'dwg-diff-pane';
+            paneA.id = 'dwgDiffPaneA';
+            const lblA = document.createElement('div');
+            lblA.className = 'diff-viewer-label rev-a';
+            lblA.textContent = 'Rev ' + defaultA;
+            lblA.id = 'dwgDiffLabelA';
+            paneA.appendChild(lblA);
+
+            const innerA = document.createElement('div');
+            innerA.className = 'dwg-diff-pane-inner';
+            innerA.id = 'dwgDiffInnerA';
+            paneA.appendChild(innerA);
+            splitViewport.appendChild(paneA);
+
+            // Center gutter
+            const gutter = document.createElement('div');
+            gutter.className = 'dwg-diff-gutter';
+            splitViewport.appendChild(gutter);
+
+            // Pane B
+            const paneB = document.createElement('div');
+            paneB.className = 'dwg-diff-pane';
+            paneB.id = 'dwgDiffPaneB';
+            const lblB = document.createElement('div');
+            lblB.className = 'diff-viewer-label rev-b';
+            lblB.textContent = 'Rev ' + defaultB;
+            lblB.id = 'dwgDiffLabelB';
+            paneB.appendChild(lblB);
+
+            const innerB = document.createElement('div');
+            innerB.className = 'dwg-diff-pane-inner';
+            innerB.id = 'dwgDiffInnerB';
+            paneB.appendChild(innerB);
+            splitViewport.appendChild(paneB);
+
+            container.appendChild(splitViewport);
+
+            // Summary bar (bottom)
+            const summaryBar = document.createElement('div');
+            summaryBar.className = 'dwg-diff-summary-bar';
+            summaryBar.id = 'dwgDiffSummaryBar';
+            if (drawingDiffState.diffResult) {
+                _renderDwgDiffSummaryBar(summaryBar);
+            } else if (!hasRealRevisions) {
+                summaryBar.innerHTML = '<span style="color:var(--text-secondary);">Development preview only — split viewport is enabled, but no real drawing revisions are available yet.</span>';
+            } else {
+                summaryBar.innerHTML = '<span style="color:var(--text-secondary);">Select revisions and click Compare</span>';
+            }
+            container.appendChild(summaryBar);
+
+            // Synced pan/zoom handlers
+            _initDwgDiffPanZoom(paneA, innerA, paneB, innerB);
+
+            // Load drawing images into both panes — always attempt,
+            // even without uploaded drawing (revision renders may exist)
+            _loadDwgDiffImages(innerA, innerB);
+
+            // If diff already loaded, render overlays
+            if (drawingDiffState.diffResult) {
+                setTimeout(() => _renderDwgDiffOverlays(), 200);
+            }
+        }
+
+        async function _loadDwgDiffImages(innerA, innerB) {
+            // Load both panes in parallel, then reset logical camera once both are done.
+            drawingDiffState.baseFitA = null;
+            drawingDiffState.baseFitB = null;
+
+            await Promise.all([
+                _loadDwgDiffPane(innerA, drawingDiffState.activeRevA, 'A'),
+                _loadDwgDiffPane(innerB, drawingDiffState.activeRevB, 'B'),
+            ]);
+
+            // Both panes have computed their baseFit — reset shared camera
+            drawingDiffState.logicalZoom = 1.0;
+            drawingDiffState.logicalPanX = 0;
+            drawingDiffState.logicalPanY = 0;
+            _updateDwgDiffTransforms();
+        }
+
+        function _loadDwgDiffPane(inner, rev, side) {
+            // Returns a Promise that resolves when the image loads (or placeholder is shown).
+            // Attaches load/error listeners BEFORE setting img.src for determinism.
+            const pn = state.partNumber;
+            if (!pn || !rev) return Promise.resolve();
+
+            inner.innerHTML = '';
+            inner.parentElement?.querySelectorAll('.dwg-diff-fallback-badge').forEach(b => b.remove());
+
+            const showFallbackBadge = (text) => {
+                const badge = document.createElement('div');
+                badge.className = 'dwg-diff-fallback-badge';
+                badge.style.cssText = 'position:absolute;bottom:8px;left:12px;font-size:9px;color:var(--text-secondary);background:rgba(0,0,0,0.6);padding:2px 6px;border-radius:3px;z-index:12;pointer-events:none;';
+                badge.textContent = text;
+                inner.parentElement?.appendChild(badge);
+            };
+
+            const showPlaceholder = (message) => {
+                const el = document.createElement('div');
+                el.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:var(--text-secondary);font-size:12px;text-align:center;padding:20px;';
+                el.textContent = message;
+                inner.appendChild(el);
+            };
+
+            // Try to load an image URL. Returns a Promise resolving to
+            // { loaded: true } on success or { loaded: false } on error.
+            // Computes baseFit on successful load.
+            const tryLoadImage = (url) => {
+                return new Promise(resolve => {
+                    const img = document.createElement('img');
+                    img.draggable = false;
+
+                    // Attach listeners BEFORE setting src
+                    img.addEventListener('load', () => {
+                        const pane = inner.parentElement;
+                        if (pane) {
+                            const pw = pane.clientWidth;
+                            const ph = pane.clientHeight;
+                            const iw = img.naturalWidth;
+                            const ih = img.naturalHeight;
+                            if (pw > 0 && ph > 0 && iw > 0 && ih > 0) {
+                                const fitScale = Math.min(pw / iw, ph / ih) * 0.90;
+                                const offsetX = (pw - iw * fitScale) / 2;
+                                const offsetY = (ph - ih * fitScale) / 2;
+                                const baseFit = { scale: fitScale, offsetX, offsetY, imgW: iw, imgH: ih, paneW: pw, paneH: ph };
+                                if (side === 'A') drawingDiffState.baseFitA = baseFit;
+                                else drawingDiffState.baseFitB = baseFit;
+                            }
+                        }
+                        resolve({ loaded: true });
+                    }, { once: true });
+
+                    img.addEventListener('error', () => {
+                        // Remove the failed img so fallback can use the pane
+                        if (img.parentNode) img.parentNode.removeChild(img);
+                        resolve({ loaded: false });
+                    }, { once: true });
+
+                    inner.appendChild(img);
+                    img.src = url;
+                });
+            };
+
+            const revUrl = `/api/drawing-render/${encodeURIComponent(pn)}?revision=${encodeURIComponent(rev)}`;
+
+            const getUploadedRasterUrl = async () => {
+                if (!state.fileDataUrl) return null;
+                if (isPdfDrawing()) {
+                    await ensurePdfPageRendered(state.currentPage);
+                    return getDisplayedDrawingUrl();
+                }
+                return state.fileDataUrl;
+            };
+
+            // 1. Try revision-specific render directly (no HEAD probe)
+            // 2. If that fails, fall back to uploaded drawing
+            // 3. If that also fails, show placeholder
+            return (async () => {
+                const revResult = await tryLoadImage(revUrl);
+                if (revResult.loaded) return;
+
+                // Revision render failed — try uploaded drawing
+                const rasterUrl = await getUploadedRasterUrl();
+                if (rasterUrl) {
+                    const fallbackResult = await tryLoadImage(rasterUrl);
+                    if (fallbackResult.loaded) {
+                        showFallbackBadge('Using uploaded drawing (no rev-specific render)');
+                        return;
+                    }
+                }
+
+                showPlaceholder(`No drawing available for Rev ${rev}.\nUpload a drawing or add a render at parts/${pn}/rev${rev}/`);
+            })();
+        }
+
+        async function _reloadDwgDiffPaneImages() {
+            drawingDiffState.baseFitA = null;
+            drawingDiffState.baseFitB = null;
+
+            const innerA = document.getElementById('dwgDiffInnerA');
+            const innerB = document.getElementById('dwgDiffInnerB');
+            const promises = [];
+            if (innerA) promises.push(_loadDwgDiffPane(innerA, drawingDiffState.activeRevA, 'A'));
+            if (innerB) promises.push(_loadDwgDiffPane(innerB, drawingDiffState.activeRevB, 'B'));
+            await Promise.all(promises);
+
+            // Both done — reset shared camera
+            drawingDiffState.logicalZoom = 1.0;
+            drawingDiffState.logicalPanX = 0;
+            drawingDiffState.logicalPanY = 0;
+            _updateDwgDiffTransforms();
+
+            const la = document.getElementById('dwgDiffLabelA');
+            const lb = document.getElementById('dwgDiffLabelB');
+            if (la) la.textContent = 'Rev ' + (drawingDiffState.activeRevA || '?');
+            if (lb) lb.textContent = 'Rev ' + (drawingDiffState.activeRevB || '?');
+        }
+
+        function _initDwgDiffPanZoom(paneA, innerA, paneB, innerB) {
+            // Synced zoom via wheel — operates on shared logicalZoom
+            const handleWheel = (e) => {
+                e.preventDefault();
+                const factor = e.deltaY > 0 ? 0.92 : 1.08;
+                drawingDiffState.logicalZoom = Math.max(0.1, Math.min(20, drawingDiffState.logicalZoom * factor));
+                _updateDwgDiffTransforms();
+            };
+            paneA.addEventListener('wheel', handleWheel, { passive: false });
+            paneB.addEventListener('wheel', handleWheel, { passive: false });
+
+            // Synced pan via mouse drag — operates on shared logicalPan
+            const handleMouseDown = (e) => {
+                if (e.button !== 0) return;
+                drawingDiffState.isPanning = true;
+                drawingDiffState._panMouseStartX = e.clientX;
+                drawingDiffState._panMouseStartY = e.clientY;
+                drawingDiffState._panLogicalStartX = drawingDiffState.logicalPanX;
+                drawingDiffState._panLogicalStartY = drawingDiffState.logicalPanY;
+                paneA.style.cursor = 'grabbing';
+                paneB.style.cursor = 'grabbing';
+            };
+            paneA.addEventListener('mousedown', handleMouseDown);
+            paneB.addEventListener('mousedown', handleMouseDown);
+
+            const handleMouseMove = (e) => {
+                if (!drawingDiffState.isPanning) return;
+                const dx = e.clientX - drawingDiffState._panMouseStartX;
+                const dy = e.clientY - drawingDiffState._panMouseStartY;
+                drawingDiffState.logicalPanX = drawingDiffState._panLogicalStartX + dx;
+                drawingDiffState.logicalPanY = drawingDiffState._panLogicalStartY + dy;
+                _updateDwgDiffTransforms();
+            };
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', () => {
+                if (!drawingDiffState.isPanning) return;
+                drawingDiffState.isPanning = false;
+                paneA.style.cursor = 'grab';
+                paneB.style.cursor = 'grab';
+            });
+        }
+
+        function _updateDwgDiffTransforms() {
+            // Each pane computes its own CSS transform from:
+            //   baseFit (per-pane, computed at image load) +
+            //   logicalZoom/Pan (shared camera state)
+            const lz = drawingDiffState.logicalZoom;
+            const lpx = drawingDiffState.logicalPanX;
+            const lpy = drawingDiffState.logicalPanY;
+
+            const applyToPane = (innerId, baseFit) => {
+                const inner = document.getElementById(innerId);
+                if (!inner || !baseFit) return;
+                // Actual pixel scale = base fit scale * logical zoom
+                const s = baseFit.scale * lz;
+                // Center offset at fit (baseFit.offsetX/Y) + logical pan
+                const tx = baseFit.offsetX + lpx;
+                const ty = baseFit.offsetY + lpy;
+                // Use translate then scale so the image stays centered
+                inner.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+                inner.style.transformOrigin = '0 0';
+            };
+
+            applyToPane('dwgDiffInnerA', drawingDiffState.baseFitA);
+            applyToPane('dwgDiffInnerB', drawingDiffState.baseFitB);
+        }
+
+        async function _loadDrawingDiff(pn, revA, revB) {
+            drawingDiffState.loading = true;
+            drawingDiffState.diffResult = null;
+            drawingDiffState.selectedView = null;
+            drawingDiffState.showAnnotationChanges = true;
+            drawingDiffState.showProjectedDelta = true;
+
+            // Update UI
+            const btn = document.querySelector('.dwg-diff-rev-bar button');
+            if (btn) { btn.textContent = 'Comparing...'; btn.disabled = true; }
+            const summaryEl = document.getElementById('dwgDiffSummaryText');
+            if (summaryEl) summaryEl.textContent = 'Loading...';
+
+            try {
+                const res = await fetch(`/api/drawing-diff/${encodeURIComponent(pn)}?revA=${encodeURIComponent(revA)}&revB=${encodeURIComponent(revB)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                if (state.partNumber !== pn) return; // stale
+                drawingDiffState.diffResult = data;
+                drawingDiffState.activeRevA = revA;
+                drawingDiffState.activeRevB = revB;
+
+                // Update summary
+                if (summaryEl) summaryEl.textContent = _getDwgDiffDisplaySummaryText(data);
+                // Update labels
+                const la = document.getElementById('dwgDiffLabelA');
+                const lb = document.getElementById('dwgDiffLabelB');
+                if (la) la.textContent = 'Rev ' + revA;
+                if (lb) lb.textContent = 'Rev ' + revB;
+
+                // Render navigator
+                const nav = document.getElementById('dwgDiffNavigator');
+                if (nav) { nav.style.display = ''; _renderDwgDiffNavigator(nav); }
+
+                // Render summary bar
+                const bar = document.getElementById('dwgDiffSummaryBar');
+                if (bar) _renderDwgDiffSummaryBar(bar);
+
+                // Render overlays
+                _renderDwgDiffOverlays();
+
+            } catch (err) {
+                console.error('[DrawingDiff] Error:', err);
+                if (summaryEl) summaryEl.textContent = 'Compare failed: ' + err.message;
+            } finally {
+                drawingDiffState.loading = false;
+                if (btn) { btn.textContent = 'Compare'; btn.disabled = false; }
+            }
+        }
+
+        function _renderDwgDiffNavigator(nav) {
+            nav.innerHTML = '';
+            const diff = drawingDiffState.diffResult;
+            if (!diff) return;
+
+            const vi = diff.viewIdentity || {};
+
+            // Matched views — keyed by viewKey (viewName@sheetName)
+            (vi.matched || []).forEach(m => {
+                const vk = m.viewKey;
+                const pill = document.createElement('div');
+                pill.className = 'dwg-diff-nav-pill';
+                const uiState = _getDwgDiffUiViewState(diff, vk);
+                const priority = _getDwgNativePriorityInfo(diff, vk);
+                if (uiState === 'unchanged') pill.classList.add('unchanged');
+                else if (uiState === 'ambiguous') pill.classList.add('ambiguous');
+                else pill.classList.add('changed');
+
+                if (drawingDiffState.selectedView === vk) pill.classList.add('active');
+
+                const label = document.createElement('span');
+                label.textContent = m.viewNameB || m.viewNameA;
+                pill.appendChild(label);
+
+                if (priority) {
+                    const badge = document.createElement('span');
+                    badge.className = `dwg-diff-priority-badge ${priority.badgeClass}`;
+                    badge.textContent = priority.label;
+                    pill.appendChild(badge);
+                }
+
+                const baseTitle = `${_getDwgDiffUiViewTitle(diff, vk)} (confidence: ${(m.confidence * 100).toFixed(0)}%)`;
+                pill.title = priority ? `${baseTitle} | ${priority.title}` : baseTitle;
+                pill.addEventListener('click', () => {
+                    const wasSelected = drawingDiffState.selectedView === vk;
+                    drawingDiffState.selectedView = wasSelected ? null : vk;
+                    _renderDwgDiffNavigator(nav);
+                    _renderDwgDiffOverlays();
+                    if (!wasSelected) _focusDwgDiffView(m);
+                    else _clearDwgDiffViewFocus();
+                });
+                nav.appendChild(pill);
+            });
+
+            // Unmatched base (removed)
+            (vi.unmatchedBase || []).forEach(u => {
+                const pill = document.createElement('div');
+                pill.className = 'dwg-diff-nav-pill removed';
+                pill.textContent = '−' + (u.viewName || '');
+                pill.title = 'View removed in Rev B';
+                nav.appendChild(pill);
+            });
+
+            // Unmatched target (added)
+            (vi.unmatchedTarget || []).forEach(u => {
+                const pill = document.createElement('div');
+                pill.className = 'dwg-diff-nav-pill added';
+                pill.textContent = '+' + (u.viewName || '');
+                pill.title = 'View added in Rev B';
+                nav.appendChild(pill);
+            });
+        }
+
+        function _renderDwgDiffSummaryBar(bar) {
+            bar.innerHTML = '';
+            const diff = drawingDiffState.diffResult;
+            if (!diff || !diff.summary) return;
+
+            const s = diff.summary;
+            const changedDisplay = _countDwgDiffDisplayedChangedViews(diff);
+            const stats = [
+                { label: 'Matched', count: s.matchedViews, color: 'var(--text-primary)' },
+                { label: 'Changed', count: changedDisplay, color: '#FFB300' },
+                { label: 'Added', count: s.unmatchedTargetViews, color: '#00E676' },
+                { label: 'Removed', count: s.unmatchedBaseViews, color: '#FF5252' },
+                { label: 'Ambiguous', count: s.ambiguousViews, color: '#AB47BC' },
+            ];
+            stats.forEach(st => {
+                if (st.count === 0 && st.label !== 'Matched' && st.label !== 'Changed') return;
+                const div = document.createElement('div');
+                div.className = 'stat';
+                div.innerHTML = `<span class="stat-count" style="color:${st.color}">${st.count}</span> ${st.label}`;
+                bar.appendChild(div);
+            });
+
+            // Annotation counts
+            if (s.totalAnnotationsModified || s.totalAnnotationsAdded || s.totalAnnotationsRemoved) {
+                const annDiv = document.createElement('div');
+                annDiv.className = 'stat';
+                const parts = [];
+                if (s.totalAnnotationsModified) parts.push(`${s.totalAnnotationsModified} mod`);
+                if (s.totalAnnotationsAdded) parts.push(`${s.totalAnnotationsAdded} add`);
+                if (s.totalAnnotationsRemoved) parts.push(`${s.totalAnnotationsRemoved} rem`);
+                annDiv.innerHTML = `Annotations: <span class="stat-count" style="color:#FFB300">${parts.join(', ')}</span>`;
+                bar.appendChild(annDiv);
+            }
+            if (s.totalNativeGeometryAdded || s.totalNativeGeometryRemoved) {
+                const geoDiv = document.createElement('div');
+                geoDiv.className = 'stat';
+                const parts = [];
+                if (s.totalNativeGeometryAdded) parts.push(`${s.totalNativeGeometryAdded} add`);
+                if (s.totalNativeGeometryRemoved) parts.push(`${s.totalNativeGeometryRemoved} rem`);
+                geoDiv.innerHTML = `Native Geometry: <span class="stat-count" style="color:#7FDBFF">${parts.join(', ')}</span>`;
+                bar.appendChild(geoDiv);
+            }
+
+            const priority = diff.nativeGeometryPriority || {};
+            const extractNow = (priority.extractNowViewKeys || []).length;
+            const consider = (priority.considerViewKeys || []).length;
+            if (extractNow || consider) {
+                const priDiv = document.createElement('div');
+                priDiv.className = 'stat';
+                const parts = [];
+                if (extractNow) parts.push(`${extractNow} now`);
+                if (consider) parts.push(`${consider} maybe`);
+                priDiv.innerHTML = `Native Priority: <span class="stat-count" style="color:#A7F3D0">${parts.join(', ')}</span>`;
+                bar.appendChild(priDiv);
+            }
+        }
+
+        function _getDwgDiffUiViewState(diff, viewKey) {
+            const findings = diff?.userFacingFindings?.perView || {};
+            const annDiff = diff?.annotationDiff?.perView || {};
+            const geomPerView = diff?.geometryDiff?.perView || {};
+            const nativeGeomPerView = diff?.nativeGeometryDiff?.perView || {};
+            const interp = findings[viewKey]?.interpretation || 'unchanged';
+
+            if (interp === 'view_match_ambiguous') return 'ambiguous';
+            if (interp === 'view_removed' || interp === 'view_added') return 'changed';
+
+            const annChanged = !!annDiff[viewKey]?.hasChanges;
+            const displayGeom = (geomPerView[viewKey]?.projectedRegions || []).length > 0;
+            const nativeGeom = !!nativeGeomPerView[viewKey]?.hasChanges;
+            if (annChanged || displayGeom || nativeGeom) return 'changed';
+            return 'unchanged';
+        }
+
+        function _getDwgDiffUiViewTitle(diff, viewKey) {
+            const findings = diff?.userFacingFindings?.perView || {};
+            const annDiff = diff?.annotationDiff?.perView || {};
+            const geomPerView = diff?.geometryDiff?.perView || {};
+            const nativeGeomPerView = diff?.nativeGeometryDiff?.perView || {};
+            const interp = findings[viewKey]?.interpretation || 'unchanged';
+
+            if (interp === 'view_match_ambiguous') return 'view_match_ambiguous';
+            if (interp === 'view_removed' || interp === 'view_added') return interp;
+
+            const annChanged = !!annDiff[viewKey]?.hasChanges;
+            const geomView = geomPerView[viewKey] || {};
+            const nativeGeomView = nativeGeomPerView[viewKey] || {};
+            const displayGeom = (geomView.projectedRegions || []).length > 0;
+            const nativeGeom = !!nativeGeomView.hasChanges;
+            if (annChanged && (displayGeom || nativeGeom)) return 'geometry_changed';
+            if (nativeGeom) return 'native_geometry_changed';
+            if (annChanged) return 'annotation_only_change';
+            if (displayGeom) return 'model_delta_displayed';
+            if (geomView.deltaPresent) return 'model_delta_suppressed_for_display';
+            return interp;
+        }
+
+        function _getDwgNativePriorityInfo(diff, viewKey) {
+            const item = diff?.nativeGeometryPriority?.perView?.[viewKey];
+            if (!item) return null;
+
+            const tier = item.tier || 'skip';
+            const label = tier === 'extract_now' ? 'Now'
+                : tier === 'consider' ? 'Maybe'
+                : 'Skip';
+            const badgeClass = tier === 'extract_now' ? 'extract-now'
+                : tier === 'consider' ? 'consider'
+                : 'skip';
+            const score = typeof item.score === 'number' ? item.score.toFixed(2) : '0.00';
+            const reasons = Array.isArray(item.reasons) ? item.reasons.join(', ') : '';
+            const signals = item.signals || {};
+            const title = [
+                `Native geometry priority: ${tier.replace('_', ' ')}`,
+                `score: ${score}`,
+                `family: ${signals.viewFamily || 'unknown'}`,
+                `scale: ${signals.viewScale ?? 'n/a'}`,
+                reasons ? `signals: ${reasons}` : '',
+            ].filter(Boolean).join(' | ');
+
+            return { tier, label, badgeClass, title };
+        }
+
+        function _countDwgDiffDisplayedChangedViews(diff) {
+            const matched = diff?.viewIdentity?.matched || [];
+            let count = 0;
+            matched.forEach(m => {
+                if (_getDwgDiffUiViewState(diff, m.viewKey) === 'changed') count += 1;
+            });
+            return count;
+        }
+
+        function _getDwgDiffDisplaySummaryText(diff) {
+            const s = diff?.summary || {};
+            const matched = s.matchedViews || 0;
+            const changed = _countDwgDiffDisplayedChangedViews(diff);
+            const parts = [];
+            if (matched) parts.push(`${matched} view(s) matched`);
+            parts.push(`${changed} changed`);
+
+            const annParts = [];
+            if (s.totalAnnotationsModified) annParts.push(`${s.totalAnnotationsModified} modified`);
+            if (s.totalAnnotationsAdded) annParts.push(`${s.totalAnnotationsAdded} added`);
+            if (s.totalAnnotationsRemoved) annParts.push(`${s.totalAnnotationsRemoved} removed`);
+            if (annParts.length) parts.push(`annotations: ${annParts.join(', ')}`);
+            const nativeParts = [];
+            if (s.totalNativeGeometryAdded) nativeParts.push(`${s.totalNativeGeometryAdded} added`);
+            if (s.totalNativeGeometryRemoved) nativeParts.push(`${s.totalNativeGeometryRemoved} removed`);
+            if (nativeParts.length) parts.push(`native geometry: ${nativeParts.join(', ')}`);
+            return parts.join('; ') || 'Done';
+        }
+
+        function _renderDwgDiffOverlays() {
+            // Clear existing overlays
+            document.querySelectorAll('.dwg-diff-ann-marker, .dwg-diff-proj-marker, .dwg-diff-proj-region, .dwg-diff-native-layer, .dwg-diff-native-legend').forEach(el => el.remove());
+
+            const diff = drawingDiffState.diffResult;
+            if (!diff) return;
+
+            const innerA = document.getElementById('dwgDiffInnerA');
+            const innerB = document.getElementById('dwgDiffInnerB');
+            const imgA = innerA?.querySelector('img');
+            const imgB = innerB?.querySelector('img');
+            if (!innerB || !imgB || !imgB.naturalWidth) return;
+
+            // Sheet dims from diff artifact — per-sheet resolution for multi-sheet accuracy
+            const sheetDimsA = diff.sheetDimsA || {};
+            const sheetDimsB = diff.sheetDimsB || {};
+            const perSheetA = sheetDimsA.perSheet || {};
+            const perSheetB = sheetDimsB.perSheet || {};
+            const defaultWA = sheetDimsA.sheetWidth || 0.8636;
+            const defaultHA = sheetDimsA.sheetHeight || 0.5588;
+            const defaultWB = sheetDimsB.sheetWidth || 0.8636;
+            const defaultHB = sheetDimsB.sheetHeight || 0.5588;
+
+            // Resolve sheet dims for a viewKey (viewName@sheetName)
+            const getSheetDimsA = (viewKey) => {
+                const sn = (viewKey || '').split('@')[1] || '';
+                const sd = perSheetA[sn];
+                return { w: sd?.sheetWidth || defaultWA, h: sd?.sheetHeight || defaultHA };
+            };
+            const getSheetDimsB = (viewKey) => {
+                const sn = (viewKey || '').split('@')[1] || '';
+                const sd = perSheetB[sn];
+                return { w: sd?.sheetWidth || defaultWB, h: sd?.sheetHeight || defaultHB };
+            };
+
+            // Per-pane image dims
+            const imgWA = imgA?.naturalWidth || imgB.naturalWidth;
+            const imgHA = imgA?.naturalHeight || imgB.naturalHeight;
+            const imgWB = imgB.naturalWidth;
+            const imgHB = imgB.naturalHeight;
+
+            // Helpers: per-pane coordinate converters (sheet-scoped)
+            const toPixelA = (sx, sy, viewKey) => {
+                const sd = getSheetDimsA(viewKey);
+                return { x: (sx / sd.w) * imgWA, y: (1 - sy / sd.h) * imgHA };
+            };
+            const toPixelB = (sx, sy, viewKey) => {
+                const sd = getSheetDimsB(viewKey);
+                return { x: (sx / sd.w) * imgWB, y: (1 - sy / sd.h) * imgHB };
+            };
+            const boundsToRect = (bounds, toPixelFn, viewKey) => {
+                if (!bounds || bounds.length < 4) return null;
+                const tl = toPixelFn(bounds[0], bounds[3], viewKey);
+                const br = toPixelFn(bounds[2], bounds[1], viewKey);
+                return {
+                    left: Math.min(tl.x, br.x),
+                    top: Math.min(tl.y, br.y),
+                    width: Math.abs(br.x - tl.x),
+                    height: Math.abs(br.y - tl.y),
+                };
+            };
+            const ensureNativeLayer = (container) => {
+                if (!container) return null;
+                let layer = container.querySelector('.dwg-diff-native-layer');
+                if (layer) return layer;
+                layer = _svgEl('svg');
+                layer.classList.add('dwg-diff-native-layer');
+                layer.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+                layer.setAttribute('width', '100%');
+                layer.setAttribute('height', '100%');
+                container.appendChild(layer);
+                return layer;
+            };
+            const ensureNativeLegend = (container, variant) => {
+                if (!container || !variant) return null;
+                const host = container.closest('.dwg-diff-pane') || container.parentElement || container;
+                let legend = host.querySelector(`.dwg-diff-native-legend[data-variant="${variant}"]`);
+                if (legend) return legend;
+                legend = document.createElement('div');
+                legend.className = `dwg-diff-native-legend ${variant}`;
+                legend.dataset.variant = variant;
+                if (variant === 'added') legend.classList.add('right');
+                legend.innerHTML = `
+                    <span class="dwg-diff-native-legend-swatch" aria-hidden="true"></span>
+                    <span>${variant === 'removed' ? 'Exact geometry removed' : 'Exact geometry added'}</span>
+                `;
+                host.appendChild(legend);
+                return legend;
+            };
+            const createNativeShape = (primitive, toPixelFn, viewKey) => {
+                if (primitive?.primitiveType === 'circle' &&
+                    Array.isArray(primitive.centerSheet) &&
+                    primitive.centerSheet.length >= 2 &&
+                    typeof primitive.radiusSheet === 'number' &&
+                    primitive.radiusSheet > 0) {
+                    const center = toPixelFn(primitive.centerSheet[0], primitive.centerSheet[1], viewKey);
+                    const edge = toPixelFn(primitive.centerSheet[0] + primitive.radiusSheet, primitive.centerSheet[1], viewKey);
+                    const radiusPx = Math.max(1.5, Math.abs(edge.x - center.x));
+                    const circle = _svgEl('circle');
+                    circle.setAttribute('cx', center.x);
+                    circle.setAttribute('cy', center.y);
+                    circle.setAttribute('r', radiusPx);
+                    return circle;
+                }
+
+                const points = Array.isArray(primitive?.pointsSheet) ? primitive.pointsSheet : [];
+                const pts = points
+                    .map(pt => (pt && typeof pt.x === 'number' && typeof pt.y === 'number')
+                        ? toPixelFn(pt.x, pt.y, viewKey)
+                        : null)
+                    .filter(Boolean);
+                if (pts.length < 2) return null;
+                const poly = _svgEl('polyline');
+                poly.setAttribute('points', pts.map(pt => `${pt.x},${pt.y}`).join(' '));
+                return poly;
+            };
+            const renderNativePrimitive = (container, primitive, toPixelFn, viewKey, klass, title) => {
+                const layer = ensureNativeLayer(container);
+                if (!layer) return;
+                const shape = createNativeShape(primitive, toPixelFn, viewKey);
+                if (!shape) return;
+                const halo = shape.cloneNode(false);
+                halo.setAttribute('class', 'dwg-diff-native-halo');
+                layer.appendChild(halo);
+                shape.setAttribute('class', klass);
+                if (primitive?.primitiveType === 'circle') {
+                    shape.setAttribute('fill', klass.includes('removed')
+                        ? 'rgba(255, 90, 95, 0.11)'
+                        : 'rgba(36, 200, 255, 0.08)');
+                }
+                const titleEl = _svgEl('title');
+                titleEl.textContent = title || '';
+                shape.appendChild(titleEl);
+                layer.appendChild(shape);
+                ensureNativeLegend(container, klass.includes('removed') ? 'removed' : 'added');
+            };
+
+            // Eligibility map for frontend gating
+            const eligibility = diff.compareEligibility?.perView || {};
+
+            // Build highlight-box lookup indexes (keyed by sheetName|viewName|annotationName)
+            const buildHlBoxIndex = (hlData) => {
+                const idx = {};
+                if (!hlData) return idx;
+                const anns = Array.isArray(hlData.annotations) ? hlData.annotations : (Array.isArray(hlData) ? hlData : []);
+                anns.forEach(a => {
+                    const key = `${a.sheetName || ''}|${a.viewName || ''}|${a.annotationName || ''}`;
+                    if (a.boxSheet && a.boxSheet.length >= 4) idx[key] = a.boxSheet;
+                });
+                return idx;
+            };
+            const hlBoxIdxA = buildHlBoxIndex(diff.highlightBoxesA);
+            const hlBoxIdxB = buildHlBoxIndex(diff.highlightBoxesB);
+            const nativeGeomPerView = diff.nativeGeometryDiff?.perView || {};
+
+            // Look up highlight-box boxSheet for an annotation
+            const lookupHlBox = (annName, viewKey, hlBoxIdx) => {
+                // viewKey is "viewName@sheetName"
+                const atIdx = (viewKey || '').indexOf('@');
+                const vn = atIdx >= 0 ? viewKey.substring(0, atIdx) : viewKey;
+                const sn = atIdx >= 0 ? viewKey.substring(atIdx + 1) : '';
+                return hlBoxIdx[`${sn}|${vn}|${annName}`] || null;
+            };
+
+            // Resolve the best available rectangle for an annotation.
+            // Priority: highlight-box boxSheet → boundsSheet → textExtent synthesis → point fallback.
+            const resolveAnnRect = (ann, toPixelFn, viewKey, hlBoxIdx, boundsKey, posKey, extentKey) => {
+                // 1. Highlight-box lookup (best quality — orientation-aware VLM boxes)
+                const annName = ann[boundsKey ? 'annotationNameB' : 'annotationName'] || ann.annotationNameA || ann.annotationName || '';
+                if (hlBoxIdx && annName) {
+                    const hlBox = lookupHlBox(annName, viewKey, hlBoxIdx);
+                    if (hlBox) return boundsToRect(hlBox, toPixelFn, viewKey);
+                }
+                // 2. Exact boundsSheet from drawing map
+                const bounds = ann[boundsKey || 'boundsSheet'];
+                if (bounds && bounds.length >= 4) {
+                    return boundsToRect(bounds, toPixelFn, viewKey);
+                }
+                // 3. Synthesize from positionSheet + textExtent
+                const pos = ann[posKey || 'positionSheet'];
+                const extent = ann[extentKey || 'textExtent'];
+                if (pos && extent && extent.length >= 2 && extent[0] > 0 && extent[1] > 0) {
+                    const synthBounds = [pos[0], pos[1] - extent[1], pos[0] + extent[0], pos[1]];
+                    return boundsToRect(synthBounds, toPixelFn, viewKey);
+                }
+                // 4. Point fallback
+                if (pos) {
+                    const pt = toPixelFn(pos[0], pos[1], viewKey);
+                    return { left: pt.x - 12, top: pt.y - 12, width: 24, height: 24 };
+                }
+                return null;
+            };
+
+            // Annotation change overlays
+            if (drawingDiffState.showAnnotationChanges) {
+                const annDiff = diff.annotationDiff?.perView || {};
+                Object.entries(annDiff).forEach(([viewKey, viewDiff]) => {
+                    if (drawingDiffState.selectedView && drawingDiffState.selectedView !== viewKey) return;
+                    const elig = eligibility[viewKey];
+                    if (elig && !elig.supportedForAnnotationDiff) return;
+                    if (viewDiff.skipped) return;
+
+                    // Added annotations → Pane B, look up in Rev B highlight boxes
+                    (viewDiff.added || []).forEach(a => {
+                        const rect = resolveAnnRect(a, toPixelB, viewKey, hlBoxIdxB);
+                        if (rect) _placeDwgDiffMarker(innerB, rect, 'ann-added', `Added: ${a.dimensionText || a.noteText || a.annotationName}`);
+                    });
+
+                    // Removed annotations → Pane A, look up in Rev A highlight boxes
+                    const matchEntry = (diff.viewIdentity?.matched || []).find(m => m.viewKey === viewKey);
+                    const viewKeyA = matchEntry ? (matchEntry.viewNameA + '@' + matchEntry.sheetNameA) : viewKey;
+                    (viewDiff.removed || []).forEach(r => {
+                        const target = innerA || innerB;
+                        const toPixelFn = innerA ? toPixelA : toPixelB;
+                        const vkForDims = innerA ? viewKeyA : viewKey;
+                        const rect = resolveAnnRect(r, toPixelFn, vkForDims, hlBoxIdxA);
+                        if (rect) _placeDwgDiffMarker(target, rect, 'ann-removed', `Removed: ${r.dimensionText || r.noteText || r.annotationName}`);
+                    });
+
+                    // Modified annotations → Pane B, prefer Rev B highlight boxes
+                    (viewDiff.modified || []).forEach(m => {
+                        const rect = resolveAnnRect(m, toPixelB, viewKey, hlBoxIdxB,
+                            'boundsSheetB', 'positionSheetB', 'textExtentB')
+                            || resolveAnnRect(m, toPixelB, viewKey, hlBoxIdxA,
+                            'boundsSheetA', 'positionSheetA', 'textExtentA');
+                        if (rect) {
+                            const changeText = (m.changes || []).map(c => `${c.field}: ${c.old} \u2192 ${c.new}`).join(', ');
+                            _placeDwgDiffMarker(innerB, rect, 'ann-modified', `Modified: ${changeText}`);
+                        }
+                    });
+                });
+            }
+
+            // Native exact geometry overlays: stronger than projected regions, so
+            // render them first and suppress advisory projected boxes for those views.
+            if (drawingDiffState.showProjectedDelta && diff.nativeGeometryDiff?.available) {
+                Object.entries(nativeGeomPerView).forEach(([viewKey, vd]) => {
+                    if (drawingDiffState.selectedView && drawingDiffState.selectedView !== viewKey) return;
+                    const elig = eligibility[viewKey];
+                    if (elig && !elig.supportedForNativeGeometryDiff) return;
+                    if (vd.skipped || !vd.hasChanges) return;
+                    (vd.removed || []).forEach(primitive => {
+                        renderNativePrimitive(
+                            innerA,
+                            primitive,
+                            toPixelA,
+                            viewKey,
+                            'dwg-diff-native-removed',
+                            'Removed native drawing geometry'
+                        );
+                    });
+                    (vd.added || []).forEach(primitive => {
+                        renderNativePrimitive(
+                            innerB,
+                            primitive,
+                            toPixelB,
+                            viewKey,
+                            'dwg-diff-native-added',
+                            'Added native drawing geometry'
+                        );
+                    });
+                });
+            }
+
+            // Projected model delta markers on Pane B
+            if (drawingDiffState.showProjectedDelta && diff.geometryDiff?.available) {
+                const geomPerView = diff.geometryDiff.perView || {};
+                Object.entries(geomPerView).forEach(([viewKey, vd]) => {
+                    if (drawingDiffState.selectedView && drawingDiffState.selectedView !== viewKey) return;
+                    // Eligibility gate
+                    const elig = eligibility[viewKey];
+                    if (elig && !elig.supportedForProjectedModelReasoning) return;
+                    if (vd.skipped || !vd.deltaPresent) return;
+                    if (nativeGeomPerView[viewKey]?.hasChanges) return;
+                    (vd.projectedRegions || []).forEach(region => {
+                        if (region.sheetBounds && region.sheetBounds.length >= 4) {
+                            const rect = boundsToRect(region.sheetBounds, toPixelB, viewKey);
+                            if (rect) {
+                                _placeDwgProjectedRegion(
+                                    innerB,
+                                    rect,
+                                    `Model ${region.type || 'change'} projects into this view (advisory)`
+                                );
+                                return;
+                            }
+                        }
+                        const pos = region.sheetPosition;
+                        if (!pos || pos.length < 2) return;
+                        const pt = toPixelB(pos[0], pos[1], viewKey);
+                        const marker = document.createElement('div');
+                        marker.className = 'dwg-diff-proj-marker';
+                        marker.style.left = pt.x + 'px';
+                        marker.style.top = pt.y + 'px';
+                        marker.title = `Model ${region.type || 'change'} projected here (advisory)`;
+                        innerB.appendChild(marker);
+                    });
+                });
+            }
+        }
+
+        function _placeDwgDiffMarker(container, rect, className, title) {
+            // Enforce minimum visible size
+            const MIN_SIZE = 20;
+            let w = Math.max(rect.width, MIN_SIZE);
+            let h = Math.max(rect.height, MIN_SIZE);
+            // Center the enlarged marker on the original rect center
+            let left = rect.left - (w - rect.width) / 2;
+            let top = rect.top - (h - rect.height) / 2;
+
+            const marker = document.createElement('div');
+            marker.className = 'dwg-diff-ann-marker ' + className;
+            marker.style.left = left + 'px';
+            marker.style.top = top + 'px';
+            marker.style.width = w + 'px';
+            marker.style.height = h + 'px';
+            marker.title = title || '';
+
+            // Change badge
+            const badge = document.createElement('span');
+            badge.className = 'dwg-diff-badge';
+            if (className.includes('ann-added')) badge.textContent = '+';
+            else if (className.includes('ann-modified')) badge.textContent = '\u0394';
+            else if (className.includes('ann-removed')) badge.textContent = '\u2013';
+            marker.appendChild(badge);
+
+            container.appendChild(marker);
+        }
+
+        function _placeDwgProjectedRegion(container, rect, title) {
+            const MIN_SIZE = 18;
+            const w = Math.max(rect.width, MIN_SIZE);
+            const h = Math.max(rect.height, MIN_SIZE);
+            const left = rect.left - (w - rect.width) / 2;
+            const top = rect.top - (h - rect.height) / 2;
+
+            const marker = document.createElement('div');
+            marker.className = 'dwg-diff-proj-region';
+            marker.style.left = left + 'px';
+            marker.style.top = top + 'px';
+            marker.style.width = w + 'px';
+            marker.style.height = h + 'px';
+            marker.title = title || '';
+            container.appendChild(marker);
+        }
+
+        function _focusDwgDiffView(matchEntry) {
+            // Auto-center and zoom to a matched view's outline.
+            // Uses pane B outline+dims for zoom/pan (drives the shared logical camera),
+            // but dimming uses per-pane outline+dims so each side highlights correctly.
+            const diff = drawingDiffState.diffResult;
+            if (!diff) return;
+
+            const outlineB = matchEntry.viewOutlineB;
+            const outlineA = matchEntry.viewOutlineA;
+            const outline = outlineB || outlineA;
+            if (!outline || outline.length < 4) return;
+
+            // Per-pane sheet dims
+            const sheetDimsB = diff.sheetDimsB || {};
+            const perSheetB = sheetDimsB.perSheet || {};
+            const snB = matchEntry.sheetNameB || '';
+            const sdB = perSheetB[snB] || {};
+            const sheetWB = sdB.sheetWidth || sheetDimsB.sheetWidth || 0.8636;
+            const sheetHB = sdB.sheetHeight || sheetDimsB.sheetHeight || 0.5588;
+
+            // Use pane B for zoom/pan computation
+            const baseFit = drawingDiffState.baseFitB || drawingDiffState.baseFitA;
+            if (!baseFit) return;
+
+            const imgW = baseFit.imgW;
+            const imgH = baseFit.imgH;
+            const paneW = baseFit.paneW;
+            const paneH = baseFit.paneH;
+            const refOutline = outlineB || outline;
+
+            // View center in pixel coords (at base fit scale)
+            const vcx = ((refOutline[0] + refOutline[2]) / 2 / sheetWB) * imgW;
+            const vcy = ((1 - (refOutline[1] + refOutline[3]) / 2 / sheetHB)) * imgH;
+            // View size in pixels
+            const vw = Math.abs(refOutline[2] - refOutline[0]) / sheetWB * imgW;
+            const vh = Math.abs(refOutline[3] - refOutline[1]) / sheetHB * imgH;
+
+            // Compute zoom to fit view in ~60% of pane
+            const targetFraction = 0.6;
+            const zoomForWidth = (paneW * targetFraction) / (vw * baseFit.scale);
+            const zoomForHeight = (paneH * targetFraction) / (vh * baseFit.scale);
+            const targetZoom = Math.min(zoomForWidth, zoomForHeight);
+            drawingDiffState.logicalZoom = Math.max(1.0, Math.min(targetZoom, 3.0));
+
+            // Pan to center
+            drawingDiffState.logicalPanX = paneW / 2 - (baseFit.offsetX + vcx * baseFit.scale) * drawingDiffState.logicalZoom;
+            drawingDiffState.logicalPanY = paneH / 2 - (baseFit.offsetY + vcy * baseFit.scale) * drawingDiffState.logicalZoom;
+
+            _updateDwgDiffTransforms();
+
+            // Apply per-pane dimming with correct outline+dims for each side
+            _applyDwgDiffViewDim(matchEntry);
+        }
+
+        function _clearDwgDiffViewFocus() {
+            drawingDiffState.logicalZoom = 1.0;
+            drawingDiffState.logicalPanX = 0;
+            drawingDiffState.logicalPanY = 0;
+            _updateDwgDiffTransforms();
+            document.querySelectorAll('.dwg-diff-view-dim').forEach(el => el.remove());
+        }
+
+        function _applyDwgDiffViewDim(matchEntry) {
+            document.querySelectorAll('.dwg-diff-view-dim').forEach(el => el.remove());
+            const diff = drawingDiffState.diffResult;
+            if (!diff) return;
+
+            // Per-pane config: each side uses its own outline + sheet dims
+            const panes = [
+                {
+                    innerId: 'dwgDiffInnerA',
+                    outline: matchEntry.viewOutlineA || matchEntry.viewOutlineB,
+                    sheetName: matchEntry.sheetNameA || '',
+                    sheetDimsKey: 'sheetDimsA',
+                },
+                {
+                    innerId: 'dwgDiffInnerB',
+                    outline: matchEntry.viewOutlineB || matchEntry.viewOutlineA,
+                    sheetName: matchEntry.sheetNameB || '',
+                    sheetDimsKey: 'sheetDimsB',
+                },
+            ];
+
+            panes.forEach(({ innerId, outline, sheetName, sheetDimsKey }) => {
+                const inner = document.getElementById(innerId);
+                if (!inner || !outline || outline.length < 4) return;
+                const img = inner.querySelector('img');
+                if (!img || !img.naturalWidth) return;
+                const iw = img.naturalWidth;
+                const ih = img.naturalHeight;
+
+                const sd = diff[sheetDimsKey] || {};
+                const perSheet = sd.perSheet || {};
+                const sheetSD = perSheet[sheetName] || {};
+                const sheetW = sheetSD.sheetWidth || sd.sheetWidth || 0.8636;
+                const sheetH = sheetSD.sheetHeight || sd.sheetHeight || 0.5588;
+
+                const left = (outline[0] / sheetW) * iw;
+                const top = (1 - outline[3] / sheetH) * ih;
+                const right = (outline[2] / sheetW) * iw;
+                const bottom = (1 - outline[1] / sheetH) * ih;
+
+                const dim = document.createElement('div');
+                dim.className = 'dwg-diff-view-dim';
+                dim.style.width = iw + 'px';
+                dim.style.height = ih + 'px';
+                const pad = 6;
+                const cl = Math.max(0, left - pad);
+                const ct = Math.max(0, top - pad);
+                const cr = Math.min(iw, right + pad);
+                const cb = Math.min(ih, bottom + pad);
+                dim.style.clipPath = `polygon(
+                    0 0, ${iw}px 0, ${iw}px ${ih}px, 0 ${ih}px, 0 0,
+                    ${cl}px ${ct}px, ${cl}px ${cb}px, ${cr}px ${cb}px, ${cr}px ${ct}px, ${cl}px ${ct}px
+                )`;
+                inner.appendChild(dim);
+            });
+        }
+
         function _storeGeometryDiffResults(result, partNumber, revA, revB) {
             state._geometryDiffResult = {
                 part_number: partNumber,
@@ -14223,28 +15962,6 @@
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
-        }
-
-        function _escapeHtml(text) {
-            return String(text == null ? '' : text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
-
-        function _buildAsmeRefsHtml(asmeRefs) {
-            if (!Array.isArray(asmeRefs) || !asmeRefs.length) return;
-            let refsHtml = '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">';
-            asmeRefs.forEach(function(ref) {
-                const label = ref.section || ref.feature_type || 'ASME Ref';
-                const page = (ref.images && ref.images[0]) ? ref.images[0].page : '';
-                const payload = encodeURIComponent(JSON.stringify(ref));
-                refsHtml += '<button style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.2);border-radius:4px;font-size:11px;color:var(--accent);cursor:pointer;font-family:inherit;" data-asme-ref="' + payload + '">\uD83D\uDCD6 ' + _escapeHtml(label) + (page ? ' (' + _escapeHtml(page) + ')' : '') + '</button>';
-            });
-            refsHtml += '</div>';
-            return refsHtml;
         }
 
         function _showAsmeRefsFromResponse(asmeRefs, targetAgentKey) {
@@ -15739,6 +17456,7 @@
             state.inspecting = true;
             state.results = null;
             state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
+            renderDimExplorerHighlight();
             state.faiCharacteristics = []; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
             runBtn.disabled = true;
             runBtn.textContent = 'Analyzing...';
@@ -15883,6 +17601,7 @@
             // Destroy part compare viewers on reset
             if (typeof _destroyPartDiffViewers === 'function') _destroyPartDiffViewers();
             state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
+            renderDimExplorerHighlight();
             state.faiCharacteristics = []; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
             state.drawingZoom = 1;
             state.drawingPanX = 0;
@@ -20941,19 +22660,6 @@
                 scheduleAgentStateSave();
             }
 
-            agentMessages.addEventListener('click', (e) => {
-                const btn = e.target.closest('[data-asme-ref]');
-                if (!btn) return;
-                const payload = btn.getAttribute('data-asme-ref');
-                if (!payload) return;
-                try {
-                    const ref = JSON.parse(decodeURIComponent(payload));
-                    _showAsmeRefPopup(ref);
-                } catch (err) {
-                    console.error('[ASME Refs] Failed to open reference:', err);
-                }
-            });
-
             agentToggleBtn.addEventListener('click', () => {
                 toggleAgentPanel();
             });
@@ -21717,6 +23423,7 @@
     </script>
 </body>
 </html>
+
 
 
 

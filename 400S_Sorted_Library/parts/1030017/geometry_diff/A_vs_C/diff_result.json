@@ -1,0 +1,196 @@
+{
+  "identical": false,
+  "volume_a_mm3": 4690978.404,
+  "volume_b_mm3": 4666846.46,
+  "removed_volume_mm3": 24131.944,
+  "added_volume_mm3": 0.0,
+  "net_change_mm3": -24131.944,
+  "solids_a": 1,
+  "solids_b": 1,
+  "bbox_a": {
+    "min": [
+      -127.0,
+      -127.0,
+      -0.0
+    ],
+    "max": [
+      127.0,
+      127.0,
+      177.8
+    ],
+    "extents": [
+      254.0,
+      254.0,
+      177.8
+    ]
+  },
+  "bbox_b": {
+    "min": [
+      -127.0,
+      -127.0,
+      -0.0
+    ],
+    "max": [
+      127.0,
+      127.0,
+      177.8
+    ],
+    "extents": [
+      254.0,
+      254.0,
+      177.8
+    ]
+  },
+  "changed_centroids": [
+    {
+      "type": "removed",
+      "centroid": [
+        -101.6,
+        101.6,
+        25.4
+      ],
+      "volume_mm3": 6032.986
+    },
+    {
+      "type": "removed",
+      "centroid": [
+        -101.6,
+        -101.6,
+        25.4
+      ],
+      "volume_mm3": 6032.986
+    },
+    {
+      "type": "removed",
+      "centroid": [
+        101.6,
+        -101.6,
+        25.4
+      ],
+      "volume_mm3": 6032.986
+    },
+    {
+      "type": "removed",
+      "centroid": [
+        101.6,
+        101.6,
+        25.4
+      ],
+      "volume_mm3": 6032.986
+    }
+  ],
+  "changed_regions": [
+    {
+      "type": "removed",
+      "centroid": [
+        -101.6,
+        101.6,
+        25.4
+      ],
+      "bbox": {
+        "min": [
+          -114.348,
+          88.852,
+          -0.048
+        ],
+        "max": [
+          -88.852,
+          114.348,
+          50.848
+        ],
+        "extents": [
+          25.497,
+          25.497,
+          50.897
+        ]
+      },
+      "volume_mm3": 6032.986,
+      "region_index": 1
+    },
+    {
+      "type": "removed",
+      "centroid": [
+        -101.6,
+        -101.6,
+        25.4
+      ],
+      "bbox": {
+        "min": [
+          -114.348,
+          -114.348,
+          -0.048
+        ],
+        "max": [
+          -88.852,
+          -88.852,
+          50.848
+        ],
+        "extents": [
+          25.497,
+          25.497,
+          50.897
+        ]
+      },
+      "volume_mm3": 6032.986,
+      "region_index": 2
+    },
+    {
+      "type": "removed",
+      "centroid": [
+        101.6,
+        -101.6,
+        25.4
+      ],
+      "bbox": {
+        "min": [
+          88.852,
+          -114.348,
+          -0.048
+        ],
+        "max": [
+          114.348,
+          -88.852,
+          50.848
+        ],
+        "extents": [
+          25.497,
+          25.497,
+          50.897
+        ]
+      },
+      "volume_mm3": 6032.986,
+      "region_index": 3
+    },
+    {
+      "type": "removed",
+      "centroid": [
+        101.6,
+        101.6,
+        25.4
+      ],
+      "bbox": {
+        "min": [
+          88.852,
+          88.852,
+          -0.048
+        ],
+        "max": [
+          114.348,
+          114.348,
+          50.848
+        ],
+        "extents": [
+          25.497,
+          25.497,
+          50.897
+        ]
+      },
+      "volume_mm3": 6032.986,
+      "region_index": 4
+    }
+  ],
+  "import_warnings": [],
+  "computation_time_s": 0.34,
+  "removed_stl": "C:\\Users\\skaumb\\OneDrive - continentalmachines.com\\Desktop\\Projects\\AI-tool\\400S_Sorted_Library\\parts\\1030017\\geometry_diff\\A_vs_C\\removed.stl",
+  "added_stl": null
+}

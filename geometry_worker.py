@@ -81,6 +81,43 @@ def _get_centroid(shape):
     return [round((xmin + xmax) / 2, 3), round((ymin + ymax) / 2, 3), round((zmin + zmax) / 2, 3)]
 
 
+def _extract_change_regions(shape, change_type: str) -> list:
+    """Extract per-solid change regions with centroid + bbox.
+
+    Boolean diff results can contain multiple disconnected solids. Exporting each
+    solid separately lets downstream drawing projection show advisory regions
+    instead of only a single centroid dot.
+    """
+    regions = []
+    explorer = TopExp_Explorer(shape, TopAbs_SOLID)
+    while explorer.More():
+        solid = explorer.Current()
+        volume = _get_volume(solid)
+        if abs(volume) > 0.001:
+            regions.append({
+                "type": change_type,
+                "centroid": _get_centroid(solid),
+                "bbox": _get_bbox(solid),
+                "volume_mm3": round(volume, 3),
+            })
+        explorer.Next()
+
+    if not regions:
+        total_volume = _get_volume(shape)
+        if abs(total_volume) > 0.001:
+            regions.append({
+                "type": change_type,
+                "centroid": _get_centroid(shape),
+                "bbox": _get_bbox(shape),
+                "volume_mm3": round(total_volume, 3),
+            })
+
+    regions.sort(key=lambda r: (-abs(r.get("volume_mm3", 0.0)), r["type"]))
+    for idx, region in enumerate(regions, start=1):
+        region["region_index"] = idx
+    return regions
+
+
 def _save_stl(shape, path: str, linear_deflection: float = 0.1):
     mesh = BRepMesh_IncrementalMesh(shape, linear_deflection)
     mesh.Perform()
@@ -198,6 +235,7 @@ async def compute_diff(req: DiffRequest):
         "bbox_a": bbox_a,
         "bbox_b": bbox_b,
         "changed_centroids": [],
+        "changed_regions": [],
         "import_warnings": import_warnings,
         "computation_time_s": round(time.time() - t_start, 2),
         "removed_stl": None,
@@ -209,22 +247,26 @@ async def compute_diff(req: DiffRequest):
         stl_path = out_dir / "removed.stl"
         _save_stl(removed_shape, str(stl_path))
         result["removed_stl"] = str(stl_path)
-        result["changed_centroids"].append({
-            "type": "removed",
-            "centroid": _get_centroid(removed_shape),
-            "volume_mm3": round(vol_removed, 3),
-        })
+        removed_regions = _extract_change_regions(removed_shape, "removed")
+        result["changed_regions"].extend(removed_regions)
+        result["changed_centroids"].extend({
+            "type": region["type"],
+            "centroid": region["centroid"],
+            "volume_mm3": region["volume_mm3"],
+        } for region in removed_regions)
         logger.info(f"Saved removed volume: {stl_path}")
 
     if abs(vol_added) > 0.001:
         stl_path = out_dir / "added.stl"
         _save_stl(added_shape, str(stl_path))
         result["added_stl"] = str(stl_path)
-        result["changed_centroids"].append({
-            "type": "added",
-            "centroid": _get_centroid(added_shape),
-            "volume_mm3": round(vol_added, 3),
-        })
+        added_regions = _extract_change_regions(added_shape, "added")
+        result["changed_regions"].extend(added_regions)
+        result["changed_centroids"].extend({
+            "type": region["type"],
+            "centroid": region["centroid"],
+            "volume_mm3": region["volume_mm3"],
+        } for region in added_regions)
         logger.info(f"Saved added volume: {stl_path}")
 
     # Save result JSON

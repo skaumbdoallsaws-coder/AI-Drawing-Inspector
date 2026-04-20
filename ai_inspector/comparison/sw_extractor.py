@@ -21,7 +21,7 @@ Note: VBA extractor stores all dimensions in SI units (meters).
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import re
 
 # Conversion factor: meters to inches
@@ -54,6 +54,11 @@ class SwFeature:
     location: str = ""
     raw_data: Dict[str, Any] = field(default_factory=dict)
     source: str = "solidworks"
+    # Spatial fields (populated from geometry section)
+    center_3d_mm: Optional[Tuple[float, float, float]] = None
+    axis_direction: Optional[Tuple[float, float, float]] = None
+    start_face: Optional[str] = None
+    visible_in_views: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
@@ -77,6 +82,8 @@ class SwFeature:
             d["thread"] = self.thread
         if self.location:
             d["location"] = self.location
+        if self.visible_in_views:
+            d["visible_in_views"] = self.visible_in_views
         return d
 
 
@@ -187,6 +194,9 @@ class SwFeatureExtractor:
         if hole_count == 0:
             comparison_features = self._extract_from_comparison(sw_data)
             features.extend(comparison_features)
+
+        # Enrich features with spatial data from geometry section
+        self._enrich_spatial_fields(features, sw_data)
 
         return features
 
@@ -483,3 +493,85 @@ class SwFeatureExtractor:
                 except (ValueError, TypeError):
                     continue
         return None
+
+    # ------------------------------------------------------------------
+    # Spatial enrichment
+    # ------------------------------------------------------------------
+
+    def _enrich_spatial_fields(
+        self,
+        features: List[SwFeature],
+        sw_data: Dict[str, Any],
+    ) -> None:
+        """Populate spatial fields on features from geometry and comparison sections.
+
+        Cross-references:
+        1. comparison.holeGroups[].instances[] — modelCenter, startFace, axis
+        2. geometry.cylinders[] — axisPoint, axisDirection, diameter
+
+        Populates: center_3d_mm, axis_direction, start_face, visible_in_views.
+        """
+        from .spatial_renderer import compute_visible_views
+
+        # Build lookup from comparison.holeGroups by groupId
+        group_lookup: Dict[str, Dict] = {}
+        comparison = sw_data.get("comparison", {})
+        for group in comparison.get("holeGroups", []):
+            gid = group.get("groupId", "")
+            if gid:
+                group_lookup[gid] = group
+
+        # Build list of internal cylinders from geometry
+        cylinders = sw_data.get("geometry", {}).get("cylinders", [])
+        internal_cylinders = [c for c in cylinders if c.get("isInternal", False)]
+
+        for feat in features:
+            if feat.feature_type not in ("Hole", "TappedHole"):
+                continue
+
+            # Strategy 1: match via comparison.holeGroups by location (groupId)
+            group = group_lookup.get(feat.location)
+            if group:
+                instances = group.get("instances", [])
+                if instances:
+                    inst = instances[0]  # Use first instance for representative position
+                    mc = inst.get("modelCenter", {})
+                    if mc:
+                        feat.center_3d_mm = (
+                            mc.get("xMm", 0.0),
+                            mc.get("yMm", 0.0),
+                            mc.get("zMm", 0.0),
+                        )
+                    axis = inst.get("axis")
+                    if axis and isinstance(axis, (list, tuple)) and len(axis) == 3:
+                        feat.axis_direction = tuple(axis)
+                    feat.start_face = inst.get("startFace")
+
+            # Strategy 2: match via geometry.cylinders by diameter
+            if feat.axis_direction is None and feat.diameter_inches is not None:
+                feat_dia_m = feat.diameter_inches / METERS_TO_INCHES
+                best_cyl = None
+                best_delta = float("inf")
+                for cyl in internal_cylinders:
+                    cyl_dia = cyl.get("diameter", 0)
+                    d = abs(cyl_dia - feat_dia_m)
+                    if d < best_delta:
+                        best_delta = d
+                        best_cyl = cyl
+                # Accept if within 0.5mm (0.0005m)
+                if best_cyl and best_delta < 0.0005:
+                    ap = best_cyl.get("axisPoint", [0, 0, 0])
+                    ad = best_cyl.get("axisDirection", [0, 0, 1])
+                    if feat.center_3d_mm is None:
+                        # Convert from meters to mm
+                        feat.center_3d_mm = (
+                            ap[0] * 1000.0,
+                            ap[1] * 1000.0,
+                            ap[2] * 1000.0,
+                        )
+                    if feat.axis_direction is None:
+                        feat.axis_direction = tuple(ad)
+
+            # Compute which standard views show this feature
+            if feat.axis_direction:
+                feat.visible_in_views = compute_visible_views(feat.axis_direction)

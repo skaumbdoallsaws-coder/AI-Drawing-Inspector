@@ -111,11 +111,14 @@ namespace SolidWorksExtractor.Services
 
                     case "Cut":
                     case "ICE-Cut":
+                    case "Cut-Thicken":
                         ExtractExtrude(doc, feat, collection, isSuppressed, suppressionByConfig, true);
                         break;
 
                     case "Revolution":
                     case "RevCut":
+                    case "Revolve":
+                    case "RevolveCut":
                         ExtractRevolve(doc, feat, collection, isSuppressed, suppressionByConfig);
                         break;
 
@@ -130,6 +133,7 @@ namespace SolidWorksExtractor.Services
                         break;
 
                     case "Fillet":
+                    case "VarFillet":
                         ExtractFillet(doc, feat, collection, isSuppressed, suppressionByConfig);
                         break;
 

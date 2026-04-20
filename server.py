@@ -21,7 +21,9 @@ from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 
 from dotenv import load_dotenv
-load_dotenv()
+
+REPO_ROOT = Path(__file__).resolve().parent
+load_dotenv(dotenv_path=REPO_ROOT / ".env")
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +36,8 @@ from ai_inspector.spatial.profile_validator import validate_all_profiles
 from ai_inspector.utils.drawing_map import (
     apply_drawing_map_to_findings,
     load_drawing_map,
+    load_drawing_map_revision,
+    list_drawing_map_revisions,
     sanitize_part_number,
 )
 
@@ -477,12 +481,74 @@ async def run_inspection(
 
         resolved_part_number = result.get("part_number") or part_number
         drawing_map = load_drawing_map(resolved_part_number, "400S_Sorted_Library")
+
+        # Load inspection profile for profile-aware annotation matching
+        profile_data = None
+        safe_rpn = sanitize_part_number(resolved_part_number)
+        for _prof_candidate in [
+            Path("400S_Sorted_Library") / f"{safe_rpn}_inspection_profile.json",
+            Path("400S_Sorted_Library") / f"{safe_rpn}.json",
+        ]:
+            if _prof_candidate.exists():
+                try:
+                    with open(_prof_candidate, "r", encoding="utf-8-sig") as _pf:
+                        profile_data = json.load(_pf)
+                except Exception:
+                    pass
+                break
+
         enriched_features, drawing_map_metadata = apply_drawing_map_to_findings(
             result.get("features", []),
             drawing_map,
+            profile=profile_data,
         )
 
         result["features"] = enriched_features
+        if isinstance(result.get("findings"), dict):
+            result["findings"]["features"] = enriched_features
+
+        total_features = len(enriched_features)
+        status_counts = {
+            "present": sum(1 for f in enriched_features if str(f.get("status") or "").upper() == "PRESENT"),
+            "missing": sum(1 for f in enriched_features if str(f.get("status") or "").upper() == "MISSING"),
+            "partial": sum(1 for f in enriched_features if str(f.get("status") or "").upper() == "PARTIAL"),
+            "discrepant": sum(1 for f in enriched_features if str(f.get("status") or "").upper() == "DISCREPANT"),
+        }
+        completeness_pct = int(round((status_counts["present"] / total_features) * 100)) if total_features else 0
+        issue_statuses = {"MISSING", "PARTIAL", "DISCREPANT"}
+        critical_issues = []
+        for feat in enriched_features:
+            if str(feat.get("status") or "").upper() not in issue_statuses:
+                continue
+            critical_issues.append(feat.get("observation") or feat.get("name") or "Unnamed issue")
+        critical_issues = critical_issues[:10]
+
+        result["gap_summary"] = {
+            "total_features": total_features,
+            "present": status_counts["present"],
+            "missing": status_counts["missing"],
+            "partial": status_counts["partial"],
+            "discrepant": status_counts["discrepant"],
+            "completeness": f"{completeness_pct}%",
+            "critical_issues": critical_issues,
+        }
+        if isinstance(result.get("findings"), dict):
+            result["findings"]["gap_summary"] = {
+                "total_features": total_features,
+                "present": status_counts["present"],
+                "missing": status_counts["missing"],
+                "partial": status_counts["partial"],
+                "discrepant": status_counts["discrepant"],
+                "overall_completeness": f"{completeness_pct}%",
+                "critical_issues": critical_issues,
+            }
+        try:
+            rep_summary = inspector._compute_representation_summary(enriched_features)
+        except Exception:
+            rep_summary = result.get("representation_summary")
+        result["representation_summary"] = rep_summary
+        if isinstance(result.get("findings"), dict) and rep_summary is not None:
+            result["findings"]["representation_summary"] = rep_summary
         result["drawing_map"] = drawing_map
         result["drawing_map_metadata"] = drawing_map_metadata
 
@@ -1715,6 +1781,160 @@ async def get_assembly_diff(assembly_number: str, revA: str = Query(...), revB: 
     return diff_result
 
 
+# ---------- Drawing Revision Diff ----------
+
+@app.get("/api/drawing-revisions/{part_number}")
+async def get_drawing_revisions(part_number: str):
+    """List revisions that have drawing maps available for comparison."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    revisions = list_drawing_map_revisions(safe_pn, "400S_Sorted_Library")
+    return {"revisions": revisions, "part_number": safe_pn}
+
+
+@app.get("/api/drawing-diff/{part_number}")
+async def get_drawing_diff(
+    part_number: str,
+    revA: str = Query(...),
+    revB: str = Query(...),
+):
+    """Compare two drawing map revisions and return structured diff.
+
+    Returns the full compare artifact (contract v1.0) with view matching,
+    annotation diff, sheet metadata diff, projected model delta, and verdicts.
+    """
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    safe_a = re.sub(r'[^\w]', '', revA)
+    safe_b = re.sub(r'[^\w]', '', revB)
+    if not safe_pn or not safe_a or not safe_b:
+        raise HTTPException(status_code=400, detail="Invalid part number or revision")
+
+    map_a = load_drawing_map_revision(safe_pn, safe_a, "400S_Sorted_Library")
+    map_b = load_drawing_map_revision(safe_pn, safe_b, "400S_Sorted_Library")
+
+    if map_a is None:
+        raise HTTPException(status_code=404, detail=f"Drawing map not found for rev {safe_a}")
+    if map_b is None:
+        raise HTTPException(status_code=404, detail=f"Drawing map not found for rev {safe_b}")
+
+    # Load geometry diff if available (for projected model delta)
+    geometry_diff = None
+    geom_cache = (Path("400S_Sorted_Library/parts") / safe_pn
+                  / "geometry_diff" / f"{safe_a}_vs_{safe_b}" / "diff_result.json")
+    if geom_cache.exists():
+        try:
+            with open(geom_cache, encoding="utf-8-sig") as f:
+                geometry_diff = json.load(f)
+        except Exception:
+            logger.warning("Failed to load geometry diff cache: %s", geom_cache)
+
+    # Load part JSONs for bbox center (optional)
+    part_json_a = _load_part_json(safe_pn, safe_a)
+    part_json_b = _load_part_json(safe_pn, safe_b)
+
+    from ai_inspector.comparison.drawing_differ import compute_drawing_diff
+    result = compute_drawing_diff(
+        drawing_map_a=map_a,
+        drawing_map_b=map_b,
+        geometry_diff=geometry_diff,
+        part_json_a=part_json_a,
+        part_json_b=part_json_b,
+    )
+    result["partNumber"] = safe_pn
+    result["revA"] = safe_a
+    result["revB"] = safe_b
+
+    # Load per-revision highlight boxes for overlay geometry
+    result["highlightBoxesA"] = _load_highlight_boxes(safe_pn, safe_a)
+    result["highlightBoxesB"] = _load_highlight_boxes(safe_pn, safe_b)
+
+    # Strip internal fields before sending to frontend
+    vi = result.get("viewIdentity", {})
+    vi.pop("_viewsA", None)
+    vi.pop("_viewsB", None)
+
+    return result
+
+
+def _load_part_json(part_number: str, revision: str) -> Optional[dict]:
+    """Load part JSON for a specific revision, with root fallback."""
+    safe_pn = part_number
+    safe_rev = revision
+
+    # Revision-specific
+    rev_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / f"{safe_pn}.json"
+    if rev_path.exists():
+        try:
+            with open(rev_path, encoding="utf-8-sig") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    # Root fallback
+    root_path = Path("400S_Sorted_Library") / f"{safe_pn}.json"
+    if root_path.exists():
+        try:
+            with open(root_path, encoding="utf-8-sig") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    return None
+
+
+def _load_highlight_boxes(part_number: str, revision: str) -> Optional[dict]:
+    """Load highlight boxes for a specific revision, with root fallback."""
+    safe_pn = part_number
+    safe_rev = revision
+    filename = f"{safe_pn}_highlight_boxes.json"
+
+    # Revision-specific
+    rev_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / filename
+    if rev_path.exists():
+        try:
+            with open(rev_path, encoding="utf-8-sig") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    # Root fallback
+    root_path = Path("400S_Sorted_Library") / filename
+    if root_path.exists():
+        try:
+            with open(root_path, encoding="utf-8-sig") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    return None
+
+
+@app.get("/api/drawing-render/{part_number}")
+async def get_drawing_render(part_number: str, revision: str = Query(...)):
+    """Serve a revision-specific rendered drawing image (raster only).
+
+    Looks for PNG/JPG renders at parts/{pn}/rev{X}/{pn}_drawing.{ext}.
+    PDF is excluded because the compare UI renders into <img> tags.
+    Returns 404 if no raster render exists (frontend falls back to the
+    uploaded drawing).
+    """
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    safe_rev = re.sub(r'[^\w]', '', revision)
+    if not safe_pn or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid part number or revision")
+
+    base_dir = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}"
+    # Raster only — PDF excluded (can't render in <img>)
+    for ext, media in [("png", "image/png"), ("jpg", "image/jpeg")]:
+        render_path = base_dir / f"{safe_pn}_drawing.{ext}"
+        if render_path.exists():
+            return FileResponse(path=str(render_path), media_type=media)
+
+    raise HTTPException(status_code=404, detail=f"No drawing render for {part_number} rev {revision}")
+
+
 # ---------- Agent Chat ----------
 
 class AgentMessage(BaseModel):
@@ -1929,6 +2149,8 @@ FINDING_TO_ASME_FEATURE = {
     "runout": "GDT_Runout", "profile": "GDT_Profile",
     "tolerance": "05_Tolerancing_Defaults",
     "dimension": "Dimension_Basics",
+    "hidden line": "Line_Conventions", "centerline": "Line_Conventions",
+    "center line": "Line_Conventions", "line type": "Line_Conventions",
     "gd&t": "GDT_Symbology", "feature control": "GDT_Symbology",
 }
 
@@ -3433,6 +3655,12 @@ def _clean_agent_response(text: str) -> str:
     return result.strip()
 
 
+def _is_walkthrough_message(message: str) -> bool:
+    """Detect guided assembly walkthrough requests that need legacy narration markers."""
+    msg_lower = (message or "").lower()
+    return any(kw in msg_lower for kw in ["walk", "tour", "narrat", "walkthrough"])
+
+
 @app.post("/api/agent/chat")
 async def agent_chat(request: AgentChatRequest):
     """Chat with the InspectorPro Agent (ASME expert powered by Claude)."""
@@ -3449,8 +3677,25 @@ async def agent_chat(request: AgentChatRequest):
     if request.agent_type not in AGENT_PROMPTS:
         raise HTTPException(status_code=400, detail=f"Invalid agent_type: '{request.agent_type}'. Must be one of: inspector, deviation-analyst, parts-finder")
 
-    # Select system prompt based on agent_type, with Phase 4C tool appendix
-    system_prompt = AGENT_PROMPTS[request.agent_type] + build_tool_appendix(request.agent_type)
+    is_walkthrough = _is_walkthrough_message(request.message)
+
+    # Walkthrough mode still depends on legacy HIGHLIGHT_PARTS narration markers.
+    # Do not append the tool appendix here, or the model will favor <tool_calls>
+    # over the segmented format that the frontend narration player expects.
+    system_prompt = AGENT_PROMPTS[request.agent_type]
+    if is_walkthrough:
+        system_prompt += (
+            "\n\n"
+            "WALKTHROUGH OUTPUT OVERRIDE\n"
+            "- Do NOT emit <tool_calls> or any JSON for walkthroughs.\n"
+            "- Do NOT use tool syntax for highlights.\n"
+            "- You MUST follow the walkthrough format exactly using repeated "
+            "HIGHLIGHT_PARTS lines in the response body.\n"
+            "- The walkthrough is invalid if it is returned as prose-only without "
+            "multiple HIGHLIGHT_PARTS sections.\n"
+        )
+    else:
+        system_prompt += build_tool_appendix(request.agent_type)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -3798,10 +4043,58 @@ async def agent_chat(request: AgentChatRequest):
 
         # Extract dimension highlight commands before cleaning
         highlight_dims = []
+        available_dim_keys = []
+        if ctx:
+            available_dim_keys = [
+                str(ad.get("dim_key", "")).strip()
+                for ad in ctx.get("available_dimensions", [])
+                if ad.get("dim_key")
+            ]
+
+        def _resolve_highlight_dim_token(token: str) -> Optional[str]:
+            token = (token or "").strip()
+            if not token:
+                return None
+            if token in available_dim_keys:
+                return token
+            bracket_match = re.search(r'\[([^\]]+)\]', token)
+            if bracket_match:
+                bracket_key = bracket_match.group(1).strip()
+                if bracket_key in available_dim_keys:
+                    return bracket_key
+            substring_matches = [key for key in available_dim_keys if key and key in token]
+            if len(substring_matches) == 1:
+                return substring_matches[0]
+            return None
+
         hl_match = re.search(r'^HIGHLIGHT_DIMS:\s*(.+)$', response_text, re.MULTILINE)
         if hl_match:
-            highlight_dims = [k.strip() for k in hl_match.group(1).split(",") if k.strip()]
+            raw_dim_tokens = [k.strip() for k in hl_match.group(1).split(",") if k.strip()]
+            if available_dim_keys:
+                resolved = []
+                for token in raw_dim_tokens:
+                    dim_key = _resolve_highlight_dim_token(token)
+                    if dim_key and dim_key not in resolved:
+                        resolved.append(dim_key)
+                highlight_dims = resolved
+            else:
+                highlight_dims = raw_dim_tokens
             response_text = re.sub(r'^HIGHLIGHT_DIMS:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
+        if native_tool_calls and available_dim_keys:
+            for tc in native_tool_calls:
+                if tc.get("name") != "highlight_dimensions":
+                    continue
+                args = tc.get("args", {})
+                raw_dim_tokens = args.get("dim_keys", [])
+                if not isinstance(raw_dim_tokens, list):
+                    raw_dim_tokens = [raw_dim_tokens] if raw_dim_tokens else []
+                resolved = []
+                for token in raw_dim_tokens:
+                    dim_key = _resolve_highlight_dim_token(str(token))
+                    if dim_key and dim_key not in resolved:
+                        resolved.append(dim_key)
+                args["dim_keys"] = resolved
 
         # Extract view highlight commands before cleaning
         highlight_views = []
@@ -4093,19 +4386,42 @@ async def agent_chat(request: AgentChatRequest):
                     if ref["feature_type"] not in seen_ft:
                         seen_ft.add(ref["feature_type"])
                         asme_refs.append(ref)
-            # Priority 3: only MISSING/PARTIAL/DISCREPANT findings
-            if len(asme_refs) < 3 and isinstance(ctx, dict):
-                ctx_findings = ctx.get("findings", [])
-                if isinstance(ctx_findings, list):
-                    for finding in ctx_findings:
+            # Priority 3: finding-based fallback — only when priorities 1+2 found
+            # nothing AND message looks like an inspection follow-up (not a
+            # generic ASME question like "what about title blocks?").
+            _FOLLOWUP_WORDS = {"this", "that", "issue", "problem", "requirement",
+                               "missing", "incomplete", "wrong", "noncompliant",
+                               "defect", "finding", "error", "fail", "deviation"}
+            if len(asme_refs) == 0 and isinstance(ctx, dict):
+                msg_words = set(request.message.lower().split())
+                is_followup = bool(msg_words & _FOLLOWUP_WORDS)
+                if is_followup:
+                    ctx_findings = ctx.get("findings", [])
+                    issue_findings = [
+                        f for f in (ctx_findings if isinstance(ctx_findings, list) else [])
+                        if isinstance(f, dict) and f.get("status", "").upper() in ("MISSING", "PARTIAL", "DISCREPANT")
+                    ]
+                    # Single issue → unambiguous, use it directly
+                    # Multiple issues → pick the one whose name/observation overlaps the message
+                    candidates = []
+                    if len(issue_findings) == 1:
+                        candidates = issue_findings
+                    elif len(issue_findings) > 1:
+                        for finding in issue_findings:
+                            finding_words = set()
+                            for k in ("name", "observation"):
+                                finding_words.update(str(finding.get(k, "")).lower().split())
+                            if msg_words & finding_words:
+                                candidates.append(finding)
+                        if not candidates:
+                            candidates = issue_findings[:1]  # last resort: first issue only
+                    for finding in candidates:
                         if len(asme_refs) >= 3:
                             break
-                        status = finding.get("status", "").upper() if isinstance(finding, dict) else ""
-                        if status in ("MISSING", "PARTIAL", "DISCREPANT"):
-                            for ref in _resolve_asme_refs_for_finding(finding):
-                                if ref["feature_type"] not in seen_ft:
-                                    seen_ft.add(ref["feature_type"])
-                                    asme_refs.append(ref)
+                        for ref in _resolve_asme_refs_for_finding(finding):
+                            if ref["feature_type"] not in seen_ft:
+                                seen_ft.add(ref["feature_type"])
+                                asme_refs.append(ref)
             asme_refs = asme_refs[:3]
         if asme_refs:
             result["asme_refs"] = asme_refs
@@ -5027,6 +5343,62 @@ async def voice_synthesize(request: VoiceSynthesizeRequest):
         raise HTTPException(status_code=502, detail=f"Voice synthesis failed: {str(e)}")
 
 
+# ---------- Training / Blender MCP ----------
+
+@app.get("/api/training/blender/status")
+async def training_blender_status():
+    """Check whether the Blender MCP server is available for training scene generation."""
+    try:
+        from ai_inspector.services.training_scene_service import check_status
+        return check_status()
+    except Exception as e:
+        logger.error(f"Blender MCP status check error: {e}")
+        return {"available": False, "url": None, "error": str(e)}
+
+
+@app.post("/api/training/blender/generate-preview")
+async def training_blender_generate_preview(request: Request):
+    """Generate a Blender-based training preview for the current part/assembly context.
+
+    Expects JSON body:
+        {
+            "part_number": "1015001",
+            "part_name": "Piston",          // optional
+            "assembly_number": "6000201",    // optional
+            "revision": "A"                  // optional
+        }
+
+    Returns the standard training preview response shape.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "available": False, "error": "Invalid JSON body"},
+        )
+
+    part_number = body.get("part_number")
+    if not part_number:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "available": False, "error": "part_number is required"},
+        )
+
+    try:
+        from ai_inspector.services.training_scene_service import generate_preview
+        result = generate_preview(
+            part_number=part_number,
+            part_name=body.get("part_name"),
+            assembly_number=body.get("assembly_number"),
+            revision=body.get("revision"),
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Blender training preview error: {e}")
+        return {"ok": False, "available": True, "error": f"Server error: {str(e)}"}
+
+
 # ---------- Static Files ----------
 
 # Serve the frontend
@@ -5035,6 +5407,11 @@ async def serve_index():
     """Serve the main frontend HTML page."""
     return FileResponse("static/index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
+
+# Mount generated assets directory (training previews, etc.)
+_generated_dir = Path("generated")
+_generated_dir.mkdir(exist_ok=True)
+app.mount("/generated", StaticFiles(directory="generated"), name="generated")
 
 # Mount static files directory (must be after specific routes)
 app.mount("/static", StaticFiles(directory="static"), name="static")

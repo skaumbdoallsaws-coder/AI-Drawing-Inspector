@@ -93,14 +93,6 @@ and section cuts?
 - Set asme_compliance based on gap severity: COMPLIANT (all required items present), MINOR_GAPS (1-2 missing recommended items), MAJOR_GAPS (1+ missing required items), NON_COMPLIANT (most required items missing)
 - The observation field should ALSO mention the most important gaps in natural language
 
-## Feature Location
-
-For each feature with status PRESENT, PARTIAL, or DISCREPANT, include a "location" object
-with approximate bounding box coordinates (as percentages 0-100 of the drawing page dimensions)
-indicating where the feature's callout or annotation appears on the drawing. Estimate the
-center position and extent of the relevant callout text, dimension line, or symbol.
-For MISSING features, set "location" to null (they have no location on the drawing).
-
 ## Output
 
 Return ONLY a valid JSON object (no markdown fences, no commentary):
@@ -121,14 +113,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary):
       "severity": "CRITICAL | MAJOR | MINOR | INFO",
       "representation_score": "<integer 0-100, or null if MISSING>",
       "representation_gaps": ["<list of specific ASME gaps, empty array if compliant or MISSING>"],
-      "asme_compliance": "COMPLIANT | MINOR_GAPS | MAJOR_GAPS | NON_COMPLIANT | null (if MISSING)",
-      "location": {{
-        "x_pct": "<approximate X position as percentage (0-100) of drawing width where feature callout/annotation appears>",
-        "y_pct": "<approximate Y position as percentage (0-100) of drawing height>",
-        "width_pct": "<approximate width as percentage of drawing width (5-30 typical)>",
-        "height_pct": "<approximate height as percentage of drawing height (3-20 typical)>",
-        "page": "<page number where this feature appears (1-based)>"
-      }}
+      "asme_compliance": "COMPLIANT | MINOR_GAPS | MAJOR_GAPS | NON_COMPLIANT | null (if MISSING)"
     }}
   ],
   "view_assessment": {{
@@ -743,10 +728,6 @@ class SpatialInspector:
                 feature["asme_compliance"] = None
                 feature["representation_score"] = None
                 feature["representation_gaps"] = []
-                feature["location"] = None
-            # Ensure location field exists (default None if not returned)
-            if "location" not in feature:
-                feature["location"] = None
 
         return findings, tokens_in, tokens_out
 

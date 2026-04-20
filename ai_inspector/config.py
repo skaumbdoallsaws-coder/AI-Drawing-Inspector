@@ -106,6 +106,11 @@ class Config:
     vision_extraction_temperature: float = 0.1
     vision_extraction_detail: str = "high"  # OpenAI image detail level ("low", "high", "auto")
 
+    # === Spatial Understanding ===
+    spatial_context_enabled: bool = True   # Render 2D projections from SW 3D data
+    spatial_match_weight: float = 0.005    # Weight for spatial tiebreaking in matcher
+    deduplicate_cross_view: bool = True    # Remove cross-view duplicate callouts
+
     # === VLM (page understanding) ===
     use_vlm: bool = True  # Enable Qwen VLM for holistic page understanding
 

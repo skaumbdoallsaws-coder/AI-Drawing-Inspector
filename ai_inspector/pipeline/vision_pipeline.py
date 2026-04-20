@@ -166,8 +166,53 @@ class VisionPipeline:
                         }
 
         # ============================================================
+        # PHASE 0.5: Load or render spatial reference views
+        # Strategy 1: Real SolidWorks screenshots (if exported alongside JSON)
+        # Strategy 2: Matplotlib projections from 3D coordinate data (fallback)
+        # ============================================================
+        view_images = {}
+        view_source = "none"
+        if sw_data and self.config.spatial_context_enabled:
+            # Try loading real SW screenshots first
+            view_exports = sw_data.get("viewExports", {}).get("views", [])
+            if view_exports and sw_json_path:
+                sw_dir = Path(sw_json_path).parent
+                for ve in view_exports:
+                    vname = ve.get("viewName", "")
+                    fname = ve.get("fileName", "")
+                    if vname and fname:
+                        img_path = sw_dir / fname
+                        if img_path.exists():
+                            view_images[vname] = Image.open(img_path).convert("RGB")
+                if view_images:
+                    view_source = "solidworks"
+
+            # Fall back to matplotlib rendering
+            if not view_images:
+                try:
+                    from ..comparison.spatial_renderer import render_standard_views
+                    view_images = render_standard_views(sw_data, sw_features)
+                    if view_images:
+                        view_source = "matplotlib"
+                except Exception as e:
+                    view_images = {}
+                    if output_dir:
+                        out = Path(output_dir)
+                        out.mkdir(parents=True, exist_ok=True)
+                        with open(out / "spatial_render_error.txt", "w") as f:
+                            f.write(str(e))
+
+        # Save rendered views for debugging
+        if view_images and output_dir:
+            out = Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            for view_name, view_img in view_images.items():
+                view_img.save(out / f"spatial_view_{view_name}.png")
+
+        # ============================================================
         # PHASE 1: GPT-4o Vision Extraction (replaces YOLO + OCR)
         # Now assembly-aware: GPT-4o sees mate specs alongside SW features
+        # Also spatially-aware: GPT-4o sees rendered 3D projections
         # ============================================================
         raw_callouts = extract_callouts(
             image=image,
@@ -176,6 +221,8 @@ class VisionPipeline:
             config=self.config,
             mating_context=mating_context if mating_context else None,
             mate_specs=mate_specs if mate_specs else None,
+            view_images=view_images if view_images else None,
+            view_source=view_source,
         )
 
         # Save raw extraction for debugging
@@ -233,6 +280,11 @@ class VisionPipeline:
                 )
 
         validated_callouts, validation_stats = validate_and_repair_all(raw_callouts)
+
+        # --- Cross-view deduplication ---
+        if self.config.deduplicate_cross_view and view_images:
+            from ..comparison.deduplicator import deduplicate_cross_view
+            validated_callouts = deduplicate_cross_view(validated_callouts)
 
         # --- Expand both sides ---
         expanded_callouts, expanded_sw = expand_both_sides(validated_callouts, sw_features)

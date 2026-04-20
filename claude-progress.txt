@@ -1,5 +1,28 @@
 ## InspectorPro - Autonomous Coding Progress
 
+### Session 55 - 2026-02-19
+
+**Features Completed This Session:**
+- Feature #125: Auto-annotate drawing with inspection findings — highlight features by status (PASSING)
+  - Modified INSPECTION_PROMPT in engine.py to request bounding box coordinates (location field with x_pct, y_pct, width_pct, height_pct, page)
+  - Added post-processing in engine.py to ensure every feature has location field (default None for MISSING)
+  - Added redundant post-processing in server.py /api/inspect endpoint for resilience
+  - Frontend: getAutoAnnotationColor() returns color by status (green=PRESENT, yellow=PARTIAL, red=MISSING, orange=DISCREPANT)
+  - Frontend: generateFallbackLocations() creates evenly-distributed grid positions when AI omits coordinates
+  - Frontend: autoAnnotateFindings() orchestrates annotation — checks locations, generates fallbacks, handles PDF swap
+  - Frontend: drawAutoAnnotations() creates SVG rounded rects with dashed stroke (stroke-dasharray: 6 3), 15% opacity fill, and feature name labels
+  - Frontend: swapPdfToImageForAnnotations() replaces PDF embed with img via /api/render-pdf-page for annotation overlay
+  - Added "Show Findings" toggle in annotation toolbar (checkbox, default checked, hides/shows auto-annotations)
+  - Annotations placed inside drawingWrapper for pan/zoom compatibility
+  - Re-draw logic in renderViewport() preserves annotations across tab switches
+  - Cleanup in resetInspection() clears auto-annotation state
+  - Verified: Image upload shows color-coded dashed annotations ✓
+  - Verified: Show Findings toggle hides/shows annotations ✓
+  - Verified: Zero console errors ✓
+  - Verified: No mock data patterns ✓
+
+**Current Status: 125/125 features passing (100%) 🎉 ALL FEATURES COMPLETE — PROJECT FINISHED**
+
 ### Session 54 - 2026-02-18
 
 **Features Completed This Session:**

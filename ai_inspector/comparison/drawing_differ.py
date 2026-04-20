@@ -723,7 +723,42 @@ def _count_native_geometry_cues(view: Any) -> int:
 def _primitive_local_signature(primitive: dict, tol: float) -> Optional[Tuple[Any, ...]]:
     primitive_type = (primitive.get("primitiveType") or "polyline").lower()
     source_kind = primitive.get("sourceKind") or "modelEdge"
+    center = primitive.get("centerView")
+    radius = primitive.get("radiusView")
     points = _coerce_primitive_points(primitive.get("pointsView"))
+    if radius is not None:
+        try:
+            if isinstance(center, dict):
+                cx = center["x"]
+                cy = center["y"]
+            elif isinstance(center, (list, tuple)) and len(center) >= 2:
+                cx, cy = center[0], center[1]
+            else:
+                raise TypeError("Unsupported centerView shape")
+
+            qx = round(float(cx) / tol)
+            qy = round(float(cy) / tol)
+            qr = round(float(radius) / tol)
+
+            # Circles should not be keyed from sampled point loops. The tessellation
+            # can vary slightly across revisions/extractions even when the actual
+            # circle is unchanged, which produces false "all lines changed" overlays.
+            if primitive_type == "circle":
+                return ("circle", source_kind, qx, qy, qr)
+
+            # Arcs benefit from stable center/radius matching too, but they also need
+            # start/end discrimination so different sweeps at the same radius do not
+            # collapse together.
+            if primitive_type == "arc" and qr > 0:
+                start = end = None
+                if points:
+                    start = (round(points[0][0] / tol), round(points[0][1] / tol))
+                    end = (round(points[-1][0] / tol), round(points[-1][1] / tol))
+                    if end < start:
+                        start, end = end, start
+                return ("arc", source_kind, qx, qy, qr, start, end)
+        except (KeyError, TypeError, ValueError):
+            return None
 
     if points:
         qpts = tuple((round(x / tol), round(y / tol)) for x, y in points)
@@ -731,17 +766,6 @@ def _primitive_local_signature(primitive: dict, tol: float) -> Optional[Tuple[An
         if rqpts < qpts:
             qpts = rqpts
         return ("pts", primitive_type, source_kind, qpts)
-
-    center = primitive.get("centerView")
-    radius = primitive.get("radiusView")
-    if isinstance(center, dict) and radius is not None:
-        try:
-            qx = round(float(center["x"]) / tol)
-            qy = round(float(center["y"]) / tol)
-            qr = round(float(radius) / tol)
-            return ("cr", primitive_type, source_kind, qx, qy, qr)
-        except (KeyError, TypeError, ValueError):
-            return None
 
     bounds = primitive.get("boundsView")
     if isinstance(bounds, list) and len(bounds) >= 4:
@@ -940,6 +964,17 @@ def _ann_bounds_iou(a: dict, b: dict) -> float:
     return inter / union
 
 
+def _annotation_position_distance(a: dict, b: dict) -> float:
+    """Euclidean distance between annotation positions, or inf if unavailable."""
+    ax, ay = _ann_pos(a)
+    bx, by = _ann_pos(b)
+    if (ax, ay) == (0.0, 0.0) and not a.get("positionSheet"):
+        return float("inf")
+    if (bx, by) == (0.0, 0.0) and not b.get("positionSheet"):
+        return float("inf")
+    return math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
+
+
 def _compute_ann_match_cost(
     ann_a: dict,
     ann_b: dict,
@@ -1096,7 +1131,34 @@ def _diff_annotations_for_view(
         )
         gap = best_alt - cost
         if cost > _ANN_MATCH_STRONG and gap < _ANN_AMBIGUITY_GAP:
-            continue  # ambiguous — abstain
+            # Dimensions can legitimately change value/text across revisions while
+            # staying the closest positional counterpart in the view. In that case,
+            # prefer the position-dominant pairing over a conservative abstain so
+            # the UI shows a true modified pair instead of a red/green false split.
+            accept_dimension_pair = False
+            if (fa[r].get("annotationType") == "displayDimension"
+                    and fb[c_idx].get("annotationType") == "displayDimension"):
+                chosen_dist = _annotation_position_distance(fa[r], fb[c_idx])
+                alt_row_dists = [
+                    _annotation_position_distance(fa[r], fb[j])
+                    for j in range(n_b)
+                    if j != c_idx and fb[j].get("annotationType") == fa[r].get("annotationType")
+                ]
+                alt_col_dists = [
+                    _annotation_position_distance(fa[i], fb[c_idx])
+                    for i in range(n_a)
+                    if i != r and fa[i].get("annotationType") == fb[c_idx].get("annotationType")
+                ]
+                finite_alt_dists = [d for d in alt_row_dists + alt_col_dists if math.isfinite(d)]
+                best_alt_dist = min(finite_alt_dists) if finite_alt_dists else float("inf")
+                pos_tol = max(view_diagonal * _POSITION_TOL_FRACTION, 0.002)
+                if (math.isfinite(chosen_dist)
+                        and chosen_dist <= pos_tol * 2.0
+                        and (not math.isfinite(best_alt_dist) or chosen_dist <= best_alt_dist * 0.75)):
+                    accept_dimension_pair = True
+
+            if not accept_dimension_pair:
+                continue  # ambiguous — abstain
 
         matches.append((r, c_idx, float(cost)))
         matched_a.add(r)
@@ -1274,6 +1336,125 @@ def _make_removed_annotation(ann: dict, ann_type: str) -> dict:
     }
 
 
+def _annotation_has_loc(ann: dict) -> bool:
+    bounds = ann.get("boundsSheet")
+    if isinstance(bounds, list) and len(bounds) >= 4:
+        return True
+    pos = _extract_pos(ann)
+    return bool(pos)
+
+
+def _rebuild_annotation_rollup(added: List[dict], removed: List[dict], modified: List[dict]) -> Dict[str, Dict[str, int]]:
+    rollup: Dict[str, Dict[str, int]] = {}
+    for a in added:
+        t = a["annotationType"]
+        rollup.setdefault(t, {"added": 0, "removed": 0, "modified": 0})
+        rollup[t]["added"] += 1
+    for r in removed:
+        t = r["annotationType"]
+        rollup.setdefault(t, {"added": 0, "removed": 0, "modified": 0})
+        rollup[t]["removed"] += 1
+    for m in modified:
+        t = m["annotationType"]
+        rollup.setdefault(t, {"added": 0, "removed": 0, "modified": 0})
+        rollup[t]["modified"] += 1
+    return rollup
+
+
+def _suppress_low_confidence_orphan_dimensions(
+    diff: dict,
+    anns_a: List[dict],
+    anns_b: List[dict],
+    view_family: str,
+) -> dict:
+    """Suppress likely extractor-noise orphan dimensions in detail/section views.
+
+    Per-annotation gate: an orphan is suppressed only when its own data is
+    unreliable (no location AND no semantic anchor, or marked semantic-only,
+    or anchored to a ghost view that doesn't exist in the same drawing).
+    Suppressed orphans are kept on diff['suppressedOrphans'] so downstream
+    consumers (verdicts, future UI) can still see what was filtered.
+    """
+    if view_family not in ("detail", "section"):
+        return diff
+
+    # Build set of valid view names per drawing for ghost-feature detection
+    def _valid_view_names(anns: List[dict]) -> set:
+        names = set()
+        for ann in anns:
+            vn = ann.get("viewName")
+            if isinstance(vn, str) and vn.strip():
+                names.add(vn.strip())
+        return names
+
+    valid_views_a = _valid_view_names(anns_a)
+    valid_views_b = _valid_view_names(anns_b)
+
+    def _orphan_is_low_confidence(ann: dict, sibling_view_names: set) -> bool:
+        """Per-annotation confidence check. Only the orphan's own data matters."""
+        if ann.get("annotationType") != "displayDimension":
+            return False
+        # Hard signals from the extractor itself
+        if ann.get("geometrySource") == "semantic_only":
+            return True
+        # Ghost feature anchor: featureName references a view that doesn't exist
+        feat = ann.get("featureName")
+        if isinstance(feat, str) and feat.strip():
+            feat_name = feat.strip()
+            looks_like_view = feat_name.lower().startswith(("drawing view", "section view", "detail view"))
+            if looks_like_view and feat_name not in sibling_view_names:
+                return True
+        # Geometry is fully empty (no location anywhere)
+        if not _annotation_has_loc(ann):
+            return True
+        return False
+
+    suppressed_removed: List[dict] = []
+    suppressed_added: List[dict] = []
+    changed = False
+
+    if diff.get("removed"):
+        kept, dropped = [], []
+        for r in diff["removed"]:
+            # Orphans on the removed side came from anns_a; check their data against valid_views_a
+            if _orphan_is_low_confidence(r, valid_views_a):
+                dropped.append(r)
+            else:
+                kept.append(r)
+        if dropped:
+            diff["removed"] = kept
+            suppressed_removed.extend(dropped)
+            changed = True
+
+    if diff.get("added"):
+        kept, dropped = [], []
+        for a in diff["added"]:
+            # Orphans on the added side came from anns_b; check against valid_views_b
+            if _orphan_is_low_confidence(a, valid_views_b):
+                dropped.append(a)
+            else:
+                kept.append(a)
+        if dropped:
+            diff["added"] = kept
+            suppressed_added.extend(dropped)
+            changed = True
+
+    if changed:
+        # Preserve evidence rather than silently delete
+        existing = diff.get("suppressedOrphans") or {"added": [], "removed": []}
+        existing.setdefault("added", []).extend(suppressed_added)
+        existing.setdefault("removed", []).extend(suppressed_removed)
+        diff["suppressedOrphans"] = existing
+        diff["rollup"] = _rebuild_annotation_rollup(
+            diff.get("added", []),
+            diff.get("removed", []),
+            diff.get("modified", []),
+        )
+        diff["hasChanges"] = bool(diff.get("added") or diff.get("removed") or diff.get("modified"))
+
+    return diff
+
+
 def _compute_annotation_diff(view_identity: dict, eligibility: dict) -> dict:
     """Compute annotation diff for all matched view pairs.
 
@@ -1313,6 +1494,12 @@ def _compute_annotation_diff(view_identity: dict, eligibility: dict) -> dict:
         diag = _outline_diagonal(vb.view_outline)
 
         diff = _diff_annotations_for_view(va.annotations, vb.annotations, diag)
+        diff = _suppress_low_confidence_orphan_dimensions(
+            diff,
+            va.annotations,
+            vb.annotations,
+            _view_family(match.get("viewType", "Standard")),
+        )
         per_view[vk] = diff
 
     return {"perView": per_view}

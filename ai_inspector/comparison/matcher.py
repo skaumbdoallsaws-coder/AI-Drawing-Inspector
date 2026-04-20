@@ -339,9 +339,10 @@ class FeatureMatcher:
         ]
 
         # Try to match each callout to a SW feature
+        spatial_weight = default_config.spatial_match_weight
         for callout_idx, callout in type_callouts:
             best_match = None
-            best_delta = float("inf")
+            best_score = float("inf")
             best_sw_idx = None
 
             for sw_idx, sw_feat in type_sw:
@@ -349,10 +350,14 @@ class FeatureMatcher:
                     continue
 
                 match_result, delta = self._try_match(callout, sw_feat, callout_type)
-                if match_result and abs(delta) < abs(best_delta):
-                    best_match = match_result
-                    best_delta = delta
-                    best_sw_idx = sw_idx
+                if match_result:
+                    # Composite score: numeric delta + spatial penalty
+                    vp = self._view_penalty(callout, sw_feat)
+                    score = abs(delta) + vp * spatial_weight
+                    if score < best_score:
+                        best_match = match_result
+                        best_score = score
+                        best_sw_idx = sw_idx
 
             if best_match:
                 results.append(best_match)
@@ -557,6 +562,28 @@ class FeatureMatcher:
             ), delta
 
         return None, float("inf")
+
+    # ------------------------------------------------------------------
+    # Spatial tiebreaking
+    # ------------------------------------------------------------------
+
+    def _view_penalty(
+        self,
+        callout: Dict[str, Any],
+        sw_feat: SwFeature,
+    ) -> float:
+        """Compute view-match penalty for spatial tiebreaking.
+
+        Returns:
+            0.0 if callout view matches an SW visible view,
+            0.3 if views are known but don't match,
+            0.5 if either side has no view data (neutral).
+        """
+        callout_view = callout.get("view")
+        sw_views = getattr(sw_feat, "visible_in_views", [])
+        if not callout_view or not sw_views:
+            return 0.5
+        return 0.0 if callout_view in sw_views else 0.3
 
     # ------------------------------------------------------------------
     # Field accessors for drawing callout dicts

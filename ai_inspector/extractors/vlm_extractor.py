@@ -31,6 +31,50 @@ EXTRACTION_SYSTEM = (
     "ONLY valid JSON — no markdown fences, no commentary."
 )
 
+SPATIAL_INSTRUCTIONS_SW = '''\
+
+SPATIAL REFERENCE VIEWS:
+The images above include the engineering drawing PLUS standard view screenshots \
+exported directly from the SolidWorks CAD model (Front, Top, Right, and \
+Isometric views, displayed with Hidden Lines Removed).
+
+These are REAL CAD renders showing the exact part geometry. Use them to:
+1. Identify which drawing view corresponds to which standard projection \
+(front, top, right, section, detail) by matching shapes and proportions.
+2. Locate features by comparing CAD screenshot positions with drawing \
+callout positions.
+3. Avoid double-counting: if a feature appears in multiple drawing views, \
+report it ONLY ONCE from the view where it is most prominent.
+
+For EVERY callout, include these spatial fields:
+  "view": "front" | "top" | "right" | "section" | "detail" | "unknown"
+  "featureGroup": "FG_1" | "FG_2" | ...  (group annotations that refer to \
+the SAME physical feature across views)
+'''
+
+SPATIAL_INSTRUCTIONS_MPL = '''\
+
+SPATIAL REFERENCE VIEWS:
+The images above include the engineering drawing PLUS three simplified \
+projection views rendered from the CAD model data (labeled FRONT VIEW, \
+TOP VIEW, RIGHT VIEW). Each view shows numbered circles where holes are \
+located in the 3D CAD model, with the part bounding box as a rectangle.
+
+Use these reference views to:
+1. Identify which drawing view corresponds to which standard projection \
+(front, top, right, section, detail).
+2. Locate features by comparing rendered circle positions with drawing \
+callout positions.
+3. Avoid double-counting: if a feature appears in multiple drawing views, \
+report it ONLY ONCE from the view where it is most prominent (shows as a circle, \
+not as hidden lines).
+
+For EVERY callout, include these spatial fields:
+  "view": "front" | "top" | "right" | "section" | "detail" | "unknown"
+  "featureGroup": "FG_1" | "FG_2" | ...  (group annotations that refer to \
+the SAME physical feature across views)
+'''
+
 EXTRACTION_PROMPT = '''\
 Examine this engineering drawing image carefully.
 
@@ -41,6 +85,8 @@ dimension, hole, thread, fillet, chamfer, or tolerance annotation.
 {sw_context}
 
 {assembly_context}
+
+{spatial_context}
 
 Return a JSON array. Each element must use one of these calloutType values \
 and include the corresponding fields:
@@ -268,6 +314,9 @@ def _parse_response(text: str) -> List[Dict[str, Any]]:
         "Hole", "TappedHole", "Fillet", "Chamfer",
         "Dimension", "Angle",
     }
+    # Spatial fields to preserve (pass-through from GPT-4o)
+    SPATIAL_FIELDS = {"view", "featureGroup"}
+
     valid = []
     for item in parsed:
         if not isinstance(item, dict):
@@ -281,6 +330,9 @@ def _parse_response(text: str) -> List[Dict[str, Any]]:
         # Default quantity
         if "quantity" not in item:
             item["quantity"] = 1
+        # Normalize spatial fields
+        if item.get("view") and isinstance(item["view"], str):
+            item["view"] = item["view"].lower().strip()
         valid.append(item)
 
     return valid
@@ -293,6 +345,8 @@ def extract_callouts(
     config: Optional[Config] = None,
     mating_context: Optional[Dict[str, Any]] = None,
     mate_specs: Optional[Dict[str, Any]] = None,
+    view_images: Optional[Dict[str, Image.Image]] = None,
+    view_source: str = "none",
 ) -> List[Dict[str, Any]]:
     """
     Extract callouts from an engineering drawing using GPT-4o vision.
@@ -305,6 +359,8 @@ def extract_callouts(
         config: Config override (uses default_config if None)
         mating_context: Assembly mating context (parent assembly, siblings)
         mate_specs: Mate specifications (thread specs, mate types)
+        view_images: Optional dict of rendered spatial view images
+                     {"front": PIL.Image, "top": PIL.Image, "right": PIL.Image}
 
     Returns:
         List of callout dicts ready for the normalization/matching pipeline.
@@ -315,35 +371,61 @@ def extract_callouts(
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
 
-    # Encode image
+    # Encode drawing image
     b64_image = _encode_image(image)
 
     # Build prompt
     sw_context = _build_sw_context(sw_features)
     assembly_context = _build_assembly_context(mating_context, mate_specs)
+    if view_images and view_source == "solidworks":
+        spatial_context = SPATIAL_INSTRUCTIONS_SW
+    elif view_images:
+        spatial_context = SPATIAL_INSTRUCTIONS_MPL
+    else:
+        spatial_context = ""
     prompt_text = EXTRACTION_PROMPT.format(
         sw_context=sw_context,
         assembly_context=assembly_context,
+        spatial_context=spatial_context,
     )
+
+    # Build multi-image content array
+    content = [
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/png;base64,{b64_image}",
+                "detail": cfg.vision_extraction_detail,
+            },
+        },
+    ]
+
+    # Add spatial view images
+    # Real SW screenshots: "high" detail (meaningful geometry)
+    # Matplotlib renders: "low" detail (simple line drawings)
+    if view_images:
+        view_detail = "high" if view_source == "solidworks" else "low"
+        view_max_dim = 1024 if view_source == "solidworks" else 512
+        for view_name in ("front", "top", "right", "isometric"):
+            view_img = view_images.get(view_name)
+            if view_img:
+                b64_view = _encode_image(view_img, max_dimension=view_max_dim)
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{b64_view}",
+                        "detail": view_detail,
+                    },
+                })
+
+    content.append({"type": "text", "text": prompt_text})
 
     # Call GPT-4o with vision
     response = client.chat.completions.create(
         model=cfg.vision_extraction_model,
         messages=[
             {"role": "system", "content": EXTRACTION_SYSTEM},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{b64_image}",
-                            "detail": cfg.vision_extraction_detail,
-                        },
-                    },
-                    {"type": "text", "text": prompt_text},
-                ],
-            },
+            {"role": "user", "content": content},
         ],
         max_tokens=cfg.vision_extraction_max_tokens,
         temperature=cfg.vision_extraction_temperature,
@@ -356,8 +438,10 @@ def extract_callouts(
     callouts = _parse_response(raw_text)
 
     # Attach metadata
+    has_spatial = bool(view_images)
     for callout in callouts:
         callout["_source"] = "gpt4o_vision"
         callout["_tokens_used"] = tokens_used
+        callout["_spatial_context"] = has_spatial
 
     return callouts

@@ -1783,9 +1783,9 @@ namespace SolidWorksExtractor.Services
 
                 if (errCode == 0 && stressResult != null)
                 {
-                    double[] stressValues = (double[])stressResult;
+                    double[] stressValues = ConvertToDoubleArray(stressResult);
                     // stressValues[0] = min, stressValues[1] = max
-                    if (stressValues.Length >= 2)
+                    if (stressValues != null && stressValues.Length >= 2)
                     {
                         summary.MaxVonMisesMpa = stressValues[1] / 1e6;  // Pa to MPa
                     }
@@ -1814,8 +1814,8 @@ namespace SolidWorksExtractor.Services
 
                 if (errCode == 0 && dispResult != null)
                 {
-                    double[] dispValues = (double[])dispResult;
-                    if (dispValues.Length >= 2)
+                    double[] dispValues = ConvertToDoubleArray(dispResult);
+                    if (dispValues != null && dispValues.Length >= 2)
                     {
                         summary.MaxDisplacementMm = dispValues[1] * 1000.0;  // meters to mm
                     }
@@ -1843,7 +1843,8 @@ namespace SolidWorksExtractor.Services
 
                 if (errCode == 0 && reactionResult != null)
                 {
-                    double[] reactionValues = (double[])reactionResult;
+                    double[] reactionValues = ConvertToDoubleArray(reactionResult);
+                    if (reactionValues == null) reactionValues = new double[0];
                     // Layout: [Fx, Fy, Fz, Mx, My, Mz, ...]. Read forces if present and
                     // continue to read moments if the next 3 slots are also present.
                     if (reactionValues.Length >= 3)
@@ -1956,38 +1957,10 @@ namespace SolidWorksExtractor.Services
 
                 if (allConnectivity != null && allConnectivity.Length >= 4)
                 {
-                    // Connectivity is a flat array: [nodesPerElem, n0, n1, n2, n3, nodesPerElem, n0, n1, n2, n3, ...]
-                    // or just [n0, n1, n2, n3, n0, n1, n2, n3, ...] with fixed stride
-                    // Detect stride: if first entry is 4, it's a header-based format
-                    int stride = 4; // assume tet4 corner nodes
-                    int offset = 0;
-                    if (allConnectivity.Length > 0 && allConnectivity[0] == 4)
-                    {
-                        stride = 5; // 4 nodes + 1 header per element
-                        offset = 1; // skip the header
-                    }
-                    else if (allConnectivity.Length > 0 && allConnectivity[0] == 10)
-                    {
-                        stride = 11; // 10 nodes + 1 header per element (tet10)
-                        offset = 1;
-                    }
-
-                    int connElemCount = allConnectivity.Length / stride;
-                    for (int e = 0; e < connElemCount; e++)
-                    {
-                        int baseIdx = e * stride + offset;
-                        if (baseIdx + 3 >= allConnectivity.Length) break;
-
-                        int n0 = allConnectivity[baseIdx];
-                        int n1 = allConnectivity[baseIdx + 1];
-                        int n2 = allConnectivity[baseIdx + 2];
-                        int n3 = allConnectivity[baseIdx + 3];
-
-                        AddFace(faceCount, faceNodes, n0, n1, n2);
-                        AddFace(faceCount, faceNodes, n0, n1, n3);
-                        AddFace(faceCount, faceNodes, n0, n2, n3);
-                        AddFace(faceCount, faceNodes, n1, n2, n3);
-                    }
+                    int stride; int offset; int nodesPerElem;
+                    DetectConnectivityLayout(allConnectivity, out nodesPerElem, out stride, out offset);
+                    Console.WriteLine($"    FEA: Connectivity layout: nodesPerElem={nodesPerElem}, stride={stride}, offset={offset}");
+                    AppendFacesFromConnectivity(allConnectivity, nodesPerElem, stride, offset, faceCount, faceNodes);
                 }
                 else
                 {
@@ -2003,28 +1976,10 @@ namespace SolidWorksExtractor.Services
                         return null;
                     }
 
-                    // Same stride detection
-                    int stride = 4;
-                    int offset2 = 0;
-                    if (elemArray[0] == 4) { stride = 5; offset2 = 1; }
-                    else if (elemArray[0] == 10) { stride = 11; offset2 = 1; }
-
-                    int bulkElemCount = elemArray.Length / stride;
-                    for (int e = 0; e < bulkElemCount; e++)
-                    {
-                        int baseIdx = e * stride + offset2;
-                        if (baseIdx + 3 >= elemArray.Length) break;
-
-                        int n0 = elemArray[baseIdx];
-                        int n1 = elemArray[baseIdx + 1];
-                        int n2 = elemArray[baseIdx + 2];
-                        int n3 = elemArray[baseIdx + 3];
-
-                        AddFace(faceCount, faceNodes, n0, n1, n2);
-                        AddFace(faceCount, faceNodes, n0, n1, n3);
-                        AddFace(faceCount, faceNodes, n0, n2, n3);
-                        AddFace(faceCount, faceNodes, n1, n2, n3);
-                    }
+                    int stride; int offset; int nodesPerElem;
+                    DetectConnectivityLayout(elemArray, out nodesPerElem, out stride, out offset);
+                    Console.WriteLine($"    FEA: GetElements layout: nodesPerElem={nodesPerElem}, stride={stride}, offset={offset}");
+                    AppendFacesFromConnectivity(elemArray, nodesPerElem, stride, offset, faceCount, faceNodes);
                 }
 
                 // Also try GetSurfaceNodesAndNormals for identifying surface node set
@@ -2116,111 +2071,53 @@ namespace SolidWorksExtractor.Services
 
                 if (results != null)
                 {
-                    // The API does not have GetNodalStress(); use per-element GetStress()
-                    // to get element stress and average at shared nodes.
-                    // GetStress(NElementNumber, NStepNum, DispPlane, NUnits, out ErrorCode)
-                    // returns array of stress components for that element.
-                    // We build a node stress accumulator from elements that touch surface nodes.
                     try
                     {
-                        // Build reverse map: surfaceNodeId -> list of element indices that contain it
-                        // Since we have surface faces, we can query stress for a representative
-                        // element per face, then spread to its nodes.
-                        // Simpler approach: query stress for elements 1..elemCount, and for each
-                        // element whose corner nodes are in surfaceNodeSet, accumulate at those nodes.
-                        // This is expensive for large meshes, so we limit to surface-adjacent elements.
-                        var nodeStressSum = new Dictionary<int, double>();
-                        var nodeStressCount = new Dictionary<int, int>();
-
-                        // Initialize for surface nodes
-                        foreach (int nid in surfaceNodeSet)
-                        {
-                            nodeStressSum[nid] = 0.0;
-                            nodeStressCount[nid] = 0;
-                        }
-
-                        // Re-read connectivity to find elements touching surface nodes
-                        // We already have bulk connectivity above; re-iterate elements
-                        int connErr2 = 0;
-                        object connData2 = mesh.GetConnectivity(out connErr2);
-                        int[] conn2 = ConvertToIntArray(connData2);
-                        if (conn2 == null)
-                        {
-                            object elemBulk2 = mesh.GetElements();
-                            LogConnectivityArrayDiagnostics("GetElements (stress pass)", elemBulk2, 0, connErr2);
-                            conn2 = ConvertToIntArray(elemBulk2);
-                        }
-
-                        if (conn2 != null && conn2.Length >= 4)
-                        {
-                            int stride2 = 4;
-                            int off2 = 0;
-                            if (conn2[0] == 4) { stride2 = 5; off2 = 1; }
-                            else if (conn2[0] == 10) { stride2 = 11; off2 = 1; }
-
-                            int numElems = conn2.Length / stride2;
-                            for (int e = 0; e < numElems; e++)
-                            {
-                                int bi = e * stride2 + off2;
-                                if (bi + 3 >= conn2.Length) break;
-
-                                int en0 = conn2[bi], en1 = conn2[bi + 1], en2 = conn2[bi + 2], en3 = conn2[bi + 3];
-
-                                // Only process elements that have at least one surface node
-                                bool hasSurf = surfaceNodeSet.Contains(en0) || surfaceNodeSet.Contains(en1)
-                                            || surfaceNodeSet.Contains(en2) || surfaceNodeSet.Contains(en3);
-                                if (!hasSurf) continue;
-
-                                try
-                                {
-                                    int sErrCode = 0;
-                                    // Element numbers are 1-based
-                                    object stressData = results.GetStress(e + 1, 0, null, 0, out sErrCode);
-                                    if (sErrCode == 0 && stressData != null)
-                                    {
-                                        double[] sVals = stressData as double[];
-                                        if (sVals != null && sVals.Length > 0)
-                                        {
-                                            // GetStress returns [SX, SY, SZ, TXY, TXZ, TYZ, P1, P2, P3, VON, INT, ...]
-                                            // VON is at index 9 (matching swsStressComponentVON)
-                                            double vonMises = sVals.Length > 9 ? sVals[9] : sVals[0];
-
-                                            // Distribute to surface nodes of this element
-                                            foreach (int nid in new[] { en0, en1, en2, en3 })
-                                            {
-                                                if (surfaceNodeSet.Contains(nid))
-                                                {
-                                                    nodeStressSum[nid] += vonMises;
-                                                    nodeStressCount[nid]++;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                catch { /* skip element */ }
-                            }
-                        }
-
-                        // Map averaged stress to surface vertices
+                        // Per-node stress is the right granularity for surface visualization.
+                        // GetStressComponentForAllStepsAtNode(VON=9, nodeId, plane, units, out err)
+                        // returns one nodal value per step. For static analysis there is one step.
+                        // This is much cheaper than the per-element averaging path because it
+                        // avoids re-reading connectivity and avoids querying interior elements.
+                        int loaded = 0;
+                        int failed = 0;
                         for (int i = 0; i < surfVertCount; i++)
                         {
                             int nid = surfaceNodes[i];
-                            if (nodeStressCount.ContainsKey(nid) && nodeStressCount[nid] > 0)
+                            try
                             {
-                                stressValues[i] = nodeStressSum[nid] / nodeStressCount[nid];
-                                if (Math.Abs(stressValues[i]) > maxStress)
+                                int sErr = 0;
+                                object nodalStress = results.GetStressComponentForAllStepsAtNode(
+                                    (int)swsStressComponent_e.swsStressComponentVON,
+                                    nid,
+                                    null,
+                                    0, // units: 0 = N/m^2 (Pa)
+                                    out sErr);
+                                if (sErr == 0 && nodalStress != null)
                                 {
-                                    maxStress = Math.Abs(stressValues[i]);
-                                    peakIdx = i;
+                                    double[] perStep = ConvertToDoubleArray(nodalStress);
+                                    if (perStep != null && perStep.Length > 0)
+                                    {
+                                        // Last step is the converged value for static analysis
+                                        double von = perStep[perStep.Length - 1];
+                                        stressValues[i] = von;
+                                        if (Math.Abs(von) > maxStress)
+                                        {
+                                            maxStress = Math.Abs(von);
+                                            peakIdx = i;
+                                        }
+                                        loaded++;
+                                    }
+                                    else { failed++; }
                                 }
+                                else { failed++; }
                             }
+                            catch { failed++; }
                         }
-
-                        Console.WriteLine($"    FEA: Per-element stress mapped to {surfVertCount:N0} surface nodes");
+                        Console.WriteLine($"    FEA: Nodal stress loaded for {loaded:N0}/{surfVertCount:N0} surface nodes (failed={failed})");
                     }
                     catch (Exception ex)
                     {
-                        Warn(summary, "Error reading element stress: " + ex.Message);
+                        Warn(summary, "Error reading nodal stress: " + ex.Message);
                     }
                 }
 
@@ -2263,7 +2160,7 @@ namespace SolidWorksExtractor.Services
 
                         if (dispErrCode == 0 && dispBulk != null)
                         {
-                            double[] allDisp = dispBulk as double[];
+                            double[] allDisp = ConvertToDoubleArray(dispBulk);
                             if (allDisp != null)
                             {
                                 // allDisp is indexed by node: allDisp[(nodeId-1)*3 + component]
@@ -2688,6 +2585,64 @@ namespace SolidWorksExtractor.Services
             {
                 faceCount[key] = 1;
                 faceNodes[key] = new int[] { n0, n1, n2 }; // preserve original winding
+            }
+        }
+
+        /// <summary>
+        /// Detect connectivity layout from a leading header value.
+        /// Observed shapes from COSMOSWorks GetConnectivity / GetElements:
+        ///   header=3:  surface tri shells       -> stride=4, offset=1, 3 nodes/elem
+        ///   header=4:  tet4 (corners only)      -> stride=5, offset=1
+        ///   header=10: tet10 (corners + mid)    -> stride=11, offset=1
+        ///   else:      bare tet4 (no header)    -> stride=4, offset=0, assume tet4
+        /// </summary>
+        private static void DetectConnectivityLayout(int[] connectivity, out int nodesPerElem, out int stride, out int offset)
+        {
+            int header = connectivity != null && connectivity.Length > 0 ? connectivity[0] : 0;
+            switch (header)
+            {
+                case 3:  nodesPerElem = 3;  stride = 4;  offset = 1; break;
+                case 4:  nodesPerElem = 4;  stride = 5;  offset = 1; break;
+                case 10: nodesPerElem = 10; stride = 11; offset = 1; break;
+                default: nodesPerElem = 4;  stride = 4;  offset = 0; break;
+            }
+        }
+
+        /// <summary>
+        /// Append face entries from a connectivity array. Surface tris (3 nodes/elem) are
+        /// added directly as a single face per entry; tet4 / tet10 each contribute four
+        /// candidate triangle faces (the tet's four faces) so that AddFace's dedup picks
+        /// out the boundary by count==1.
+        /// </summary>
+        private void AppendFacesFromConnectivity(int[] connectivity, int nodesPerElem, int stride, int offset,
+            Dictionary<long, int> faceCount, Dictionary<long, int[]> faceNodes)
+        {
+            if (connectivity == null) return;
+            int totalEntries = connectivity.Length / stride;
+            for (int e = 0; e < totalEntries; e++)
+            {
+                int baseIdx = e * stride + offset;
+                if (baseIdx + (nodesPerElem - 1) >= connectivity.Length) break;
+
+                if (nodesPerElem == 3)
+                {
+                    int n0 = connectivity[baseIdx];
+                    int n1 = connectivity[baseIdx + 1];
+                    int n2 = connectivity[baseIdx + 2];
+                    AddFace(faceCount, faceNodes, n0, n1, n2);
+                }
+                else // tet4 / tet10 — corner nodes are first 4
+                {
+                    int n0 = connectivity[baseIdx];
+                    int n1 = connectivity[baseIdx + 1];
+                    int n2 = connectivity[baseIdx + 2];
+                    int n3 = connectivity[baseIdx + 3];
+
+                    AddFace(faceCount, faceNodes, n0, n1, n2);
+                    AddFace(faceCount, faceNodes, n0, n1, n3);
+                    AddFace(faceCount, faceNodes, n0, n2, n3);
+                    AddFace(faceCount, faceNodes, n1, n2, n3);
+                }
             }
         }
 
@@ -3458,6 +3413,41 @@ namespace SolidWorksExtractor.Services
                     .Replace("\n", "\\n")
                     .Replace("\r", "\\r")
                     .Replace("\t", "\\t");
+        }
+
+        /// <summary>
+        /// COSMOSWorks bulk arrays sometimes marshal as object[] of boxed doubles
+        /// instead of double[]. Older code assumed double[] and broke on object[];
+        /// this normalizes to double[] across all observed marshalling shapes.
+        /// </summary>
+        private double[] ConvertToDoubleArray(object obj)
+        {
+            if (obj == null) return null;
+            if (obj is double[] dArr) return dArr;
+            if (obj is float[] fArr)
+            {
+                double[] r = new double[fArr.Length];
+                for (int i = 0; i < fArr.Length; i++) r[i] = fArr[i];
+                return r;
+            }
+            if (obj is object[] oArr)
+            {
+                double[] r = new double[oArr.Length];
+                for (int i = 0; i < oArr.Length; i++)
+                    r[i] = oArr[i] == null ? 0.0 : Convert.ToDouble(oArr[i], CultureInfo.InvariantCulture);
+                return r;
+            }
+            if (obj is Array arr)
+            {
+                double[] r = new double[arr.Length];
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    object v = arr.GetValue(i);
+                    r[i] = v == null ? 0.0 : Convert.ToDouble(v, CultureInfo.InvariantCulture);
+                }
+                return r;
+            }
+            return null;
         }
 
         private int[] ConvertToIntArray(object obj)

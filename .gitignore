@@ -53,3 +53,12 @@ sw_json_library/
 # Dataset configs (allow callouts.yaml placeholder)
 datasets/*.yaml
 !datasets/callouts.yaml
+
+# FEA worker artifacts (Stage 4 hand-off package)
+# The sweeping *.json ignore above would otherwise silently skip the worker's
+# results.json, manifest.json, and part-data JSON -- without these allow rules
+# only the .glb would survive, breaking the audit trail. The temp staging
+# directory used by scripts/run_fea_extract.ps1 is the one path that must NOT
+# be committed: it is transient and only contains residue from interrupted runs.
+!incoming_fea/**/*.json
+incoming_fea/.staging/

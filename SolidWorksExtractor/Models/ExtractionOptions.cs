@@ -53,6 +53,18 @@ namespace SolidWorksExtractor.Models
         /// <summary>Export FEA simulation results (stress-colored GLB + results JSON)?</summary>
         public bool ExportFea { get; set; } = false;
 
+        /// <summary>
+        /// Force FEA extraction to use the study with this exact name (case-insensitive).
+        /// Takes precedence over FeaStudyIndex. Null/empty means no name filter.
+        /// </summary>
+        public string FeaStudyName { get; set; } = null;
+
+        /// <summary>
+        /// Force FEA extraction to use the study at this 0-based index in the study manager.
+        /// Used only when FeaStudyName is null/empty. Negative value (-1) means unset.
+        /// </summary>
+        public int FeaStudyIndex { get; set; } = -1;
+
         /// <summary>Cache key for this extraction (file path + config)</summary>
         public string CacheKey { get; set; }
 

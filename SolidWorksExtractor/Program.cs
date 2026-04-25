@@ -35,6 +35,10 @@ namespace SolidWorksExtractor
     ///   --full              Full mode: complete extraction (default)
     ///   --part-glb          Export per-feature colored GLB for a single part
     ///   --fea               Export FEA simulation results (stress GLB + results JSON)
+    ///   --fea-list-studies  List all Simulation studies in the document and exit
+    ///   --fea-preflight     Print FEA environment + study list (no extraction) and exit
+    ///   --fea-study-name <name>   Force FEA extraction to use this study (case-insensitive)
+    ///   --fea-study-index <n>     Force FEA extraction to use the study at 0-based index n
     /// </summary>
     class Program
     {
@@ -60,6 +64,8 @@ namespace SolidWorksExtractor
             var drawingTargetViews = new List<string>();
             bool useActive = false;
             bool startIfNotRunning = false;
+            bool feaListStudies = false;
+            bool feaPreflight = false;
             var options = ExtractionOptions.Full();
 
             for (int i = 0; i < args.Length; i++)
@@ -168,10 +174,68 @@ namespace SolidWorksExtractor
                 }
             }
 
+                else if (arg == "--fea-list-studies")
+                {
+                    feaListStudies = true;
+                }
+                else if (arg == "--fea-preflight")
+                {
+                    feaPreflight = true;
+                }
+                else if (arg == "--fea-study-name")
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.WriteLine("ERROR: --fea-study-name requires a value (the study name).");
+                        return 1;
+                    }
+                    string nameVal = args[++i];
+                    if (string.IsNullOrWhiteSpace(nameVal))
+                    {
+                        Console.WriteLine("ERROR: --fea-study-name value cannot be empty.");
+                        return 1;
+                    }
+                    options.FeaStudyName = nameVal;
+                    options.ExportFea = true; // explicit selection implies extraction is wanted
+                }
+                else if (arg == "--fea-study-index")
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.WriteLine("ERROR: --fea-study-index requires an integer value.");
+                        return 1;
+                    }
+                    string raw = args[++i];
+                    int idx;
+                    if (!int.TryParse(raw, out idx))
+                    {
+                        Console.WriteLine($"ERROR: --fea-study-index requires an integer; got '{raw}'.");
+                        return 1;
+                    }
+                    if (idx < 0)
+                    {
+                        Console.WriteLine($"ERROR: --fea-study-index must be >= 0; got {idx}.");
+                        return 1;
+                    }
+                    options.FeaStudyIndex = idx;
+                    options.ExportFea = true; // explicit selection implies extraction is wanted
+                }
             // Handle batch mode
             if (!string.IsNullOrEmpty(batchPartsFolder))
             {
                 return RunBatchPartsMode(batchPartsFolder, batchOutputFolder, options, startIfNotRunning);
+            }
+
+            // Reject incompatible flag combinations BEFORE any dispatch.
+            // Preflight and list-studies are inspect-only single-document modes; they do not
+            // make sense when scanning an entire folder, so the combination is a hard error
+            // rather than a silent ignore. (Per-document preflight inside batch is out of scope
+            // for the FEA worker flow — see FEA_WORKER_README.md.)
+            if ((feaPreflight || feaListStudies) && !string.IsNullOrEmpty(batchPartsFolder))
+            {
+                Console.WriteLine("ERROR: --fea-preflight / --fea-list-studies cannot be combined with --batch-parts.");
+                Console.WriteLine("       Run them on a single document (--active or a path to one .sldprt).");
+                return 1;
             }
 
             // If no input file and not using active, default to active
@@ -243,6 +307,40 @@ namespace SolidWorksExtractor
                 try
                 {
                     int docType = doc.GetType();
+                // FEA preflight / list-studies short-circuit. These are inspect-only
+                // modes — no extraction, no JSON written, no batch mode side-effects.
+                if (feaPreflight || feaListStudies)
+                {
+                    var simInspect = new SimulationExtractor();
+                    if (feaPreflight)
+                    {
+                        bool addinOk = simInspect.RunPreflight(connection.Application, doc);
+                        return addinOk ? 0 : 3;  // 3 = preflight ran but Simulation add-in unavailable
+                    }
+                    else // feaListStudies
+                    {
+                        var studies = simInspect.ListStudies(connection.Application, doc);
+                        Console.WriteLine();
+                        Console.WriteLine($"Studies ({studies.Count}):");
+                        if (studies.Count == 0)
+                        {
+                            Console.WriteLine("  (no studies — Simulation add-in not loaded, or document has none)");
+                        }
+                        else
+                        {
+                            foreach (var s in studies)
+                            {
+                                string name = s.Name ?? "(unnamed)";
+                                string type = s.AnalysisTypeLabel ?? "unknown";
+                                Console.WriteLine($"  [{s.Index}] '{name}'  type={type}  results={(s.HasResults ? \"yes\" : \"no\")}");
+                                if (!string.IsNullOrEmpty(s.Note))
+                                    Console.WriteLine($"        Note: {s.Note}");
+                            }
+                        }
+                        return 0;
+                    }
+                }
+
                     var serializer = new JsonSerializer(indented: true);
 
                     if (docType == (int)swDocumentTypes_e.swDocPART)
@@ -304,7 +402,9 @@ namespace SolidWorksExtractor
                             var simExtractor = new SimulationExtractor();
                             string feaOutputDir = Path.GetDirectoryName(outputFile);
                             string feaPartNumber = GetDeterministicPartNumber(partData, Path.GetFileName(doc.GetPathName()));
-                            string feaGlbPath = simExtractor.ExtractSimulation(connection.Application, doc, feaOutputDir, feaPartNumber);
+                            string feaGlbPath = simExtractor.ExtractSimulation(
+                                connection.Application, doc, feaOutputDir, feaPartNumber,
+                                options.FeaStudyName, options.FeaStudyIndex);
                             if (feaGlbPath != null)
                             {
                                 Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
@@ -1074,7 +1174,9 @@ namespace SolidWorksExtractor
                             {
                                 Console.WriteLine("  - Extracting FEA simulation results...");
                                 var simExtractor = new SimulationExtractor();
-                                string feaGlbPath = simExtractor.ExtractSimulation(connection.Application, doc, outputFolder, partNumber);
+                                string feaGlbPath = simExtractor.ExtractSimulation(
+                                    connection.Application, doc, outputFolder, partNumber,
+                                    options.FeaStudyName, options.FeaStudyIndex);
                                 if (feaGlbPath != null)
                                     Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
                                 else
@@ -1289,6 +1391,10 @@ namespace SolidWorksExtractor
             Console.WriteLine("  Failures are logged but don't stop the batch");
             Console.WriteLine("  Output JSON files are named by part number (with fallback to filename)");
             Console.WriteLine("  A _batch_index.json file is created with metadata for all extracted parts");
+            Console.WriteLine("  --fea-list-studies     List Simulation studies in the document and exit");
+            Console.WriteLine("  --fea-preflight        Print FEA environment + study list and exit");
+            Console.WriteLine("  --fea-study-name <s>   Force FEA extraction to use the named study (case-insensitive)");
+            Console.WriteLine("  --fea-study-index <n>  Force FEA extraction to use the study at 0-based index n");
             Console.WriteLine();
             Console.WriteLine("  FAST - Extracts features and properties only. Skips:");
             Console.WriteLine("         - Geometry ground truth analysis (cylinder/slot detection)");
@@ -1313,3 +1419,7 @@ namespace SolidWorksExtractor
         }
     }
 }
+            Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea-preflight                 # show env + studies");
+            Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea-list-studies              # studies only");
+            Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea --fea-study-name \"Static 1\"");
+            Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea --fea-study-index 2");

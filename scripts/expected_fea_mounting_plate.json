@@ -1,0 +1,28 @@
+{
+  "_comment": "Expected-values reference for the Mounting Plate / Static 1 worker run, derived directly from 'Mounting Plate-Static 1-1.docx' (the SolidWorks Simulation report saved on 2026-04-24). Used by scripts/validate_fea_run.ps1 with -ExpectedReport. Each numeric field has a tolerance applied; tighten them once a real worker run lands so the validator catches regressions but does not flag normal solver float noise.",
+
+  "study_name": "Static 1",
+  "study_type": "static",
+  "configuration_name": "Default",
+
+  "material_name": "Alloy Steel",
+  "yield_strength_mpa": 620.422,
+  "tensile_strength_mpa": 723.826,
+  "elastic_modulus_mpa": 210000,
+  "poissons_ratio": 0.28,
+  "mass_density_kg_per_m3": 7700,
+
+  "mesh_node_count": 18410,
+  "mesh_element_count": 11466,
+
+  "max_von_mises_mpa": 799.979,
+  "max_displacement_mm": 0.124,
+  "reaction_fx_n": -150000,
+
+  "tolerances": {
+    "stress_pct": 1.0,
+    "displacement_pct": 1.0,
+    "modulus_pct": 1.0,
+    "node_count_abs": 100
+  }
+}

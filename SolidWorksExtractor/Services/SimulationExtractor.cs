@@ -631,6 +631,7 @@ namespace SolidWorksExtractor.Services
                                 return null;
                             }
                             Console.WriteLine($"    FEA: Selected study '{name}' by name (index {i})");
+                            TryActivateStudy(studyMgr, i);
                             return candidate;
                         }
                     }
@@ -672,6 +673,7 @@ namespace SolidWorksExtractor.Services
                         return null;
                     }
                     Console.WriteLine($"    FEA: Selected study '{name ?? "(unnamed)"}' by index {studyIndex}");
+                    TryActivateStudy(studyMgr, studyIndex);
                     return candidate;
                 }
                 catch (Exception ex)
@@ -685,6 +687,35 @@ namespace SolidWorksExtractor.Services
             // 3) Legacy implicit fallback — emit a clear notice so users know they hit the default
             Console.WriteLine("    FEA: No --fea-study-name or --fea-study-index supplied; using IMPLICIT selection (first completed static study).");
             return FindCompletedStaticStudy(studyMgr, studyCount, modelDoc);
+        }
+
+        /// <summary>
+        /// Make the picked study the active study in StudyManager. The COSMOSWorks
+        /// mesh database (GetConnectivity / GetElements) only loads for the active study;
+        /// without this, those calls return DBNull with errCode=swsMeshQuery_DataBaseNotAvailable.
+        /// Best-effort — we log on failure but don't abort, since some study types or older
+        /// API versions may not honor the setter.
+        /// </summary>
+        private void TryActivateStudy(dynamic studyMgr, int studyIndex)
+        {
+            try
+            {
+                int before = -1;
+                try { before = (int)studyMgr.ActiveStudy; } catch { }
+                if (before == studyIndex)
+                {
+                    Console.WriteLine($"    FEA: Study {studyIndex} is already the active study");
+                    return;
+                }
+                studyMgr.ActiveStudy = studyIndex;
+                int after = -1;
+                try { after = (int)studyMgr.ActiveStudy; } catch { }
+                Console.WriteLine($"    FEA: Activated study index {studyIndex} (was {before}, now {after})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    FEA Warning: Could not set ActiveStudy={studyIndex}: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -836,6 +867,7 @@ namespace SolidWorksExtractor.Services
                     }
 
                     Console.WriteLine($"    FEA: Found completed static study '{candidate.Name}' at index {i}");
+                    TryActivateStudy(studyMgr, i);
                     return candidate;
                 }
                 catch (Exception ex)

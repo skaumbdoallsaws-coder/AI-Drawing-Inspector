@@ -2208,9 +2208,14 @@ namespace SolidWorksExtractor.Services
                         // Final fallback: query per-element shell stress over the surface
                         // tri shells and distribute to the triangle's 3 vertices. Element
                         // numbers are 1-based and align with connectivity entry index.
+                        // This path is bounded by a wall-clock budget — on this build
+                        // each GetStress takes ~0.1-1s of COM round-trip, so 3000+ shells
+                        // can take 30+ minutes if every call is slow. We cap at 60s so a
+                        // bad run still produces a complete artifact set (with uniform
+                        // colors) instead of hanging the worker indefinitely.
                         if (loaded == 0 && allConnectivity != null && surfaceFaces.Count > 0)
                         {
-                            Console.WriteLine("    FEA: Per-node stress empty — falling back to per-element shell stress.");
+                            Console.WriteLine("    FEA: Per-node stress empty — falling back to per-element shell stress (60s budget).");
                             int stride; int offset; int npe;
                             DetectConnectivityLayout(allConnectivity, out npe, out stride, out offset);
                             int triCount = allConnectivity.Length / stride;
@@ -2218,9 +2223,18 @@ namespace SolidWorksExtractor.Services
                             var nodeStressSum = new Dictionary<int, double>();
                             var nodeStressCount = new Dictionary<int, int>();
                             int elStressOk = 0, elStressFail = 0;
+                            int processed = 0;
+                            var sw = System.Diagnostics.Stopwatch.StartNew();
+                            const long budgetMs = 60_000;
 
                             for (int e = 0; e < triCount; e++)
                             {
+                                if (sw.ElapsedMilliseconds > budgetMs)
+                                {
+                                    Console.WriteLine($"    FEA: Per-element budget exceeded at element {e}/{triCount}; stopping. Vertex colors will reflect the partial coverage.");
+                                    break;
+                                }
+
                                 int bi = e * stride + offset;
                                 if (bi + 2 >= allConnectivity.Length) break;
 
@@ -2246,12 +2260,14 @@ namespace SolidWorksExtractor.Services
                                                 nodeStressCount[nid]++;
                                             }
                                             elStressOk++;
+                                            processed++;
                                             continue;
                                         }
                                     }
                                     elStressFail++;
+                                    processed++;
                                 }
-                                catch { elStressFail++; }
+                                catch { elStressFail++; processed++; }
                             }
                             for (int i = 0; i < surfVertCount; i++)
                             {
@@ -2264,7 +2280,8 @@ namespace SolidWorksExtractor.Services
                                     if (Math.Abs(v) > maxStress) { maxStress = Math.Abs(v); peakIdx = i; }
                                 }
                             }
-                            Console.WriteLine($"    FEA: Per-element shell stress: ok={elStressOk}, fail={elStressFail}, surface nodes covered={nodeStressCount.Count:N0}/{surfVertCount:N0}");
+                            sw.Stop();
+                            Console.WriteLine($"    FEA: Per-element shell stress: processed={processed}/{triCount}, ok={elStressOk}, fail={elStressFail}, surface nodes covered={nodeStressCount.Count:N0}/{surfVertCount:N0}, elapsed={sw.ElapsedMilliseconds}ms");
                         }
                     }
                     catch (Exception ex)
@@ -2273,12 +2290,19 @@ namespace SolidWorksExtractor.Services
                     }
                 }
 
-                // Update max stress location
+                // Update max stress location based on per-vertex stress.
+                // NB: do NOT overwrite summary.MaxVonMisesMpa if it's already populated
+                // from GetMinMaxStress (slot [3]) — that value covers the entire FE
+                // mesh and is more authoritative than partial per-vertex coverage from
+                // a budget-capped per-element fallback. Only promote if the per-vertex
+                // peak exceeds the current value.
                 if (maxStress > 0 && peakIdx < surfVertCount)
                 {
                     int nid = surfaceNodes[peakIdx];
                     summary.MaxStressLocation = new double[] { nodeX[nid], nodeY[nid], nodeZ[nid] };
-                    summary.MaxVonMisesMpa = maxStress / 1e6;
+                    double maxMpa = maxStress / 1e6;
+                    if (maxMpa > summary.MaxVonMisesMpa)
+                        summary.MaxVonMisesMpa = maxMpa;
                     summary.MaxStressNode = nid;  // 1-based SolidWorks node ID
                 }
 

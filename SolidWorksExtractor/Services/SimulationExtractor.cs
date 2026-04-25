@@ -755,35 +755,44 @@ namespace SolidWorksExtractor.Services
                 }
                 Console.WriteLine($"    FEA: EnsureResultsLoaded: existing plot count = {plotCount}");
 
+                // 1) Iterate every existing plot and attempt activation. ActivatePlot can
+                //    return false for various reasons (plot type not displayable, missing
+                //    sub-data file, etc.), so we don't bail on first failure — we want at
+                //    least one plot to take, since that's what triggers the result-DB load.
+                bool anyActivated = false;
                 if (plotCount > 0)
                 {
-                    string firstPlotName = null;
-                    try
-                    {
-                        object plotNamesObj = results.GetPlotNames();
-                        if (plotNamesObj is Array pa && pa.Length > 0)
-                            firstPlotName = pa.GetValue(0)?.ToString();
-                    }
+                    object plotNamesObj = null;
+                    try { plotNamesObj = results.GetPlotNames(); }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"    FEA: EnsureResultsLoaded: GetPlotNames failed: {ex.Message}");
                     }
 
-                    if (!string.IsNullOrWhiteSpace(firstPlotName))
+                    if (plotNamesObj is Array pa)
                     {
-                        bool activated = false;
-                        try { activated = results.ActivatePlot(firstPlotName); }
-                        catch (Exception ex)
+                        for (int i = 0; i < pa.Length; i++)
                         {
-                            Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot('{firstPlotName}') threw: {ex.Message}");
+                            string pn = pa.GetValue(i)?.ToString();
+                            if (string.IsNullOrWhiteSpace(pn)) continue;
+                            bool activated = false;
+                            try { activated = results.ActivatePlot(pn); }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot('{pn}') threw: {ex.Message}");
+                                continue;
+                            }
+                            Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot('{pn}') = {activated}");
+                            if (activated) { anyActivated = true; break; }
                         }
-                        Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot('{firstPlotName}') = {activated}");
-                        return;
                     }
                 }
 
-                // No existing plot — create a transient von Mises stress plot to force load.
-                // swsResultStress=2, swsStressComponentVON=9, NUnits=0 (default), BValueByElem=false.
+                // 2) Force-create a von Mises stress plot regardless. Even when one of the
+                //    existing plots activated, CreatePlot is the most reliable way to pull
+                //    result arrays into memory. We do NOT delete the transient afterwards —
+                //    deletion has been observed to unload the data we just loaded.
+                //    swsResultStress=2, swsStressComponentVON=9, NUnits=0 (default), BValueByElem=false.
                 int createErr = 0;
                 CWPlot transient = null;
                 try
@@ -795,26 +804,23 @@ namespace SolidWorksExtractor.Services
                     Console.WriteLine($"    FEA: EnsureResultsLoaded: CreatePlot threw: {ex.Message}");
                     return;
                 }
-                Console.WriteLine($"    FEA: EnsureResultsLoaded: CreatePlot(stress/VON) errCode={createErr}, plot={(transient != null ? "ok" : "null")}");
+                Console.WriteLine($"    FEA: EnsureResultsLoaded: CreatePlot(stress/VON) errCode={createErr}, plot={(transient != null ? "ok" : "null")}, anyActivated={anyActivated}");
 
-                // Best-effort: delete the transient plot so the study is left unchanged.
                 if (transient != null)
                 {
                     string transientName = null;
                     try { transientName = ((dynamic)transient).Name as string; } catch { }
-                    SafeReleaseCom(transient);
                     if (!string.IsNullOrWhiteSpace(transientName))
                     {
-                        try
-                        {
-                            bool deleted = results.DeletePlot(transientName);
-                            Console.WriteLine($"    FEA: EnsureResultsLoaded: DeletePlot('{transientName}') = {deleted}");
-                        }
+                        bool activated = false;
+                        try { activated = results.ActivatePlot(transientName); }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"    FEA: EnsureResultsLoaded: DeletePlot('{transientName}') threw: {ex.Message}");
+                            Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot transient '{transientName}' threw: {ex.Message}");
                         }
+                        Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot('{transientName}') = {activated} (transient)");
                     }
+                    SafeReleaseCom(transient);
                 }
             }
             finally

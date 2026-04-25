@@ -13,6 +13,7 @@
 #        <PartNumber>_fea_<slug>.glb
 #        <PartNumber>_fea_<slug>_results.json
 #        <PartNumber>_fea_<slug>_manifest.json
+#      No extra files are allowed in canonical staging.
 #   2. Required manifest fields are present and non-trivial (manifest_version,
 #      timestamp_utc, solidworks_version, source.{document_path, part_number},
 #      study.{name, slug, type, selection_mode}, outputs[], summary, warnings).
@@ -26,6 +27,9 @@
 #   6. Provenance hygiene:
 #        - selection_mode != "implicit"  (warn — should normally be explicit)
 #        - extractor_git_commit not null (warn  -- worker had git on PATH)
+#   7. Visualization honesty:
+#        - manifest.visualization.approximate must be false
+#        - manifest.visualization.mode must be solver_fe_mesh
 #
 # What it does NOT check:
 #   - GLB binary integrity (out of scope; the visualisation layer will surface
@@ -139,6 +143,15 @@ foreach ($kvp in $expectedFiles.GetEnumerator()) {
         Write-Fail ("Missing required file ({0}): {1}" -f $kvp.Key, $kvp.Value)
     }
 }
+$allFiles = @(Get-ChildItem -Path $Directory -File -ErrorAction SilentlyContinue)
+$expectedLeafNames = @($expectedFiles.Values | ForEach-Object { Split-Path -Leaf $_ })
+$extraFiles = @($allFiles | Where-Object { $expectedLeafNames -notcontains $_.Name })
+if ($allFiles.Count -eq 4 -and $extraFiles.Count -eq 0) {
+    Write-Pass "Directory contains exactly the four canonical files"
+} else {
+    Write-Fail ("Directory must contain exactly the four canonical files; found {0} file(s), {1} unexpected" -f $allFiles.Count, $extraFiles.Count)
+    $extraFiles | ForEach-Object { Write-Fail ("Unexpected file in canonical staging: {0}" -f $_.Name) }
+}
 
 # ---------------------------------------------------------------------------
 # 2. Manifest schema + required fields
@@ -206,6 +219,24 @@ if ($null -ne $manifest.outputs -and $manifest.outputs.Count -ge 3) {
     Write-Pass ("manifest.outputs has {0} entries" -f $manifest.outputs.Count)
 } else {
     Write-Fail "manifest.outputs missing or has fewer than 3 entries"
+}
+if ((Test-FieldPropertyPresent $manifest "visualization.approximate")) {
+    if ($manifest.visualization.approximate -eq $true) {
+        Write-Fail "manifest.visualization.approximate is true -- approximate visualization is not mergeable as a normal worker FEA GLB"
+    } else {
+        Write-Pass "manifest.visualization.approximate is false"
+    }
+} else {
+    Write-Fail "manifest.visualization.approximate missing"
+}
+if ((Test-FieldNonEmpty $manifest "visualization.mode")) {
+    if ($manifest.visualization.mode -eq "solver_fe_mesh") {
+        Write-Pass "manifest.visualization.mode = solver_fe_mesh"
+    } else {
+        Write-Fail ("manifest.visualization.mode must be solver_fe_mesh, got '{0}'" -f $manifest.visualization.mode)
+    }
+} else {
+    Write-Fail "manifest.visualization.mode missing"
 }
 if ($null -ne $manifest.warnings) {
     Write-Pass ("manifest.warnings present ({0} entries)" -f $manifest.warnings.Count)

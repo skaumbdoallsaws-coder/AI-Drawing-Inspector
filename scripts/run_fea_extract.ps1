@@ -13,6 +13,8 @@
 #     selected, and prevents a -StudyIndex / -AllowImplicit re-run from quietly
 #     accumulating mixed artifacts in a placeholder directory.
 #   * refuse to overwrite an existing canonical directory unless -Force is set
+#   * refuse to move artifacts unless temp staging contains exactly the four
+#     canonical files; view PNGs and other extras are contract violations
 #
 # Inspect-only modes:
 #   -Preflight     prints SolidWorks version + add-in + study list, then exits
@@ -59,14 +61,6 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $extractor = Join-Path $repoRoot "SolidWorksExtractor\bin\Debug\SolidWorksExtractor.exe"
 
-if (-not (Test-Path $extractor)) {
-    Write-Host "ERROR: Extractor not built." -ForegroundColor Red
-    Write-Host "       Expected at: $extractor"
-    Write-Host "       Build first per FEA_WORKER_README.md:"
-    Write-Host '         msbuild SolidWorksExtractor\SolidWorksExtractor.csproj /p:Configuration=Debug'
-    exit 1
-}
-
 # --- mode validation: exactly one mode at a time ---
 $inspectModeCount = 0
 if ($Preflight) { $inspectModeCount++ }
@@ -81,12 +75,117 @@ if (-not [string]::IsNullOrWhiteSpace($StudyName)) { $selectorCount++ }
 if ($null -ne $StudyIndex) { $selectorCount++ }
 if ($AllowImplicit) { $selectorCount++ }
 
+function Assert-ExtractorBuilt {
+    if (-not (Test-Path $extractor)) {
+        Write-Host "ERROR: Extractor not built." -ForegroundColor Red
+        Write-Host "       Expected at: $extractor"
+        Write-Host "       Build first per FEA_WORKER_README.md:"
+        Write-Host '         msbuild SolidWorksExtractor\SolidWorksExtractor.csproj /p:Configuration=Debug'
+        exit 1
+    }
+}
+
+function Get-GitHeadCommit {
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $head = @(& git -C $repoRoot rev-parse HEAD 2>&1)
+        $gitExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+
+    $commit = @($head | Where-Object { $_ -match '^[0-9a-fA-F]{40}$' } | Select-Object -First 1)
+    if ($gitExit -ne 0 -or $commit.Count -eq 0 -or [string]::IsNullOrWhiteSpace($commit[0])) {
+        Write-Host "ERROR: Could not resolve git HEAD for provenance." -ForegroundColor Red
+        Write-Host "       Ensure Git is installed and this runner is executed inside the repo."
+        if ($head.Count -gt 0) {
+            $head | ForEach-Object { Write-Host "       $_" }
+        }
+        exit 1
+    }
+    return $commit[0].Trim()
+}
+
+function Test-IsTransientStagingPath {
+    param([string]$Path)
+    $normalized = ($Path -replace '\\', '/').Trim('"')
+    return ($normalized -eq "incoming_fea/.staging" -or $normalized.StartsWith("incoming_fea/.staging/"))
+}
+
+function Test-IsRunSourcePath {
+    param([string]$Path)
+    $normalized = ($Path -replace '\\', '/').Trim('"')
+    if (Test-IsTransientStagingPath $normalized) { return $false }
+    if ($normalized -eq "scripts/run_fea_extract.ps1") { return $true }
+    if (-not $normalized.StartsWith("SolidWorksExtractor/")) { return $false }
+
+    $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
+    $leaf = [System.IO.Path]::GetFileName($normalized)
+    $sourceExtensions = @(".cs", ".csproj", ".sln", ".config", ".resx", ".settings", ".props", ".targets")
+    return (($sourceExtensions -contains $extension) -or $leaf -eq "packages.config")
+}
+
+function Assert-CleanRunSource {
+    $head = Get-GitHeadCommit
+    Write-Host "Git HEAD:  $head" -ForegroundColor Cyan
+
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $statusLines = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=all 2>&1)
+        $gitExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+
+    if ($gitExit -ne 0) {
+        Write-Host "ERROR: Could not inspect git worktree cleanliness." -ForegroundColor Red
+        $statusLines | ForEach-Object { Write-Host "       $_" }
+        exit 1
+    }
+
+    $dirtyRunSource = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $statusLines) {
+        $lineText = [string]$line
+        if ([string]::IsNullOrWhiteSpace($lineText)) { continue }
+
+        $pathText = if ($lineText.Length -gt 3) { $lineText.Substring(3) } else { $lineText }
+        $paths = @($pathText)
+        if ($pathText.Contains(" -> ")) {
+            $paths = @($pathText -split " -> ")
+        }
+
+        foreach ($path in $paths) {
+            if (Test-IsRunSourcePath $path) {
+                $dirtyRunSource.Add($lineText)
+                break
+            }
+        }
+    }
+
+    if ($dirtyRunSource.Count -gt 0) {
+        Write-Host ""
+        Write-Host "ERROR: Worker extraction source is not clean." -ForegroundColor Red
+        Write-Host "       Commit source changes first, then rerun extraction so the manifest"
+        Write-Host "       extractor_git_commit identifies the exact code used."
+        Write-Host ""
+        Write-Host "Dirty source entries:" -ForegroundColor Red
+        $dirtyRunSource | ForEach-Object { Write-Host "       $_" }
+        exit 4
+    }
+
+    return $head
+}
+
 # --- inspect-only modes short-circuit, no slug needed ---
 if ($Preflight -or $ListStudies) {
     if ($selectorCount -gt 0) {
         Write-Host "ERROR: Study selector flags do not apply in inspect-only modes." -ForegroundColor Red
         exit 1
     }
+
+    Assert-ExtractorBuilt
 
     $args = New-Object System.Collections.Generic.List[string]
     if ($Active) {
@@ -128,6 +227,9 @@ if ([string]::IsNullOrWhiteSpace($PartNumber)) {
         Write-Host "PartNumber not supplied; derived from filename: $PartNumber" -ForegroundColor Yellow
     }
 }
+
+$currentHead = Assert-CleanRunSource
+Assert-ExtractorBuilt
 
 # --- mirror the C# MakeStudySlug logic so the output directory matches the
 #     actual filenames that the extractor will produce ---
@@ -202,6 +304,7 @@ if ($Active) {
 }
 
 $extractorArgs.Add("--fea")
+$extractorArgs.Add("--no-views")
 
 if (-not [string]::IsNullOrWhiteSpace($StudyName)) {
     $extractorArgs.Add("--fea-study-name")
@@ -256,12 +359,48 @@ try {
     exit 2
 }
 
+$manifestCommit = $manifestObj.extractor_git_commit
+if ([string]::IsNullOrWhiteSpace($manifestCommit) -or -not [string]::Equals([string]$manifestCommit, $currentHead, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host "ERROR: Manifest provenance does not match the extraction HEAD." -ForegroundColor Red
+    Write-Host "       HEAD:      $currentHead"
+    Write-Host "       Manifest:  $manifestCommit"
+    Write-Host "       Temp staging directory left in place for inspection: $tempDir" -ForegroundColor Yellow
+    exit 2
+}
+
 $actualStudySlug = $manifestObj.study.slug
 $actualStudyName = $manifestObj.study.name
 $selectionMode = $manifestObj.study.selection_mode
 if ([string]::IsNullOrWhiteSpace($actualStudySlug)) {
     Write-Host "ERROR: Manifest does not contain study.slug -- cannot place artifacts canonically." -ForegroundColor Red
     Write-Host "       Manifest: $($manifestFile.FullName)"
+    exit 2
+}
+
+$expectedBase = "${PartNumber}_fea_${actualStudySlug}"
+$expectedNames = @(
+    "$PartNumber.json",
+    "$expectedBase.glb",
+    "${expectedBase}_results.json",
+    "${expectedBase}_manifest.json"
+)
+$tempFiles = @(Get-ChildItem -Path $tempDir -File -ErrorAction SilentlyContinue)
+$tempNames = @($tempFiles | ForEach-Object { $_.Name })
+$unexpectedTemp = @($tempNames | Where-Object { $expectedNames -notcontains $_ })
+$missingTemp = @($expectedNames | Where-Object { $tempNames -notcontains $_ })
+if ($unexpectedTemp.Count -gt 0 -or $missingTemp.Count -gt 0 -or $tempFiles.Count -ne 4) {
+    Write-Host "ERROR: Worker FEA staging contract violation." -ForegroundColor Red
+    Write-Host "       Expected exactly these 4 files in temp staging:"
+    $expectedNames | ForEach-Object { Write-Host "         $_" }
+    if ($missingTemp.Count -gt 0) {
+        Write-Host "       Missing:" -ForegroundColor Red
+        $missingTemp | ForEach-Object { Write-Host "         $_" }
+    }
+    if ($unexpectedTemp.Count -gt 0) {
+        Write-Host "       Unexpected:" -ForegroundColor Red
+        $unexpectedTemp | ForEach-Object { Write-Host "         $_" }
+    }
+    Write-Host "       Temp staging directory left in place for inspection: $tempDir" -ForegroundColor Yellow
     exit 2
 }
 
@@ -290,11 +429,12 @@ if (Test-Path $canonicalDir) {
     New-Item -ItemType Directory -Path $canonicalDir -Force | Out-Null
 }
 
-# --- move every file from temp staging into canonical ---
+# --- move only the four canonical files from temp staging into canonical ---
 $movedFiles = @()
-Get-ChildItem -Path $tempDir -File | ForEach-Object {
-    $dest = Join-Path $canonicalDir $_.Name
-    Move-Item -Path $_.FullName -Destination $dest -Force
+$expectedNames | ForEach-Object {
+    $source = Join-Path $tempDir $_
+    $dest = Join-Path $canonicalDir $_
+    Move-Item -Path $source -Destination $dest -Force
     $movedFiles += $dest
 }
 
@@ -321,6 +461,9 @@ $missing = @()
 if (-not (Test-Path $canonGlb)) { $missing += $canonGlb }
 if (-not (Test-Path $canonResults)) { $missing += $canonResults }
 if (-not (Test-Path $canonPartData)) { $missing += $canonPartData }
+$canonicalFiles = @(Get-ChildItem -Path $canonicalDir -File -ErrorAction SilentlyContinue)
+$canonicalNames = @($canonicalFiles | ForEach-Object { $_.Name })
+$unexpectedCanonical = @($canonicalNames | Where-Object { $expectedNames -notcontains $_ })
 
 Write-Host ""
 Write-Host "Canonical staging directory: $canonicalDir" -ForegroundColor Cyan
@@ -334,6 +477,13 @@ if ($missing.Count -gt 0) {
     Write-Host "ERROR: Manifest moved but the run is incomplete -- expected files are missing:" -ForegroundColor Red
     $missing | ForEach-Object { Write-Host "   $_" }
     Write-Host "       Do not commit this directory until the missing files are produced." -ForegroundColor Red
+    exit 2
+}
+if ($canonicalFiles.Count -ne 4 -or $unexpectedCanonical.Count -gt 0) {
+    Write-Host ""
+    Write-Host "ERROR: Canonical staging contains files outside the four-file contract:" -ForegroundColor Red
+    $unexpectedCanonical | ForEach-Object { Write-Host "   $_" }
+    Write-Host "       Do not commit this directory until it contains only the canonical files." -ForegroundColor Red
     exit 2
 }
 

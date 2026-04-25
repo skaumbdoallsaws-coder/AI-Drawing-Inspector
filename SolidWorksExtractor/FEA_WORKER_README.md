@@ -82,7 +82,15 @@ cd C:\src\AI-tool
 git fetch origin
 git checkout main
 git pull
+git status --short
 ```
+
+`git status --short` must show no source changes before extraction. If any
+extractor or runner source changed locally, commit those source changes first,
+then rebuild and run extraction from that committed HEAD. The runner enforces
+this for extractor build inputs under `SolidWorksExtractor/` and
+`scripts/run_fea_extract.ps1`, excluding only transient residue under
+`incoming_fea/.staging/`.
 
 ### Step B — Rebuild if Step A changed any `.cs` file
 
@@ -136,6 +144,11 @@ situations. The selection mode is recorded in the manifest's
 `"implicit"`) so the reviewer on the source-of-truth machine can spot any
 implicit run on review.
 
+Before the extractor starts, the runner prints the exact `Git HEAD` commit
+that the run must use for provenance. If the runner reports dirty extraction
+source, stop: commit those source changes first, then rerun extraction from the
+clean committed worktree.
+
 Every successful run lands in the canonical staging directory:
 
 ```
@@ -147,6 +160,8 @@ directory under `incoming_fea\.staging\` first, reads the manifest the
 extractor produces to discover the real `<study-slug>`, then moves the
 four artifacts into the canonical directory. There is no `by_index_<n>` or
 `by_implicit_selection` placeholder in the committed layout.
+View PNGs are not part of worker FEA staging; the runner and extractor skip
+view screenshot export for this path.
 
 If the canonical directory already contains artifacts (you are re-running
 the same part + study combination), the script **refuses** to overwrite
@@ -165,8 +180,11 @@ Open the `*_manifest.json` file the script reports. Verify:
 - `study.selection_mode` is `"explicit-name"` or `"explicit-index"`,
   **not** `"implicit"` (unless you intentionally used `-AllowImplicit`).
 - `solidworks_version` is the version you ran on.
-- `extractor_git_commit` is a real SHA, not `null`. If it is null, install
-  git or add it to PATH and rerun.
+- `extractor_git_commit` is a real SHA, not `null`, and it exactly matches
+  the `Git HEAD` value printed by the runner before extraction. If it is null
+  or different, install git / fix PATH / commit source changes and rerun.
+- `visualization.approximate` is `false`; normal worker runs must not ship
+  synthetic CAD-tessellation heatmaps as FEA GLBs.
 - `warnings` list does not contain anything alarming. The two known-always
   warnings are:
   - `"Per-node strain (max_strain_node) is not exposed via the COSMOSWorks API; left null."`
@@ -214,19 +232,27 @@ Inspect-only modes can run on any document and never write to `incoming_fea/`.
    Simulation add-in is reachable before you spend time on extraction.
 3. **Always use explicit study selection** (`-StudyName` or `-StudyIndex`).
    `-AllowImplicit` is opt-in only and should be rare.
-4. **Do not solve studies via the runner script.** The extractor reads
+4. **Do not run extraction from dirty extractor or runner source.** Commit
+   source changes first. The runner refuses normal extraction when
+   extractor build inputs under `SolidWorksExtractor/` or
+   `scripts/run_fea_extract.ps1` have uncommitted changes, and the manifest's
+   `extractor_git_commit` must match the printed `Git HEAD`.
+5. **Do not solve studies via the runner script.** The extractor reads
    results; it does not solve. If a study is unsolved, solve it **inside
    SolidWorks** first — the explicit-selection path will refuse it otherwise.
-5. **Do not edit the generated artifacts.** If something looks wrong, leave
+6. **Do not accept approximate visualization as a normal FEA GLB.** If FE
+   connectivity is unavailable, the run must fail clearly instead of writing a
+   CAD-tessellated heatmap into canonical staging.
+7. **Do not edit the generated artifacts.** If something looks wrong, leave
    it as-is and report. Hand-editing destroys provenance.
-6. **Do not copy `SolidWorksExtractor.exe` out of the repo.** Always run it
+8. **Do not copy `SolidWorksExtractor.exe` out of the repo.** Always run it
    from `bin/Debug/`. The runner script enforces this.
-7. **Do not rebuild in Release** unless explicitly told to. The repo is on
+9. **Do not rebuild in Release** unless explicitly told to. The repo is on
    Debug builds for everyone today.
-8. **Do not commit anything from `bin/`, `obj/`, `.vs/`, or other build
+10. **Do not commit anything from `bin/`, `obj/`, `.vs/`, or other build
    output.** `git status -s` should show only `incoming_fea/...` paths
    before you commit.
-9. **Do not run `--batch-parts` on a folder of parts in this stage.** FEA
+11. **Do not run `--batch-parts` on a folder of parts in this stage.** FEA
    batching is out of scope; the runner script + extractor are designed for
    one part / one study per invocation.
 
@@ -244,12 +270,17 @@ incoming_fea\<part-slug>\<study-slug>\
   <PartNumber>_fea_<study-slug>_manifest.json      — provenance manifest
 ```
 
+No view PNGs or approximate visualization artifacts are allowed in this
+canonical directory.
+
 Manifest top-level fields (manifest_version `"1"`):
 
 - `timestamp_utc`, `extractor_version`, `extractor_git_commit`, `solidworks_version`
 - `source.document_path`, `source.part_number`
 - `study.name`, `study.slug`, `study.index`, `study.type`, `study.selection_mode`
 - `outputs[]` — list of generated filenames in this directory
+- `visualization.{mode, approximate}` — must report a solver-backed FE mesh
+  with `approximate: false` for a normal mergeable worker run
 - `summary.{max_von_mises_mpa, max_displacement_mm, safety_factor, yield_strength_mpa, material, surface_node_count, element_count, has_morph_target}`
 - `warnings[]` — any non-fatal extraction warnings collected during the run
 

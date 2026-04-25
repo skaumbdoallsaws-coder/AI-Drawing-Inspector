@@ -40,6 +40,11 @@ A re-run of the same `(part, study)` pair refuses to overwrite the existing
 directory unless the worker passes `-Force`. This prevents accidental re-runs
 from quietly destroying earlier provenance.
 
+Canonical staging is intentionally narrow: no view PNGs, screenshots,
+diagnostics, or approximate visualizations belong in
+`incoming_fea/<part-slug>/<study-slug>/`. Anything outside the four filenames
+shown above is a contract violation, not an optional extra artifact.
+
 ## Workflow
 
 The full worker workflow lives in
@@ -75,7 +80,8 @@ Exit codes: `0` = passed (warnings allowed), `1` = at least one failure
 (do not merge), `2` = directory or manifest missing, `3` = bad CLI args.
 
 The validator does not touch the running app and does not regenerate
-artifacts; it is read-only audit.
+artifacts; it is read-only audit. It also fails if canonical staging contains
+extra files or if the manifest reports approximate visualization.
 
 ## What NOT to commit here
 

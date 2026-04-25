@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.cosworks;
 
@@ -111,17 +112,10 @@ namespace SolidWorksExtractor.Services
 
                         info.AnalysisTypeLabel = LabelAnalysisType(info.AnalysisType);
 
-                        try
-                        {
-                            ICWResults res = (ICWResults)candidate.Results;
-                            info.HasResults = res != null;
-                            SafeReleaseCom(res);
-                        }
-                        catch (Exception rex)
-                        {
-                            info.HasResults = false;
-                            info.Note = "results error: " + rex.Message;
-                        }
+                        string resultsNote;
+                        info.HasResults = EnsureResultsAvailable(candidate, modelDoc, out resultsNote);
+                        if (!string.IsNullOrWhiteSpace(resultsNote))
+                            info.Note = resultsNote;
                     }
                     catch (Exception ex)
                     {
@@ -335,6 +329,10 @@ namespace SolidWorksExtractor.Services
             public double ReactionMz = 0;
             public bool HasReactionMoments = false;
 
+            // Visualization provenance
+            public string VisualizationMode;
+            public bool VisualizationApproximate = false;
+
             // Loads & fixtures
             public List<LoadInfo> Loads = new List<LoadInfo>();
             public List<FixtureInfo> Fixtures = new List<FixtureInfo>();
@@ -354,6 +352,9 @@ namespace SolidWorksExtractor.Services
         {
             public string Name;
             public string Type;
+            public int? TypeRaw;
+            public string Subtype;
+            public int? SubtypeRaw;
             public double? Value;
             public string ValueUnit;          // e.g. "N", "Pa", null when not applicable
             public int? EntityCount;
@@ -367,6 +368,9 @@ namespace SolidWorksExtractor.Services
         {
             public string Name;
             public string Type;
+            public int? TypeRaw;
+            public string Subtype;
+            public int? SubtypeRaw;
             public int? EntityCount;
             public string EntityKind;
         }
@@ -471,7 +475,7 @@ namespace SolidWorksExtractor.Services
 
                 // Pick the study. Honor explicit name first, then explicit index,
                 // then fall back to the legacy implicit "first completed static" path.
-                study = SelectStudy(studyMgr, studyCount, studyName, studyIndex);
+                study = SelectStudy(studyMgr, studyCount, studyName, studyIndex, modelDoc);
                 if (study == null)
                 {
                     Console.WriteLine("    FEA Warning: No suitable study found for the requested selection");
@@ -502,15 +506,18 @@ namespace SolidWorksExtractor.Services
                 }
 
                 // Extract surface mesh with stress and displacement data
-                var meshData = ExtractResultMesh(study, summary);
+                var meshData = ExtractResultMesh(study, modelDoc, summary);
                 if (meshData == null)
                 {
-                    Console.WriteLine("    FEA Error: Failed to extract result mesh");
+                    Console.WriteLine("    FEA Error: Solver-backed visualization mesh unavailable.");
+                    Console.WriteLine("               Refusing to write a normal FEA GLB from approximate CAD tessellation.");
                     return null;
                 }
 
                 summary.SurfaceNodeCount = meshData.UniqueNodeCount > 0 ? meshData.UniqueNodeCount : meshData.VertexCount;
                 summary.HasMorphTarget = meshData.MorphPositions != null && meshData.MorphPositions.Length > 0;
+                summary.VisualizationMode = "solver_fe_mesh";
+                summary.VisualizationApproximate = false;
 
                 // Compute safety factor
                 if (summary.YieldStrengthMpa > 0 && summary.MaxVonMisesMpa > 0)
@@ -598,7 +605,7 @@ namespace SolidWorksExtractor.Services
         /// have no accessible results, since the extraction pipeline downstream assumes a
         /// completed static study. This avoids silent misleading output from the wrong study.
         /// </summary>
-        private dynamic SelectStudy(dynamic studyMgr, int studyCount, string studyName, int studyIndex)
+        private dynamic SelectStudy(dynamic studyMgr, int studyCount, string studyName, int studyIndex, IModelDoc2 modelDoc)
         {
             // 1) Explicit name (case-insensitive)
             if (!string.IsNullOrWhiteSpace(studyName))
@@ -616,7 +623,7 @@ namespace SolidWorksExtractor.Services
                             && string.Equals(name, studyName, StringComparison.OrdinalIgnoreCase))
                         {
                             string reason;
-                            if (!IsStaticAndSolved(candidate, out reason))
+                            if (!IsStaticAndSolved(candidate, modelDoc, out reason))
                             {
                                 Console.WriteLine($"    FEA Error: Study '{name}' (index {i}) rejected: {reason}");
                                 Console.WriteLine($"               Explicit selection requires a static study with accessible results.");
@@ -657,7 +664,7 @@ namespace SolidWorksExtractor.Services
                     string name = null;
                     try { name = candidate.Name as string; } catch { }
                     string reason;
-                    if (!IsStaticAndSolved(candidate, out reason))
+                    if (!IsStaticAndSolved(candidate, modelDoc, out reason))
                     {
                         Console.WriteLine($"    FEA Error: Study '{name ?? "(unnamed)"}' at index {studyIndex} rejected: {reason}");
                         Console.WriteLine($"               Explicit selection requires a static study with accessible results.");
@@ -677,14 +684,14 @@ namespace SolidWorksExtractor.Services
 
             // 3) Legacy implicit fallback — emit a clear notice so users know they hit the default
             Console.WriteLine("    FEA: No --fea-study-name or --fea-study-index supplied; using IMPLICIT selection (first completed static study).");
-            return FindCompletedStaticStudy(studyMgr, studyCount);
+            return FindCompletedStaticStudy(studyMgr, studyCount, modelDoc);
         }
 
         /// <summary>
         /// Validate that a study is static (AnalysisType == 0) and has accessible results.
         /// Sets <paramref name="reason"/> to a human-readable rejection reason on failure.
         /// </summary>
-        private bool IsStaticAndSolved(dynamic study, out string reason)
+        private bool IsStaticAndSolved(dynamic study, IModelDoc2 modelDoc, out string reason)
         {
             reason = null;
             int analysisType;
@@ -704,31 +711,103 @@ namespace SolidWorksExtractor.Services
                 return false;
             }
 
-            // Check Results accessibility — a non-null Results object means the solver has run.
+            string resultsNote;
+            if (EnsureResultsAvailable(study, modelDoc, out resultsNote))
+                return true;
+
+            reason = string.IsNullOrWhiteSpace(resultsNote)
+                ? "no results available - study has not been solved"
+                : "no results available - " + resultsNote;
+            return false;
+        }
+
+        private bool EnsureResultsAvailable(dynamic study, IModelDoc2 modelDoc, out string note)
+        {
+            note = null;
+
+            string initialError;
+            if (TryGetResults(study, out initialError))
+                return true;
+
+            string connectNote;
+            if (TryConnectExistingAnalysisDatabase(study, modelDoc, out connectNote))
+            {
+                if (!string.IsNullOrWhiteSpace(connectNote))
+                    Console.WriteLine("    FEA: " + connectNote);
+                return true;
+            }
+
+            note = !string.IsNullOrWhiteSpace(connectNote)
+                ? connectNote
+                : (!string.IsNullOrWhiteSpace(initialError) ? "results not accessible: " + initialError : null);
+            return false;
+        }
+
+        private bool TryGetResults(dynamic study, out string error)
+        {
+            error = null;
             try
             {
                 ICWResults results = (ICWResults)study.Results;
                 bool ok = results != null;
                 SafeReleaseCom(results);
-                if (!ok)
-                {
-                    reason = "no results available — study has not been solved";
-                    return false;
-                }
-                return true;
+                return ok;
             }
             catch (Exception ex)
             {
-                reason = "results not accessible (study likely unsolved): " + ex.Message;
+                error = ex.Message;
                 return false;
             }
+        }
+
+        private bool TryConnectExistingAnalysisDatabase(dynamic study, IModelDoc2 modelDoc, out string note)
+        {
+            note = null;
+            string docPath = null;
+            try
+            {
+                if (modelDoc != null)
+                    docPath = modelDoc.GetPathName();
+            }
+            catch { }
+            if (string.IsNullOrWhiteSpace(docPath))
+                return false;
+
+            string docDir = Path.GetDirectoryName(docPath);
+            if (string.IsNullOrWhiteSpace(docDir))
+                return false;
+
+            string resultsDir = Path.Combine(docDir, "Simulation Results");
+            if (!Directory.Exists(resultsDir))
+                return false;
+
+            try
+            {
+                int rc = (int)study.ConnectAnalysisDatabase(resultsDir);
+                string afterError;
+                if (TryGetResults(study, out afterError))
+                {
+                    note = $"Connected existing analysis database: {resultsDir} (rc={rc})";
+                    return true;
+                }
+
+                note = !string.IsNullOrWhiteSpace(afterError)
+                    ? $"ConnectAnalysisDatabase({resultsDir}) rc={rc}, but results are still unavailable: {afterError}"
+                    : $"ConnectAnalysisDatabase({resultsDir}) rc={rc}, but results are still unavailable";
+            }
+            catch (Exception ex)
+            {
+                note = $"ConnectAnalysisDatabase({resultsDir}) failed: {ex.Message}";
+            }
+
+            return false;
         }
 
         /// <summary>
         /// Find the first completed static study in the study manager.
         /// Prefers studies that have results already computed.
         /// </summary>
-        private dynamic FindCompletedStaticStudy(dynamic studyMgr, int studyCount)
+        private dynamic FindCompletedStaticStudy(dynamic studyMgr, int studyCount, IModelDoc2 modelDoc)
         {
             for (int i = 0; i < studyCount; i++)
             {
@@ -748,22 +827,10 @@ namespace SolidWorksExtractor.Services
                         continue;
                     }
 
-                    // Check if results are available
-                    // HasResults() returns 0 if no results, 1 if results exist
-                    try
+                    string resultsNote;
+                    if (!EnsureResultsAvailable(candidate, modelDoc, out resultsNote))
                     {
-                        ICWResults results = (ICWResults)candidate.Results;
-                        if (results == null)
-                        {
-                            Console.WriteLine($"    FEA: Study '{candidate.Name}' has no results object");
-                            SafeReleaseCom(candidate);
-                            continue;
-                        }
-                        SafeReleaseCom(results);
-                    }
-                    catch
-                    {
-                        Console.WriteLine($"    FEA: Study '{candidate.Name}' results not accessible");
+                        Console.WriteLine($"    FEA: Study '{candidate.Name}' has no results object{(string.IsNullOrWhiteSpace(resultsNote) ? "" : ": " + resultsNote)}");
                         SafeReleaseCom(candidate);
                         continue;
                     }
@@ -926,14 +993,16 @@ namespace SolidWorksExtractor.Services
         /// </summary>
         private void PopulateMaterialProperties(ICWMaterial material, FeaResultsSummary summary)
         {
-            int unitMeters = (int)swsLinearUnit_e.swsLinearUnitMeters;
+            // COSMOSWorks material database values are base SI when queried with
+            // the millimeter enum; querying with meters can return display-scaled values.
+            int materialDbUnit = (int)swsLinearUnit_e.swsLinearUnitMillimeters;
             int td;
 
             // Yield (already extracted in v1; re-read here for consistency, value in Pa).
             try
             {
                 td = 0;
-                double yieldPa = material.GetPropertyByName(unitMeters, "SIGYLD", out td);
+                double yieldPa = material.GetPropertyByName(materialDbUnit, "SIGYLD", out td);
                 if (yieldPa > 0) summary.YieldStrengthMpa = yieldPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material SIGYLD: " + ex.Message); }
@@ -942,7 +1011,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double tenPa = material.GetPropertyByName(unitMeters, "SIGXT", out td);
+                double tenPa = material.GetPropertyByName(materialDbUnit, "SIGXT", out td);
                 if (tenPa > 0) summary.TensileStrengthMpa = tenPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material SIGXT (tensile): " + ex.Message); }
@@ -951,7 +1020,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double exPa = material.GetPropertyByName(unitMeters, "EX", out td);
+                double exPa = material.GetPropertyByName(materialDbUnit, "EX", out td);
                 if (exPa > 0) summary.ElasticModulusMpa = exPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material EX (elastic modulus): " + ex.Message); }
@@ -960,7 +1029,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double nu = material.GetPropertyByName(unitMeters, "NUXY", out td);
+                double nu = material.GetPropertyByName(materialDbUnit, "NUXY", out td);
                 if (nu > 0) summary.PoissonsRatio = nu;
             }
             catch (Exception ex) { Warn(summary, "Material NUXY (Poisson): " + ex.Message); }
@@ -969,7 +1038,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double dens = material.GetPropertyByName(unitMeters, "DENS", out td);
+                double dens = material.GetPropertyByName(materialDbUnit, "DENS", out td);
                 if (dens > 0) summary.MassDensityKgPerM3 = dens;
             }
             catch (Exception ex) { Warn(summary, "Material DENS (density): " + ex.Message); }
@@ -978,7 +1047,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double gxyPa = material.GetPropertyByName(unitMeters, "GXY", out td);
+                double gxyPa = material.GetPropertyByName(materialDbUnit, "GXY", out td);
                 if (gxyPa > 0) summary.ShearModulusMpa = gxyPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material GXY (shear modulus): " + ex.Message); }
@@ -987,7 +1056,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double alpx = material.GetPropertyByName(unitMeters, "ALPX", out td);
+                double alpx = material.GetPropertyByName(materialDbUnit, "ALPX", out td);
                 if (alpx > 0) summary.ThermalExpansionPerKelvin = alpx;
             }
             catch (Exception ex) { Warn(summary, "Material ALPX (thermal expansion): " + ex.Message); }
@@ -1064,8 +1133,9 @@ namespace SolidWorksExtractor.Services
         }
 
         /// <summary>
-        /// Iterate study.LoadsAndRestraintsManager and split into Loads and Fixtures.
-        /// Each entry's Name, Type, and EntityCount are extracted defensively.
+        /// Iterate study.LoadsAndRestraintsManager and conservatively split verified
+        /// load categories from restraint categories. Raw type integers are always
+        /// preserved; unverified categories are omitted with warnings.
         /// </summary>
         private void ExtractLoadsAndFixtures(dynamic study, FeaResultsSummary summary)
         {
@@ -1093,55 +1163,57 @@ namespace SolidWorksExtractor.Services
                         string name = null;
                         try { name = ((dynamic)item).Name as string; } catch { }
 
-                        int typeInt = -1;
-                        try { typeInt = (int)((dynamic)item).Type; } catch { }
-                        string typeLabel = LabelLoadOrFixtureType(typeInt);
+                        int? typeRaw = null;
+                        try { typeRaw = (int)((dynamic)item).Type; } catch { }
 
                         int? entityCount = null;
                         try { entityCount = (int)((dynamic)item).EntityCount; } catch { }
 
-                        // Fixtures and loads share the manager. Heuristic: items whose
-                        // type label starts with "Fixed" or contains "Restraint" are
-                        // fixtures; everything else is treated as a load.
-                        bool isFixture = typeLabel != null
-                            && (typeLabel.IndexOf("Fixed", StringComparison.OrdinalIgnoreCase) >= 0
-                             || typeLabel.IndexOf("Restraint", StringComparison.OrdinalIgnoreCase) >= 0
-                             || typeLabel.IndexOf("Hinge", StringComparison.OrdinalIgnoreCase) >= 0
-                             || typeLabel.IndexOf("Roller", StringComparison.OrdinalIgnoreCase) >= 0
-                             || typeLabel.IndexOf("Symmetry", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                        if (isFixture)
+                        if (!typeRaw.HasValue)
                         {
+                            Warn(summary, $"Loads/restraints item {i} ('{name ?? "(unnamed)"}') did not expose a raw Type integer; category left unreported.");
+                            continue;
+                        }
+
+                        string typeLabel = LabelLoadsAndRestraintsType(typeRaw.Value);
+                        if (IsFixtureCategory(typeRaw.Value))
+                        {
+                            int? subtypeRaw = TryReadIntProperty(item, "RestraintType");
                             summary.Fixtures.Add(new FixtureInfo
                             {
                                 Name = name,
                                 Type = typeLabel,
+                                TypeRaw = typeRaw,
+                                Subtype = subtypeRaw.HasValue ? LabelRestraintSubtype(subtypeRaw.Value) : null,
+                                SubtypeRaw = subtypeRaw,
+                                EntityCount = entityCount,
+                                EntityKind = null
+                            });
+                            if (!subtypeRaw.HasValue)
+                                Warn(summary, $"Fixture '{name ?? "(unnamed)"}' type_raw={typeRaw.Value} did not expose a verified restraint subtype; subtype left null.");
+                        }
+                        else if (IsLoadCategory(typeRaw.Value))
+                        {
+                            int? subtypeRaw = TryReadLoadSubtype(item, typeRaw.Value);
+                            double? value = TryReadLoadValue(item, typeRaw.Value);
+                            string unit = value.HasValue ? "raw" : null;
+
+                            summary.Loads.Add(new LoadInfo
+                            {
+                                Name = name,
+                                Type = typeLabel,
+                                TypeRaw = typeRaw,
+                                Subtype = subtypeRaw.HasValue ? LabelLoadSubtype(typeRaw.Value, subtypeRaw.Value) : null,
+                                SubtypeRaw = subtypeRaw,
+                                Value = value,
+                                ValueUnit = unit,
                                 EntityCount = entityCount,
                                 EntityKind = null
                             });
                         }
                         else
                         {
-                            double? value = null;
-                            string unit = null;
-                            try
-                            {
-                                // Many load types expose a Value / Magnitude property; the
-                                // accessor name varies. Try a couple defensively.
-                                value = (double)((dynamic)item).Value;
-                                unit = "raw"; // unit semantics depend on the load type
-                            }
-                            catch { }
-
-                            summary.Loads.Add(new LoadInfo
-                            {
-                                Name = name,
-                                Type = typeLabel,
-                                Value = value,
-                                ValueUnit = unit,
-                                EntityCount = entityCount,
-                                EntityKind = null
-                            });
+                            Warn(summary, $"Loads/restraints item {i} ('{name ?? "(unnamed)"}') has unclassified type_raw={typeRaw.Value}; not placing it in loads[] or fixtures[].");
                         }
                     }
                     catch (Exception ex)
@@ -1156,14 +1228,11 @@ namespace SolidWorksExtractor.Services
 
                 if (summary.Loads.Count == 0 && summary.Fixtures.Count == 0)
                 {
-                    Warn(summary, "LoadsAndRestraintsManager returned 0 readable items; loads/fixtures left empty.");
+                    Warn(summary, "LoadsAndRestraintsManager returned no confidently categorized loads/fixtures; arrays left empty.");
                 }
                 else
                 {
-                    // EntityCount is exposed on each item, but the entity-type
-                    // discriminator (face / edge / vertex) is not. Document the
-                    // gap once per run rather than per item.
-                    Warn(summary, "Load/fixture entity_kind (face/edge/vertex) is not exposed via the COSMOSWorks API; left null on every item.");
+                    Warn(summary, "Load/fixture entity_kind (face/edge/vertex) is not exposed via the COSMOSWorks API; left null on every categorized item.");
                 }
             }
             finally
@@ -1247,34 +1316,174 @@ namespace SolidWorksExtractor.Services
         }
 
         /// <summary>
-        /// Best-effort label for a load/fixture type integer. Conservative — anything
-        /// not in this short table is reported as "type({n})" so the caller can decode.
+        /// Label the verified ICWLoadsAndRestraints.Type category enum. These are
+        /// category labels only, not fixture/load subtypes.
         /// </summary>
-        private static string LabelLoadOrFixtureType(int t)
+        private static string LabelLoadsAndRestraintsType(int t)
         {
-            // The swsRestraintType_e and swsLoadType_e enums are extensive and
-            // cross-version. We label only the most common ones; everything else
-            // surfaces as "type(N)" so the manifest still records the integer.
             switch (t)
             {
-                case 0: return "Fixed Geometry";
-                case 1: return "Roller / Slider";
-                case 2: return "Hinge";
-                case 3: return "Reference Geometry";
-                case 4: return "On Flat Faces";
-                case 5: return "On Cylindrical Faces";
-                case 6: return "On Spherical Faces";
-                case 10: return "Force";
-                case 11: return "Pressure";
-                case 12: return "Gravity";
-                case 13: return "Centrifugal";
-                case 14: return "Bearing Load";
-                case 15: return "Temperature";
-                case 16: return "Heat Power";
-                case 17: return "Heat Flux";
-                case 18: return "Convection";
+                case 1: return "Pressure";
+                case 2: return "Restraint";
+                case 3: return "Force";
+                case 4: return "Gravity";
+                case 5: return "Centrifugal";
+                case 6: return "Temperature";
+                case 7: return "Convection";
+                case 8: return "Heat Power";
+                case 9: return "Heat Flux";
+                case 10: return "Radiation";
+                case 11: return "Remote Load";
+                case 13: return "Bearing Load";
+                case 14: return "Velocity";
+                case 15: return "Base Excitation";
                 default: return $"type({t})";
             }
+        }
+
+        private static bool IsFixtureCategory(int t)
+        {
+            return t == 2;
+        }
+
+        private static bool IsLoadCategory(int t)
+        {
+            switch (t)
+            {
+                case 1:
+                case 3:
+                case 4:
+                case 5:
+                case 6:
+                case 7:
+                case 8:
+                case 9:
+                case 10:
+                case 11:
+                case 13:
+                case 14:
+                case 15:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static int? TryReadIntProperty(object item, string propertyName)
+        {
+            try
+            {
+                object value = item.GetType().InvokeMember(
+                    propertyName,
+                    System.Reflection.BindingFlags.GetProperty,
+                    null,
+                    item,
+                    null,
+                    CultureInfo.InvariantCulture);
+                if (value == null) return null;
+                return Convert.ToInt32(value, CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                try
+                {
+                    dynamic dyn = item;
+                    if (propertyName == "RestraintType") return (int)dyn.RestraintType;
+                    if (propertyName == "ForceType") return (int)dyn.ForceType;
+                    if (propertyName == "PressureType") return (int)dyn.PressureType;
+                    if (propertyName == "LoadType") return (int)dyn.LoadType;
+                }
+                catch { }
+                return null;
+            }
+        }
+
+        private static int? TryReadLoadSubtype(object item, int typeRaw)
+        {
+            switch (typeRaw)
+            {
+                case 1: return TryReadIntProperty(item, "PressureType");
+                case 3: return TryReadIntProperty(item, "ForceType");
+                case 11: return TryReadIntProperty(item, "LoadType");
+                default: return null;
+            }
+        }
+
+        private static double? TryReadLoadValue(object item, int typeRaw)
+        {
+            string[] names = typeRaw == 3
+                ? new[] { "NormalForceOrTorqueValue", "Value", "Magnitude" }
+                : new[] { "Value", "Magnitude", "NormalForceOrTorqueValue" };
+
+            foreach (string name in names)
+            {
+                try
+                {
+                    object value = item.GetType().InvokeMember(
+                        name,
+                        System.Reflection.BindingFlags.GetProperty,
+                        null,
+                        item,
+                        null,
+                        CultureInfo.InvariantCulture);
+                    if (value != null)
+                        return Convert.ToDouble(value, CultureInfo.InvariantCulture);
+                }
+                catch
+                {
+                    try
+                    {
+                        dynamic dyn = item;
+                        if (name == "NormalForceOrTorqueValue") return (double)dyn.NormalForceOrTorqueValue;
+                        if (name == "Value") return (double)dyn.Value;
+                        if (name == "Magnitude") return (double)dyn.Magnitude;
+                    }
+                    catch { }
+                }
+            }
+            return null;
+        }
+
+        private static string LabelRestraintSubtype(int t)
+        {
+            switch (t)
+            {
+                case 0: return "Fixed";
+                case 1: return "Immovable";
+                case 2: return "Symmetric";
+                case 3: return "Roller";
+                case 4: return "Hinge";
+                case 5: return "Reference Geometry";
+                case 6: return "Flat Face";
+                case 7: return "Cylindrical Faces";
+                case 8: return "Spherical Surface";
+                case 9: return "Cyclic Symmetry";
+                default: return $"type({t})";
+            }
+        }
+
+        private static string LabelLoadSubtype(int typeRaw, int subtypeRaw)
+        {
+            if (typeRaw == 3)
+            {
+                switch (subtypeRaw)
+                {
+                    case 0: return "Force or Moment";
+                    case 1: return "Normal Force";
+                    case 2: return "Torque";
+                    default: return $"type({subtypeRaw})";
+                }
+            }
+            if (typeRaw == 1)
+            {
+                switch (subtypeRaw)
+                {
+                    case 0: return "Normal";
+                    case 1: return "Reference Geometry";
+                    default: return $"type({subtypeRaw})";
+                }
+            }
+            return $"type({subtypeRaw})";
         }
 
         /// <summary>
@@ -1395,13 +1604,13 @@ namespace SolidWorksExtractor.Services
         /// Uses ICWMesh to get surface nodes and builds surface triangles from element connectivity.
         /// Maps per-element stress values onto surface nodes for vertex coloring.
         /// </summary>
-        private FeaMeshData ExtractResultMesh(dynamic study, FeaResultsSummary summary)
+        private FeaMeshData ExtractResultMesh(dynamic study, IModelDoc2 modelDoc, FeaResultsSummary summary)
         {
             // The installed COSMOSWorks interop does not expose ICWPlot.GetTriangleArray()
             // or GetResult() for direct mesh extraction from plots. Instead, we use the
             // node-based approach: read all nodes/elements from ICWMesh, extract the
             // surface boundary, and map element stress values onto surface nodes.
-            return ExtractResultMeshFromNodes(study, summary);
+            return ExtractResultMeshFromNodes(study, modelDoc, summary);
         }
 
         /// <summary>
@@ -1410,7 +1619,7 @@ namespace SolidWorksExtractor.Services
         /// It reads all nodes and elements, extracts the surface boundary, then maps
         /// nodal results onto surface vertices.
         /// </summary>
-        private FeaMeshData ExtractResultMeshFromNodes(dynamic study, FeaResultsSummary summary)
+        private FeaMeshData ExtractResultMeshFromNodes(dynamic study, IModelDoc2 modelDoc, FeaResultsSummary summary)
         {
             Console.WriteLine("    FEA: Using node-based mesh extraction...");
 
@@ -1514,7 +1723,9 @@ namespace SolidWorksExtractor.Services
                     int[] elemArray = ConvertToIntArray(elemBulk);
                     if (elemArray == null || elemArray.Length < 4)
                     {
-                        Console.WriteLine("    FEA Error: Could not read element connectivity");
+                        PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
+                        Warn(summary, "FE element connectivity is unavailable; refusing to emit a standard FEA GLB because no solver-backed visualization mesh can be built.");
+                        Console.WriteLine("    FEA Error: Could not read element connectivity for solver-backed GLB");
                         return null;
                     }
 
@@ -1856,6 +2067,12 @@ namespace SolidWorksExtractor.Services
                     Warn(summary, "Could not extract displacement morph: " + ex.Message);
                 }
 
+                if (summary.MaxVonMisesMpa <= 0 || summary.MaxDisplacementMm <= 0 ||
+                    (Math.Abs(summary.ReactionFx) < 1e-12 && Math.Abs(summary.ReactionFy) < 1e-12 && Math.Abs(summary.ReactionFz) < 1e-12))
+                {
+                    PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
+                }
+
                 // Compute bounding box
                 float bbMinX = float.MaxValue, bbMinY = float.MaxValue, bbMinZ = float.MaxValue;
                 float bbMaxX = float.MinValue, bbMaxY = float.MinValue, bbMaxZ = float.MinValue;
@@ -1891,6 +2108,101 @@ namespace SolidWorksExtractor.Services
                 SafeReleaseCom(results);
                 SafeReleaseCom(mesh);
             }
+        }
+
+        private void PopulateSummaryFromSolverOut(IModelDoc2 modelDoc, FeaResultsSummary summary, double[] nodeX, double[] nodeY, double[] nodeZ)
+        {
+            string docPath = null;
+            try
+            {
+                if (modelDoc != null)
+                    docPath = modelDoc.GetPathName();
+            }
+            catch { }
+            if (string.IsNullOrWhiteSpace(docPath))
+                return;
+
+            string docDir = Path.GetDirectoryName(docPath);
+            if (string.IsNullOrWhiteSpace(docDir))
+                return;
+
+            string resultsDir = Path.Combine(docDir, "Simulation Results");
+            if (!Directory.Exists(resultsDir))
+                return;
+
+            string docBase = Path.GetFileNameWithoutExtension(docPath);
+            string studyName = summary != null ? (summary.StudyName ?? "") : "";
+            string outPath = Path.Combine(resultsDir, docBase + "-" + studyName + ".OUT");
+            if (!File.Exists(outPath))
+            {
+                string safeStudyPattern = studyName.Replace("*", "_").Replace("?", "_");
+                string[] matches = Directory.GetFiles(resultsDir, "*" + safeStudyPattern + "*.OUT");
+                if (matches.Length > 0)
+                    outPath = matches[0];
+            }
+            if (!File.Exists(outPath))
+                return;
+
+            bool populated = false;
+            try
+            {
+                string text = File.ReadAllText(outPath);
+                Match stress = Regex.Match(text, @"MAXIMUM\s+NODAL\s+VON\s+MISES\s+STRESS[\s\S]*?NODE\s+(\d+)\s+MAX\.\s+([+\-]?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)", RegexOptions.IgnoreCase);
+                if (stress.Success)
+                {
+                    int node = int.Parse(stress.Groups[1].Value, CultureInfo.InvariantCulture);
+                    double pa = ParseFortranDouble(stress.Groups[2].Value);
+                    if (pa > 0)
+                    {
+                        summary.MaxVonMisesMpa = pa / 1e6;
+                        summary.MaxStressNode = node;
+                        if (node > 0 && nodeX != null && node < nodeX.Length)
+                            summary.MaxStressLocation = new double[] { nodeX[node], nodeY[node], nodeZ[node] };
+                        populated = true;
+                    }
+                }
+
+                Match disp = Regex.Match(text, @"MAXIMUM\s+RESULTANT\s+DISPLACEMENT[\s\S]*?NODE\s+(\d+)\s+MAX\.\s+([+\-]?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)", RegexOptions.IgnoreCase);
+                if (disp.Success)
+                {
+                    int node = int.Parse(disp.Groups[1].Value, CultureInfo.InvariantCulture);
+                    double meters = ParseFortranDouble(disp.Groups[2].Value);
+                    if (meters > 0)
+                    {
+                        summary.MaxDisplacementMm = meters * 1000.0;
+                        summary.MaxDisplacementNode = node;
+                        populated = true;
+                    }
+                }
+
+                Match react = Regex.Match(text, @"Total\s+React\.\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)", RegexOptions.IgnoreCase);
+                if (react.Success)
+                {
+                    summary.ReactionFx = Math.Round(ParseFortranDouble(react.Groups[1].Value), 2);
+                    summary.ReactionFy = Math.Round(ParseFortranDouble(react.Groups[2].Value), 2);
+                    summary.ReactionFz = Math.Round(ParseFortranDouble(react.Groups[3].Value), 2);
+                    summary.ReactionMx = Math.Round(ParseFortranDouble(react.Groups[4].Value), 6);
+                    summary.ReactionMy = Math.Round(ParseFortranDouble(react.Groups[5].Value), 6);
+                    summary.ReactionMz = Math.Round(ParseFortranDouble(react.Groups[6].Value), 6);
+                    summary.HasReactionMoments = true;
+                    populated = true;
+                }
+
+                if (populated)
+                    Warn(summary, "Numeric result extrema were populated from the SolidWorks solver .OUT file after direct COSMOSWorks result access was incomplete.");
+            }
+            catch (Exception ex)
+            {
+                Warn(summary, "Could not parse solver .OUT summary: " + ex.Message);
+            }
+        }
+
+        private static double ParseFortranDouble(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            value = value.Trim().Replace('D', 'E').Replace('d', 'E');
+            double parsed;
+            return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ? parsed : 0;
         }
 
         /// <summary>
@@ -2601,6 +2913,11 @@ namespace SolidWorksExtractor.Services
             }
             sb.AppendLine("  ],");
 
+            sb.AppendLine("  \"visualization\": {");
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"mode\": \"{0}\",\n", EscapeJson(summary?.VisualizationMode ?? "unknown"));
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"approximate\": {0}\n", summary != null && summary.VisualizationApproximate ? "true" : "false");
+            sb.AppendLine("  },");
+
             // Embedded summary snapshot (so the manifest is auditable on its own)
             if (summary != null)
             {
@@ -2671,6 +2988,10 @@ namespace SolidWorksExtractor.Services
             sb.AppendFormat(CultureInfo.InvariantCulture, "    \"safety_factor\": {0:F2}\n", summary.SafetyFactor);
             sb.AppendLine("  },");
             sb.AppendFormat(CultureInfo.InvariantCulture, "  \"has_morph_target\": {0},\n", summary.HasMorphTarget ? "true" : "false");
+            sb.AppendLine("  \"visualization\": {");
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"mode\": \"{0}\",\n", EscapeJson(summary.VisualizationMode ?? "unknown"));
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"approximate\": {0}\n", summary.VisualizationApproximate ? "true" : "false");
+            sb.AppendLine("  },");
 
             // --- v2 expansion: study identity ---
             sb.AppendLine("  \"study\": {");
@@ -2729,6 +3050,9 @@ namespace SolidWorksExtractor.Services
                 sb.Append("    {");
                 sb.Append("\"name\":").Append(JsonStringOrNull(L.Name));
                 sb.Append(",\"type\":").Append(JsonStringOrNull(L.Type));
+                sb.Append(",\"type_raw\":").Append(JsonIntOrNull(L.TypeRaw));
+                sb.Append(",\"subtype\":").Append(JsonStringOrNull(L.Subtype));
+                sb.Append(",\"subtype_raw\":").Append(JsonIntOrNull(L.SubtypeRaw));
                 sb.Append(",\"value\":").Append(JsonNumberOrNull(L.Value, "G6"));
                 sb.Append(",\"value_unit\":").Append(JsonStringOrNull(L.ValueUnit));
                 sb.Append(",\"entity_count\":").Append(JsonIntOrNull(L.EntityCount));
@@ -2747,6 +3071,9 @@ namespace SolidWorksExtractor.Services
                 sb.Append("    {");
                 sb.Append("\"name\":").Append(JsonStringOrNull(F.Name));
                 sb.Append(",\"type\":").Append(JsonStringOrNull(F.Type));
+                sb.Append(",\"type_raw\":").Append(JsonIntOrNull(F.TypeRaw));
+                sb.Append(",\"subtype\":").Append(JsonStringOrNull(F.Subtype));
+                sb.Append(",\"subtype_raw\":").Append(JsonIntOrNull(F.SubtypeRaw));
                 sb.Append(",\"entity_count\":").Append(JsonIntOrNull(F.EntityCount));
                 sb.Append(",\"entity_kind\":").Append(JsonStringOrNull(F.EntityKind));
                 sb.Append("}");

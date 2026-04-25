@@ -5728,25 +5728,59 @@
             const scene = new THREE.Group();
             const bufferViews = json.bufferViews || [];
             const accessors = json.accessors || [];
-            const materials = (json.materials || []).map(mat => {
+
+            // Build a material *factory* per glTF material rather than a
+            // single shared instance, because vertex colors and morph-target
+            // shader variants are per-primitive in three.js r128. We honour
+            // KHR_materials_unlit (used by the FEA stress GLB) by switching
+            // to MeshBasicMaterial so vertex colors display as authored
+            // without scene-lighting modulation.
+            const materialFactories = (json.materials || []).map(mat => {
                 const pbr = mat.pbrMetallicRoughness || {};
                 const baseColor = pbr.baseColorFactor || [0.8, 0.8, 0.8, 1.0];
-                return new THREE.MeshStandardMaterial({
-                    color: new THREE.Color(baseColor[0], baseColor[1], baseColor[2]),
-                    metalness: pbr.metallicFactor !== undefined ? pbr.metallicFactor : 0.1,
-                    roughness: pbr.roughnessFactor !== undefined ? pbr.roughnessFactor : 0.7,
-                    side: THREE.DoubleSide,
-                });
+                const isUnlit = !!(mat.extensions && mat.extensions.KHR_materials_unlit);
+                return ({ vertexColors, hasMorphTargets, hasMorphNormals }) => {
+                    const baseProps = {
+                        color: new THREE.Color(baseColor[0], baseColor[1], baseColor[2]),
+                        side: THREE.DoubleSide,
+                        vertexColors: !!vertexColors,
+                    };
+                    let m;
+                    if (isUnlit) {
+                        m = new THREE.MeshBasicMaterial(baseProps);
+                    } else {
+                        m = new THREE.MeshStandardMaterial({
+                            ...baseProps,
+                            metalness: pbr.metallicFactor !== undefined ? pbr.metallicFactor : 0.1,
+                            roughness: pbr.roughnessFactor !== undefined ? pbr.roughnessFactor : 0.7,
+                        });
+                    }
+                    // r128 requires explicit morphTargets / morphNormals flags
+                    // for the shader to compile the morph variants. Newer
+                    // three.js auto-detects from geometry; here we are explicit.
+                    if (hasMorphTargets) m.morphTargets = true;
+                    if (hasMorphNormals) m.morphNormals = true;
+                    return m;
+                };
             });
 
-            const getAccessorData = (idx) => {
+            const getAccessorInfo = (idx) => {
                 const acc = accessors[idx];
                 const bv = bufferViews[acc.bufferView];
                 const offset = (bv.byteOffset || 0) + (acc.byteOffset || 0);
                 const componentTypes = { 5120: Int8Array, 5121: Uint8Array, 5122: Int16Array, 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array };
                 const TypedArr = componentTypes[acc.componentType] || Float32Array;
                 const numComponents = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 }[acc.type] || 1;
-                return new TypedArr(bin, offset, acc.count * numComponents);
+                return {
+                    data: new TypedArr(bin, offset, acc.count * numComponents),
+                    itemSize: numComponents,
+                    normalized: !!acc.normalized,
+                };
+            };
+            const getAccessorData = (idx) => getAccessorInfo(idx).data;
+            const buildAttribute = (idx) => {
+                const info = getAccessorInfo(idx);
+                return new THREE.BufferAttribute(info.data, info.itemSize, info.normalized);
             };
 
             // Parse meshes
@@ -5757,19 +5791,87 @@
                 (meshDef.primitives || []).forEach(prim => {
                     const geo = new THREE.BufferGeometry();
                     if (prim.attributes.POSITION !== undefined) {
-                        geo.setAttribute('position', new THREE.BufferAttribute(getAccessorData(prim.attributes.POSITION), 3));
+                        geo.setAttribute('position', buildAttribute(prim.attributes.POSITION));
                     }
                     if (prim.attributes.NORMAL !== undefined) {
-                        geo.setAttribute('normal', new THREE.BufferAttribute(getAccessorData(prim.attributes.NORMAL), 3));
+                        geo.setAttribute('normal', buildAttribute(prim.attributes.NORMAL));
+                    }
+                    // Vertex colors: COLOR_0 may be FLOAT VEC3/VEC4 or
+                    // normalized UNSIGNED_BYTE/UNSIGNED_SHORT VEC3/VEC4. The
+                    // BufferAttribute carries the normalized flag through to
+                    // the shader so the values are remapped to 0..1 correctly.
+                    const hasColor = prim.attributes.COLOR_0 !== undefined;
+                    if (hasColor) {
+                        geo.setAttribute('color', buildAttribute(prim.attributes.COLOR_0));
                     }
                     if (prim.indices !== undefined) {
                         geo.setIndex(new THREE.BufferAttribute(getAccessorData(prim.indices), 1));
                     }
                     if (!prim.attributes.NORMAL) geo.computeVertexNormals();
-                    const mat = (prim.material !== undefined && materials[prim.material])
-                        ? materials[prim.material]
-                        : new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.1, roughness: 0.7, side: THREE.DoubleSide });
-                    group.add(new THREE.Mesh(geo, mat));
+
+                    // Morph targets: read primitive.targets and attach as
+                    // geometry.morphAttributes BEFORE constructing the Mesh,
+                    // so the Mesh constructor's updateMorphTargets() picks
+                    // them up and initializes morphTargetInfluences.
+                    let hasMorphTargets = false;
+                    let hasMorphNormals = false;
+                    if (Array.isArray(prim.targets) && prim.targets.length > 0) {
+                        const morphPositions = [];
+                        const morphNormals = [];
+                        prim.targets.forEach(target => {
+                            if (target.POSITION !== undefined) {
+                                morphPositions.push(buildAttribute(target.POSITION));
+                            }
+                            if (target.NORMAL !== undefined) {
+                                morphNormals.push(buildAttribute(target.NORMAL));
+                            }
+                        });
+                        if (morphPositions.length > 0) {
+                            geo.morphAttributes.position = morphPositions;
+                            hasMorphTargets = true;
+                        }
+                        if (morphNormals.length > 0) {
+                            geo.morphAttributes.normal = morphNormals;
+                            hasMorphNormals = true;
+                        }
+                        // Per glTF 2.0 spec, morph target POSITION/NORMAL
+                        // values are RELATIVE deltas added to the base
+                        // attribute scaled by influence. Three.js r128
+                        // defaults morphTargetsRelative to false (treating
+                        // them as absolute positions), which produces wrong
+                        // results for any glTF asset. Set it true here.
+                        geo.morphTargetsRelative = true;
+                    }
+
+                    let mat;
+                    if (prim.material !== undefined && materialFactories[prim.material]) {
+                        mat = materialFactories[prim.material]({
+                            vertexColors: hasColor,
+                            hasMorphTargets,
+                            hasMorphNormals,
+                        });
+                    } else {
+                        mat = new THREE.MeshStandardMaterial({
+                            color: 0xcccccc,
+                            metalness: 0.1,
+                            roughness: 0.7,
+                            side: THREE.DoubleSide,
+                            vertexColors: hasColor,
+                        });
+                        if (hasMorphTargets) mat.morphTargets = true;
+                        if (hasMorphNormals) mat.morphNormals = true;
+                    }
+
+                    const mesh = new THREE.Mesh(geo, mat);
+                    // Mesh constructor calls updateMorphTargets() which sets
+                    // mesh.morphTargetInfluences = [0, 0, ...] if morphAttributes
+                    // is present. Apply any author-supplied weights now.
+                    if (Array.isArray(meshDef.weights) && mesh.morphTargetInfluences) {
+                        for (let i = 0; i < meshDef.weights.length && i < mesh.morphTargetInfluences.length; i++) {
+                            mesh.morphTargetInfluences[i] = meshDef.weights[i];
+                        }
+                    }
+                    group.add(mesh);
                 });
                 return group;
             });
@@ -6873,7 +6975,8 @@
         }
 
         function filterDropdown(query) {
-            const q = query.toLowerCase().trim();
+            const rawQuery = String(query || '').trim();
+            const q = rawQuery.toLowerCase();
             const items = dropdownList.querySelectorAll('.search-dropdown-item');
             let visibleCount = 0;
 
@@ -6888,7 +6991,7 @@
             });
 
             if (visibleCount === 0) {
-                const directPn = q.replace(/[^a-z0-9_-]/gi, '');
+                const directPn = rawQuery.replace(/[^a-z0-9_-]/gi, '');
                 if (directPn) {
                     const loadItem = document.createElement('div');
                     loadItem.className = 'search-dropdown-item';
@@ -19445,7 +19548,24 @@
                 root.userData._morphMesh = morphMesh;
                 scene.add(root);
                 state.threeFeaScene = root;
-                // Fit camera around just the FEA mesh
+
+                // Three.js Geometry.computeBoundingBox() in r128 unions the
+                // morph attribute extents into the bounding box, even at
+                // zero influence. For an FEA stress mesh that means a
+                // miscalibrated or oversized morph delta buffer would cause
+                // the camera to frame the morph extents instead of the
+                // actual base mesh, leaving the rendered geometry tiny or
+                // off-screen. Pre-compute the bounding box from base
+                // positions only and cache it on the geometry so
+                // Box3.setFromObject (used by _fitCameraToGroup) honours it.
+                root.traverse(child => {
+                    if (child.isMesh && child.geometry && child.geometry.attributes.position) {
+                        const baseBox = new THREE.Box3();
+                        baseBox.setFromBufferAttribute(child.geometry.attributes.position);
+                        child.geometry.boundingBox = baseBox;
+                    }
+                });
+
                 if (typeof _fitCameraToGroup === 'function') {
                     _fitCameraToGroup(state.threeCamera, state.threeControls, root);
                 }

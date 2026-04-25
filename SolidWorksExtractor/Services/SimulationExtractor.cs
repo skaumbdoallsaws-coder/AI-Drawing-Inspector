@@ -1785,10 +1785,18 @@ namespace SolidWorksExtractor.Services
                 if (errCode == 0 && stressResult != null)
                 {
                     double[] stressValues = ConvertToDoubleArray(stressResult);
-                    // stressValues[0] = min, stressValues[1] = max
-                    if (stressValues != null && stressValues.Length >= 2)
+                    // Observed COSMOSWorks layout for static studies (length 4):
+                    //   [minNode, minValue, maxNode, maxValue]  (Pa)
+                    // The two value slots are odd-indexed; the even-indexed slots are
+                    // 1-based node IDs and must NOT be treated as values.
+                    if (stressValues != null && stressValues.Length >= 4)
                     {
-                        summary.MaxVonMisesMpa = stressValues[1] / 1e6;  // Pa to MPa
+                        summary.MaxVonMisesMpa = stressValues[3] / 1e6;
+                    }
+                    else if (stressValues != null && stressValues.Length >= 2)
+                    {
+                        // Older 2-slot layout: [min, max]
+                        summary.MaxVonMisesMpa = stressValues[1] / 1e6;
                     }
                 }
                 else
@@ -1817,17 +1825,15 @@ namespace SolidWorksExtractor.Services
                 if (errCode == 0 && dispResult != null)
                 {
                     double[] dispValues = ConvertToDoubleArray(dispResult);
-                    if (dispValues != null && dispValues.Length >= 2)
+                    // Layout matches GetMinMaxStress: [minNode, minValue, maxNode, maxValue]
+                    // for length-4 arrays. Slot [3] is the max value in meters.
+                    if (dispValues != null && dispValues.Length >= 4)
                     {
-                        // The COSMOSWorks GetMinMax* arrays for static analyses can be returned
-                        // as [min, max, ...] OR [count, min, max, ...] depending on study state;
-                        // pick the largest magnitude in the array as a robust max-detector.
-                        double bestMax = 0;
-                        for (int k = 0; k < dispValues.Length; k++)
-                        {
-                            if (Math.Abs(dispValues[k]) > bestMax) bestMax = Math.Abs(dispValues[k]);
-                        }
-                        summary.MaxDisplacementMm = bestMax * 1000.0;  // meters to mm
+                        summary.MaxDisplacementMm = dispValues[3] * 1000.0;
+                    }
+                    else if (dispValues != null && dispValues.Length >= 2)
+                    {
+                        summary.MaxDisplacementMm = dispValues[1] * 1000.0;
                     }
                 }
                 else
@@ -1856,24 +1862,30 @@ namespace SolidWorksExtractor.Services
                 {
                     double[] reactionValues = ConvertToDoubleArray(reactionResult);
                     if (reactionValues == null) reactionValues = new double[0];
-                    // Layout: [Fx, Fy, Fz, Mx, My, Mz, ...]. Read forces if present and
-                    // continue to read moments if the next 3 slots are also present.
-                    if (reactionValues.Length >= 3)
+                    // COSMOSWorks observed layout: per-node array of size 9 * nodeCount
+                    // (~165k entries for 18k nodes), NOT a 6-entry global resultant.
+                    // The first six entries are NOT [Fx, Fy, Fz, Mx, My, Mz] of the
+                    // global reaction. Refuse to populate from this shape and let the
+                    // .OUT solver-text fallback fill in the global resultant instead.
+                    if (reactionValues.Length > 0 && reactionValues.Length <= 12)
                     {
-                        summary.ReactionFx = Math.Round(reactionValues[0], 2);
-                        summary.ReactionFy = Math.Round(reactionValues[1], 2);
-                        summary.ReactionFz = Math.Round(reactionValues[2], 2);
+                        if (reactionValues.Length >= 3)
+                        {
+                            summary.ReactionFx = Math.Round(reactionValues[0], 2);
+                            summary.ReactionFy = Math.Round(reactionValues[1], 2);
+                            summary.ReactionFz = Math.Round(reactionValues[2], 2);
+                        }
+                        if (reactionValues.Length >= 6)
+                        {
+                            summary.ReactionMx = Math.Round(reactionValues[3], 6);
+                            summary.ReactionMy = Math.Round(reactionValues[4], 6);
+                            summary.ReactionMz = Math.Round(reactionValues[5], 6);
+                            summary.HasReactionMoments = true;
+                        }
                     }
-                    if (reactionValues.Length >= 6)
+                    else if (reactionValues.Length > 12)
                     {
-                        summary.ReactionMx = Math.Round(reactionValues[3], 6);
-                        summary.ReactionMy = Math.Round(reactionValues[4], 6);
-                        summary.ReactionMz = Math.Round(reactionValues[5], 6);
-                        summary.HasReactionMoments = true;
-                    }
-                    else
-                    {
-                        Warn(summary, $"Reaction array length {reactionValues.Length} < 6; moments left at zero.");
+                        Warn(summary, $"GetReactionForcesAndMoments returned per-node array (length={reactionValues.Length}); deferring to .OUT fallback for global resultant.");
                     }
                 }
             }
@@ -2088,66 +2100,114 @@ namespace SolidWorksExtractor.Services
                     try
                     {
                         int loaded = 0;
-                        int failed = 0;
-                        int firstErr = 0;
-                        string firstErrText = null;
-                        bool diagPrinted = false;
 
-                        for (int i = 0; i < surfVertCount; i++)
+                        // First try GetStressForEntities2 with null entities ("all") and
+                        // BValueByNode=true. If supported, we get every nodal stress in one
+                        // bulk COM call instead of N round-trips.
+                        try
                         {
-                            int nid = surfaceNodes[i];
-                            try
+                            int bulkErr = 0;
+                            object bulkStress = results.GetStressForEntities2(
+                                true,                                                       // BValueByNode
+                                (int)swsStressComponent_e.swsStressComponentVON,            // VON
+                                0,                                                          // step
+                                null,                                                       // DispPlane
+                                null,                                                       // ArraySelectedEntities -> "all"
+                                0,                                                          // units: Pa
+                                out bulkErr);
+                            LogConnectivityArrayDiagnostics("GetStressForEntities2(all,VON,byNode)", bulkStress, bulkErr);
+                            if (bulkErr == 0 && bulkStress != null)
                             {
-                                int sErr = 0;
-                                object nodalStress = results.GetStressComponentForAllStepsAtNode(
-                                    (int)swsStressComponent_e.swsStressComponentVON,
-                                    nid,
-                                    null,
-                                    0, // units: 0 = N/m^2 (Pa)
-                                    out sErr);
-
-                                if (!diagPrinted)
+                                double[] perEntity = ConvertToDoubleArray(bulkStress);
+                                if (perEntity != null && perEntity.Length >= 2)
                                 {
-                                    diagPrinted = true;
-                                    LogConnectivityArrayDiagnostics(
-                                        $"GetStressComponentForAllStepsAtNode(node={nid})",
-                                        nodalStress, sErr);
-                                }
-
-                                if (sErr == 0 && nodalStress != null)
-                                {
-                                    double[] perStep = ConvertToDoubleArray(nodalStress);
-                                    if (perStep != null && perStep.Length > 0)
+                                    // Common COSMOSWorks layout for per-node stress is
+                                    // [nodeId, value, nodeId, value, ...]. Build a map.
+                                    var nodeVon = new Dictionary<int, double>();
+                                    for (int k = 0; k + 1 < perEntity.Length; k += 2)
                                     {
-                                        double von = perStep[perStep.Length - 1];
-                                        stressValues[i] = von;
-                                        if (Math.Abs(von) > maxStress)
-                                        {
-                                            maxStress = Math.Abs(von);
-                                            peakIdx = i;
-                                        }
-                                        loaded++;
+                                        int nid = (int)Math.Round(perEntity[k]);
+                                        if (nid > 0) nodeVon[nid] = perEntity[k + 1];
                                     }
-                                    else { failed++; if (firstErr == 0) firstErr = -1001; }
+                                    for (int i = 0; i < surfVertCount; i++)
+                                    {
+                                        int nid = surfaceNodes[i];
+                                        double v;
+                                        if (nodeVon.TryGetValue(nid, out v))
+                                        {
+                                            stressValues[i] = v;
+                                            if (Math.Abs(v) > maxStress) { maxStress = Math.Abs(v); peakIdx = i; }
+                                            loaded++;
+                                        }
+                                    }
+                                    Console.WriteLine($"    FEA: Nodal stress (bulk): loaded={loaded:N0}/{surfVertCount:N0}");
                                 }
-                                else
-                                {
-                                    failed++;
-                                    if (firstErr == 0) firstErr = sErr;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                failed++;
-                                if (firstErrText == null) firstErrText = ex.Message;
                             }
                         }
-                        Console.WriteLine($"    FEA: Nodal stress: loaded={loaded:N0}/{surfVertCount:N0}, failed={failed}, firstErrCode={firstErr}, firstErrText={firstErrText ?? "(none)"}");
+                        catch (Exception bulkEx)
+                        {
+                            Console.WriteLine($"    FEA: GetStressForEntities2 bulk attempt threw: {bulkEx.Message}");
+                        }
 
-                        // Fallback: if the per-node API returned no usable values, query
-                        // per-element stress on the 3-node surface tri shells and distribute
-                        // to the triangle's 3 vertices. The connectivity entries are the
-                        // shell elements; element numbers are 1-based.
+                        // Per-node fallback (slower) only if bulk returned nothing usable.
+                        if (loaded == 0)
+                        {
+                            int failed = 0;
+                            int firstErr = 0;
+                            string firstErrText = null;
+                            bool diagPrinted = false;
+
+                            for (int i = 0; i < surfVertCount; i++)
+                            {
+                                int nid = surfaceNodes[i];
+                                try
+                                {
+                                    int sErr = 0;
+                                    object nodalStress = results.GetStressComponentForAllStepsAtNode(
+                                        (int)swsStressComponent_e.swsStressComponentVON,
+                                        nid,
+                                        null,
+                                        0,
+                                        out sErr);
+
+                                    if (!diagPrinted)
+                                    {
+                                        diagPrinted = true;
+                                        LogConnectivityArrayDiagnostics(
+                                            $"GetStressComponentForAllStepsAtNode(node={nid})",
+                                            nodalStress, sErr);
+                                    }
+
+                                    if (sErr == 0 && nodalStress != null)
+                                    {
+                                        double[] perStep = ConvertToDoubleArray(nodalStress);
+                                        if (perStep != null && perStep.Length > 0)
+                                        {
+                                            double von = perStep[perStep.Length - 1];
+                                            stressValues[i] = von;
+                                            if (Math.Abs(von) > maxStress) { maxStress = Math.Abs(von); peakIdx = i; }
+                                            loaded++;
+                                        }
+                                        else { failed++; if (firstErr == 0) firstErr = -1001; }
+                                    }
+                                    else
+                                    {
+                                        failed++;
+                                        if (firstErr == 0) firstErr = sErr;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    failed++;
+                                    if (firstErrText == null) firstErrText = ex.Message;
+                                }
+                            }
+                            Console.WriteLine($"    FEA: Nodal stress (per-node): loaded={loaded:N0}/{surfVertCount:N0}, failed={failed}, firstErrCode={firstErr}, firstErrText={firstErrText ?? "(none)"}");
+                        }
+
+                        // Final fallback: query per-element shell stress over the surface
+                        // tri shells and distribute to the triangle's 3 vertices. Element
+                        // numbers are 1-based and align with connectivity entry index.
                         if (loaded == 0 && allConnectivity != null && surfaceFaces.Count > 0)
                         {
                             Console.WriteLine("    FEA: Per-node stress empty — falling back to per-element shell stress.");
@@ -2285,10 +2345,9 @@ namespace SolidWorksExtractor.Services
                                 }
                                 if (bestNid > 0) summary.MaxDisplacementNode = bestNid;
 
-                                // The bulk read is the authoritative URES source — use it
-                                // to populate MaxDisplacementMm if GetMinMaxDisplacement
-                                // reported a clearly-bogus value (e.g. 1e-30, the API
-                                // sometimes returns metadata in slot[1] instead of max).
+                                // Cross-check: if GetMinMaxDisplacement returned an
+                                // implausibly small value but the bulk read found real
+                                // deflection, prefer the bulk-read magnitude.
                                 double bestMagMm = bestMag * 1000.0;
                                 if (bestMagMm > summary.MaxDisplacementMm)
                                     summary.MaxDisplacementMm = bestMagMm;

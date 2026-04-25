@@ -16429,11 +16429,13 @@
                 container.style.cssText = 'flex:1;position:relative;background:var(--bg-main);min-height:0;';
                 wrapper.appendChild(container);
 
-                if (state.threeLoadedPart === state.partNumber && state.threeStlAvailable === false) {
-                    _show3DPlaceholder(container, 'No 3D model available for ' + state.partNumber);
-                } else {
-                    _init3DScene(container);
-                }
+                // Always initialize the scene shell so the toolbar mounts and
+                // the FEA probe can decide whether to expose the Simulation
+                // toggle. A part with no geometry but valid FEA artifacts
+                // (e.g. Mounting Plate) needs the shell alive; the no-geometry
+                // notice is rendered as a non-destructive overlay inside the
+                // shell when the geometry load actually fails.
+                _init3DScene(container);
             }
 
             viewportContent.appendChild(wrapper);
@@ -18689,6 +18691,11 @@
                     controls.target.copy(state.threeCameraState.target);
                     _syncOrbitFromCamera(controls, camera);
                 }
+            } else if (state.threeLoadedPart === state.partNumber && state.threeStlAvailable === false) {
+                // Cached "no geometry" — render the notice directly without
+                // re-fetching. The toolbar above is still mounted; the FEA
+                // probe will fire below and may surface a Simulation toggle.
+                _showNoGeometryNotice(container, state.partNumber);
             } else {
                 // Show loading indicator
                 const loadingDiv = document.createElement('div');
@@ -18855,11 +18862,11 @@
                     state.threeLoadedPart = pn;
                     state.threeStlAvailable = false;
                     state.threePartGlbAvailable = false;
-                    _show3DPlaceholder(container, 'No 3D model available for ' + pn);
-                    if (state.threeAnimationId) {
-                        cancelAnimationFrame(state.threeAnimationId);
-                        state.threeAnimationId = null;
-                    }
+                    // Non-destructive notice: keep the renderer/scene/toolbar
+                    // alive so the FEA probe can still expose the Simulation
+                    // toggle for parts with FEA-only artifacts (e.g. Mounting
+                    // Plate). The notice text adapts to whether FEA exists.
+                    _showNoGeometryNotice(container, pn);
                 }
                 );
             }
@@ -19314,6 +19321,10 @@
             toggle.style.display = state.threeFeaAvailable === true ? 'flex' : 'none';
             // Refresh / redraw the FEA panel if it's currently visible
             if (state.threeFeaActive) _renderFeaInfoPanel();
+            // Refresh the no-geometry notice's helper text now that the probe
+            // has settled — it can flip from "no 3D data" to "Simulation is
+            // still available" once we know FEA exists.
+            _refreshNoGeometryNoticeText(state.partNumber);
         }
 
         // Switch between Geometry mode (existing GLB/STL) and Simulation mode
@@ -19328,6 +19339,10 @@
                 if (state.featureHighlightActive && typeof clearFeatureHighlights === 'function') {
                     clearFeatureHighlights();
                 }
+                // Hide the no-geometry notice while Simulation is active so
+                // the FEA mesh isn't obscured. The notice reappears when the
+                // user toggles back to Geometry if no mesh is present.
+                _hideNoGeometryNotice();
                 try {
                     await _ensureFeaMeshLoaded();
                 } catch {
@@ -19335,6 +19350,11 @@
                     // restored geometry visibility, and rendered an error panel.
                     // Swallow here so the click handler can still redraw the
                     // toolbar buttons via _refreshActive afterward.
+                    // Re-show the no-geometry notice if appropriate so the user
+                    // sees a coherent Geometry-mode UI after the failure.
+                    if (_hasNoGeometryForCurrentPart()) {
+                        _showNoGeometryNotice(document.getElementById('three-container'), state.partNumber);
+                    }
                     return;
                 }
                 _setFeaVisible(true);
@@ -19343,6 +19363,10 @@
                 _setFeaVisible(false);
                 _setGeometryVisible(true);
                 _removeFeaInfoPanel();
+                // Geometry has nothing to show? Surface the notice again.
+                if (_hasNoGeometryForCurrentPart()) {
+                    _showNoGeometryNotice(document.getElementById('three-container'), state.partNumber);
+                }
             }
         }
 
@@ -19452,6 +19476,70 @@
             const morphMesh = root.userData._morphMesh;
             if (!morphMesh || !morphMesh.morphTargetInfluences) return;
             morphMesh.morphTargetInfluences[0] = value;
+        }
+
+        // ---- No-geometry overlay notice ----
+        // Non-destructive replacement for _show3DPlaceholder() in the FEA-aware
+        // path. Lives as an absolutely-positioned div inside the existing
+        // three-container so the renderer/scene/camera/controls/toolbar stay
+        // mounted underneath. Geometry mode shows it when no mesh is present;
+        // Simulation mode hides it via _hideNoGeometryNotice().
+        function _showNoGeometryNotice(container, partNumber) {
+            // Remove any prior notice so multiple calls don't stack
+            _hideNoGeometryNotice(container);
+            const notice = document.createElement('div');
+            notice.className = 'three-no-geometry-notice';
+            notice.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--text-secondary);font-size:14px;line-height:1.5;pointer-events:none;padding:20px;z-index:2;';
+            const inner = document.createElement('div');
+            inner.style.cssText = 'max-width:420px;background:rgba(20,22,30,0.85);border:1px solid var(--border);border-radius:6px;padding:18px 22px;pointer-events:auto;';
+            inner.appendChild(_buildNoGeometryNoticeContent(partNumber));
+            notice.appendChild(inner);
+            container.appendChild(notice);
+        }
+
+        function _buildNoGeometryNoticeContent(partNumber) {
+            const wrap = document.createElement('div');
+            const main = document.createElement('div');
+            main.style.cssText = 'color:var(--text-primary);font-weight:600;margin-bottom:6px;';
+            main.textContent = 'No geometry model available for ' + (partNumber || 'this part');
+            wrap.appendChild(main);
+            const sub = document.createElement('div');
+            sub.style.cssText = 'font-size:12px;color:var(--text-secondary);';
+            // Adapt the sub-text to whether the FEA probe has surfaced artifacts.
+            // _syncFeaToolbarVisibility() refreshes this when the probe completes.
+            sub.textContent = state.threeFeaAvailable === true
+                ? 'Simulation is still available — switch via the toolbar above.'
+                : 'No 3D data has been published for this part yet.';
+            wrap.appendChild(sub);
+            return wrap;
+        }
+
+        // Refresh the notice's body text in place (used after the FEA probe
+        // returns so the message can flip from "no 3D data" to "Simulation
+        // is still available"). No-op if the notice isn't currently mounted.
+        function _refreshNoGeometryNoticeText(partNumber) {
+            const container = document.getElementById('three-container');
+            if (!container) return;
+            const notice = container.querySelector('.three-no-geometry-notice');
+            if (!notice) return;
+            const inner = notice.firstChild;
+            if (!inner) return;
+            inner.innerHTML = '';
+            inner.appendChild(_buildNoGeometryNoticeContent(partNumber || state.partNumber));
+        }
+
+        function _hideNoGeometryNotice(container) {
+            const root = container || document.getElementById('three-container');
+            if (!root) return;
+            root.querySelectorAll('.three-no-geometry-notice').forEach(el => el.remove());
+        }
+
+        // True when this part has been confirmed to have no geometry mesh
+        // loaded into the scene (so Geometry mode should surface the notice).
+        function _hasNoGeometryForCurrentPart() {
+            return state.threeLoadedPart === state.partNumber
+                && state.threeStlAvailable === false
+                && state.threePartGlbAvailable === false;
         }
 
         // ---- FEA info panel (Stage 4 + 5) ----

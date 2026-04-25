@@ -52,7 +52,13 @@ param(
     # Allow overwriting an existing canonical staging directory for the same
     # (part, study). Without this, the script refuses to clobber prior artifacts
     # so accidental re-runs cannot quietly destroy provenance.
-    [switch]$Force
+    [switch]$Force,
+
+    # If the picked study's mesh is "ExistsAndNotCurrent" (the part has been
+    # modified since the mesh was generated), let the extractor call
+    # study.MeshAndRun() to re-mesh and re-solve before extraction. Off by
+    # default because re-meshing modifies the document's saved analysis state.
+    [switch]$AllowRemesh
 )
 
 $ErrorActionPreference = "Stop"
@@ -314,6 +320,10 @@ if (-not [string]::IsNullOrWhiteSpace($StudyName)) {
     $extractorArgs.Add(([int]$StudyIndex).ToString())
 }
 # If -AllowImplicit, no selection flag -- extractor falls through to legacy path.
+
+if ($AllowRemesh) {
+    $extractorArgs.Add("--fea-allow-remesh")
+}
 
 # The extractor places FEA outputs in the same directory as its --output JSON.
 # Point that JSON at the temp staging dir so all 4 FEA files land there together.

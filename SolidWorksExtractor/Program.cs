@@ -39,6 +39,8 @@ namespace SolidWorksExtractor
     ///   --fea-preflight     Print FEA environment + study list (no extraction) and exit
     ///   --fea-study-name <name>   Force FEA extraction to use this study (case-insensitive)
     ///   --fea-study-index <n>     Force FEA extraction to use the study at 0-based index n
+    ///   --fea-allow-remesh        If the picked study's mesh is stale, re-mesh + re-solve
+    ///                             via study.MeshAndRun() before extraction (modifies analysis state)
     /// </summary>
     class Program
     {
@@ -215,6 +217,10 @@ namespace SolidWorksExtractor
                     options.FeaStudyIndex = idx;
                     options.ExportFea = true; // explicit selection implies extraction is wanted
                 }
+                else if (arg == "--fea-allow-remesh")
+                {
+                    options.AllowRemesh = true;
+                }
                 else if (!arg.StartsWith("-") && inputFile == null)
                 {
                     inputFile = args[i];
@@ -230,7 +236,7 @@ namespace SolidWorksExtractor
             // Preflight and list-studies are inspect-only single-document modes; they do not
             // make sense when scanning an entire folder, so the combination is a hard error
             // rather than a silent ignore. (Per-document preflight inside batch is out of scope
-            // for the FEA worker flow — see FEA_WORKER_README.md.)
+            // for the FEA worker flow ï¿½ see FEA_WORKER_README.md.)
             if ((feaPreflight || feaListStudies) && !string.IsNullOrEmpty(batchPartsFolder))
             {
                 Console.WriteLine("ERROR: --fea-preflight / --fea-list-studies cannot be combined with --batch-parts.");
@@ -308,7 +314,7 @@ namespace SolidWorksExtractor
                 {
                     int docType = doc.GetType();
                 // FEA preflight / list-studies short-circuit. These are inspect-only
-                // modes — no extraction, no JSON written, no batch mode side-effects.
+                // modes ï¿½ no extraction, no JSON written, no batch mode side-effects.
                 if (feaPreflight || feaListStudies)
                 {
                     var simInspect = new SimulationExtractor();
@@ -324,7 +330,7 @@ namespace SolidWorksExtractor
                         Console.WriteLine($"Studies ({studies.Count}):");
                         if (studies.Count == 0)
                         {
-                            Console.WriteLine("  (no studies — Simulation add-in not loaded, or document has none)");
+                            Console.WriteLine("  (no studies ï¿½ Simulation add-in not loaded, or document has none)");
                         }
                         else
                         {
@@ -408,7 +414,7 @@ namespace SolidWorksExtractor
                                 feaPartNumber = GetDeterministicPartNumber(partData, Path.GetFileName(doc.GetPathName()));
                             string feaGlbPath = simExtractor.ExtractSimulation(
                                 connection.Application, doc, feaOutputDir, feaPartNumber,
-                                options.FeaStudyName, options.FeaStudyIndex);
+                                options.FeaStudyName, options.FeaStudyIndex, options.AllowRemesh);
                             if (feaGlbPath != null)
                             {
                                 Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
@@ -1181,7 +1187,7 @@ namespace SolidWorksExtractor
                                 var simExtractor = new SimulationExtractor();
                                 string feaGlbPath = simExtractor.ExtractSimulation(
                                     connection.Application, doc, outputFolder, partNumber,
-                                    options.FeaStudyName, options.FeaStudyIndex);
+                                    options.FeaStudyName, options.FeaStudyIndex, options.AllowRemesh);
                                 if (feaGlbPath != null)
                                     Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
                                 else
@@ -1400,6 +1406,8 @@ namespace SolidWorksExtractor
             Console.WriteLine("  --fea-preflight        Print FEA environment + study list and exit");
             Console.WriteLine("  --fea-study-name <s>   Force FEA extraction to use the named study (case-insensitive)");
             Console.WriteLine("  --fea-study-index <n>  Force FEA extraction to use the study at 0-based index n");
+            Console.WriteLine("  --fea-allow-remesh     If the picked study's mesh is stale, re-mesh + re-solve");
+            Console.WriteLine("                         via study.MeshAndRun() before extraction (modifies analysis state)");
             Console.WriteLine();
             Console.WriteLine("  FAST - Extracts features and properties only. Skips:");
             Console.WriteLine("         - Geometry ground truth analysis (cylinder/slot detection)");

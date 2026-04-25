@@ -394,7 +394,13 @@ namespace SolidWorksExtractor.Services
         /// </summary>
         public string ExtractSimulation(ISldWorks swApp, IModelDoc2 modelDoc, string outputFolder, string partNumber)
         {
-            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, null, -1);
+            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, null, -1, false);
+        }
+
+        public string ExtractSimulation(ISldWorks swApp, IModelDoc2 modelDoc, string outputFolder, string partNumber,
+            string studyName, int studyIndex)
+        {
+            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, studyName, studyIndex, false);
         }
 
         /// <summary>
@@ -410,9 +416,13 @@ namespace SolidWorksExtractor.Services
         /// <param name="partNumber">Part number for output filenames</param>
         /// <param name="studyName">Optional study name to force selection</param>
         /// <param name="studyIndex">Optional 0-based study index to force selection (-1 = unset)</param>
+        /// <param name="allowRemesh">If the picked study's mesh is stale (ExistsAndNotCurrent),
+        /// call study.MeshAndRun() to re-mesh + re-solve before extraction. Default false —
+        /// stale mesh refuses with a clear "re-mesh required" message instead of silently
+        /// modifying analysis state.</param>
         /// <returns>Path to the GLB file, or null on failure</returns>
         public string ExtractSimulation(ISldWorks swApp, IModelDoc2 modelDoc, string outputFolder, string partNumber,
-            string studyName, int studyIndex)
+            string studyName, int studyIndex, bool allowRemesh)
         {
             if (swApp == null || modelDoc == null)
             {
@@ -489,6 +499,58 @@ namespace SolidWorksExtractor.Services
                 // GetConnectivity / GetMinMaxStress / GetMinMaxDisplacement calls don't
                 // hit swsResultsErrorDatabaseNotAvailable (errCode=1).
                 EnsureResultsLoaded(study);
+
+                // Mesh-state gate. If the part has been modified since the mesh was
+                // generated, MeshState=2 (ExistsAndNotCurrent) and the entire result DB
+                // refuses to load — every connectivity/result query returns DBNull or
+                // errCode=1. Refuse fast with an actionable message unless the caller
+                // opted in to API-driven re-mesh.
+                int meshStatePre = -1;
+                try
+                {
+                    ICWMesh probeMesh = (ICWMesh)study.Mesh;
+                    if (probeMesh != null)
+                    {
+                        try { meshStatePre = ((dynamic)probeMesh).MeshState; } catch { }
+                        SafeReleaseCom(probeMesh);
+                    }
+                }
+                catch { /* probed below */ }
+
+                if (meshStatePre != 1)
+                {
+                    string meshStateLabel = MeshStateLabel(meshStatePre);
+                    if (allowRemesh)
+                    {
+                        Console.WriteLine($"    FEA: Mesh state is '{meshStateLabel}' (need 'ExistsAndCurrent'); --fea-allow-remesh set, calling study.MeshAndRun() to re-mesh and re-solve...");
+                        try
+                        {
+                            study.MeshAndRun();
+                            Console.WriteLine("    FEA: study.MeshAndRun() returned");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"    FEA Error: study.MeshAndRun() threw: {ex.Message}");
+                            return null;
+                        }
+                        // Re-prime results after the new solve
+                        EnsureResultsLoaded(study);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"    FEA Error: Mesh is '{meshStateLabel}' (state={meshStatePre}); the result database refuses to load against stale geometry.");
+                        Console.WriteLine("               To produce a solver-backed FEA package, either:");
+                        Console.WriteLine("                 1) In SolidWorks, right-click 'Mesh' under the study → 'Create Mesh',");
+                        Console.WriteLine("                    then right-click the study → 'Run This Study'. Save the part. Rerun extraction.");
+                        Console.WriteLine("                 2) Re-run with --fea-allow-remesh to have the extractor call");
+                        Console.WriteLine("                    study.MeshAndRun() automatically (this modifies saved analysis state).");
+                        return null;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("    FEA: Mesh state is 'ExistsAndCurrent' — proceeding");
+                }
 
                 // Extract study metadata
                 var summary = ExtractStudyMetadata(study, selectedStudyName);
@@ -720,6 +782,22 @@ namespace SolidWorksExtractor.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"    FEA Warning: Could not set ActiveStudy={studyIndex}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Human-readable label for swsMeshState_e values.
+        /// </summary>
+        private static string MeshStateLabel(int state)
+        {
+            switch (state)
+            {
+                case 0: return "NoMesh";
+                case 1: return "ExistsAndCurrent";
+                case 2: return "ExistsAndNotCurrent";
+                case 3: return "Failed";
+                case 4: return "Interrupted";
+                default: return $"unknown({state})";
             }
         }
 

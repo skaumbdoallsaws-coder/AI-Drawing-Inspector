@@ -65,6 +65,14 @@ namespace SolidWorksExtractor.Models
         /// </summary>
         public int FeaStudyIndex { get; set; } = -1;
 
+        /// <summary>
+        /// When the picked study's mesh is "ExistsAndNotCurrent" (the part has been modified
+        /// since the mesh was generated), opt-in to call study.MeshAndRun() so the extractor
+        /// re-meshes and re-solves before extraction. Default off — by default we refuse and
+        /// tell the user to re-mesh in the UI, since re-meshing modifies analysis state.
+        /// </summary>
+        public bool AllowRemesh { get; set; } = false;
+
         /// <summary>Cache key for this extraction (file path + config)</summary>
         public string CacheKey { get; set; }
 

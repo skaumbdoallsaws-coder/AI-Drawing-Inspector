@@ -384,9 +384,28 @@ app.add_middleware(
 
 @app.get("/api/profiles")
 async def list_profiles():
-    """Return list of all available inspection profiles."""
+    """Return list of all available inspection profiles, plus any app-local
+    FEA demo parts (see LOCAL_FEA_DEMO_PARTS) so they appear in the normal
+    part-selection dropdown alongside production parts."""
     try:
-        profiles = inspector.list_profiles()
+        profiles = list(inspector.list_profiles())
+        # Append demo parts. Skip any that collide with an existing production
+        # part_number so we never silently shadow real parts.
+        existing_pns = {p.get("part_number") for p in profiles}
+        for entry in LOCAL_FEA_DEMO_PARTS.values():
+            pn = entry["part_number"]
+            if pn in existing_pns:
+                logger.warning(
+                    "Demo part '%s' collides with existing profile; skipping append.", pn
+                )
+                continue
+            profiles.append({
+                "part_number": pn,
+                "part_name": entry["part_name"],
+                "feature_count": 0,
+                "has_views": False,
+                "is_demo_fea": True,
+            })
         return profiles
     except FileNotFoundError as e:
         logger.error(f"Library directory not found: {e}")
@@ -684,6 +703,22 @@ async def get_profile_details(part_number: str):
     Includes feature names, types, expected counts, and spatial descriptions.
     Used by the Agent to provide pre-inspection context about a part.
     """
+    # Synthetic profile for app-local FEA demo parts -- these have no JSON in
+    # 400S_Sorted_Library/ by design. Returning 200 here is what lets the
+    # frontend treat the demo part as a normal selectable part.
+    demo_entry = _demo_fea_entry(part_number)
+    if demo_entry is not None:
+        return {
+            "part_number": demo_entry["part_number"],
+            "part_name": demo_entry["part_name"],
+            "part_description": demo_entry["part_description"],
+            "features": [],
+            "view_expectations": {},
+            "source": "local_fea_demo",
+            "geometry_available": bool(demo_entry.get("has_geometry", False)),
+            "fea_available": True,
+        }
+
     # Sanitize part_number to prevent path traversal
     safe_pn = re.sub(r'[^\w\-]', '', part_number)
     if not safe_pn:
@@ -1112,6 +1147,48 @@ def _make_fea_slug(name: str) -> str:
     return s or "study_unknown"
 
 
+# ----- App-local FEA demo-part registry -----
+#
+# Some FEA artifact packages were produced under a working part identity
+# (currently "Mounting Plate") that is not a production part number in
+# 400S_Sorted_Library. Rather than hide that package behind a private name or
+# alias it to an unrelated production part, we expose it through the normal
+# app flow under a distinct, explicit demo identity.
+#
+# The mapping is one-way and shallow:
+#   app-facing part_number  --(registry lookup)-->  artifact_part_slug
+# The artifact files are never renamed; only the lookup hop changes.
+#
+# Add new entries only when there is a real artifact package on disk that
+# does not have a corresponding production part. Keep keys distinct, explicit,
+# and stable so a demo identity can never be confused with a production part.
+LOCAL_FEA_DEMO_PARTS: Dict[str, Dict[str, Any]] = {
+    "FEA-MP-001": {
+        "part_number": "FEA-MP-001",
+        "part_name": "Mounting Plate (FEA demo)",
+        "part_description": (
+            "Self-contained FEA demo part. Uses the worker-extracted Mounting "
+            "Plate static-study artifacts from incoming_fea/mounting_plate/static_1/. "
+            "No geometry GLB exists for this part by design — it is an FEA-only "
+            "demo to exercise the Simulation viewer end-to-end."
+        ),
+        "artifact_part_number": "Mounting Plate",
+        "artifact_part_slug": "mounting_plate",
+        "default_study_slug": "static_1",
+        "has_geometry": False,
+        "is_demo_fea": True,
+    },
+}
+
+
+def _is_demo_fea_part(part_number: str) -> bool:
+    return part_number in LOCAL_FEA_DEMO_PARTS
+
+
+def _demo_fea_entry(part_number: str) -> Optional[Dict[str, Any]]:
+    return LOCAL_FEA_DEMO_PARTS.get(part_number)
+
+
 # Lightweight container for resolved FEA artifact paths.
 class _FeaResolution:
     def __init__(self, part_slug: str, study_slug: str, study_dir: Path,
@@ -1161,6 +1238,9 @@ def _list_fea_studies(part_slug: str) -> List[Dict[str, Any]]:
 def _resolve_fea_artifacts(part_number: str, study_slug: Optional[str]) -> _FeaResolution:
     """Resolve the canonical artifacts for (part_number, optional study_slug).
 
+    Demo parts in LOCAL_FEA_DEMO_PARTS are translated through the registry to
+    the artifact identity on disk; the rest are slugged directly.
+
     Raises HTTPException with:
       404 - no incoming_fea directory or no study sub-directories for this part
       409 - multiple studies exist and the caller did not pin one with ?study=
@@ -1169,9 +1249,19 @@ def _resolve_fea_artifacts(part_number: str, study_slug: Optional[str]) -> _FeaR
     """
     if not part_number or not part_number.strip():
         raise HTTPException(status_code=400, detail="Invalid part number")
-    part_slug = _make_fea_slug(part_number)
-    if not part_slug or part_slug == "study_unknown":
-        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    # Demo parts: translate the app-facing identity to the on-disk artifact slug
+    # before any filesystem lookup. Default study slug from the registry is
+    # only applied when the caller did not pin a study explicitly.
+    demo_entry = _demo_fea_entry(part_number)
+    if demo_entry is not None:
+        part_slug = demo_entry["artifact_part_slug"]
+        if not study_slug and demo_entry.get("default_study_slug"):
+            study_slug = demo_entry["default_study_slug"]
+    else:
+        part_slug = _make_fea_slug(part_number)
+        if not part_slug or part_slug == "study_unknown":
+            raise HTTPException(status_code=400, detail="Invalid part number")
 
     part_dir = REPO_ROOT / "incoming_fea" / part_slug
     if not part_dir.exists() or not part_dir.is_dir():
@@ -1269,8 +1359,10 @@ async def get_part_fea(part_number: str, study: Optional[str] = Query(None)):
     # Surface the available studies so the frontend can render a switcher
     # without re-fetching when the user wants to compare runs.
     available_studies = _list_fea_studies(resolution.part_slug)
-    results["_resolved"] = {
+    demo_entry = _demo_fea_entry(part_number)
+    resolved: Dict[str, Any] = {
         "part_number": part_number,
+        "requested_part_number": part_number,
         "part_slug": resolution.part_slug,
         "study_slug": resolution.study_slug,
         "study_name": (resolution.manifest.get("study") or {}).get("name"),
@@ -1280,6 +1372,13 @@ async def get_part_fea(part_number: str, study: Optional[str] = Query(None)):
         "manifest_url": f"/api/part-fea-manifest/{part_number}?study={resolution.study_slug}",
         "model_url": f"/api/part-fea-model/{part_number}?study={resolution.study_slug}",
     }
+    # Be transparent about demo aliasing so the UI can label the run honestly
+    # and the agent context can carry both identities.
+    if demo_entry is not None:
+        resolved["is_demo_fea"] = True
+        resolved["artifact_part_number"] = demo_entry["artifact_part_number"]
+        resolved["artifact_part_slug"] = demo_entry["artifact_part_slug"]
+    results["_resolved"] = resolved
     return results
 
 

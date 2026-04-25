@@ -7124,7 +7124,12 @@
                         part_number: pn,
                         part_name: details.part_name || '',
                         feature_count: Array.isArray(details.features) ? details.features.length : 0,
-                        has_views: false
+                        has_views: false,
+                        // Preserve the demo-FEA marker so the badge renders
+                        // even when the part was discovered via the fallback
+                        // /api/profile-details path rather than the cached
+                        // /api/profiles list.
+                        is_demo_fea: details.source === "local_fea_demo",
                     };
                     state.profiles.push(profile);
                     state.profiles.sort((a, b) => String(a.part_number).localeCompare(String(b.part_number)));
@@ -7142,11 +7147,19 @@
             state.featureCount = profile.feature_count;
             state.autoDetected = isAuto;
 
-            // Update part info display
+            // Update part info display. Demo FEA parts get a subtle DEMO FEA
+            // badge so the operator can tell at a glance that this is an
+            // app-local demo part backed by a worker artifact package, not a
+            // production part with a full inspection profile.
+            const isDemoFea = !!profile.is_demo_fea;
+            const autoBadge = isAuto ? '<span class="auto-badge">AUTO</span>' : '';
+            const demoBadge = isDemoFea
+                ? '<span class="auto-badge" style="background:#445;border-color:#667;color:#cce;">DEMO FEA</span>'
+                : '';
             partInfo.innerHTML = `
                 <div class="part-info-row">
                     <span class="part-info-label">Part #</span>
-                    <span>${pn} ${isAuto ? '<span class="auto-badge">AUTO</span>' : ''}</span>
+                    <span>${pn} ${autoBadge} ${demoBadge}</span>
                 </div>
                 <div class="part-info-row">
                     <span class="part-info-label">Name</span>

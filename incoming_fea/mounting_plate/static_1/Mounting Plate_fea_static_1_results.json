@@ -1,0 +1,87 @@
+﻿{
+  "schema_version": "2",
+  "study_name": "Static 1",
+  "study_type": "static",
+  "units": "SI",
+  "summary": {
+    "surface_node_count": 1704,
+    "element_count": 11466,
+    "max_von_mises_mpa": 799.98,
+    "max_displacement_mm": 0.123501,
+    "max_stress_location": [0, 0, 0],
+    "reaction_forces": { "fx": -150000, "fy": 0, "fz": 0 },
+    "material": "Alloy Steel",
+    "yield_strength_mpa": 620.422,
+    "safety_factor": 0.78
+  },
+  "has_morph_target": false,
+  "study": {
+    "name": "Static 1",
+    "type": "static",
+    "configuration_name": "Default"
+  },
+  "units_detail": {
+    "system": "SI (MKS)",
+    "length_mm": "mm",
+    "stress_mpa": "N/mm^2 (MPa)",
+    "force_n": "N",
+    "moment_nm": "N.m"
+  },
+  "material": {
+    "name": "Alloy Steel",
+    "model_type": null,
+    "yield_strength_mpa": 620.422,
+    "tensile_strength_mpa": 723.826,
+    "elastic_modulus_mpa": 210000,
+    "poissons_ratio": 0.28,
+    "mass_density_kg_per_m3": 7700,
+    "shear_modulus_mpa": 79000,
+    "thermal_expansion_per_kelvin": 1.3E-05
+  },
+  "mesh": {
+    "type": "Solid Mesh",
+    "mesher": null,
+    "node_count": 18410,
+    "surface_node_count": 1704,
+    "element_count": 11466,
+    "max_element_size_mm": 3.82256,
+    "min_element_size_mm": 1.27417,
+    "jacobian_points": 16,
+    "quality_label": null,
+    "max_aspect_ratio": null,
+    "pct_aspect_ratio_under_3": null,
+    "pct_aspect_ratio_over_10": null,
+    "pct_distorted_elements": null
+  },
+  "loads": [
+    {"name":"Tensile Force","type":"Reference Geometry","value":null,"value_unit":null,"entity_count":1,"entity_kind":null}
+  ],
+  "fixtures": [
+    {"name":"Fixed-Renamed","type":"Hinge","entity_count":1,"entity_kind":null}
+  ],
+  "results": {
+    "max_von_mises_mpa": 799.98,
+    "max_von_mises_node": 6953,
+    "max_von_mises_location_m": [0, 0, 0],
+    "max_displacement_mm": 0.123501,
+    "max_displacement_node": 2873,
+    "max_strain": null,
+    "max_strain_node": null,
+    "reaction_forces_n": { "fx": -150000, "fy": 0, "fz": 0 },
+    "reaction_moments_nm": { "mx": 0, "my": 0, "mz": 0 },
+    "safety_factor": 0.78,
+    "morph_target_available": false
+  },
+  "warnings": [
+    "Material model type (e.g. 'Linear Elastic Isotropic') is not exposed via the COSMOSWorks API; left null.",
+    "Mesher kind: 'System.__ComObject' does not contain a definition for 'Mesher'",
+    "Mesh quality label and aspect-ratio statistics are not exposed via the COSMOSWorks API; left null.",
+    "Load/fixture entity_kind (face/edge/vertex) is not exposed via the COSMOSWorks API; left null on every item.",
+    "GetMinMaxStress returned error code 1",
+    "GetMinMaxDisplacement returned error code 1",
+    "GetMinMaxStrain not available on this version: Could not convert argument 2 for call to GetMinMaxStrain.",
+    "Per-node strain (max_strain_node) is not exposed via the COSMOSWorks API; left null.",
+    "FE element connectivity is not exposed by the COSMOSWorks API for this study; using CAD surface tessellation with approximate stress coloring and no displacement morph target.",
+    "Result extrema were populated from the SolidWorks solver .OUT file because direct COSMOSWorks min/max APIs returned errors."
+  ]
+}

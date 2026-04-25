@@ -168,11 +168,6 @@ namespace SolidWorksExtractor
                 {
                     options.ExportFea = true;
                 }
-                else if (!arg.StartsWith("-") && inputFile == null)
-                {
-                    inputFile = args[i];
-                }
-            }
 
                 else if (arg == "--fea-list-studies")
                 {
@@ -220,6 +215,11 @@ namespace SolidWorksExtractor
                     options.FeaStudyIndex = idx;
                     options.ExportFea = true; // explicit selection implies extraction is wanted
                 }
+                else if (!arg.StartsWith("-") && inputFile == null)
+                {
+                    inputFile = args[i];
+                }
+            }
             // Handle batch mode
             if (!string.IsNullOrEmpty(batchPartsFolder))
             {
@@ -332,7 +332,7 @@ namespace SolidWorksExtractor
                             {
                                 string name = s.Name ?? "(unnamed)";
                                 string type = s.AnalysisTypeLabel ?? "unknown";
-                                Console.WriteLine($"  [{s.Index}] '{name}'  type={type}  results={(s.HasResults ? \"yes\" : \"no\")}");
+                                Console.WriteLine($"  [{s.Index}] '{name}'  type={type}  results={(s.HasResults ? "yes" : "no")}");
                                 if (!string.IsNullOrEmpty(s.Note))
                                     Console.WriteLine($"        Note: {s.Note}");
                             }
@@ -345,6 +345,31 @@ namespace SolidWorksExtractor
 
                     if (docType == (int)swDocumentTypes_e.swDocPART)
                     {
+                        // Extract FEA before view/export steps; those can dirty the model and invalidate saved results.
+                        if (options.ExportFea)
+                        {
+                            Console.WriteLine();
+                            Console.WriteLine("Extracting FEA simulation results...");
+                            var simExtractor = new SimulationExtractor();
+                            string feaOutputDir = Path.GetDirectoryName(outputFile);
+                            string feaPartNumber = SanitizeFileName(Path.GetFileNameWithoutExtension(outputFile));
+                            if (string.IsNullOrWhiteSpace(feaPartNumber) || feaPartNumber == "UNKNOWN")
+                            {
+                                feaPartNumber = SanitizeFileName(Path.GetFileNameWithoutExtension(doc.GetPathName()));
+                            }
+                            string feaGlbPath = simExtractor.ExtractSimulation(
+                                connection.Application, doc, feaOutputDir, feaPartNumber,
+                                options.FeaStudyName, options.FeaStudyIndex);
+                            if (feaGlbPath != null)
+                            {
+                                Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
+                            }
+                            else
+                            {
+                                Console.WriteLine("    Warning: FEA extraction produced no data (no Simulation license or no completed study?)");
+                            }
+                        }
+
                         // Extract part
                         Console.WriteLine();
                         Console.WriteLine($"Extracting part data ({options.Mode} mode)...");
@@ -395,25 +420,6 @@ namespace SolidWorksExtractor
                             }
                         }
 
-                        // Export FEA simulation results
-                        if (options.ExportFea)
-                        {
-                            Console.WriteLine("  - Extracting FEA simulation results...");
-                            var simExtractor = new SimulationExtractor();
-                            string feaOutputDir = Path.GetDirectoryName(outputFile);
-                            string feaPartNumber = GetDeterministicPartNumber(partData, Path.GetFileName(doc.GetPathName()));
-                            string feaGlbPath = simExtractor.ExtractSimulation(
-                                connection.Application, doc, feaOutputDir, feaPartNumber,
-                                options.FeaStudyName, options.FeaStudyIndex);
-                            if (feaGlbPath != null)
-                            {
-                                Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
-                            }
-                            else
-                            {
-                                Console.WriteLine("    Warning: FEA extraction produced no data (no Simulation license or no completed study?)");
-                            }
-                        }
 
                         string json = serializer.Serialize(partData);
                         serializer.SaveToFile(json, outputFile);
@@ -1416,10 +1422,10 @@ namespace SolidWorksExtractor
             Console.WriteLine("  SolidWorksExtractor.exe part.sldprt -o output.json   # Custom output path");
             Console.WriteLine("  SolidWorksExtractor.exe --active --drawing-target-view \"Drawing View1\"");
             Console.WriteLine("  SolidWorksExtractor.exe --active --drawing-target-views \"Drawing View1;Drawing View2\"");
-        }
-    }
-}
             Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea-preflight                 # show env + studies");
             Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea-list-studies              # studies only");
             Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea --fea-study-name \"Static 1\"");
             Console.WriteLine("  SolidWorksExtractor.exe plate.sldprt --fea --fea-study-index 2");
+        }
+    }
+}

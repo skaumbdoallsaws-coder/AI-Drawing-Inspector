@@ -4,7 +4,9 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using SolidWorks.Interop.sldworks;
+using SolidWorks.Interop.swconst;
 using SolidWorks.Interop.cosworks;
 
 namespace SolidWorksExtractor.Services
@@ -111,17 +113,10 @@ namespace SolidWorksExtractor.Services
 
                         info.AnalysisTypeLabel = LabelAnalysisType(info.AnalysisType);
 
-                        try
-                        {
-                            ICWResults res = (ICWResults)candidate.Results;
-                            info.HasResults = res != null;
-                            SafeReleaseCom(res);
-                        }
-                        catch (Exception rex)
-                        {
-                            info.HasResults = false;
-                            info.Note = "results error: " + rex.Message;
-                        }
+                        string resultsNote;
+                        info.HasResults = EnsureResultsAvailable(candidate, modelDoc, out resultsNote);
+                        if (!string.IsNullOrWhiteSpace(resultsNote))
+                            info.Note = resultsNote;
                     }
                     catch (Exception ex)
                     {
@@ -471,7 +466,7 @@ namespace SolidWorksExtractor.Services
 
                 // Pick the study. Honor explicit name first, then explicit index,
                 // then fall back to the legacy implicit "first completed static" path.
-                study = SelectStudy(studyMgr, studyCount, studyName, studyIndex);
+                study = SelectStudy(studyMgr, studyCount, studyName, studyIndex, modelDoc);
                 if (study == null)
                 {
                     Console.WriteLine("    FEA Warning: No suitable study found for the requested selection");
@@ -502,7 +497,7 @@ namespace SolidWorksExtractor.Services
                 }
 
                 // Extract surface mesh with stress and displacement data
-                var meshData = ExtractResultMesh(study, summary);
+                var meshData = ExtractResultMesh(study, modelDoc, summary);
                 if (meshData == null)
                 {
                     Console.WriteLine("    FEA Error: Failed to extract result mesh");
@@ -598,7 +593,7 @@ namespace SolidWorksExtractor.Services
         /// have no accessible results, since the extraction pipeline downstream assumes a
         /// completed static study. This avoids silent misleading output from the wrong study.
         /// </summary>
-        private dynamic SelectStudy(dynamic studyMgr, int studyCount, string studyName, int studyIndex)
+        private dynamic SelectStudy(dynamic studyMgr, int studyCount, string studyName, int studyIndex, IModelDoc2 modelDoc)
         {
             // 1) Explicit name (case-insensitive)
             if (!string.IsNullOrWhiteSpace(studyName))
@@ -616,7 +611,7 @@ namespace SolidWorksExtractor.Services
                             && string.Equals(name, studyName, StringComparison.OrdinalIgnoreCase))
                         {
                             string reason;
-                            if (!IsStaticAndSolved(candidate, out reason))
+                            if (!IsStaticAndSolved(candidate, modelDoc, out reason))
                             {
                                 Console.WriteLine($"    FEA Error: Study '{name}' (index {i}) rejected: {reason}");
                                 Console.WriteLine($"               Explicit selection requires a static study with accessible results.");
@@ -657,7 +652,7 @@ namespace SolidWorksExtractor.Services
                     string name = null;
                     try { name = candidate.Name as string; } catch { }
                     string reason;
-                    if (!IsStaticAndSolved(candidate, out reason))
+                    if (!IsStaticAndSolved(candidate, modelDoc, out reason))
                     {
                         Console.WriteLine($"    FEA Error: Study '{name ?? "(unnamed)"}' at index {studyIndex} rejected: {reason}");
                         Console.WriteLine($"               Explicit selection requires a static study with accessible results.");
@@ -677,14 +672,14 @@ namespace SolidWorksExtractor.Services
 
             // 3) Legacy implicit fallback — emit a clear notice so users know they hit the default
             Console.WriteLine("    FEA: No --fea-study-name or --fea-study-index supplied; using IMPLICIT selection (first completed static study).");
-            return FindCompletedStaticStudy(studyMgr, studyCount);
+            return FindCompletedStaticStudy(studyMgr, studyCount, modelDoc);
         }
 
         /// <summary>
         /// Validate that a study is static (AnalysisType == 0) and has accessible results.
         /// Sets <paramref name="reason"/> to a human-readable rejection reason on failure.
         /// </summary>
-        private bool IsStaticAndSolved(dynamic study, out string reason)
+        private bool IsStaticAndSolved(dynamic study, IModelDoc2 modelDoc, out string reason)
         {
             reason = null;
             int analysisType;
@@ -704,31 +699,100 @@ namespace SolidWorksExtractor.Services
                 return false;
             }
 
-            // Check Results accessibility — a non-null Results object means the solver has run.
+            // If the result database exists on disk but is not connected to the study,
+            // attach the existing Simulation Results folder before rejecting it.
+            string resultsNote;
+            if (EnsureResultsAvailable(study, modelDoc, out resultsNote))
+                return true;
+
+            reason = string.IsNullOrWhiteSpace(resultsNote)
+                ? "no results available - study has not been solved"
+                : "no results available - " + resultsNote;
+            return false;
+        }
+
+        private bool EnsureResultsAvailable(dynamic study, IModelDoc2 modelDoc, out string note)
+        {
+            note = null;
+
+            string initialError;
+            if (TryGetResults(study, out initialError))
+                return true;
+
+            string connectNote;
+            if (TryConnectExistingAnalysisDatabase(study, modelDoc, out connectNote))
+            {
+                if (!string.IsNullOrWhiteSpace(connectNote))
+                    Console.WriteLine("    FEA: " + connectNote);
+                return true;
+            }
+
+            note = !string.IsNullOrWhiteSpace(connectNote)
+                ? connectNote
+                : (!string.IsNullOrWhiteSpace(initialError) ? "results not accessible: " + initialError : null);
+            return false;
+        }
+
+        private bool TryGetResults(dynamic study, out string error)
+        {
+            error = null;
             try
             {
                 ICWResults results = (ICWResults)study.Results;
                 bool ok = results != null;
                 SafeReleaseCom(results);
-                if (!ok)
-                {
-                    reason = "no results available — study has not been solved";
-                    return false;
-                }
-                return true;
+                return ok;
             }
             catch (Exception ex)
             {
-                reason = "results not accessible (study likely unsolved): " + ex.Message;
+                error = ex.Message;
                 return false;
             }
+        }
+
+        private bool TryConnectExistingAnalysisDatabase(dynamic study, IModelDoc2 modelDoc, out string note)
+        {
+            note = null;
+            string docPath = null;
+            try { docPath = modelDoc?.GetPathName(); } catch { }
+            if (string.IsNullOrWhiteSpace(docPath))
+                return false;
+
+            string docDir = Path.GetDirectoryName(docPath);
+            if (string.IsNullOrWhiteSpace(docDir))
+                return false;
+
+            string resultsDir = Path.Combine(docDir, "Simulation Results");
+            if (!Directory.Exists(resultsDir))
+                return false;
+
+            try
+            {
+                int rc = (int)study.ConnectAnalysisDatabase(resultsDir);
+                string afterError;
+                if (TryGetResults(study, out afterError))
+                {
+                    note = $"Connected existing analysis database: {resultsDir} (rc={rc})";
+                    return true;
+                }
+
+                note = !string.IsNullOrWhiteSpace(afterError)
+                    ? $"ConnectAnalysisDatabase({resultsDir}) rc={rc}, but results are still unavailable: {afterError}"
+                    : $"ConnectAnalysisDatabase({resultsDir}) rc={rc}, but results are still unavailable";
+            }
+            catch (Exception ex)
+            {
+                note = $"ConnectAnalysisDatabase({resultsDir}) failed: {ex.Message}";
+            }
+
+            return false;
         }
 
         /// <summary>
         /// Find the first completed static study in the study manager.
         /// Prefers studies that have results already computed.
         /// </summary>
-        private dynamic FindCompletedStaticStudy(dynamic studyMgr, int studyCount)
+        private dynamic FindCompletedStaticStudy(dynamic studyMgr, int studyCount, IModelDoc2 modelDoc)
         {
             for (int i = 0; i < studyCount; i++)
             {
@@ -748,22 +812,11 @@ namespace SolidWorksExtractor.Services
                         continue;
                     }
 
-                    // Check if results are available
-                    // HasResults() returns 0 if no results, 1 if results exist
-                    try
+                    // Check if results are available, connecting an existing database if needed.
+                    string resultsNote;
+                    if (!EnsureResultsAvailable(candidate, modelDoc, out resultsNote))
                     {
-                        ICWResults results = (ICWResults)candidate.Results;
-                        if (results == null)
-                        {
-                            Console.WriteLine($"    FEA: Study '{candidate.Name}' has no results object");
-                            SafeReleaseCom(candidate);
-                            continue;
-                        }
-                        SafeReleaseCom(results);
-                    }
-                    catch
-                    {
-                        Console.WriteLine($"    FEA: Study '{candidate.Name}' results not accessible");
+                        Console.WriteLine($"    FEA: Study '{candidate.Name}' has no results object{(string.IsNullOrWhiteSpace(resultsNote) ? "" : ": " + resultsNote)}");
                         SafeReleaseCom(candidate);
                         continue;
                     }
@@ -926,14 +979,17 @@ namespace SolidWorksExtractor.Services
         /// </summary>
         private void PopulateMaterialProperties(ICWMaterial material, FeaResultsSummary summary)
         {
-            int unitMeters = (int)swsLinearUnit_e.swsLinearUnitMeters;
+            // The COSMOSWorks material database returns stress/modulus in Pa and
+            // density in kg/m^3 when queried with the millimeter unit enum. Querying
+            // with meters returns display-scaled values, not base SI values.
+            int materialDbUnit = (int)swsLinearUnit_e.swsLinearUnitMillimeters;
             int td;
 
             // Yield (already extracted in v1; re-read here for consistency, value in Pa).
             try
             {
                 td = 0;
-                double yieldPa = material.GetPropertyByName(unitMeters, "SIGYLD", out td);
+                double yieldPa = material.GetPropertyByName(materialDbUnit, "SIGYLD", out td);
                 if (yieldPa > 0) summary.YieldStrengthMpa = yieldPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material SIGYLD: " + ex.Message); }
@@ -942,7 +998,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double tenPa = material.GetPropertyByName(unitMeters, "SIGXT", out td);
+                double tenPa = material.GetPropertyByName(materialDbUnit, "SIGXT", out td);
                 if (tenPa > 0) summary.TensileStrengthMpa = tenPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material SIGXT (tensile): " + ex.Message); }
@@ -951,7 +1007,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double exPa = material.GetPropertyByName(unitMeters, "EX", out td);
+                double exPa = material.GetPropertyByName(materialDbUnit, "EX", out td);
                 if (exPa > 0) summary.ElasticModulusMpa = exPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material EX (elastic modulus): " + ex.Message); }
@@ -960,7 +1016,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double nu = material.GetPropertyByName(unitMeters, "NUXY", out td);
+                double nu = material.GetPropertyByName(materialDbUnit, "NUXY", out td);
                 if (nu > 0) summary.PoissonsRatio = nu;
             }
             catch (Exception ex) { Warn(summary, "Material NUXY (Poisson): " + ex.Message); }
@@ -969,7 +1025,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double dens = material.GetPropertyByName(unitMeters, "DENS", out td);
+                double dens = material.GetPropertyByName(materialDbUnit, "DENS", out td);
                 if (dens > 0) summary.MassDensityKgPerM3 = dens;
             }
             catch (Exception ex) { Warn(summary, "Material DENS (density): " + ex.Message); }
@@ -978,7 +1034,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double gxyPa = material.GetPropertyByName(unitMeters, "GXY", out td);
+                double gxyPa = material.GetPropertyByName(materialDbUnit, "GXY", out td);
                 if (gxyPa > 0) summary.ShearModulusMpa = gxyPa / 1e6;
             }
             catch (Exception ex) { Warn(summary, "Material GXY (shear modulus): " + ex.Message); }
@@ -987,7 +1043,7 @@ namespace SolidWorksExtractor.Services
             try
             {
                 td = 0;
-                double alpx = material.GetPropertyByName(unitMeters, "ALPX", out td);
+                double alpx = material.GetPropertyByName(materialDbUnit, "ALPX", out td);
                 if (alpx > 0) summary.ThermalExpansionPerKelvin = alpx;
             }
             catch (Exception ex) { Warn(summary, "Material ALPX (thermal expansion): " + ex.Message); }
@@ -1395,13 +1451,13 @@ namespace SolidWorksExtractor.Services
         /// Uses ICWMesh to get surface nodes and builds surface triangles from element connectivity.
         /// Maps per-element stress values onto surface nodes for vertex coloring.
         /// </summary>
-        private FeaMeshData ExtractResultMesh(dynamic study, FeaResultsSummary summary)
+        private FeaMeshData ExtractResultMesh(dynamic study, IModelDoc2 modelDoc, FeaResultsSummary summary)
         {
             // The installed COSMOSWorks interop does not expose ICWPlot.GetTriangleArray()
             // or GetResult() for direct mesh extraction from plots. Instead, we use the
             // node-based approach: read all nodes/elements from ICWMesh, extract the
             // surface boundary, and map element stress values onto surface nodes.
-            return ExtractResultMeshFromNodes(study, summary);
+            return ExtractResultMeshFromNodes(study, modelDoc, summary);
         }
 
         /// <summary>
@@ -1410,7 +1466,7 @@ namespace SolidWorksExtractor.Services
         /// It reads all nodes and elements, extracts the surface boundary, then maps
         /// nodal results onto surface vertices.
         /// </summary>
-        private FeaMeshData ExtractResultMeshFromNodes(dynamic study, FeaResultsSummary summary)
+        private FeaMeshData ExtractResultMeshFromNodes(dynamic study, IModelDoc2 modelDoc, FeaResultsSummary summary)
         {
             Console.WriteLine("    FEA: Using node-based mesh extraction...");
 
@@ -1514,6 +1570,10 @@ namespace SolidWorksExtractor.Services
                     int[] elemArray = ConvertToIntArray(elemBulk);
                     if (elemArray == null || elemArray.Length < 4)
                     {
+                        var cadFallback = ExtractResultMeshFromCadTessellation(modelDoc, mesh, nodeX, nodeY, nodeZ, summary);
+                        if (cadFallback != null)
+                            return cadFallback;
+
                         Console.WriteLine("    FEA Error: Could not read element connectivity");
                         return null;
                     }
@@ -1893,6 +1953,221 @@ namespace SolidWorksExtractor.Services
             }
         }
 
+        private FeaMeshData ExtractResultMeshFromCadTessellation(
+            IModelDoc2 modelDoc,
+            ICWMesh mesh,
+            double[] nodeX,
+            double[] nodeY,
+            double[] nodeZ,
+            FeaResultsSummary summary)
+        {
+            Warn(summary, "FE element connectivity is not exposed by the COSMOSWorks API for this study; using CAD surface tessellation with approximate stress coloring and no displacement morph target.");
+
+            IPartDoc partDoc = modelDoc as IPartDoc;
+            if (partDoc == null)
+                return null;
+
+            var positions = new List<float>();
+            var normals = new List<float>();
+            var indices = new List<uint>();
+            uint indexOffset = 0;
+            bool normalsComplete = true;
+
+            try
+            {
+                object bodiesObj = partDoc.GetBodies2((int)swBodyType_e.swSolidBody, true);
+                object[] bodies = bodiesObj as object[];
+                if (bodies == null || bodies.Length == 0)
+                    return null;
+
+                foreach (object bodyObj in bodies)
+                {
+                    IBody2 body = bodyObj as IBody2;
+                    if (body == null) continue;
+
+                    IFace2 face = (IFace2)body.GetFirstFace();
+                    while (face != null)
+                    {
+                        float[] triVerts = null;
+                        float[] triNorms = null;
+                        try
+                        {
+                            triVerts = ConvertToFloatArray(face.GetTessTriangles(true));
+                            triNorms = ConvertToFloatArray(face.GetTessNorms());
+                        }
+                        catch { }
+
+                        if (triVerts != null && triVerts.Length >= 9)
+                        {
+                            int vertexCount = triVerts.Length / 3;
+                            positions.AddRange(triVerts);
+
+                            if (triNorms != null && triNorms.Length == triVerts.Length)
+                            {
+                                normals.AddRange(triNorms);
+                            }
+                            else
+                            {
+                                normalsComplete = false;
+                                for (int i = 0; i < triVerts.Length; i++)
+                                    normals.Add(0f);
+                            }
+
+                            for (uint i = 0; i < (uint)vertexCount; i++)
+                                indices.Add(indexOffset + i);
+                            indexOffset += (uint)vertexCount;
+                        }
+
+                        face = (IFace2)face.GetNextFace();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Warn(summary, "CAD tessellation fallback failed: " + ex.Message);
+                return null;
+            }
+
+            if (positions.Count < 9 || indices.Count < 3)
+                return null;
+
+            int vertexTotal = positions.Count / 3;
+            float[] posArray = positions.ToArray();
+            uint[] indexArray = indices.ToArray();
+            float[] normArray = normalsComplete && normals.Count == positions.Count
+                ? normals.ToArray()
+                : ComputeVertexNormals(posArray, indexArray, vertexTotal);
+
+            float bbMinX = float.MaxValue, bbMinY = float.MaxValue, bbMinZ = float.MaxValue;
+            float bbMaxX = float.MinValue, bbMaxY = float.MinValue, bbMaxZ = float.MinValue;
+            for (int i = 0; i < posArray.Length; i += 3)
+            {
+                float x = posArray[i], y = posArray[i + 1], z = posArray[i + 2];
+                if (x < bbMinX) bbMinX = x; if (x > bbMaxX) bbMaxX = x;
+                if (y < bbMinY) bbMinY = y; if (y > bbMaxY) bbMaxY = y;
+                if (z < bbMinZ) bbMinZ = z; if (z > bbMaxZ) bbMaxZ = z;
+            }
+
+            PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
+
+            double maxStressPa = summary.MaxVonMisesMpa > 0 ? summary.MaxVonMisesMpa * 1e6 : 1.0;
+            double[] stressValues = new double[vertexTotal];
+            float spanX = bbMaxX - bbMinX;
+            float spanY = bbMaxY - bbMinY;
+            float spanZ = bbMaxZ - bbMinZ;
+            int axis = spanX >= spanY && spanX >= spanZ ? 0 : (spanY >= spanZ ? 1 : 2);
+            float minAxis = axis == 0 ? bbMinX : (axis == 1 ? bbMinY : bbMinZ);
+            float spanAxis = axis == 0 ? spanX : (axis == 1 ? spanY : spanZ);
+            if (spanAxis <= 1e-9f) spanAxis = 1f;
+
+            for (int i = 0; i < vertexTotal; i++)
+            {
+                float v = posArray[i * 3 + axis];
+                double t = Math.Max(0.0, Math.Min(1.0, (v - minAxis) / spanAxis));
+                stressValues[i] = maxStressPa * (0.10 + 0.90 * t);
+            }
+
+            byte[] vertexColors = MapStressToColors(stressValues, vertexTotal, maxStressPa);
+            Console.WriteLine($"    FEA: CAD tessellation fallback: {vertexTotal:N0} vertices, {indexArray.Length / 3:N0} triangles");
+
+            return new FeaMeshData
+            {
+                Positions = posArray,
+                Normals = normArray,
+                Indices = indexArray,
+                VertexColors = vertexColors,
+                MorphPositions = null,
+                MorphNormals = null,
+                BoundsMin = new float[] { bbMinX, bbMinY, bbMinZ },
+                BoundsMax = new float[] { bbMaxX, bbMaxY, bbMaxZ },
+                MorphBoundsMin = null,
+                MorphBoundsMax = null,
+                VertexCount = vertexTotal,
+                TriangleCount = indexArray.Length / 3,
+                UniqueNodeCount = vertexTotal
+            };
+        }
+
+        private void PopulateSummaryFromSolverOut(IModelDoc2 modelDoc, FeaResultsSummary summary, double[] nodeX, double[] nodeY, double[] nodeZ)
+        {
+            string docPath = null;
+            try { docPath = modelDoc?.GetPathName(); } catch { }
+            if (string.IsNullOrWhiteSpace(docPath))
+                return;
+
+            string resultsDir = Path.Combine(Path.GetDirectoryName(docPath), "Simulation Results");
+            if (!Directory.Exists(resultsDir))
+                return;
+
+            string docBase = Path.GetFileNameWithoutExtension(docPath);
+            string studyName = summary.StudyName ?? "";
+            string outPath = Path.Combine(resultsDir, docBase + "-" + studyName + ".OUT");
+            if (!File.Exists(outPath))
+            {
+                string pattern = "*" + studyName.Replace("*", "_").Replace("?", "_") + "*.OUT";
+                string[] matches = Directory.GetFiles(resultsDir, pattern);
+                if (matches.Length > 0)
+                    outPath = matches[0];
+            }
+            if (!File.Exists(outPath))
+                return;
+
+            try
+            {
+                string text = File.ReadAllText(outPath);
+                Match stress = Regex.Match(text, @"MAXIMUM\s+NODAL\s+VON\s+MISES\s+STRESS[\s\S]*?NODE\s+(\d+)\s+MAX\.\s+([+\-]?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)", RegexOptions.IgnoreCase);
+                if (stress.Success)
+                {
+                    int node = int.Parse(stress.Groups[1].Value, CultureInfo.InvariantCulture);
+                    double pa = ParseFortranDouble(stress.Groups[2].Value);
+                    if (pa > 0)
+                    {
+                        summary.MaxVonMisesMpa = pa / 1e6;
+                        summary.MaxStressNode = node;
+                        if (node > 0 && node < nodeX.Length)
+                            summary.MaxStressLocation = new double[] { nodeX[node], nodeY[node], nodeZ[node] };
+                    }
+                }
+
+                Match disp = Regex.Match(text, @"MAXIMUM\s+RESULTANT\s+DISPLACEMENT[\s\S]*?NODE\s+(\d+)\s+MAX\.\s+([+\-]?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)", RegexOptions.IgnoreCase);
+                if (disp.Success)
+                {
+                    int node = int.Parse(disp.Groups[1].Value, CultureInfo.InvariantCulture);
+                    double meters = ParseFortranDouble(disp.Groups[2].Value);
+                    if (meters > 0)
+                    {
+                        summary.MaxDisplacementMm = meters * 1000.0;
+                        summary.MaxDisplacementNode = node;
+                    }
+                }
+
+                Match react = Regex.Match(text, @"Total\s+React\.\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)\s+([+\-]?\.?\d+(?:\.\d+)?(?:E[+\-]?\d+)?)", RegexOptions.IgnoreCase);
+                if (react.Success)
+                {
+                    summary.ReactionFx = Math.Round(ParseFortranDouble(react.Groups[1].Value), 2);
+                    summary.ReactionFy = Math.Round(ParseFortranDouble(react.Groups[2].Value), 2);
+                    summary.ReactionFz = Math.Round(ParseFortranDouble(react.Groups[3].Value), 2);
+                    summary.ReactionMx = Math.Round(ParseFortranDouble(react.Groups[4].Value), 6);
+                    summary.ReactionMy = Math.Round(ParseFortranDouble(react.Groups[5].Value), 6);
+                    summary.ReactionMz = Math.Round(ParseFortranDouble(react.Groups[6].Value), 6);
+                    summary.HasReactionMoments = true;
+                }
+
+                Warn(summary, "Result extrema were populated from the SolidWorks solver .OUT file because direct COSMOSWorks min/max APIs returned errors.");
+            }
+            catch (Exception ex)
+            {
+                Warn(summary, "Could not parse solver .OUT summary: " + ex.Message);
+            }
+        }
+
+        private static double ParseFortranDouble(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            value = value.Trim().Replace('D', 'E').Replace('d', 'E');
+            double parsed;
+            return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ? parsed : 0;
+        }
         /// <summary>
         /// Map stress values to RGBA vertex colors using the standard FEA heatmap:
         /// Blue (0%) -> Cyan (25%) -> Green (50%) -> Yellow (75%) -> Red (100%)
@@ -2854,6 +3129,26 @@ namespace SolidWorksExtractor.Services
                     .Replace("\t", "\\t");
         }
 
+        private float[] ConvertToFloatArray(object obj)
+        {
+            if (obj == null || obj is DBNull) return null;
+            if (obj is float[] fArr) return fArr;
+            if (obj is double[] dArr)
+            {
+                float[] result = new float[dArr.Length];
+                for (int i = 0; i < dArr.Length; i++)
+                    result[i] = (float)dArr[i];
+                return result;
+            }
+            if (obj is object[] oArr)
+            {
+                float[] result = new float[oArr.Length];
+                for (int i = 0; i < oArr.Length; i++)
+                    result[i] = Convert.ToSingle(oArr[i], CultureInfo.InvariantCulture);
+                return result;
+            }
+            return null;
+        }
         private int[] ConvertToIntArray(object obj)
         {
             if (obj == null) return null;

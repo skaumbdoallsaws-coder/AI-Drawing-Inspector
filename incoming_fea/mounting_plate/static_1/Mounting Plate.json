@@ -1,0 +1,706 @@
+{
+  "fileName": "Mounting Plate.SLDPRT",
+  "filePath": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
+  "extractionTime": "2026-04-25T00:59:57.0656561-05:00",
+  "solidWorksVersion": "SolidWorks 2024 (v32.5.0)",
+  "units": {
+    "docUnitSystem": "MMGS",
+    "docLengthUnit": "mm",
+    "docMassUnit": "mg",
+    "docAngleUnit": "deg",
+    "internalSystem": "SI (meters)",
+    "note": "All internal values in SI (meters). Also provided in mm and inches for convenience.",
+    "conversions": {
+      "metersToMm": 1000,
+      "metersToInches": 39.3701,
+      "mmToInches": 0.0393701,
+      "inchesToMm": 25.4
+    }  },  "identity": {
+    "partNumber": null,
+    "description": "Mounting Plate",
+    "revision": null,
+    "author": null,
+    "material": null,
+    "finish": null,
+    "customProperties": {
+      "PartNo": "",
+      "Description": "Mounting Plate"
+    },
+    "configProperties": {
+    }
+  },  "physical": {
+    "lengthUnit": "mm",
+    "massUnit": "mg",
+    "mass": 0.05580044317,
+    "volume": 5.580044317E-05,
+    "surfaceArea": 0.01605654867,
+    "centerOfMass": [1.043005554E-17, 6.512668355E-20, -1.185912606E-19],
+    "assignedMaterial": "Steel",
+    "materialDatabase": null,
+    "boundingBox": {
+      "minX": -0.04,
+      "minY": -0.04,
+      "minZ": -0.005,
+      "maxX": 0.04,
+      "maxY": 0.04,
+      "maxZ": 0.005,
+      "length": 0.08,
+      "width": 0.08,
+      "height": 0.01
+    }  },  "features": {
+    "holeWizardHoles": [
+      {
+        "name": "Ø6.0 (6) Diameter Hole1",
+        "holeType": "Unknown",
+        "standard": "ANSI Metric",
+        "fastenerSize": "Ø6.0",
+        "diameter": 0.1524,
+        "depth": 0,
+        "isThrough": true,
+        "isTapped": false,
+        "threadSize": null,
+        "threadDepth": 0,
+        "counterboreDiameter": 0,
+        "counterboreDepth": 0,
+        "countersinkDiameter": 0,
+        "countersinkAngle": 0,
+        "endCondition": "Through All",
+        "instanceCount": 1,
+        "isSuppressed": false
+      }
+    ],
+    "extrudes": [
+      {
+        "name": "Boss-Extrude1",
+        "typeName": "Extrusion",
+        "direction1EndCondition": "Mid Plane",
+        "direction1Depth": 0.01,
+        "isTwoDirectional": false,
+        "direction2EndCondition": null,
+        "direction2Depth": 0,
+        "hasDraft": false,
+        "draftAngle": 0,
+        "sketchName": "Sketch1",
+        "isSuppressed": false
+      }
+    ],
+    "cuts": [
+      {
+        "name": "Cut-Extrude1",
+        "typeName": "ICE",
+        "direction1EndCondition": "Through All Both",
+        "direction1Depth": 0.01,
+        "isTwoDirectional": true,
+        "direction2EndCondition": "Through All",
+        "direction2Depth": 0,
+        "sketchName": "Sketch7",
+        "isSuppressed": false
+      }
+    ],
+    "revolves": [
+    ],
+    "fillets": [
+    ],
+    "chamfers": [
+    ],
+    "patterns": [
+      {
+        "name": "Mirror1",
+        "patternType": "Mirror",
+        "direction1Count": 0,
+        "direction1Spacing": 0,
+        "direction2Count": 0,
+        "direction2Spacing": 0,
+        "instanceCount": 0,
+        "totalAngle": 0,
+        "isSuppressed": false
+      },
+      {
+        "name": "Mirror2",
+        "patternType": "Mirror",
+        "direction1Count": 0,
+        "direction1Spacing": 0,
+        "direction2Count": 0,
+        "direction2Spacing": 0,
+        "instanceCount": 0,
+        "totalAngle": 0,
+        "isSuppressed": false
+      }
+    ],
+    "sheetMetal": [
+    ],
+    "otherFeatures": [
+    ]
+  },  "geometry": {
+    "cylinders": [
+      {
+        "id": "CYL_1",
+        "type": "ThroughHole",
+        "isInternal": true,
+        "diameter": 0.03,
+        "radius": 0.015,
+        "length": 0.01,
+        "axisPoint": [0, 0, -0.005],
+        "axisDirection": [0, 0, 1],
+        "isThrough": true,
+        "hasThread": false,
+        "groupId": 1,
+        "instanceInGroup": 1
+      },
+      {
+        "id": "CYL_2",
+        "type": "ThroughHole",
+        "isInternal": true,
+        "diameter": 0.006,
+        "radius": 0.003,
+        "length": 0.01,
+        "axisPoint": [-0.03, 0.03, 0.005],
+        "axisDirection": [0, 0, 1],
+        "isThrough": true,
+        "hasThread": false,
+        "groupId": 2,
+        "instanceInGroup": 1
+      },
+      {
+        "id": "CYL_3",
+        "type": "ThroughHole",
+        "isInternal": true,
+        "diameter": 0.006,
+        "radius": 0.003,
+        "length": 0.01,
+        "axisPoint": [0.03, 0.03, 0.005],
+        "axisDirection": [0, 0, 1],
+        "isThrough": true,
+        "hasThread": false,
+        "groupId": 2,
+        "instanceInGroup": 2
+      },
+      {
+        "id": "CYL_4",
+        "type": "ThroughHole",
+        "isInternal": true,
+        "diameter": 0.006,
+        "radius": 0.003,
+        "length": 0.01,
+        "axisPoint": [0.03, -0.03, 0.005],
+        "axisDirection": [0, 0, 1],
+        "isThrough": true,
+        "hasThread": false,
+        "groupId": 2,
+        "instanceInGroup": 3
+      },
+      {
+        "id": "CYL_5",
+        "type": "ThroughHole",
+        "isInternal": true,
+        "diameter": 0.006,
+        "radius": 0.003,
+        "length": 0.01,
+        "axisPoint": [-0.03, -0.03, 0.005],
+        "axisDirection": [0, 0, 1],
+        "isThrough": true,
+        "hasThread": false,
+        "groupId": 2,
+        "instanceInGroup": 4
+      }
+    ],
+    "planarFaces": [
+{
+        "id": "PLANE_4",
+        "orientation": "Back (+Y)",
+        "normal": [0, 1, 0],
+        "area": 0.0008
+      },
+{
+        "id": "PLANE_2",
+        "orientation": "Front (-Y)",
+        "normal": [0, -1, 0],
+        "area": 0.0008
+      },
+{
+        "id": "PLANE_1",
+        "orientation": "Left (-X)",
+        "normal": [-1, -1.734723476E-16, 0],
+        "area": 0.0008
+      },
+{
+        "id": "PLANE_3",
+        "orientation": "Right (+X)",
+        "normal": [1, 1.734723476E-16, 0],
+        "area": 0.0008
+      },
+{
+        "id": "PLANE_5",
+        "orientation": "Top (+Z)",
+        "normal": [0, 0, 1],
+        "area": 0.005580044317
+      },
+{
+        "id": "PLANE_6",
+        "orientation": "Top (+Z)",
+        "normal": [0, 0, 1],
+        "area": 0.005580044317
+      }
+    ],    "edges": {
+      "totalEdgeCount": 22,
+      "linearEdgeCount": 12,
+      "circularEdgeCount": 10,
+      "helicalEdgeCount": 0,
+      "splineEdgeCount": 0
+    }  },  "configurations": [
+    {
+      "name": "Default",
+      "isActive": true,
+      "description": "Default",
+      "properties": {
+      }
+    }
+  ],
+  "comparison": {
+    "holeGroups": [
+      {
+        "groupId": "HW_1",
+        "canonical": "ø6.00mm THRU",
+        "holeType": "Through",
+        "diameters": {
+          "pilotOrTapDrillDiameterMm": 6,
+          "pilotOrTapDrillDiameterInches": 0.2362206,
+          "pilotOrTapDrillDiameterMeters": 0.006,
+          "nearestStandardInch": "15/64\"",
+          "nearestStandardInchDecimal": 0.234375,
+          "nearestStandardMm": "ø6.0mm",
+          "nearestStandardMmValue": 6,
+          "calloutPreferred": "ø15/64 THRU"
+        },        "count": 1,
+        "source": "HoleWizard",
+        "confidence": "High",
+        "reconciliationNote": "Matched by center; nominal(feature)=152.40mm, measured(geometry)=6.00mm (diff=146.40mm)"
+      },
+      {
+        "groupId": "GEOM_2",
+        "canonical": "ø30.00mm THRU",
+        "holeType": "Through",
+        "diameters": {
+          "pilotOrTapDrillDiameterMm": 30,
+          "pilotOrTapDrillDiameterInches": 1.181103,
+          "pilotOrTapDrillDiameterMeters": 0.03,
+          "nearestStandardInch": "1\"",
+          "nearestStandardInchDecimal": 1,
+          "nearestStandardMm": "ø25.0mm",
+          "nearestStandardMmValue": 25,
+          "calloutPreferred": "ø1 THRU"
+        },        "count": 1,
+        "source": "GeometryWithFeature",
+        "confidence": "Medium",
+        "reconciliationNote": "Geometry mapped to feature 'Cut-Extrude1'"
+      },
+      {
+        "groupId": "GEOM_3",
+        "canonical": "ø6.00mm THRU",
+        "holeType": "Through",
+        "diameters": {
+          "pilotOrTapDrillDiameterMm": 6,
+          "pilotOrTapDrillDiameterInches": 0.2362206,
+          "pilotOrTapDrillDiameterMeters": 0.006,
+          "nearestStandardInch": "15/64\"",
+          "nearestStandardInchDecimal": 0.234375,
+          "nearestStandardMm": "ø6.0mm",
+          "nearestStandardMmValue": 6,
+          "calloutPreferred": "ø15/64 THRU"
+        },        "count": 1,
+        "source": "GeometryWithFeature",
+        "confidence": "Medium",
+        "reconciliationNote": "Geometry mapped to feature 'Mirror1'"
+      },
+      {
+        "groupId": "GEOM_4",
+        "canonical": "ø6.00mm THRU (2X)",
+        "holeType": "Through",
+        "diameters": {
+          "pilotOrTapDrillDiameterMm": 6,
+          "pilotOrTapDrillDiameterInches": 0.2362206,
+          "pilotOrTapDrillDiameterMeters": 0.006,
+          "nearestStandardInch": "15/64\"",
+          "nearestStandardInchDecimal": 0.234375,
+          "nearestStandardMm": "ø6.0mm",
+          "nearestStandardMmValue": 6,
+          "calloutPreferred": "ø15/64 THRU (2X)"
+        },        "count": 2,
+        "source": "GeometryWithFeature",
+        "confidence": "Medium",
+        "reconciliationNote": "Geometry mapped to feature 'Mirror2'"
+      }
+    ],
+    "allHoles": [
+      {
+        "instanceId": "CYL_2",
+        "groupId": "HW_1",
+        "modelCenter": {
+          "xMeters": -0.03,
+          "yMeters": 0.03,
+          "zMeters": 0.005,
+          "xMm": -30,
+          "yMm": 30,
+          "zMm": 5
+        },        "faceEntryCenter": {
+          "xMeters": -0.03,
+          "yMeters": 0.03,
+          "zMeters": 0,
+          "xMm": -30,
+          "yMm": 30,
+          "zMm": 0
+        },        "axis": [0, 0, 1],
+        "measuredDiameterMm": 6,
+        "measuredDiameterMeters": 0.006,
+        "measuredDepthMm": 10,
+        "measuredDepthMeters": 0.01,
+        "isThrough": true,
+        "featureName": "Ø6.0 (6) Diameter Hole1",
+        "startFace": "+Z",
+        "hasThreadIntent": false,
+        "threadCallout": null,
+        "threadModeled": false
+      },
+      {
+        "instanceId": "CYL_1",
+        "groupId": "GEOM_2",
+        "modelCenter": {
+          "xMeters": 0,
+          "yMeters": 0,
+          "zMeters": -0.005,
+          "xMm": 0,
+          "yMm": 0,
+          "zMm": -5
+        },        "faceEntryCenter": {
+          "xMeters": 0,
+          "yMeters": 0,
+          "zMeters": 0,
+          "xMm": 0,
+          "yMm": 0,
+          "zMm": 0
+        },        "axis": [0, 0, 1],
+        "measuredDiameterMm": 30,
+        "measuredDiameterMeters": 0.03,
+        "measuredDepthMm": 10,
+        "measuredDepthMeters": 0.01,
+        "isThrough": true,
+        "featureName": "Cut-Extrude1",
+        "startFace": "+Z",
+        "hasThreadIntent": false,
+        "threadCallout": null,
+        "threadModeled": false
+      },
+      {
+        "instanceId": "CYL_3",
+        "groupId": "GEOM_3",
+        "modelCenter": {
+          "xMeters": 0.03,
+          "yMeters": 0.03,
+          "zMeters": 0.005,
+          "xMm": 30,
+          "yMm": 30,
+          "zMm": 5
+        },        "faceEntryCenter": {
+          "xMeters": 0.03,
+          "yMeters": 0.03,
+          "zMeters": 0,
+          "xMm": 30,
+          "yMm": 30,
+          "zMm": 0
+        },        "axis": [0, 0, 1],
+        "measuredDiameterMm": 6,
+        "measuredDiameterMeters": 0.006,
+        "measuredDepthMm": 10,
+        "measuredDepthMeters": 0.01,
+        "isThrough": true,
+        "featureName": "Mirror1",
+        "startFace": "+Z",
+        "hasThreadIntent": false,
+        "threadCallout": null,
+        "threadModeled": false
+      },
+      {
+        "instanceId": "CYL_4",
+        "groupId": "GEOM_4",
+        "modelCenter": {
+          "xMeters": 0.03,
+          "yMeters": -0.03,
+          "zMeters": 0.005,
+          "xMm": 30,
+          "yMm": -30,
+          "zMm": 5
+        },        "faceEntryCenter": {
+          "xMeters": 0.03,
+          "yMeters": -0.03,
+          "zMeters": 0,
+          "xMm": 30,
+          "yMm": -30,
+          "zMm": 0
+        },        "axis": [0, 0, 1],
+        "measuredDiameterMm": 6,
+        "measuredDiameterMeters": 0.006,
+        "measuredDepthMm": 10,
+        "measuredDepthMeters": 0.01,
+        "isThrough": true,
+        "featureName": "Mirror2",
+        "startFace": "+Z",
+        "hasThreadIntent": false,
+        "threadCallout": null,
+        "threadModeled": false
+      },
+      {
+        "instanceId": "CYL_5",
+        "groupId": "GEOM_4",
+        "modelCenter": {
+          "xMeters": -0.03,
+          "yMeters": -0.03,
+          "zMeters": 0.005,
+          "xMm": -30,
+          "yMm": -30,
+          "zMm": 5
+        },        "faceEntryCenter": {
+          "xMeters": -0.03,
+          "yMeters": -0.03,
+          "zMeters": 0,
+          "xMm": -30,
+          "yMm": -30,
+          "zMm": 0
+        },        "axis": [0, 0, 1],
+        "measuredDiameterMm": 6,
+        "measuredDiameterMeters": 0.006,
+        "measuredDepthMm": 10,
+        "measuredDepthMeters": 0.01,
+        "isThrough": true,
+        "featureName": "Mirror2",
+        "startFace": "+Z",
+        "hasThreadIntent": false,
+        "threadCallout": null,
+        "threadModeled": false
+      }
+    ],
+    "slots": [
+    ]
+  },
+  "sketches": [
+    {
+      "sketchName": "Sketch1",
+      "parentFeatureName": "Boss-Extrude1",
+      "parentFeatureType": "Extrusion",
+      "planeOrigin": [0, 0, 0],
+      "planeXAxis": [1, 0, 0],
+      "planeYAxis": [0, 1, 0],
+      "planeNormal": [0, 0, 1],
+      "dimensions": [
+        {
+          "dimensionName": "D1",
+          "normalizedKey": "D1@Sketch1",
+          "rawFullName": "D1@Sketch1@Mounting Plate.Part",
+          "sketchName": "Sketch1",
+          "parentFeatureName": "Boss-Extrude1",
+          "value": 0.08,
+          "valueMm": 80,
+          "valueInch": 3.149608,
+          "dimensionType": "linear",
+          "tolerancePlus": 0,
+          "toleranceMinus": 0,
+          "isReference": false,
+          "isDriven": false,
+          "attachedEntities": [
+            {
+              "entityType": "SketchPoint",
+              "point": [-0.04, 0.04]
+            },
+            {
+              "entityType": "SketchPoint",
+              "point": [0.04, 0.04]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sketchName": "Sketch7",
+      "parentFeatureName": "Cut-Extrude1",
+      "parentFeatureType": "ICE",
+      "planeOrigin": [0, 0, 0],
+      "planeXAxis": [1, 0, 0],
+      "planeYAxis": [0, 1, 0],
+      "planeNormal": [0, 0, 1],
+      "dimensions": [
+        {
+          "dimensionName": "D1",
+          "normalizedKey": "D1@Sketch7",
+          "rawFullName": "D1@Sketch7@Mounting Plate.Part",
+          "sketchName": "Sketch7",
+          "parentFeatureName": "Cut-Extrude1",
+          "value": 0.03,
+          "valueMm": 30,
+          "valueInch": 1.181103,
+          "dimensionType": "diametric",
+          "tolerancePlus": 0,
+          "toleranceMinus": 0,
+          "isReference": false,
+          "isDriven": false,
+          "attachedEntities": [
+            {
+              "entityType": "SketchArc",
+              "center": [0, 0],
+              "radius": 0.015,
+              "startAngle": 0,
+              "endAngle": 6.283185307
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sketchName": "Sketch6",
+      "parentFeatureName": "Ø6.0 (6) Diameter Hole1",
+      "parentFeatureType": "HoleWzd",
+      "planeOrigin": [0, 0, 0.005],
+      "planeXAxis": [1, 0, 0],
+      "planeYAxis": [0, 1, 0],
+      "planeNormal": [0, 0, 1],
+      "dimensions": [
+        {
+          "dimensionName": "D1",
+          "normalizedKey": "D1@Sketch6",
+          "rawFullName": "D1@Sketch6@Mounting Plate.Part",
+          "sketchName": "Sketch6",
+          "parentFeatureName": "Ø6.0 (6) Diameter Hole1",
+          "value": 0.01,
+          "valueMm": 10,
+          "valueInch": 0.393701,
+          "dimensionType": "linear",
+          "tolerancePlus": 0,
+          "toleranceMinus": 0,
+          "isReference": false,
+          "isDriven": false,
+          "attachedEntities": [
+            {
+              "entityType": "SketchLine",
+              "startPoint": [-0.04, 0.04],
+              "endPoint": [-0.04, -0.04]
+            },
+            {
+              "entityType": "SketchPoint",
+              "point": [-0.03, 0.03]
+            }
+          ]
+        },
+        {
+          "dimensionName": "D2",
+          "normalizedKey": "D2@Sketch6",
+          "rawFullName": "D2@Sketch6@Mounting Plate.Part",
+          "sketchName": "Sketch6",
+          "parentFeatureName": "Ø6.0 (6) Diameter Hole1",
+          "value": 0.01,
+          "valueMm": 10,
+          "valueInch": 0.393701,
+          "dimensionType": "linear",
+          "tolerancePlus": 0,
+          "toleranceMinus": 0,
+          "isReference": false,
+          "isDriven": true,
+          "attachedEntities": [
+            {
+              "entityType": "SketchLine",
+              "startPoint": [-0.04, 0.04],
+              "endPoint": [0.04, 0.04]
+            },
+            {
+              "entityType": "SketchPoint",
+              "point": [-0.03, 0.03]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sketchName": "Sketch4",
+      "parentFeatureName": "Ø6.0 (6) Diameter Hole1",
+      "parentFeatureType": "HoleWzd",
+      "planeOrigin": [-0.03, 0.03, 0.005],
+      "planeXAxis": [0, -1, 0],
+      "planeYAxis": [0, 0, -1],
+      "planeNormal": [1, 0, 0],
+      "dimensions": [
+        {
+          "dimensionName": "Thru Hole Dia.",
+          "normalizedKey": "Thru Hole Dia.@Sketch4",
+          "rawFullName": "Thru Hole Dia.@Sketch4@Mounting Plate.Part",
+          "sketchName": "Sketch4",
+          "parentFeatureName": "Ø6.0 (6) Diameter Hole1",
+          "value": 0.006,
+          "valueMm": 6,
+          "valueInch": 0.2362206,
+          "dimensionType": "linear",
+          "tolerancePlus": 0,
+          "toleranceMinus": 0,
+          "isReference": false,
+          "isDriven": false,
+          "attachedEntities": [
+            {
+              "entityType": "SketchLine",
+              "startPoint": [0, -0.00635],
+              "endPoint": [0, 0.10795]
+            },
+            {
+              "entityType": "SketchLine",
+              "startPoint": [0.003, 0.01],
+              "endPoint": [0.003, 1.224646799E-19]
+            }
+          ]
+        },
+        {
+          "dimensionName": "Thru Hole Depth",
+          "normalizedKey": "Thru Hole Depth@Sketch4",
+          "rawFullName": "Thru Hole Depth@Sketch4@Mounting Plate.Part",
+          "sketchName": "Sketch4",
+          "parentFeatureName": "Ø6.0 (6) Diameter Hole1",
+          "value": 0.01,
+          "valueMm": 10,
+          "valueInch": 0.393701,
+          "dimensionType": "linear",
+          "tolerancePlus": 0,
+          "toleranceMinus": 0,
+          "isReference": false,
+          "isDriven": false,
+          "attachedEntities": [
+            {
+              "entityType": "SketchLine",
+              "startPoint": [0.003, 1.224646799E-19],
+              "endPoint": [0, 0]
+            },
+            {
+              "entityType": "SketchLine",
+              "startPoint": [-2.449293598E-18, 0.01],
+              "endPoint": [0.003, 0.01]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "viewExports": {
+    "colorized": false,
+    "views": [
+{
+        "viewName": "front",
+        "fileName": "Mounting Plate_view_front.png",
+        "displayMode": "HiddenLinesRemoved"
+      },{
+        "viewName": "top",
+        "fileName": "Mounting Plate_view_top.png",
+        "displayMode": "HiddenLinesRemoved"
+      },{
+        "viewName": "right",
+        "fileName": "Mounting Plate_view_right.png",
+        "displayMode": "HiddenLinesRemoved"
+      },{
+        "viewName": "isometric",
+        "fileName": "Mounting Plate_view_isometric.png",
+        "displayMode": "HiddenLinesRemoved"
+      }    ]  },
+  "verificationChecklist": ["ø6.00mm THRU - MIRRORED", "ø30.00mm THRU", "ø6.00mm THRU - MIRRORED", "ø6.00mm THRU (2X)"]
+}

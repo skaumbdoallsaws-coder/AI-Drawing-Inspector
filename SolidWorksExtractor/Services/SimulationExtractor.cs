@@ -1679,6 +1679,7 @@ namespace SolidWorksExtractor.Services
                 // Try bulk connectivity first, fall back to per-element
                 int connectErr = 0;
                 object connectData = mesh.GetConnectivity(out connectErr);
+                LogConnectivityArrayDiagnostics("GetConnectivity", connectData, connectErr);
                 int[] allConnectivity = ConvertToIntArray(connectData);
 
                 if (allConnectivity != null && allConnectivity.Length >= 4)
@@ -1720,6 +1721,7 @@ namespace SolidWorksExtractor.Services
                 {
                     // Fallback: use GetElements() bulk array
                     object elemBulk = mesh.GetElements();
+                    LogConnectivityArrayDiagnostics("GetElements", elemBulk, 0);
                     int[] elemArray = ConvertToIntArray(elemBulk);
                     if (elemArray == null || elemArray.Length < 4)
                     {
@@ -1870,7 +1872,12 @@ namespace SolidWorksExtractor.Services
                         int connErr2 = 0;
                         object connData2 = mesh.GetConnectivity(out connErr2);
                         int[] conn2 = ConvertToIntArray(connData2);
-                        if (conn2 == null) conn2 = ConvertToIntArray(mesh.GetElements());
+                        if (conn2 == null)
+                        {
+                            object elemBulk2 = mesh.GetElements();
+                            LogConnectivityArrayDiagnostics("GetElements (stress pass)", elemBulk2, 0, connErr2);
+                            conn2 = ConvertToIntArray(elemBulk2);
+                        }
 
                         if (conn2 != null && conn2.Length >= 4)
                         {
@@ -3199,7 +3206,62 @@ namespace SolidWorksExtractor.Services
                     result[i] = Convert.ToInt32(oArr[i]);
                 return result;
             }
+            // SolidWorks COM bulk arrays sometimes marshal as Int16/UInt32/Int64/Single etc.;
+            // fall through to a generic Array reader so connectivity does not silently fail
+            // when the runtime element type is something other than int/double/object.
+            if (obj is Array arr)
+            {
+                int[] result = new int[arr.Length];
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    object v = arr.GetValue(i);
+                    result[i] = v == null ? 0 : Convert.ToInt32(v, CultureInfo.InvariantCulture);
+                }
+                return result;
+            }
             return null;
+        }
+
+        private void LogConnectivityArrayDiagnostics(string label, object data, int errCode, int err2 = int.MinValue)
+        {
+            try
+            {
+                if (data == null)
+                {
+                    string suffix = err2 == int.MinValue ? "" : $", err2={err2}";
+                    Console.WriteLine($"    FEA: {label} returned null (errCode={errCode}{suffix})");
+                    return;
+                }
+
+                Type t = data.GetType();
+                int length = -1;
+                Type elemType = null;
+                if (data is Array a)
+                {
+                    length = a.Length;
+                    elemType = t.GetElementType();
+                }
+
+                string err2Suffix = err2 == int.MinValue ? "" : $", err2={err2}";
+                Console.WriteLine($"    FEA: {label} type={t.FullName}, elemType={elemType?.FullName ?? "<n/a>"}, length={length}, errCode={errCode}{err2Suffix}");
+
+                if (data is Array preview && preview.Length > 0)
+                {
+                    int sample = Math.Min(12, preview.Length);
+                    var sb = new StringBuilder();
+                    for (int i = 0; i < sample; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        object v = preview.GetValue(i);
+                        sb.Append(v == null ? "null" : v.ToString());
+                    }
+                    Console.WriteLine($"    FEA: {label} first {sample}: [{sb}]");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    FEA: {label} diagnostic failed: {ex.Message}");
+            }
         }
 
         private void SafeReleaseCom(object comObj)

@@ -1781,6 +1781,7 @@ namespace SolidWorksExtractor.Services
                     0,  // units: 0 = N/m^2 (Pa)
                     out errCode);
 
+                LogConnectivityArrayDiagnostics("GetMinMaxStress(VON)", stressResult, errCode);
                 if (errCode == 0 && stressResult != null)
                 {
                     double[] stressValues = ConvertToDoubleArray(stressResult);
@@ -1812,12 +1813,21 @@ namespace SolidWorksExtractor.Services
                     (int)swsLinearUnit_e.swsLinearUnitMeters,
                     out errCode);
 
+                LogConnectivityArrayDiagnostics("GetMinMaxDisplacement(URES)", dispResult, errCode);
                 if (errCode == 0 && dispResult != null)
                 {
                     double[] dispValues = ConvertToDoubleArray(dispResult);
                     if (dispValues != null && dispValues.Length >= 2)
                     {
-                        summary.MaxDisplacementMm = dispValues[1] * 1000.0;  // meters to mm
+                        // The COSMOSWorks GetMinMax* arrays for static analyses can be returned
+                        // as [min, max, ...] OR [count, min, max, ...] depending on study state;
+                        // pick the largest magnitude in the array as a robust max-detector.
+                        double bestMax = 0;
+                        for (int k = 0; k < dispValues.Length; k++)
+                        {
+                            if (Math.Abs(dispValues[k]) > bestMax) bestMax = Math.Abs(dispValues[k]);
+                        }
+                        summary.MaxDisplacementMm = bestMax * 1000.0;  // meters to mm
                     }
                 }
                 else
@@ -1841,6 +1851,7 @@ namespace SolidWorksExtractor.Services
                     (int)swsForceUnit_e.swsForceUnitNOrNm,
                     out errCode);
 
+                LogConnectivityArrayDiagnostics("GetReactionForcesAndMoments", reactionResult, errCode);
                 if (errCode == 0 && reactionResult != null)
                 {
                     double[] reactionValues = ConvertToDoubleArray(reactionResult);
@@ -1980,6 +1991,9 @@ namespace SolidWorksExtractor.Services
                     DetectConnectivityLayout(elemArray, out nodesPerElem, out stride, out offset);
                     Console.WriteLine($"    FEA: GetElements layout: nodesPerElem={nodesPerElem}, stride={stride}, offset={offset}");
                     AppendFacesFromConnectivity(elemArray, nodesPerElem, stride, offset, faceCount, faceNodes);
+                    // Surface (header=3) tris are also the per-element shell IDs needed
+                    // for the stress-fallback loop below; preserve the array reference.
+                    allConnectivity = elemArray;
                 }
 
                 // Also try GetSurfaceNodesAndNormals for identifying surface node set
@@ -2073,13 +2087,12 @@ namespace SolidWorksExtractor.Services
                 {
                     try
                     {
-                        // Per-node stress is the right granularity for surface visualization.
-                        // GetStressComponentForAllStepsAtNode(VON=9, nodeId, plane, units, out err)
-                        // returns one nodal value per step. For static analysis there is one step.
-                        // This is much cheaper than the per-element averaging path because it
-                        // avoids re-reading connectivity and avoids querying interior elements.
                         int loaded = 0;
                         int failed = 0;
+                        int firstErr = 0;
+                        string firstErrText = null;
+                        bool diagPrinted = false;
+
                         for (int i = 0; i < surfVertCount; i++)
                         {
                             int nid = surfaceNodes[i];
@@ -2092,12 +2105,20 @@ namespace SolidWorksExtractor.Services
                                     null,
                                     0, // units: 0 = N/m^2 (Pa)
                                     out sErr);
+
+                                if (!diagPrinted)
+                                {
+                                    diagPrinted = true;
+                                    LogConnectivityArrayDiagnostics(
+                                        $"GetStressComponentForAllStepsAtNode(node={nid})",
+                                        nodalStress, sErr);
+                                }
+
                                 if (sErr == 0 && nodalStress != null)
                                 {
                                     double[] perStep = ConvertToDoubleArray(nodalStress);
                                     if (perStep != null && perStep.Length > 0)
                                     {
-                                        // Last step is the converged value for static analysis
                                         double von = perStep[perStep.Length - 1];
                                         stressValues[i] = von;
                                         if (Math.Abs(von) > maxStress)
@@ -2107,13 +2128,84 @@ namespace SolidWorksExtractor.Services
                                         }
                                         loaded++;
                                     }
-                                    else { failed++; }
+                                    else { failed++; if (firstErr == 0) firstErr = -1001; }
                                 }
-                                else { failed++; }
+                                else
+                                {
+                                    failed++;
+                                    if (firstErr == 0) firstErr = sErr;
+                                }
                             }
-                            catch { failed++; }
+                            catch (Exception ex)
+                            {
+                                failed++;
+                                if (firstErrText == null) firstErrText = ex.Message;
+                            }
                         }
-                        Console.WriteLine($"    FEA: Nodal stress loaded for {loaded:N0}/{surfVertCount:N0} surface nodes (failed={failed})");
+                        Console.WriteLine($"    FEA: Nodal stress: loaded={loaded:N0}/{surfVertCount:N0}, failed={failed}, firstErrCode={firstErr}, firstErrText={firstErrText ?? "(none)"}");
+
+                        // Fallback: if the per-node API returned no usable values, query
+                        // per-element stress on the 3-node surface tri shells and distribute
+                        // to the triangle's 3 vertices. The connectivity entries are the
+                        // shell elements; element numbers are 1-based.
+                        if (loaded == 0 && allConnectivity != null && surfaceFaces.Count > 0)
+                        {
+                            Console.WriteLine("    FEA: Per-node stress empty — falling back to per-element shell stress.");
+                            int stride; int offset; int npe;
+                            DetectConnectivityLayout(allConnectivity, out npe, out stride, out offset);
+                            int triCount = allConnectivity.Length / stride;
+
+                            var nodeStressSum = new Dictionary<int, double>();
+                            var nodeStressCount = new Dictionary<int, int>();
+                            int elStressOk = 0, elStressFail = 0;
+
+                            for (int e = 0; e < triCount; e++)
+                            {
+                                int bi = e * stride + offset;
+                                if (bi + 2 >= allConnectivity.Length) break;
+
+                                int en0 = allConnectivity[bi];
+                                int en1 = allConnectivity[bi + 1];
+                                int en2 = allConnectivity[bi + 2];
+
+                                try
+                                {
+                                    int sErrCode = 0;
+                                    object stressData = results.GetStress(e + 1, 0, null, 0, out sErrCode);
+                                    if (sErrCode == 0 && stressData != null)
+                                    {
+                                        double[] sVals = ConvertToDoubleArray(stressData);
+                                        if (sVals != null && sVals.Length > 9)
+                                        {
+                                            double von = sVals[9]; // VON index
+                                            foreach (int nid in new[] { en0, en1, en2 })
+                                            {
+                                                if (!surfaceNodeSet.Contains(nid)) continue;
+                                                if (!nodeStressSum.ContainsKey(nid)) { nodeStressSum[nid] = 0; nodeStressCount[nid] = 0; }
+                                                nodeStressSum[nid] += von;
+                                                nodeStressCount[nid]++;
+                                            }
+                                            elStressOk++;
+                                            continue;
+                                        }
+                                    }
+                                    elStressFail++;
+                                }
+                                catch { elStressFail++; }
+                            }
+                            for (int i = 0; i < surfVertCount; i++)
+                            {
+                                int nid = surfaceNodes[i];
+                                int c;
+                                if (nodeStressCount.TryGetValue(nid, out c) && c > 0)
+                                {
+                                    double v = nodeStressSum[nid] / c;
+                                    stressValues[i] = v;
+                                    if (Math.Abs(v) > maxStress) { maxStress = Math.Abs(v); peakIdx = i; }
+                                }
+                            }
+                            Console.WriteLine($"    FEA: Per-element shell stress: ok={elStressOk}, fail={elStressFail}, surface nodes covered={nodeStressCount.Count:N0}/{surfVertCount:N0}");
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -2192,6 +2284,14 @@ namespace SolidWorksExtractor.Services
                                     }
                                 }
                                 if (bestNid > 0) summary.MaxDisplacementNode = bestNid;
+
+                                // The bulk read is the authoritative URES source — use it
+                                // to populate MaxDisplacementMm if GetMinMaxDisplacement
+                                // reported a clearly-bogus value (e.g. 1e-30, the API
+                                // sometimes returns metadata in slot[1] instead of max).
+                                double bestMagMm = bestMag * 1000.0;
+                                if (bestMagMm > summary.MaxDisplacementMm)
+                                    summary.MaxDisplacementMm = bestMagMm;
                             }
                         }
                     }
@@ -2243,7 +2343,11 @@ namespace SolidWorksExtractor.Services
                     Warn(summary, "Could not extract displacement morph: " + ex.Message);
                 }
 
-                if (summary.MaxVonMisesMpa <= 0 || summary.MaxDisplacementMm <= 0 ||
+                // Trigger the .OUT solver-text fallback when API values look obviously
+                // bogus. Displacement values below 1e-9 mm (picometer scale) are not
+                // physical for any load that would produce non-zero stress; they
+                // typically indicate the API returned metadata in the wrong slot.
+                if (summary.MaxVonMisesMpa <= 0 || summary.MaxDisplacementMm < 1e-9 ||
                     (Math.Abs(summary.ReactionFx) < 1e-12 && Math.Abs(summary.ReactionFy) < 1e-12 && Math.Abs(summary.ReactionFz) < 1e-12))
                 {
                     PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);

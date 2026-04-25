@@ -485,6 +485,11 @@ namespace SolidWorksExtractor.Services
                 string selectedStudyName = study.Name as string ?? "Unknown Study";
                 Console.WriteLine($"    FEA: Using study '{selectedStudyName}'");
 
+                // COSMOSWorks loads result data lazily; touch a plot so subsequent
+                // GetConnectivity / GetMinMaxStress / GetMinMaxDisplacement calls don't
+                // hit swsResultsErrorDatabaseNotAvailable (errCode=1).
+                EnsureResultsLoaded(study);
+
                 // Extract study metadata
                 var summary = ExtractStudyMetadata(study, selectedStudyName);
 
@@ -715,6 +720,106 @@ namespace SolidWorksExtractor.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"    FEA Warning: Could not set ActiveStudy={studyIndex}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// COSMOSWorks loads result data lazily — ConnectAnalysisDatabase only attaches
+        /// the .CWR file; the mesh/result arrays only get pulled into memory when a plot
+        /// is touched. Without this, GetConnectivity/GetMinMaxStress/GetMinMaxDisplacement
+        /// all return errCode=swsResultsErrorDatabaseNotAvailable (1).
+        ///
+        /// Strategy: ActivatePlot on any existing plot (cheap), else CreatePlot for a
+        /// von Mises stress plot to force the load, and DeletePlot the transient one
+        /// so we leave the study unchanged.
+        ///
+        /// Best-effort — log on failure but don't abort. Mesh queries below will still
+        /// hit the existing diagnostic + refusal logic if this doesn't help.
+        /// </summary>
+        private void EnsureResultsLoaded(dynamic study)
+        {
+            ICWResults results = null;
+            try
+            {
+                try { results = (ICWResults)study.Results; } catch { }
+                if (results == null)
+                {
+                    Console.WriteLine("    FEA: EnsureResultsLoaded: study.Results is null, skipping load priming");
+                    return;
+                }
+
+                int plotCount = 0;
+                try { plotCount = results.GetPlotCount(); } catch (Exception ex)
+                {
+                    Console.WriteLine($"    FEA: EnsureResultsLoaded: GetPlotCount failed: {ex.Message}");
+                }
+                Console.WriteLine($"    FEA: EnsureResultsLoaded: existing plot count = {plotCount}");
+
+                if (plotCount > 0)
+                {
+                    string firstPlotName = null;
+                    try
+                    {
+                        object plotNamesObj = results.GetPlotNames();
+                        if (plotNamesObj is Array pa && pa.Length > 0)
+                            firstPlotName = pa.GetValue(0)?.ToString();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"    FEA: EnsureResultsLoaded: GetPlotNames failed: {ex.Message}");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(firstPlotName))
+                    {
+                        bool activated = false;
+                        try { activated = results.ActivatePlot(firstPlotName); }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot('{firstPlotName}') threw: {ex.Message}");
+                        }
+                        Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivatePlot('{firstPlotName}') = {activated}");
+                        return;
+                    }
+                }
+
+                // No existing plot — create a transient von Mises stress plot to force load.
+                // swsResultStress=2, swsStressComponentVON=9, NUnits=0 (default), BValueByElem=false.
+                int createErr = 0;
+                CWPlot transient = null;
+                try
+                {
+                    transient = results.CreatePlot(2, 9, 0, false, out createErr);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"    FEA: EnsureResultsLoaded: CreatePlot threw: {ex.Message}");
+                    return;
+                }
+                Console.WriteLine($"    FEA: EnsureResultsLoaded: CreatePlot(stress/VON) errCode={createErr}, plot={(transient != null ? "ok" : "null")}");
+
+                // Best-effort: delete the transient plot so the study is left unchanged.
+                if (transient != null)
+                {
+                    string transientName = null;
+                    try { transientName = ((dynamic)transient).Name as string; } catch { }
+                    SafeReleaseCom(transient);
+                    if (!string.IsNullOrWhiteSpace(transientName))
+                    {
+                        try
+                        {
+                            bool deleted = results.DeletePlot(transientName);
+                            Console.WriteLine($"    FEA: EnsureResultsLoaded: DeletePlot('{transientName}') = {deleted}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"    FEA: EnsureResultsLoaded: DeletePlot('{transientName}') threw: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                SafeReleaseCom(results);
             }
         }
 

@@ -738,6 +738,46 @@ namespace SolidWorksExtractor.Services
         /// </summary>
         private void EnsureResultsLoaded(dynamic study)
         {
+            // Activate the study's configuration. If the part has multiple configs,
+            // results are tied to the config that was active when the analysis ran;
+            // ActivateConfiguration switches SolidWorks to that config so result reads
+            // resolve against the correct geometry.
+            try
+            {
+                study.ActivateConfiguration();
+                Console.WriteLine("    FEA: EnsureResultsLoaded: study.ActivateConfiguration() called");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    FEA: EnsureResultsLoaded: ActivateConfiguration threw: {ex.Message}");
+            }
+
+            // Dump mesh state so we can tell whether the mesh DB is actually loaded
+            // (ExistsAndCurrent=1) vs stale (ExistsAndNotCurrent=2) vs absent (NoMesh=0).
+            try
+            {
+                ICWMesh dmesh = (ICWMesh)study.Mesh;
+                if (dmesh != null)
+                {
+                    int meshState = -1;
+                    int meshType = -1;
+                    int isFailed = -1;
+                    try { meshState = ((dynamic)dmesh).MeshState; } catch { }
+                    try { meshType = ((dynamic)dmesh).MeshType; } catch { }
+                    try { isFailed = ((dynamic)dmesh).IsMeshFailed; } catch { }
+                    Console.WriteLine($"    FEA: EnsureResultsLoaded: mesh.MeshState={meshState}, MeshType={meshType}, IsMeshFailed={isFailed}");
+                    SafeReleaseCom(dmesh);
+                }
+                else
+                {
+                    Console.WriteLine("    FEA: EnsureResultsLoaded: study.Mesh is null");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    FEA: EnsureResultsLoaded: mesh state probe threw: {ex.Message}");
+            }
+
             ICWResults results = null;
             try
             {
@@ -746,6 +786,17 @@ namespace SolidWorksExtractor.Services
                 {
                     Console.WriteLine("    FEA: EnsureResultsLoaded: study.Results is null, skipping load priming");
                     return;
+                }
+
+                // Probe a result method that always exists on a loaded DB to confirm load state.
+                try
+                {
+                    int maxSteps = results.GetMaximumAvailableSteps();
+                    Console.WriteLine($"    FEA: EnsureResultsLoaded: results.GetMaximumAvailableSteps()={maxSteps}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"    FEA: EnsureResultsLoaded: GetMaximumAvailableSteps threw: {ex.Message}");
                 }
 
                 int plotCount = 0;

@@ -6577,6 +6577,18 @@
             featureMeshMap: null,          // { cad_feature_id: [mesh, mesh, ...] }
             featureColorMap: null,         // Parsed _feature_colors.json
             featureHighlightActive: false, // True when any feature is color-revealed
+            // ---- FEA viewing state (kept separate from geometry state) ----
+            threeFeaAvailable: null,       // null=unknown, true=available, false=no FEA package for this part
+            threeFeaActive: false,         // True when 3D Model tab is in Simulation mode
+            threeFeaScene: null,           // GLB scene root for the FEA mesh (cached)
+            threeFeaResults: null,         // Parsed *_results.json (full schema-v2 contents)
+            threeFeaManifest: null,        // Parsed *_manifest.json (provenance)
+            threeFeaStudy: null,           // { slug, name, type, selection_mode, available_studies }
+            threeFeaWarnings: null,        // Array of warning strings from manifest/results
+            threeFeaMorphEnabled: false,   // True when has_morph_target == true
+            threeFeaMorphValue: 0,         // Slider value 0..1 -> mesh.morphTargetInfluences[0]
+            threeFeaLoadedPart: null,      // Part number of currently cached FEA scene
+            threeFeaProbeInFlight: null,   // Part number currently being probed (avoid double fetch)
             _threeCameraAnimId: null, // Feature #122: camera transition animation frame
             _assyCameraAnimId: null,  // Fly-to-part animation frame for assembly viewer
             _pendingFlyTarget: null,  // Deferred fly-to part numbers (when GLB not loaded yet)
@@ -18705,6 +18717,10 @@
                             state.featureColorMap = null;
                         }
                     });
+                // Probe for FEA artifacts in parallel; the toolbar's
+                // Geometry/Simulation toggle stays hidden unless this returns
+                // 200, so parts without an FEA package see no UI changes.
+                _probeFea(fetchPN);
             }
         }
 
@@ -19169,6 +19185,429 @@
             container.appendChild(panel);
         }
 
+        // ---- FEA viewing (Stage 4 hand-off package consumption) ----
+
+        // Apply a successful /api/part-fea/<part> response to state. Used by
+        // both the 200 path and the 409-then-retry path of _probeFea so the
+        // state shape stays consistent. Also fires off a manifest fetch so the
+        // provenance block is available for the agent context without a
+        // second user-triggered round-trip.
+        function _applyFeaProbeResult(partNumber, data) {
+            state.threeFeaResults = data;
+            state.threeFeaWarnings = data.warnings || [];
+            state.threeFeaMorphEnabled = !!data.has_morph_target;
+            const resolved = data._resolved || {};
+            state.threeFeaStudy = {
+                slug: resolved.study_slug || null,
+                name: resolved.study_name || null,
+                selection_mode: resolved.selection_mode || null,
+                visualization: resolved.visualization || {},
+                available_studies: resolved.available_studies || [],
+            };
+            state.threeFeaAvailable = true;
+            state.threeFeaLoadedPart = partNumber;
+            _syncFeaToolbarVisibility();
+
+            // Fetch the provenance manifest in the background. Failure is
+            // non-fatal (the panel + agent context fall back to nulls cleanly).
+            const studySlug = state.threeFeaStudy.slug;
+            const manifestUrl = studySlug
+                ? `/api/part-fea-manifest/${encodeURIComponent(partNumber)}?study=${encodeURIComponent(studySlug)}`
+                : `/api/part-fea-manifest/${encodeURIComponent(partNumber)}`;
+            fetch(manifestUrl)
+                .then(r => r.ok ? r.json() : null)
+                .then(manifest => {
+                    if (state.partNumber !== partNumber) return;
+                    state.threeFeaManifest = manifest || null;
+                    // Refresh the panel if it's currently rendered so the
+                    // provenance row picks up the new data.
+                    if (state.threeFeaActive) _renderFeaInfoPanel();
+                })
+                .catch(err => {
+                    console.warn('[FEA] manifest fetch failed (non-fatal):', err);
+                    if (state.partNumber === partNumber) state.threeFeaManifest = null;
+                });
+        }
+
+        //
+        // Probes /api/part-fea/<part>, populates state.threeFea*, and exposes
+        // the Geometry/Simulation toggle in the existing 3D viewer toolbar.
+        // All errors are silent for the probe (404 = no FEA, not an error).
+        async function _probeFea(partNumber) {
+            if (!partNumber || state.threeFeaProbeInFlight === partNumber) return;
+            // Already probed for this exact part: nothing to do
+            if (state.threeFeaLoadedPart === partNumber && state.threeFeaAvailable !== null) {
+                _syncFeaToolbarVisibility();
+                return;
+            }
+            state.threeFeaProbeInFlight = partNumber;
+            try {
+                const r = await fetch(`/api/part-fea/${encodeURIComponent(partNumber)}`);
+                // Bail if the user switched parts during the fetch
+                if (state.partNumber !== partNumber) return;
+                if (r.status === 404) {
+                    state.threeFeaAvailable = false;
+                    state.threeFeaResults = null;
+                    state.threeFeaManifest = null;
+                    state.threeFeaStudy = null;
+                    state.threeFeaWarnings = null;
+                    state.threeFeaMorphEnabled = false;
+                    state.threeFeaLoadedPart = partNumber;
+                    _syncFeaToolbarVisibility();
+                    return;
+                }
+                if (r.status === 409) {
+                    // Multiple studies for this part and the caller did not pin
+                    // one. v1 has no study switcher UI, so auto-pick the first
+                    // study by slug. The agent context still carries the full
+                    // available_studies list so a switcher can be added later
+                    // without changing the contract.
+                    let body = null;
+                    try { body = await r.json(); } catch {}
+                    const studies = (body && body.detail && body.detail.studies) || [];
+                    if (studies.length > 0) {
+                        const firstSlug = studies[0].slug;
+                        console.warn(`[FEA] ${partNumber} has ${studies.length} studies; auto-picking '${firstSlug}'.`);
+                        const r2 = await fetch(`/api/part-fea/${encodeURIComponent(partNumber)}?study=${encodeURIComponent(firstSlug)}`);
+                        if (state.partNumber !== partNumber) return;
+                        if (r2.ok) {
+                            const data2 = await r2.json();
+                            _applyFeaProbeResult(partNumber, data2);
+                            return;
+                        }
+                    }
+                    state.threeFeaAvailable = false;
+                    state.threeFeaLoadedPart = partNumber;
+                    _syncFeaToolbarVisibility();
+                    return;
+                }
+                if (!r.ok) {
+                    console.warn(`[FEA] /api/part-fea/${partNumber} returned ${r.status}`);
+                    state.threeFeaAvailable = false;
+                    state.threeFeaLoadedPart = partNumber;
+                    _syncFeaToolbarVisibility();
+                    return;
+                }
+                const data = await r.json();
+                if (state.partNumber !== partNumber) return;
+                _applyFeaProbeResult(partNumber, data);
+            } catch (err) {
+                console.warn('[FEA] probe failed:', err);
+                if (state.partNumber === partNumber) {
+                    state.threeFeaAvailable = false;
+                    state.threeFeaLoadedPart = partNumber;
+                    _syncFeaToolbarVisibility();
+                }
+            } finally {
+                if (state.threeFeaProbeInFlight === partNumber) {
+                    state.threeFeaProbeInFlight = null;
+                }
+            }
+        }
+
+        // Show or hide the toolbar's Geometry/Simulation toggle based on
+        // state.threeFeaAvailable. Called from the toolbar builder and after
+        // the probe completes.
+        function _syncFeaToolbarVisibility() {
+            const toggle = document.querySelector('.three-fea-toggle');
+            if (!toggle) return;
+            toggle.style.display = state.threeFeaAvailable === true ? 'flex' : 'none';
+            // Refresh / redraw the FEA panel if it's currently visible
+            if (state.threeFeaActive) _renderFeaInfoPanel();
+        }
+
+        // Switch between Geometry mode (existing GLB/STL) and Simulation mode
+        // (FEA stress mesh). Geometry mode is the default. Mode is per-part.
+        async function _setFeaMode(active) {
+            if (state.threeFeaActive === active) return;
+            state.threeFeaActive = !!active;
+            const scene = state.threeScene;
+            if (!scene) return;
+            if (active) {
+                _setGeometryVisible(false);
+                if (state.featureHighlightActive && typeof clearFeatureHighlights === 'function') {
+                    clearFeatureHighlights();
+                }
+                try {
+                    await _ensureFeaMeshLoaded();
+                } catch {
+                    // _ensureFeaMeshLoaded already reverted state.threeFeaActive,
+                    // restored geometry visibility, and rendered an error panel.
+                    // Swallow here so the click handler can still redraw the
+                    // toolbar buttons via _refreshActive afterward.
+                    return;
+                }
+                _setFeaVisible(true);
+                _renderFeaInfoPanel();
+            } else {
+                _setFeaVisible(false);
+                _setGeometryVisible(true);
+                _removeFeaInfoPanel();
+            }
+        }
+
+        function _setGeometryVisible(visible) {
+            const scene = state.threeScene;
+            if (!scene) return;
+            scene.traverse(child => {
+                if (child.isMesh && !child.userData._fea) {
+                    child.visible = visible;
+                }
+            });
+        }
+
+        function _setFeaVisible(visible) {
+            const scene = state.threeScene;
+            if (!scene) return;
+            scene.traverse(child => {
+                if (child.userData._fea) {
+                    child.visible = visible;
+                }
+            });
+        }
+
+        // Load the FEA GLB into the current scene, tag every mesh with
+        // userData._fea = true so toggle helpers can find it, fit the camera,
+        // and cache the loaded scene for subsequent toggles.
+        async function _ensureFeaMeshLoaded() {
+            const scene = state.threeScene;
+            if (!scene) return;
+            if (state.threeFeaScene && state.threeFeaScene.userData._addedTo === scene) {
+                return; // Already attached
+            }
+            const pn = state.partNumber;
+            const studySlug = state.threeFeaStudy?.slug;
+            const url = studySlug
+                ? `/api/part-fea-model/${encodeURIComponent(pn)}?study=${encodeURIComponent(studySlug)}`
+                : `/api/part-fea-model/${encodeURIComponent(pn)}`;
+            const loader = new THREE.GLTFLoader();
+            try {
+                const gltf = await new Promise((resolve, reject) => {
+                    loader.load(url, resolve, undefined, reject);
+                });
+                if (state.partNumber !== pn || !state.threeFeaActive) return;
+                const root = gltf.scene;
+                // Tag every mesh so visibility toggling can find them, and
+                // collect the first morph-bearing mesh for slider binding.
+                let morphMesh = null;
+                root.traverse(child => {
+                    if (child.isMesh) {
+                        child.userData._fea = true;
+                        // Disable backface culling so internal surfaces stay
+                        // visible during deformation
+                        if (child.material) {
+                            child.material.side = THREE.DoubleSide;
+                            child.material.needsUpdate = true;
+                        }
+                        if (!morphMesh && child.morphTargetInfluences && child.morphTargetInfluences.length > 0) {
+                            morphMesh = child;
+                        }
+                    }
+                });
+                root.userData._addedTo = scene;
+                root.userData._morphMesh = morphMesh;
+                scene.add(root);
+                state.threeFeaScene = root;
+                // Fit camera around just the FEA mesh
+                if (typeof _fitCameraToGroup === 'function') {
+                    _fitCameraToGroup(state.threeCamera, state.threeControls, root);
+                }
+                // Apply current morph value if user already moved the slider
+                if (state.threeFeaMorphValue && morphMesh) {
+                    morphMesh.morphTargetInfluences[0] = state.threeFeaMorphValue;
+                }
+            } catch (err) {
+                console.error('[FEA] GLB load failed:', err);
+                if (state.partNumber === pn) {
+                    // Revert all UI state cleanly so the user can dismiss the
+                    // error and recover via the toggle. Three things must happen:
+                    //   1. state.threeFeaActive flips back to false
+                    //   2. geometry meshes become visible again
+                    //   3. the toolbar buttons re-render to reflect Geometry as active
+                    // Without (3) the Simulation button would still appear active
+                    // and the Geometry button would early-return on click.
+                    state.threeFeaActive = false;
+                    _setGeometryVisible(true);
+                    _setFeaVisible(false);
+                    if (typeof state._refreshFeaToolbar === 'function') {
+                        state._refreshFeaToolbar();
+                    }
+                    // Render the panel WITHOUT the Simulation-mode entry guard;
+                    // the panel is now functioning as an error notice. It will
+                    // be removed on the next successful Geometry<->Simulation
+                    // toggle by _removeFeaInfoPanel().
+                    _renderFeaInfoPanel({ error: 'Could not load FEA mesh: ' + (err?.message || err) });
+                }
+                // Re-throw so callers (e.g. _setFeaMode) know the load failed
+                // and can act accordingly.
+                throw err;
+            }
+        }
+
+        // Apply a morph influence value (0..1) to the loaded FEA mesh.
+        function _applyFeaMorph(value) {
+            state.threeFeaMorphValue = value;
+            const root = state.threeFeaScene;
+            if (!root) return;
+            const morphMesh = root.userData._morphMesh;
+            if (!morphMesh || !morphMesh.morphTargetInfluences) return;
+            morphMesh.morphTargetInfluences[0] = value;
+        }
+
+        // ---- FEA info panel (Stage 4 + 5) ----
+        function _removeFeaInfoPanel() {
+            document.querySelectorAll('.three-fea-info-panel').forEach(el => el.remove());
+        }
+
+        function _renderFeaInfoPanel(opts) {
+            opts = opts || {};
+            _removeFeaInfoPanel();
+            const container = document.getElementById('three-container');
+            if (!container) return;
+            const results = state.threeFeaResults;
+            if (!results) return;
+
+            const panel = document.createElement('div');
+            panel.className = 'three-fea-info-panel';
+            panel.style.cssText = 'position:absolute;top:8px;right:8px;background:rgba(20,22,30,0.95);border:1px solid var(--border);border-radius:4px;padding:10px 12px;color:var(--text-primary);font-size:11px;line-height:1.5;max-width:280px;z-index:5;font-family:var(--font-ui, system-ui, sans-serif);';
+
+            const resolved = state.threeFeaStudy || {};
+            const vis = resolved.visualization || {};
+            const isApprox = vis.approximate === true;
+            const mat = results.material || {};
+            const mesh = results.mesh || {};
+            const r = results.results || {};
+
+            // Approximate-visualization warning banner (top of panel)
+            if (isApprox) {
+                const banner = document.createElement('div');
+                banner.style.cssText = 'background:#5a2a2a;border:1px solid #c44;color:#ffdada;padding:6px 8px;border-radius:3px;margin:-2px 0 8px 0;font-weight:600;font-size:11px;';
+                banner.textContent = 'WARNING: Approximate visualization. Do not treat geometry as authoritative.';
+                panel.appendChild(banner);
+            }
+
+            // Load error path (e.g. GLB 404)
+            if (opts.error) {
+                const err = document.createElement('div');
+                err.style.cssText = 'background:#5a2a2a;border:1px solid #c44;color:#ffdada;padding:6px 8px;border-radius:3px;margin-bottom:6px;';
+                err.textContent = opts.error;
+                panel.appendChild(err);
+            }
+
+            const title = document.createElement('div');
+            title.style.cssText = 'font-weight:700;margin-bottom:6px;color:var(--accent);';
+            title.textContent = `Simulation — ${results.study_name || resolved.name || '(unnamed)'}`;
+            panel.appendChild(title);
+
+            const manifest = state.threeFeaManifest || {};
+            const swVersion = manifest.solidworks_version || '—';
+            const gitCommit = manifest.extractor_git_commit
+                ? String(manifest.extractor_git_commit).slice(0, 8)
+                : '—';
+            const rows = [
+                ['Study type', results.study_type || '—'],
+                ['Configuration', (results.study && results.study.configuration_name) || '—'],
+                ['Material', mat.name || results.summary?.material || '—'],
+                ['Yield strength', _fmtNum(mat.yield_strength_mpa ?? results.summary?.yield_strength_mpa, ' MPa')],
+                ['Max von Mises', _fmtNum(r.max_von_mises_mpa ?? results.summary?.max_von_mises_mpa, ' MPa')],
+                ['Max displacement', _fmtNum(r.max_displacement_mm ?? results.summary?.max_displacement_mm, ' mm')],
+                ['Safety factor', _fmtNum(r.safety_factor ?? results.summary?.safety_factor, '')],
+                ['Mesh nodes', _fmtNum(mesh.node_count, '', 0)],
+                ['Surface nodes', _fmtNum(mesh.surface_node_count ?? results.summary?.surface_node_count, '', 0)],
+                ['Elements', _fmtNum(mesh.element_count ?? results.summary?.element_count, '', 0)],
+                ['Visualization', vis.mode || '—'],
+                ['Approximate', isApprox ? 'TRUE' : 'false'],
+                ['Warnings', String((state.threeFeaWarnings || []).length)],
+                ['SW version', swVersion],
+                ['Extractor commit', gitCommit],
+            ];
+            const grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:2px 10px;';
+            rows.forEach(([k, v]) => {
+                const kEl = document.createElement('div');
+                kEl.textContent = k + ':';
+                kEl.style.cssText = 'color:var(--text-secondary);';
+                const vEl = document.createElement('div');
+                vEl.textContent = v;
+                vEl.style.cssText = 'color:var(--text-primary);text-align:right;font-variant-numeric:tabular-nums;';
+                grid.appendChild(kEl);
+                grid.appendChild(vEl);
+            });
+            panel.appendChild(grid);
+
+            // Deformation slider (Stage 5)
+            const morphRow = document.createElement('div');
+            morphRow.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid var(--border);';
+            const morphLbl = document.createElement('div');
+            morphLbl.style.cssText = 'display:flex;justify-content:space-between;margin-bottom:4px;';
+            const morphLblL = document.createElement('span'); morphLblL.textContent = 'Deformation';
+            const morphLblR = document.createElement('span');
+            morphLblR.textContent = state.threeFeaMorphValue.toFixed(2);
+            morphLblR.style.cssText = 'font-variant-numeric:tabular-nums;';
+            morphLbl.appendChild(morphLblL); morphLbl.appendChild(morphLblR);
+            morphRow.appendChild(morphLbl);
+            const morphSlider = document.createElement('input');
+            morphSlider.type = 'range';
+            morphSlider.min = '0'; morphSlider.max = '1'; morphSlider.step = '0.01';
+            morphSlider.value = String(state.threeFeaMorphValue || 0);
+            morphSlider.style.cssText = 'width:100%;';
+            if (!state.threeFeaMorphEnabled) {
+                morphSlider.disabled = true;
+                morphLblR.textContent = 'n/a';
+                morphLbl.title = 'No morph target in this FEA package';
+            }
+            morphSlider.addEventListener('input', () => {
+                const v = parseFloat(morphSlider.value);
+                _applyFeaMorph(v);
+                morphLblR.textContent = v.toFixed(2);
+            });
+            morphRow.appendChild(morphSlider);
+            const morphReset = document.createElement('button');
+            morphReset.type = 'button';
+            morphReset.textContent = 'Reset';
+            morphReset.style.cssText = 'margin-top:4px;background:transparent;border:1px solid var(--border);color:var(--text-secondary);padding:2px 8px;font-size:10px;border-radius:3px;cursor:pointer;';
+            morphReset.disabled = !state.threeFeaMorphEnabled;
+            morphReset.addEventListener('click', () => {
+                morphSlider.value = '0';
+                _applyFeaMorph(0);
+                morphLblR.textContent = state.threeFeaMorphEnabled ? '0.00' : 'n/a';
+            });
+            morphRow.appendChild(morphReset);
+            panel.appendChild(morphRow);
+
+            // Warnings (collapsible, never hidden)
+            const warns = state.threeFeaWarnings || [];
+            const warnRow = document.createElement('details');
+            warnRow.style.cssText = 'margin-top:8px;border-top:1px solid var(--border);padding-top:6px;';
+            const summary = document.createElement('summary');
+            summary.textContent = `Warnings (${warns.length})`;
+            summary.style.cssText = 'cursor:pointer;font-weight:600;color:' + (warns.length ? '#e0c060' : 'var(--text-secondary)') + ';';
+            warnRow.appendChild(summary);
+            const wList = document.createElement('div');
+            wList.style.cssText = 'margin-top:4px;font-size:10px;color:var(--text-secondary);max-height:150px;overflow-y:auto;';
+            if (warns.length === 0) {
+                wList.textContent = '(none)';
+            } else {
+                warns.forEach(w => {
+                    const wDiv = document.createElement('div');
+                    wDiv.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.04);';
+                    wDiv.textContent = '• ' + w;
+                    wList.appendChild(wDiv);
+                });
+            }
+            warnRow.appendChild(wList);
+            panel.appendChild(warnRow);
+
+            container.appendChild(panel);
+        }
+
+        function _fmtNum(v, suffix, digits) {
+            if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '—';
+            if (typeof v !== 'number') return String(v);
+            const d = digits == null ? (Math.abs(v) >= 100 ? 2 : 4) : digits;
+            return v.toLocaleString(undefined, { minimumFractionDigits: d === 0 ? 0 : Math.min(d, 2), maximumFractionDigits: d }) + (suffix || '');
+        }
+
         function _create3DToolbar(container) {
             const toolbar = document.createElement('div');
             toolbar.className = 'three-toolbar';
@@ -19185,7 +19624,63 @@
                 onClick: () => _handle3DPresetView('fit'),
             }));
 
+            // Geometry / Simulation mode toggle. Only mounted when the FEA
+            // probe has confirmed artifacts exist for this part. When state
+            // changes, _syncFeaToolbarVisibility() updates the toggle's
+            // visibility without rebuilding the toolbar.
+            const feaToggleWrap = document.createElement('div');
+            feaToggleWrap.className = 'three-fea-toggle';
+            feaToggleWrap.style.cssText = 'display:none;align-items:center;gap:4px;margin-left:8px;border-left:1px solid var(--border);padding-left:8px;';
+            const geomBtn = document.createElement('button');
+            geomBtn.type = 'button';
+            geomBtn.className = 'three-fea-btn' + (state.threeFeaActive ? '' : ' active');
+            geomBtn.textContent = 'Geometry';
+            geomBtn.title = 'Show the part geometry GLB (default)';
+            geomBtn.style.cssText = 'background:transparent;border:1px solid var(--border);color:var(--text-primary);padding:3px 10px;font-size:11px;border-radius:3px;cursor:pointer;';
+            const simBtn = document.createElement('button');
+            simBtn.type = 'button';
+            simBtn.className = 'three-fea-btn' + (state.threeFeaActive ? ' active' : '');
+            simBtn.textContent = 'Simulation';
+            simBtn.title = 'Show the FEA stress mesh + deformation';
+            simBtn.style.cssText = geomBtn.style.cssText;
+            const _refreshActive = () => {
+                geomBtn.style.background = state.threeFeaActive ? 'transparent' : 'var(--accent)';
+                geomBtn.style.color = state.threeFeaActive ? 'var(--text-primary)' : '#fff';
+                simBtn.style.background = state.threeFeaActive ? 'var(--accent)' : 'transparent';
+                simBtn.style.color = state.threeFeaActive ? '#fff' : 'var(--text-primary)';
+            };
+            _refreshActive();
+            // Stash on state so async paths (GLB load failure) can refresh
+            // the visual after they revert state.threeFeaActive themselves.
+            state._refreshFeaToolbar = _refreshActive;
+            geomBtn.addEventListener('click', async () => {
+                if (!state.threeFeaActive) {
+                    // Even when state is already Geometry, dismiss any
+                    // lingering FEA error panel (e.g. left over from a failed
+                    // GLB load attempt). This is the user's escape hatch.
+                    _removeFeaInfoPanel();
+                    return;
+                }
+                await _setFeaMode(false);
+                _refreshActive();
+            });
+            simBtn.addEventListener('click', async () => {
+                if (state.threeFeaActive) return;
+                await _setFeaMode(true);
+                // _setFeaMode resolves AFTER any async GLB load completes (or
+                // reverts on failure), so the visual refresh here matches the
+                // final state regardless of which branch ran.
+                _refreshActive();
+            });
+            feaToggleWrap.appendChild(geomBtn);
+            feaToggleWrap.appendChild(simBtn);
+            toolbar.appendChild(feaToggleWrap);
+
             container.appendChild(toolbar);
+
+            // Show the toggle if the FEA probe already returned available; the
+            // probe call below will toggle it back on once available.
+            if (state.threeFeaAvailable === true) feaToggleWrap.style.display = 'flex';
         }
 
         function _handle3DPresetView(action) {
@@ -19554,6 +20049,20 @@
             state.featureMeshMap = null;
             state.featureColorMap = null;
             state.featureHighlightActive = false;
+            // FEA artifacts are part-specific; drop cached scene/results so the
+            // next part probe/load starts fresh and the Simulation toggle hides
+            // until a new probe confirms availability.
+            state.threeFeaAvailable = null;
+            state.threeFeaActive = false;
+            state.threeFeaScene = null;
+            state.threeFeaResults = null;
+            state.threeFeaManifest = null;
+            state.threeFeaStudy = null;
+            state.threeFeaWarnings = null;
+            state.threeFeaMorphEnabled = false;
+            state.threeFeaMorphValue = 0;
+            state.threeFeaLoadedPart = null;
+            state.threeFeaProbeInFlight = null;
             // Destroy part compare viewers on reset
             if (typeof _destroyPartDiffViewers === 'function') _destroyPartDiffViewers();
             state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
@@ -21759,6 +22268,70 @@
                 // CAD features for highlighting
                 if (state.featureColorMap && state.featureColorMap.features) {
                     att.part.available_cad_features = state.featureColorMap.features;
+                }
+
+                // FEA -- only present when a probe has confirmed artifacts
+                // and they have been parsed. All values are factual extracts;
+                // do not synthesize or guess any field that the manifest leaves
+                // null. visualization.approximate must surface honestly.
+                if (state.threeFeaAvailable === true && state.threeFeaResults) {
+                    const fr = state.threeFeaResults;
+                    const fs = state.threeFeaStudy || {};
+                    const vis = fs.visualization || {};
+                    const summary = fr.summary || {};
+                    const r = fr.results || {};
+                    const mat = fr.material || {};
+                    const mesh = fr.mesh || {};
+                    const mf = state.threeFeaManifest || null;
+                    att.fea = {
+                        loaded: true,
+                        active: !!state.threeFeaActive,
+                        study: {
+                            name: fr.study_name || fs.name || null,
+                            type: fr.study_type || null,
+                            slug: fs.slug || null,
+                            selection_mode: fs.selection_mode || null,
+                            configuration_name: (fr.study && fr.study.configuration_name) || null,
+                        },
+                        material: {
+                            name: mat.name || summary.material || null,
+                            yield_strength_mpa: mat.yield_strength_mpa ?? summary.yield_strength_mpa ?? null,
+                            tensile_strength_mpa: mat.tensile_strength_mpa ?? null,
+                            elastic_modulus_mpa: mat.elastic_modulus_mpa ?? null,
+                            poissons_ratio: mat.poissons_ratio ?? null,
+                            mass_density_kg_per_m3: mat.mass_density_kg_per_m3 ?? null,
+                        },
+                        mesh: {
+                            node_count: mesh.node_count ?? null,
+                            element_count: mesh.element_count ?? null,
+                            surface_node_count: mesh.surface_node_count ?? summary.surface_node_count ?? null,
+                        },
+                        results: {
+                            max_von_mises_mpa: r.max_von_mises_mpa ?? summary.max_von_mises_mpa ?? null,
+                            max_displacement_mm: r.max_displacement_mm ?? summary.max_displacement_mm ?? null,
+                            safety_factor: r.safety_factor ?? summary.safety_factor ?? null,
+                            reaction_forces_n: r.reaction_forces_n ?? summary.reaction_forces ?? null,
+                            morph_target_available: !!fr.has_morph_target,
+                        },
+                        visualization: {
+                            mode: vis.mode || null,
+                            approximate: vis.approximate === true,
+                        },
+                        // Provenance from the manifest. Populated asynchronously
+                        // by _applyFeaProbeResult; null until the manifest fetch
+                        // completes or if it failed (manifest fetch failure is
+                        // logged but non-fatal).
+                        provenance: mf ? {
+                            extractor_git_commit: mf.extractor_git_commit || null,
+                            extractor_version: mf.extractor_version || null,
+                            solidworks_version: mf.solidworks_version || null,
+                            timestamp_utc: mf.timestamp_utc || null,
+                            source_document_path: (mf.source && mf.source.document_path) || null,
+                        } : null,
+                        warnings: state.threeFeaWarnings || [],
+                    };
+                } else if (state.threeFeaAvailable === false) {
+                    att.fea = { loaded: false };
                 }
 
                 // ASSEMBLY

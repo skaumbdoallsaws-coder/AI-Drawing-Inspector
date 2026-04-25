@@ -1079,6 +1079,233 @@ async def get_part_feature_diff(part_number: str, revA: str = Query(...), revB: 
     }
 
 
+# ---------- FEA Artifact Resolution ----------
+#
+# These endpoints serve the FEA artifacts produced by the SolidWorks 2024 SP5
+# worker computer and committed under  incoming_fea/<part-slug>/<study-slug>/
+# per the contract documented in incoming_fea/README.md. They do NOT mutate
+# the staging area and do NOT copy artifacts into 400S_Sorted_Library.
+
+# Mirror of the C# MakeStudySlug() algorithm in
+# SolidWorksExtractor/Services/SimulationExtractor.cs. Used to resolve the
+# part directory under incoming_fea/, since the worker writes
+#   incoming_fea/<slug(part_number)>/<slug(study_name)>/...
+# Lowercase ASCII alphanumerics, hyphens preserved, everything else -> '_',
+# runs collapsed, leading/trailing _ and - trimmed, capped at 64 chars.
+def _make_fea_slug(name: str) -> str:
+    if not name:
+        return "study_unknown"
+    sb = []
+    for ch in name:
+        if ch.isascii() and ch.isalnum():
+            sb.append(ch.lower())
+        elif ch == '-':
+            sb.append('-')
+        else:
+            sb.append('_')
+    s = ''.join(sb)
+    while '__' in s:
+        s = s.replace('__', '_')
+    s = s.strip('_-')
+    if len(s) > 64:
+        s = s[:64].rstrip('_-')
+    return s or "study_unknown"
+
+
+# Lightweight container for resolved FEA artifact paths.
+class _FeaResolution:
+    def __init__(self, part_slug: str, study_slug: str, study_dir: Path,
+                 manifest_path: Path, results_path: Path, glb_path: Path,
+                 manifest: Dict[str, Any]):
+        self.part_slug = part_slug
+        self.study_slug = study_slug
+        self.study_dir = study_dir
+        self.manifest_path = manifest_path
+        self.results_path = results_path
+        self.glb_path = glb_path
+        self.manifest = manifest
+
+
+def _list_fea_studies(part_slug: str) -> List[Dict[str, Any]]:
+    """Enumerate study directories under incoming_fea/<part_slug>/."""
+    part_dir = REPO_ROOT / "incoming_fea" / part_slug
+    if not part_dir.exists() or not part_dir.is_dir():
+        return []
+    studies = []
+    for child in sorted(part_dir.iterdir()):
+        if not child.is_dir() or child.name.startswith('.'):
+            continue
+        manifests = list(child.glob("*_fea_*_manifest.json"))
+        if not manifests:
+            continue
+        meta: Dict[str, Any] = {"slug": child.name}
+        try:
+            # The C# extractor writes the manifest with Encoding.UTF8 which adds
+            # a BOM; utf-8-sig reads cleanly with or without it.
+            with open(manifests[0], encoding="utf-8-sig") as f:
+                manifest_data = json.load(f)
+            study_block = manifest_data.get("study") or {}
+            meta["name"] = study_block.get("name") or None
+            meta["type"] = study_block.get("type") or None
+            meta["selection_mode"] = study_block.get("selection_mode") or None
+        except Exception as e:
+            # If the manifest is unreadable, still surface the slug so the caller
+            # can see the directory exists; the per-endpoint error handling below
+            # will refuse to serve a study whose manifest cannot be parsed.
+            logging.warning("Could not read FEA manifest %s: %s", manifests[0], e)
+            meta["name"] = None
+        studies.append(meta)
+    return studies
+
+
+def _resolve_fea_artifacts(part_number: str, study_slug: Optional[str]) -> _FeaResolution:
+    """Resolve the canonical artifacts for (part_number, optional study_slug).
+
+    Raises HTTPException with:
+      404 - no incoming_fea directory or no study sub-directories for this part
+      409 - multiple studies exist and the caller did not pin one with ?study=
+      400 - bad part_number / study slug input
+      500 - manifest is missing or unparseable in a study directory we picked
+    """
+    if not part_number or not part_number.strip():
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    part_slug = _make_fea_slug(part_number)
+    if not part_slug or part_slug == "study_unknown":
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    part_dir = REPO_ROOT / "incoming_fea" / part_slug
+    if not part_dir.exists() or not part_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No FEA artifacts for part '{part_number}' (no directory at incoming_fea/{part_slug}/)",
+        )
+
+    studies = _list_fea_studies(part_slug)
+    if not studies:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No FEA studies for part '{part_number}' (no manifest under incoming_fea/{part_slug}/)",
+        )
+
+    if study_slug:
+        slug_clean = _make_fea_slug(study_slug)
+        match = next((s for s in studies if s["slug"] == slug_clean), None)
+        if not match:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No FEA study '{study_slug}' for part '{part_number}'. Available: "
+                       + ", ".join(s["slug"] for s in studies),
+            )
+        chosen_slug = slug_clean
+    elif len(studies) == 1:
+        chosen_slug = studies[0]["slug"]
+    else:
+        # Ambiguity: caller must pick. Surface the available studies in the body
+        # so the frontend can render a chooser without a second round-trip.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "multiple_studies",
+                "message": f"Multiple FEA studies for part '{part_number}'; specify ?study=<slug>.",
+                "part_slug": part_slug,
+                "studies": studies,
+            },
+        )
+
+    study_dir = part_dir / chosen_slug
+    manifests = list(study_dir.glob("*_fea_*_manifest.json"))
+    if len(manifests) != 1:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Expected exactly one manifest in {study_dir}, found {len(manifests)}",
+        )
+    manifest_path = manifests[0]
+    try:
+        with open(manifest_path, encoding="utf-8-sig") as f:
+            manifest = json.load(f)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not parse manifest {manifest_path.name}: {e}",
+        )
+
+    base = manifest_path.name[:-len("_manifest.json")]
+    results_path = study_dir / f"{base}_results.json"
+    glb_path = study_dir / f"{base}.glb"
+
+    return _FeaResolution(
+        part_slug=part_slug,
+        study_slug=chosen_slug,
+        study_dir=study_dir,
+        manifest_path=manifest_path,
+        results_path=results_path,
+        glb_path=glb_path,
+        manifest=manifest,
+    )
+
+
+@app.get("/api/part-fea/{part_number}")
+async def get_part_fea(part_number: str, study: Optional[str] = Query(None)):
+    """Serve the FEA results JSON plus minimal resolved metadata.
+
+    On success returns the full schema-v2 results JSON augmented with a
+    `_resolved` block carrying the part slug, study slug, and the visualization
+    flag from the manifest (so the UI can decide whether to show the
+    'approximate visualization' warning without a second round-trip)."""
+    resolution = _resolve_fea_artifacts(part_number, study)
+    if not resolution.results_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Manifest references results JSON that is not present: {resolution.results_path.name}",
+        )
+    try:
+        with open(resolution.results_path, encoding="utf-8-sig") as f:
+            results = json.load(f)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not parse results JSON: {e}",
+        )
+    # Surface the available studies so the frontend can render a switcher
+    # without re-fetching when the user wants to compare runs.
+    available_studies = _list_fea_studies(resolution.part_slug)
+    results["_resolved"] = {
+        "part_number": part_number,
+        "part_slug": resolution.part_slug,
+        "study_slug": resolution.study_slug,
+        "study_name": (resolution.manifest.get("study") or {}).get("name"),
+        "selection_mode": (resolution.manifest.get("study") or {}).get("selection_mode"),
+        "visualization": resolution.manifest.get("visualization") or {},
+        "available_studies": available_studies,
+        "manifest_url": f"/api/part-fea-manifest/{part_number}?study={resolution.study_slug}",
+        "model_url": f"/api/part-fea-model/{part_number}?study={resolution.study_slug}",
+    }
+    return results
+
+
+@app.get("/api/part-fea-model/{part_number}")
+async def get_part_fea_model(part_number: str, study: Optional[str] = Query(None)):
+    """Serve the FEA GLB binary."""
+    resolution = _resolve_fea_artifacts(part_number, study)
+    if not resolution.glb_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Manifest references GLB that is not present: {resolution.glb_path.name}",
+        )
+    return FileResponse(
+        path=str(resolution.glb_path),
+        media_type="model/gltf-binary",
+        filename=resolution.glb_path.name,
+    )
+
+
+@app.get("/api/part-fea-manifest/{part_number}")
+async def get_part_fea_manifest(part_number: str, study: Optional[str] = Query(None)):
+    """Serve the FEA provenance manifest JSON."""
+    resolution = _resolve_fea_artifacts(part_number, study)
+    return resolution.manifest
+
+
 # ---------- Assembly Configuration Generation ----------
 
 def _generate_assembly_configurations(assy_data, part_color_legend):

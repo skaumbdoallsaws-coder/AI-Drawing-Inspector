@@ -6689,6 +6689,7 @@
             threeFeaWarnings: null,        // Array of warning strings from manifest/results
             threeFeaMorphEnabled: false,   // True when has_morph_target == true
             threeFeaMorphValue: 0,         // Slider value 0..1 -> mesh.morphTargetInfluences[0]
+            threeFeaMorphInconsistent: null, // Set after load if morph deltas disagree with reported max displacement; { maxAbsDeltaM, reportedMaxM, ratio }
             threeFeaLoadedPart: null,      // Part number of currently cached FEA scene
             threeFeaProbeInFlight: null,   // Part number currently being probed (avoid double fetch)
             _threeCameraAnimId: null, // Feature #122: camera transition animation frame
@@ -7291,6 +7292,21 @@
             state._rawPartData = null;
             state._rawPartDataFetching = false;
             state._rawPartDataCallbacks = [];
+            // FEA state is part-specific too; reset so the next probe starts
+            // clean and a stale morph-inconsistency / scene from the prior
+            // part can't bleed into the new one.
+            state.threeFeaAvailable = null;
+            state.threeFeaActive = false;
+            state.threeFeaScene = null;
+            state.threeFeaResults = null;
+            state.threeFeaManifest = null;
+            state.threeFeaStudy = null;
+            state.threeFeaWarnings = null;
+            state.threeFeaMorphEnabled = false;
+            state.threeFeaMorphValue = 0;
+            state.threeFeaMorphInconsistent = null;
+            state.threeFeaLoadedPart = null;
+            state.threeFeaProbeInFlight = null;
             // Clear part diff state and destroy viewers
             _destroyPartDiffViewers();
             partDiffState.available = false;
@@ -19569,8 +19585,59 @@
                 if (typeof _fitCameraToGroup === 'function') {
                     _fitCameraToGroup(state.threeCamera, state.threeControls, root);
                 }
+
+                // Morph sanity check: the extractor writes deltas in METERS
+                // and the results JSON reports max_displacement_mm. The two
+                // must agree to within roughly an order of magnitude. If the
+                // morph buffer's max absolute delta is far larger than the
+                // reported displacement, the buffer is corrupt (e.g.
+                // surface-node IDs aliased into the float buffer). Driving
+                // the slider against that data produces an explosive,
+                // engineering-meaningless deformation that's worse than no
+                // deformation at all -- so we disable the slider and surface
+                // an honest warning rather than letting the user "use" garbage.
+                state.threeFeaMorphInconsistent = null;
+                if (morphMesh && morphMesh.geometry.morphAttributes.position) {
+                    const morphAttr = morphMesh.geometry.morphAttributes.position[0];
+                    if (morphAttr && morphAttr.array) {
+                        let maxAbsDelta = 0;
+                        const arr = morphAttr.array;
+                        for (let i = 0; i < arr.length; i++) {
+                            const a = Math.abs(arr[i]);
+                            if (a > maxAbsDelta) maxAbsDelta = a;
+                        }
+                        const r = state.threeFeaResults || {};
+                        const reportedMaxMm =
+                            (r.results && r.results.max_displacement_mm) ||
+                            (r.summary && r.summary.max_displacement_mm) ||
+                            0;
+                        const reportedMaxM = reportedMaxMm / 1000;
+                        const SANITY_RATIO = 10; // one order of magnitude headroom for solver / projection slack
+                        if (reportedMaxM > 0 && maxAbsDelta > SANITY_RATIO * reportedMaxM) {
+                            state.threeFeaMorphInconsistent = {
+                                maxAbsDeltaM: maxAbsDelta,
+                                reportedMaxM: reportedMaxM,
+                                ratio: maxAbsDelta / reportedMaxM,
+                            };
+                            console.warn(
+                                `[FEA] morph data inconsistent with reported displacement: ` +
+                                `max |delta| = ${maxAbsDelta.toExponential(3)} m vs reported max = ${reportedMaxM.toExponential(3)} m ` +
+                                `(${(maxAbsDelta / reportedMaxM).toExponential(2)}x). Disabling slider.`
+                            );
+                            // Disable the slider and force-zero the influence
+                            // so the visible mesh stays at base positions.
+                            state.threeFeaMorphEnabled = false;
+                            state.threeFeaMorphValue = 0;
+                            if (morphMesh.morphTargetInfluences) {
+                                morphMesh.morphTargetInfluences[0] = 0;
+                            }
+                        }
+                    }
+                }
+
                 // Apply current morph value if user already moved the slider
-                if (state.threeFeaMorphValue && morphMesh) {
+                // (only when morph is still enabled after the sanity check)
+                if (state.threeFeaMorphEnabled && state.threeFeaMorphValue && morphMesh) {
                     morphMesh.morphTargetInfluences[0] = state.threeFeaMorphValue;
                 }
             } catch (err) {
@@ -19602,7 +19669,11 @@
         }
 
         // Apply a morph influence value (0..1) to the loaded FEA mesh.
+        // No-op when the sanity check disabled morph (or when no morph is
+        // available), so a programmatic event on the disabled slider element
+        // can't drive the mesh against known-bad data.
         function _applyFeaMorph(value) {
+            if (!state.threeFeaMorphEnabled) return;
             state.threeFeaMorphValue = value;
             const root = state.threeFeaScene;
             if (!root) return;
@@ -19759,6 +19830,21 @@
             // Deformation slider (Stage 5)
             const morphRow = document.createElement('div');
             morphRow.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid var(--border);';
+
+            // If the morph sanity check tripped after load, surface a clear
+            // banner above the slider explaining why deformation is disabled.
+            // The slider's own disabled state is driven by threeFeaMorphEnabled.
+            if (state.threeFeaMorphInconsistent) {
+                const inc = state.threeFeaMorphInconsistent;
+                const incBanner = document.createElement('div');
+                incBanner.style.cssText = 'background:#5a4a2a;border:1px solid #b80;color:#ffe0a0;padding:6px 8px;border-radius:3px;margin-bottom:6px;font-size:10px;line-height:1.4;';
+                incBanner.textContent =
+                    'Deformation disabled: morph data is inconsistent with reported displacement. ' +
+                    `Max delta ${inc.maxAbsDeltaM.toExponential(2)} m vs reported max ${inc.reportedMaxM.toExponential(2)} m ` +
+                    `(${inc.ratio.toExponential(1)}x). Re-run worker extraction to repair.`;
+                morphRow.appendChild(incBanner);
+            }
+
             const morphLbl = document.createElement('div');
             morphLbl.style.cssText = 'display:flex;justify-content:space-between;margin-bottom:4px;';
             const morphLblL = document.createElement('span'); morphLblL.textContent = 'Deformation';
@@ -19775,7 +19861,9 @@
             if (!state.threeFeaMorphEnabled) {
                 morphSlider.disabled = true;
                 morphLblR.textContent = 'n/a';
-                morphLbl.title = 'No morph target in this FEA package';
+                morphLbl.title = state.threeFeaMorphInconsistent
+                    ? 'Morph data is inconsistent with reported displacement'
+                    : 'No morph target in this FEA package';
             }
             morphSlider.addEventListener('input', () => {
                 const v = parseFloat(morphSlider.value);
@@ -20282,6 +20370,7 @@
             state.threeFeaWarnings = null;
             state.threeFeaMorphEnabled = false;
             state.threeFeaMorphValue = 0;
+            state.threeFeaMorphInconsistent = null;
             state.threeFeaLoadedPart = null;
             state.threeFeaProbeInFlight = null;
             // Destroy part compare viewers on reset
@@ -22533,6 +22622,11 @@
                             safety_factor: r.safety_factor ?? summary.safety_factor ?? null,
                             reaction_forces_n: r.reaction_forces_n ?? summary.reaction_forces ?? null,
                             morph_target_available: !!fr.has_morph_target,
+                            // Set when the loader's sanity check rejected the
+                            // morph buffer as inconsistent with the reported
+                            // displacement. Carries the diagnostic numbers so
+                            // the agent can explain the disabled slider.
+                            morph_data_inconsistent: state.threeFeaMorphInconsistent || null,
                         },
                         visualization: {
                             mode: vis.mode || null,

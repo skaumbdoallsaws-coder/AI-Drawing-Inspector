@@ -2382,143 +2382,25 @@ namespace SolidWorksExtractor.Services
                             Console.WriteLine($"    FEA: Nodal stress (per-node fill): filled={filledHere:N0} gaps; total covered={totalCovered:N0}/{surfVertCount:N0}, failed={failed}, firstErrCode={firstErr}, firstErrText={firstErrText ?? "(none)"}");
                         }
 
-                        // Final fallback: per-element GetStress over only the
-                        // surface-tri parent elements (a small subset of the
-                        // total mesh on solid models), feeding the same area-
-                        // weighted projection used by the primary path. This
-                        // is more accurate AND faster than the legacy "iterate
-                        // every element with naive corner accumulation" loop:
-                        //   * area weighting matches SolidWorks' nodal-average
-                        //     scheme instead of treating every shell equally
-                        //   * surface-only iteration skips internal volume
-                        //     elements whose stress would never reach the
-                        //     visualization
-                        //   * the projection helper handles tet4 / tet10 /
-                        //     shell uniformly because it consumes pre-built
-                        //     surface tris with parent IDs.
-                        // Still wall-clock budgeted so a slow COM build can't
-                        // hang the run indefinitely.
-                        if (totalCovered < surfVertCount && surfaceFaces.Count > 0)
-                        {
-                            int budgetSec = _stressFallbackBudgetSeconds;
-                            long budgetMs = budgetSec > 0 ? (long)budgetSec * 1000L : long.MaxValue;
-                            string budgetLabel = budgetSec > 0 ? $"{budgetSec}s budget" : "no budget cap";
-                            Console.WriteLine($"    FEA: Coverage still {totalCovered:N0}/{surfVertCount:N0} after bulk + per-node API; running per-element-of-surface fallback ({budgetLabel}).");
-                            var perElemFromCalls = new Dictionary<int, double>();
-                            int elStressOk = 0, elStressFail = 0;
-                            bool budgetExceeded = false;
-                            var sw = System.Diagnostics.Stopwatch.StartNew();
-                            // Walk surface tris (not all volume elements) and
-                            // ask the API for stress at each parent element ID.
-                            // De-duplicate parent IDs so we don't hit the API
-                            // twice for the same tet that owns multiple
-                            // surface faces.
-                            var parentSet = new HashSet<int>();
-                            for (int t = 0; t < surfaceFaceParents.Count; t++)
-                            {
-                                int p = surfaceFaceParents[t];
-                                if (p >= 0) parentSet.Add(p);
-                            }
-                            int parentTotal = parentSet.Count;
-                            int progressEvery = Math.Max(100, parentTotal / 20); // log ~20 ticks across the walk
-                            int processed = 0;
-                            long lastLogMs = 0;
-                            int probesLogged = 0;
-                            const int PROBE_LIMIT = 5;
-                            // Track the modal array length so we can pick the right
-                            // VON slot ([nodes_per_element * 10 - 1] for the last
-                            // node's VON, or [9] for a single-set element). The COSMOSWorks
-                            // GetStress(NElementNumber,...) layout per node is
-                            // [SX, SY, SZ, TXY, TXZ, TYZ, P1, P2, P3, VON].
-                            int firstArrayLen = -1;
-                            foreach (int parent in parentSet)
-                            {
-                                if (budgetSec > 0 && sw.ElapsedMilliseconds > budgetMs)
-                                {
-                                    budgetExceeded = true;
-                                    Console.WriteLine($"    FEA: Per-element budget ({budgetSec}s) exceeded after {elStressOk + elStressFail}/{parentTotal} parents; stopping. Coverage will be partial.");
-                                    Console.WriteLine($"    FEA: Rerun with --fea-stress-budget-seconds 0 (or a larger value) to let the per-element fallback complete.");
-                                    break;
-                                }
-                                try
-                                {
-                                    int sErrCode = 0;
-                                    object stressData = results.GetStress(parent + 1, 0, null, 0, out sErrCode);
-                                    if (sErrCode == 0 && stressData != null)
-                                    {
-                                        double[] sVals = ConvertToDoubleArray(stressData);
-                                        if (sVals != null && sVals.Length > 0)
-                                        {
-                                            if (firstArrayLen < 0) firstArrayLen = sVals.Length;
-                                            // ----- DIAGNOSTIC PROBE -----
-                                            // Dump the first PROBE_LIMIT successful
-                                            // arrays so the COSMOSWorks layout can be
-                                            // read out of the worker log. This is
-                                            // small (5 lines) and only fires once
-                                            // per run.
-                                            if (probesLogged < PROBE_LIMIT)
-                                            {
-                                                var sb = new System.Text.StringBuilder();
-                                                sb.Append($"    FEA: GetStress(eid={parent + 1}) length={sVals.Length} values=[");
-                                                int dumpN = Math.Min(sVals.Length, 50);
-                                                for (int k = 0; k < dumpN; k++)
-                                                {
-                                                    if (k > 0) sb.Append(", ");
-                                                    sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
-                                                        "{0}:{1:E3}", k, sVals[k]);
-                                                }
-                                                if (sVals.Length > dumpN) sb.Append(", ...");
-                                                sb.Append("]");
-                                                Console.WriteLine(sb.ToString());
-                                                probesLogged++;
-                                            }
-                                            // Existing behavior kept until the
-                                            // probe diagnostic above tells us the
-                                            // actual layout — see commit message.
-                                            if (sVals.Length > 9)
-                                            {
-                                                perElemFromCalls[parent] = sVals[9];
-                                            }
-                                            else
-                                            {
-                                                perElemFromCalls[parent] = sVals[sVals.Length - 1];
-                                            }
-                                            elStressOk++;
-                                            processed++;
-                                            if (processed % progressEvery == 0)
-                                            {
-                                                long nowMs = sw.ElapsedMilliseconds;
-                                                double pct = (double)processed / parentTotal * 100.0;
-                                                double etaSec = processed > 0
-                                                    ? (nowMs / 1000.0) * (parentTotal - processed) / processed
-                                                    : 0.0;
-                                                Console.WriteLine($"    FEA: per-element progress {processed:N0}/{parentTotal:N0} ({pct:F1}%) ok={elStressOk} fail={elStressFail} elapsed={nowMs / 1000.0:F1}s eta~{etaSec:F0}s");
-                                                lastLogMs = nowMs;
-                                            }
-                                            continue;
-                                        }
-                                    }
-                                    elStressFail++;
-                                    processed++;
-                                }
-                                catch { elStressFail++; processed++; }
-                            }
-                            Console.WriteLine($"    FEA: per-element GetStress modal array length = {firstArrayLen} (10 components/node × NodesPerElement; VON at every 10th index ending at length-1)");
-                            int filledByProjection = ProjectElementStressAreaWeighted(
-                                perElemFromCalls, surfaceFaces, surfaceFaceParents,
-                                surfaceNodes, nodeRemap,
-                                nodeX, nodeY, nodeZ,
-                                stressValues, covered, ref maxStress, ref peakIdx);
-                            contribPerElemSurface = filledByProjection;
-                            totalCovered += filledByProjection;
-                            sw.Stop();
-                            string completionLabel = budgetExceeded ? "TIMED OUT (partial)" : "completed";
-                            Console.WriteLine($"    FEA: Per-element-of-surface fallback {completionLabel}: ok={elStressOk}, fail={elStressFail}, parents={parentTotal:N0}, newly covered={filledByProjection:N0}/{surfVertCount:N0}, total covered={totalCovered:N0}, elapsed={sw.ElapsedMilliseconds:N0}ms");
-                            if (budgetExceeded)
-                            {
-                                Warn(summary, $"Per-element-of-surface stress fallback timed out after {budgetSec}s ({elStressOk + elStressFail}/{parentTotal} parents); coverage is partial. Rerun with --fea-stress-budget-seconds 0 for full coverage.");
-                            }
-                        }
+                        // Per-element-of-surface fallback removed. The previous
+                        // implementation looped over 2,379 surface-parent
+                        // elements calling GetStress(eid, ...) one at a time at
+                        // ~0.65 s/call (~25 min total). On this build of
+                        // COSMOSWorks the NElementNumber argument is ignored —
+                        // every call returns the entire mesh's stress as a
+                        // single flat array of length elementCount × 12. So
+                        // the loop wasted ~24:59 of those 25 minutes and read
+                        // sVals[9] (elem 1's P3, ~14 MPa) on every call,
+                        // producing a constant-stress field that rendered as
+                        // solid red. One COM round-trip is sufficient — that
+                        // call now lives inside TryBulkPerElementVon as Path B
+                        // and lights up the primary "bulk-per-element-area-
+                        // weighted" path.
+                        // The --fea-stress-budget-seconds /
+                        // -StressBudgetSeconds knob is preserved as a no-op
+                        // for backward compatibility with worker scripts that
+                        // still pass it; nothing reads _stressFallbackBudgetSeconds
+                        // anymore on the live code path.
                     }
                     catch (Exception ex)
                     {
@@ -3292,16 +3174,31 @@ namespace SolidWorksExtractor.Services
 
         /// <summary>
         /// Try the bulk per-element stress API. Returns a (ZERO-based element
-        /// index) → von Mises value (Pa) map if the call succeeds, null
-        /// otherwise. COSMOSWorks returns interleaved [eid, value, eid, value]
-        /// pairs with 1-based element IDs in this build; we subtract 1 here so
-        /// the keys match `surfaceFaceParents`, which stores the 0-based
-        /// connectivity loop index. This alignment is required by
-        /// ProjectElementStressAreaWeighted -- if it diverges, the projection
-        /// silently no-ops and produces an empty stress field.
+        /// index) → von Mises value (Pa) map if either of the two paths
+        /// succeeds, null otherwise.
+        ///
+        /// Path A (preferred — modern COSMOSWorks builds):
+        ///   GetStressForEntities2(byElement=false, VON, all=null) returns
+        ///   interleaved [eid, value, eid, value, ...] pairs. 1-based EIDs.
+        ///
+        /// Path B (fallback for older / restricted builds — verified on
+        ///   SolidWorks 2024 v32.5.0 worker machine where Path A returns
+        ///   DBNull / errCode 7):
+        ///   GetStress(NElementNumber=1, ...) ignores NElementNumber and
+        ///   returns the entire mesh's stress as a single flat array of
+        ///   length elementCount × 12. Per-stride layout (0-based offsets):
+        ///     [0]=eid (1-based), [1..6]=SX/SY/SZ/TXY/TXZ/TYZ,
+        ///     [7..9]=P1/P2/P3, [10]=VON, [11]=INT.
+        ///   Verified empirically — see commit ceebd77 for raw probe output.
+        ///
+        /// Both paths return 0-based EID keys to match surfaceFaceParents,
+        /// which stores the 0-based connectivity loop index. This alignment
+        /// is required by ProjectElementStressAreaWeighted — if it diverges,
+        /// the projection silently no-ops and produces an empty stress field.
         /// </summary>
         private Dictionary<int, double> TryBulkPerElementVon(ICWResults results)
         {
+            // ---------- Path A: GetStressForEntities2 ----------
             try
             {
                 int err = 0;
@@ -3314,23 +3211,72 @@ namespace SolidWorksExtractor.Services
                     0,
                     out err);
                 LogConnectivityArrayDiagnostics("GetStressForEntities2(all,VON,byElement)", bulk, err);
-                if (err != 0 || bulk == null) return null;
-                double[] flat = ConvertToDoubleArray(bulk);
-                if (flat == null || flat.Length < 2) return null;
-                var map = new Dictionary<int, double>(flat.Length / 2);
-                for (int k = 0; k + 1 < flat.Length; k += 2)
+                if (err == 0 && bulk != null)
                 {
-                    int eid = (int)Math.Round(flat[k]);
-                    // API EIDs are 1-based; convert to 0-based to match
-                    // surfaceFaceParents.
-                    if (eid > 0) map[eid - 1] = flat[k + 1];
+                    double[] flat = ConvertToDoubleArray(bulk);
+                    if (flat != null && flat.Length >= 2)
+                    {
+                        var map = new Dictionary<int, double>(flat.Length / 2);
+                        for (int k = 0; k + 1 < flat.Length; k += 2)
+                        {
+                            int eid = (int)Math.Round(flat[k]);
+                            if (eid > 0) map[eid - 1] = flat[k + 1];
+                        }
+                        if (map.Count > 0)
+                        {
+                            Console.WriteLine($"    FEA: bulk per-element VON via GetStressForEntities2: {map.Count:N0} elements (raw length {flat.Length:N0}; keys converted to 0-based)");
+                            return map;
+                        }
+                    }
                 }
-                Console.WriteLine($"    FEA: bulk per-element VON parsed: {map.Count:N0} elements (raw length {flat.Length:N0}; keys converted to 0-based)");
-                return map;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"    FEA: bulk per-element VON threw: {ex.Message}");
+                Console.WriteLine($"    FEA: GetStressForEntities2 threw: {ex.Message}");
+            }
+
+            // ---------- Path B: GetStress full-mesh fallback ----------
+            try
+            {
+                int err = 0;
+                object full = results.GetStress(1, 0, null, 0, out err);
+                LogConnectivityArrayDiagnostics("GetStress(1, full-mesh)", full, err);
+                if (err != 0 || full == null) return null;
+                double[] sVals = ConvertToDoubleArray(full);
+                if (sVals == null || sVals.Length < 12 || (sVals.Length % 12) != 0)
+                {
+                    Console.WriteLine($"    FEA: GetStress full-mesh array length {(sVals == null ? -1 : sVals.Length)} is not a multiple of 12; cannot parse.");
+                    return null;
+                }
+                const int STRIDE = 12;
+                const int VON_OFFSET = 10;
+                const int EID_OFFSET = 0;
+                int strides = sVals.Length / STRIDE;
+                var sb = new System.Text.StringBuilder();
+                sb.Append("    FEA: GetStress full-mesh first stride: ");
+                for (int k = 0; k < STRIDE; k++)
+                {
+                    if (k > 0) sb.Append(", ");
+                    sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
+                        "[{0}]={1:E3}", k, sVals[k]);
+                }
+                Console.WriteLine(sb.ToString());
+                Console.WriteLine($"    FEA: GetStress full-mesh array length = {sVals.Length} ({strides:N0} elements × stride 12 = elementCount × [eid, SX, SY, SZ, TXY, TXZ, TYZ, P1, P2, P3, VON, INT]); reading VON at offset {VON_OFFSET}");
+                var map = new Dictionary<int, double>(strides);
+                int eidMismatches = 0;
+                for (int s = 0; s < strides; s++)
+                {
+                    int baseIdx = s * STRIDE;
+                    int eid = (int)Math.Round(sVals[baseIdx + EID_OFFSET]);
+                    if (eid <= 0) { eidMismatches++; continue; }
+                    map[eid - 1] = sVals[baseIdx + VON_OFFSET];
+                }
+                Console.WriteLine($"    FEA: bulk per-element VON via GetStress full-mesh: {map.Count:N0} elements (eidMismatches={eidMismatches})");
+                return map.Count > 0 ? map : null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    FEA: GetStress full-mesh threw: {ex.Message}");
                 return null;
             }
         }

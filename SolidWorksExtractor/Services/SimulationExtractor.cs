@@ -432,6 +432,16 @@ namespace SolidWorksExtractor.Services
             public int CadVertsNoStressNeighbour; // CAD verts whose K-NN had no covered stress data (left at 0)
             public int CadVertsNoDispNeighbour;   // CAD verts whose K-NN had no covered displacement data
             public bool Approximate;             // True (CAD-projected results are spatial approximations)
+            // Position of the maximum-stress vertex in the IDW-projected CAD
+            // display mesh (meters). Distinct from results.max_von_mises_location_m,
+            // which is the solver-authoritative location (FE node coordinates).
+            // The CAD peak is always at or below the FE peak by construction
+            // (IDW is a weighted average of FE values — it cannot exceed the
+            // maximum source value), so this field is purely diagnostic /
+            // visualization-aid; consumers reading max stress location must
+            // use the solver field. Null when no peak was found (e.g. the CAD
+            // path produced an empty stress field).
+            public double[] DisplayPeakStressLocationM;
         }
 
         /// <summary>
@@ -4307,19 +4317,25 @@ namespace SolidWorksExtractor.Services
             };
             Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts from {feCount:N0} FE surface nodes (stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, mean FE spacing {index.MeanSpacing:G4} m, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour})");
 
-            // Promote per-vertex peak into summary.MaxStressLocation for the
-            // CAD path (FE-mesh path already did similar logic, but the CAD
-            // peak vertex is in CAD coordinates which we want recorded).
-            if (maxStress > 0)
+            // Capture the CAD display-mesh peak as a *display-only* diagnostic
+            // — never let it shadow solver-authoritative fields:
+            //   * summary.MaxStressLocation (drives results.max_von_mises_location_m
+            //     and summary.max_stress_location) must stay tied to the solver
+            //     peak set earlier from GetMinMaxStress / .OUT fallback.
+            //   * summary.MaxVonMisesMpa is left untouched; the IDW-projected
+            //     peak is always at or below the FE solver peak by construction
+            //     (a weighted average can't exceed its largest source value),
+            //     so promoting magnitude is unnecessary and risks drift.
+            // The CAD peak coordinates land in cad_projection.display_peak_stress_location_m
+            // for visualization-side debug only.
+            if (maxStress > 0 && peakIdx < cad.VertexCount)
             {
-                summary.MaxStressLocation = new double[]
+                summary.CadProjectionDiagnostic.DisplayPeakStressLocationM = new double[]
                 {
                     cad.Positions[peakIdx * 3],
                     cad.Positions[peakIdx * 3 + 1],
                     cad.Positions[peakIdx * 3 + 2]
                 };
-                double maxMpa = maxStress / 1e6;
-                if (maxMpa > summary.MaxVonMisesMpa) summary.MaxVonMisesMpa = maxMpa;
             }
 
             return new FeaMeshData
@@ -4336,7 +4352,13 @@ namespace SolidWorksExtractor.Services
                 MorphBoundsMax = morphBoundsMax,
                 VertexCount = cad.VertexCount,
                 TriangleCount = cad.TriangleCount,
-                UniqueNodeCount = cad.VertexCount,
+                // UniqueNodeCount keeps its solver/FE-surface meaning even on
+                // the CAD-projected path, so summary.SurfaceNodeCount, which
+                // consumers read as the FE surface-node count, doesn't get
+                // overloaded with the refined display-mesh vertex count.
+                // Refined display counts are reported under cad_projection.*
+                // (cad_vertex_count, refined_cad_vertex_count, etc.).
+                UniqueNodeCount = feCount,
             };
         }
 
@@ -4983,6 +5005,18 @@ namespace SolidWorksExtractor.Services
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"far_vertex_fraction_pct\": {0:F2},\n", cp.FarVertexFractionPct);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_verts_no_covered_stress_neighbour\": {0},\n", cp.CadVertsNoStressNeighbour);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_verts_no_covered_disp_neighbour\": {0},\n", cp.CadVertsNoDispNeighbour);
+                if (cp.DisplayPeakStressLocationM != null && cp.DisplayPeakStressLocationM.Length == 3)
+                {
+                    sb.AppendFormat(CultureInfo.InvariantCulture,
+                        "    \"display_peak_stress_location_m\": [{0:G9}, {1:G9}, {2:G9}],\n",
+                        cp.DisplayPeakStressLocationM[0],
+                        cp.DisplayPeakStressLocationM[1],
+                        cp.DisplayPeakStressLocationM[2]);
+                }
+                else
+                {
+                    sb.AppendLine("    \"display_peak_stress_location_m\": null,");
+                }
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"approximate\": {0}\n", cp.Approximate ? "true" : "false");
                 sb.AppendLine("  },");
             }

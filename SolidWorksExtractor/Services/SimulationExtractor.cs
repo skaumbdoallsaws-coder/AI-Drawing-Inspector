@@ -448,7 +448,16 @@ namespace SolidWorksExtractor.Services
             public string StressSmoothingMethod;  // "gaussian" (or "none" if direct)
             public string StressSmoothingSource;  // "fe_surface_nodes"
             public double StressSmoothingSigmaM;  // Gaussian sigma (m); 0 if not Gaussian
-            public double StressSmoothingRadiusM; // Effective cutoff radius (~3 sigma); 0 if not applicable
+            public double StressSmoothingRadiusM; // Enforced cutoff radius (~3 sigma); 0 if not applicable
+            // Peak preservation: per-vertex blend between the smooth Gaussian
+            // field and a sharp triangle-barycentric field, driven by local
+            // stress spread normalised against the colour range.
+            public string StressPeakPreservationMethod; // "triangle_barycentric_blended" or "none"
+            public string StressPeakBlendSource;        // "local_spread_normalized_by_color_range" or "n/a"
+            public double StressPeakBlendMin;           // smoothstep lower edge (spread fraction → fully smooth)
+            public double StressPeakBlendMax;           // smoothstep upper edge (spread fraction → fully sharp)
+            public double StressPeakBlendMeanAlpha;     // average alpha across all CAD vertices (0..1)
+            public double StressPeakBlendHighAlphaPct;  // % of CAD vertices where alpha > 0.5 (sharp dominated)
             // Position of the maximum-stress vertex in the IDW-projected CAD
             // display mesh (meters). Distinct from results.max_von_mises_location_m,
             // which is the solver-authoritative location (FE node coordinates).
@@ -2754,6 +2763,44 @@ namespace SolidWorksExtractor.Services
                     PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
                 }
 
+                // Build per-FE-surface-triangle index/centroid arrays for
+                // the Stage 3 *sharp* contour path. Stage 3 blends a smooth
+                // Gaussian-nodal field with a sharp triangle-barycentric
+                // field (driven by local stress spread) so the contour stays
+                // smooth in low-gradient regions but preserves the local
+                // peak at the stress concentration where SolidWorks shows
+                // a red/orange hotspot.
+                int[] feTriIndices = null;
+                float[] feTriCentroids = null;
+                if (surfaceFaces.Count > 0 && nodeRemap != null && posArray != null)
+                {
+                    var triList = new List<int>(surfaceFaces.Count * 3);
+                    var ctList = new List<float>(surfaceFaces.Count * 3);
+                    for (int t = 0; t < surfaceFaces.Count; t++)
+                    {
+                        int[] tri = surfaceFaces[t];
+                        if (tri == null || tri.Length < 3) continue;
+                        int v0, v1, v2;
+                        if (!nodeRemap.TryGetValue(tri[0], out v0)) continue;
+                        if (!nodeRemap.TryGetValue(tri[1], out v1)) continue;
+                        if (!nodeRemap.TryGetValue(tri[2], out v2)) continue;
+                        if (v0 < 0 || v1 < 0 || v2 < 0) continue;
+                        if (v0 * 3 + 2 >= posArray.Length
+                            || v1 * 3 + 2 >= posArray.Length
+                            || v2 * 3 + 2 >= posArray.Length) continue;
+                        triList.Add(v0); triList.Add(v1); triList.Add(v2);
+                        float cx = (posArray[v0 * 3]     + posArray[v1 * 3]     + posArray[v2 * 3])     / 3f;
+                        float cy = (posArray[v0 * 3 + 1] + posArray[v1 * 3 + 1] + posArray[v2 * 3 + 1]) / 3f;
+                        float cz = (posArray[v0 * 3 + 2] + posArray[v1 * 3 + 2] + posArray[v2 * 3 + 2]) / 3f;
+                        ctList.Add(cx); ctList.Add(cy); ctList.Add(cz);
+                    }
+                    if (triList.Count > 0)
+                    {
+                        feTriIndices = triList.ToArray();
+                        feTriCentroids = ctList.ToArray();
+                    }
+                }
+
                 // Stage 3 -- Strategy A: try the CAD display tessellation
                 // with FE results projected onto its vertices. Returns null
                 // on any failure (no part doc, no bodies, all faces fail to
@@ -2764,6 +2811,7 @@ namespace SolidWorksExtractor.Services
                     posArray, stressValues,
                     dispXArrOuter, dispYArrOuter, dispZArrOuter, feHasDisp,
                     covered, dispCoveredOuter,
+                    feTriIndices, feTriCentroids,
                     summary);
                 if (cadProjected != null)
                 {
@@ -4233,6 +4281,8 @@ namespace SolidWorksExtractor.Services
             bool feSurfaceHasDisplacement,
             bool[] feStressCovered,            // per-FE-surface-node: stressValues was actually populated
             bool[] feDispCovered,              // per-FE-surface-node: disp arrays were actually populated
+            int[] feTriIndices,                // 3*Nt surface-vertex indices for the sharp/peak path; null disables peak preservation
+            float[] feTriCentroids,            // 3*Nt centroids in m (parallel with feTriIndices)
             FeaResultsSummary summary)
         {
             int feCount = feSurfacePositions.Length / 3;
@@ -4359,15 +4409,80 @@ namespace SolidWorksExtractor.Services
             const int STRESS_K = 12;
             double sigma = 0.7 * Math.Max(index.MeanSpacing, 1e-6);
             double inv2SigmaSq = 1.0 / (2.0 * sigma * sigma);
-            // Effective cutoff: 3-sigma (~99.7% of weight). We don't actually
-            // gate on this — Gaussian weights vanish numerically — but it's
-            // surfaced as a diagnostic so reviewers can read the smoothing
-            // breadth at a glance.
             double smoothingRadiusM = 3.0 * sigma;
-            string stressProjectionMode = "surface_nodal_local_gaussian_to_display";
+
+            // ---- Peak-preservation: edge-aware blend of smooth + sharp ----
+            // The Gaussian-only smooth field is right for global continuity
+            // but it averages the local maximum at the stress concentration
+            // downward, so the visible contour loses the red/orange hotspot
+            // SolidWorks shows near the hole. To recover it without bringing
+            // back the FE-triangle "shard" texture across flat regions, we
+            // compute two display fields and blend per CAD vertex:
+            //
+            //   smooth = Gaussian-weighted K=12 nearest FE surface nodes
+            //            (sigma = 0.7 * meanFESpacing, 3-sigma cutoff)
+            //   sharp  = closest-point-on-triangle barycentric over the FE
+            //            surface triangle field (preserves nodal peaks
+            //            exactly when the CAD vertex sits at a node)
+            //
+            // The blend factor alpha is driven by *local stress spread* — the
+            // (max - min) of stress values across the K nearest covered FE
+            // nodes, normalised by the colour-mapping range:
+            //
+            //   spread_norm = (s_max - s_min) / (colorMaxPa - colorMinPa)
+            //
+            // smoothstep(blend_min, blend_max, spread_norm) gives alpha:
+            //   - low spread (locally uniform stress) -> alpha ~ 0
+            //                                            -> smooth dominates
+            //   - high spread (near a concentration)  -> alpha ~ 1
+            //                                            -> sharp dominates
+            //
+            // The thresholds are explicit, recorded in the manifest, and
+            // tied to physical (not visual) variance.
+            const double BLEND_MIN = 0.10;  // < 10% colour range spread -> fully smooth
+            const double BLEND_MAX = 0.40;  // > 40% colour range spread -> fully sharp
+
+            // Pre-compute the same colour range used by MapStressToColors so
+            // the blend's spread normalisation matches the legend's anchor.
+            double preColorMinPa = (summary.MinVonMisesMpa > 0 && summary.MaxVonMisesMpa > 0)
+                ? summary.MinVonMisesMpa * 1e6
+                : 0.0;
+            double preColorMaxPa = (summary.MaxVonMisesMpa > 0)
+                ? summary.MaxVonMisesMpa * 1e6
+                : 1.0;
+            double colorRangePa = Math.Max(preColorMaxPa - preColorMinPa, 1e-6);
+
+            // Optional sharp-path triangle index (only used when the call
+            // site supplied feTriIndices/feTriCentroids — same fields that
+            // were re-added on this branch for peak preservation).
+            bool useSharpTriangleBary = feTriIndices != null
+                && feTriCentroids != null
+                && feTriIndices.Length >= 3
+                && feTriIndices.Length % 3 == 0
+                && feTriCentroids.Length == (feTriIndices.Length / 3) * 3;
+            int feTriCount = useSharpTriangleBary ? feTriIndices.Length / 3 : 0;
+            SurfaceNodeSpatialIndex triIndex = useSharpTriangleBary
+                ? new SurfaceNodeSpatialIndex(feTriCentroids)
+                : null;
+            const int TRI_CANDIDATE_K = 8;
+
+            string stressProjectionMode = useSharpTriangleBary
+                ? "surface_nodal_gaussian_with_peak_preservation"
+                : "surface_nodal_local_gaussian_to_display";
             int stressProjectionK = STRESS_K;
             string stressSmoothingMethod = "gaussian";
             string stressSmoothingSource = "fe_surface_nodes";
+            string peakPreservationMethod = useSharpTriangleBary
+                ? "triangle_barycentric_blended"
+                : "none";
+            string peakBlendSource = useSharpTriangleBary
+                ? "local_spread_normalized_by_color_range"
+                : "n/a";
+
+            // Diagnostics across all CAD vertices for the blend
+            double sumAlpha = 0;
+            int alphaSamples = 0;
+            int highAlphaCount = 0;
 
             for (int i = 0; i < cad.VertexCount; i++)
             {
@@ -4375,23 +4490,7 @@ namespace SolidWorksExtractor.Services
                 double cy = cad.Positions[i * 3 + 1];
                 double cz = cad.Positions[i * 3 + 2];
 
-                // ---- Stress: Gaussian-weighted K=12 over FE surface nodes ----
-                // Hard 3-sigma cutoff is enforced here so the
-                // stress_smoothing_radius_m field in cad_projection is
-                // actually a cutoff, not just a Gaussian reference radius:
-                // any neighbour with d > smoothingRadiusM is dropped before
-                // the weighted average. The Gaussian weight at 3σ is ~0.011
-                // anyway, so the contour shape is unchanged in normal cases;
-                // the cutoff just makes the diagnostic truthful.
-                //
-                // Fallback: if zero in-radius covered neighbours exist (the
-                // CAD vertex is in a region where the closest FE surface
-                // node is farther than 3σ), use the single nearest covered
-                // node so cad_verts_no_covered_stress_neighbour stays at 0.
-                // The far-vert counter (>= 2× mean FE spacing) already
-                // surfaces these cases for auditability, and the fallback
-                // is reported via the existing max_neighbour_distance_m
-                // field — never silently filled with synthetic zero.
+                // ---- Smooth field: Gaussian-weighted K=12 over FE surface nodes ----
                 var stressNbrs = index.FindNearestK(cx, cy, cz, STRESS_K);
                 if (stressNbrs.Length == 0)
                 {
@@ -4403,46 +4502,119 @@ namespace SolidWorksExtractor.Services
                     if (stressNbrs[0].dist > farThreshold) farVerts++;
 
                     double wSum = 0, sSum = 0;
+                    double sNbrMax = double.MinValue, sNbrMin = double.MaxValue;
+                    int coveredCount = 0;
                     foreach (var n in stressNbrs)
                     {
-                        if (n.dist > smoothingRadiusM) continue;
                         if (feStressCovered != null && !feStressCovered[n.idx]) continue;
+                        coveredCount++;
+                        double sV = feSurfaceStress[n.idx];
+                        if (sV > sNbrMax) sNbrMax = sV;
+                        if (sV < sNbrMin) sNbrMin = sV;
+                        if (n.dist > smoothingRadiusM) continue;
                         double w = Math.Exp(-(n.dist * n.dist) * inv2SigmaSq);
                         wSum += w;
-                        sSum += w * feSurfaceStress[n.idx];
+                        sSum += w * sV;
                     }
 
+                    double smoothVon = 0;
+                    bool haveSmooth = false;
                     if (wSum > 0)
                     {
-                        double von = sSum / wSum;
-                        cadStress[i] = von;
-                        if (von > maxStress) { maxStress = von; peakIdx = i; }
+                        smoothVon = sSum / wSum;
+                        haveSmooth = true;
                     }
                     else
                     {
-                        // No in-radius covered neighbour. Fall back to the
-                        // nearest covered node (regardless of radius) so we
-                        // never write a synthetic zero into a vertex that
-                        // has FE data nearby — just slightly outside the
-                        // 3-sigma cutoff.
-                        int fallbackIdx = -1;
+                        // Fallback: nearest covered node so
+                        // cad_verts_no_covered_stress_neighbour stays at 0.
                         for (int k = 0; k < stressNbrs.Length; k++)
                         {
                             int candIdx = stressNbrs[k].idx;
                             if (feStressCovered != null && !feStressCovered[candIdx]) continue;
-                            fallbackIdx = candIdx;
+                            smoothVon = feSurfaceStress[candIdx];
+                            haveSmooth = true;
                             break;
                         }
-                        if (fallbackIdx >= 0)
+                    }
+
+                    if (!haveSmooth)
+                    {
+                        cadVertsNoStressNeighbour++;
+                    }
+                    else
+                    {
+                        // ---- Sharp field: triangle-barycentric (when enabled) ----
+                        double sharpVon = smoothVon;
+                        if (useSharpTriangleBary)
                         {
-                            double von = feSurfaceStress[fallbackIdx];
-                            cadStress[i] = von;
-                            if (von > maxStress) { maxStress = von; peakIdx = i; }
+                            var triCandidates = triIndex.FindNearestK(cx, cy, cz, TRI_CANDIDATE_K);
+                            double bestDist2 = double.MaxValue;
+                            int bestTri = -1;
+                            double bestU = 0, bestV = 0, bestW = 0;
+                            foreach (var c in triCandidates)
+                            {
+                                int t = c.idx;
+                                if (t < 0 || t >= feTriCount) continue;
+                                int v0 = feTriIndices[t * 3];
+                                int v1 = feTriIndices[t * 3 + 1];
+                                int v2 = feTriIndices[t * 3 + 2];
+                                double u, v, w, d2;
+                                ClosestPointOnTriangle(
+                                    cx, cy, cz,
+                                    feSurfacePositions[v0 * 3], feSurfacePositions[v0 * 3 + 1], feSurfacePositions[v0 * 3 + 2],
+                                    feSurfacePositions[v1 * 3], feSurfacePositions[v1 * 3 + 1], feSurfacePositions[v1 * 3 + 2],
+                                    feSurfacePositions[v2 * 3], feSurfacePositions[v2 * 3 + 1], feSurfacePositions[v2 * 3 + 2],
+                                    out u, out v, out w, out d2);
+                                if (d2 < bestDist2)
+                                {
+                                    bestDist2 = d2;
+                                    bestTri = t;
+                                    bestU = u; bestV = v; bestW = w;
+                                }
+                            }
+                            if (bestTri >= 0)
+                            {
+                                int v0 = feTriIndices[bestTri * 3];
+                                int v1 = feTriIndices[bestTri * 3 + 1];
+                                int v2 = feTriIndices[bestTri * 3 + 2];
+                                bool s0c = (feStressCovered == null || feStressCovered[v0]);
+                                bool s1c = (feStressCovered == null || feStressCovered[v1]);
+                                bool s2c = (feStressCovered == null || feStressCovered[v2]);
+                                double bSum = 0, bWeight = 0;
+                                if (s0c) { bSum += bestU * feSurfaceStress[v0]; bWeight += bestU; }
+                                if (s1c) { bSum += bestV * feSurfaceStress[v1]; bWeight += bestV; }
+                                if (s2c) { bSum += bestW * feSurfaceStress[v2]; bWeight += bestW; }
+                                if (bWeight > 0) sharpVon = bSum / bWeight;
+                            }
                         }
-                        else
+
+                        // ---- Adaptive blend by local spread ----
+                        double alpha = 0.0;
+                        if (useSharpTriangleBary && coveredCount >= 2 && sNbrMax > sNbrMin)
                         {
-                            cadVertsNoStressNeighbour++;
+                            double spreadNorm = (sNbrMax - sNbrMin) / colorRangePa;
+                            if (spreadNorm <= BLEND_MIN)
+                            {
+                                alpha = 0.0;
+                            }
+                            else if (spreadNorm >= BLEND_MAX)
+                            {
+                                alpha = 1.0;
+                            }
+                            else
+                            {
+                                double t = (spreadNorm - BLEND_MIN) / (BLEND_MAX - BLEND_MIN);
+                                alpha = t * t * (3.0 - 2.0 * t); // smoothstep
+                            }
+                            sumAlpha += alpha;
+                            alphaSamples++;
+                            if (alpha > 0.5) highAlphaCount++;
                         }
+
+                        double finalVon = (1.0 - alpha) * smoothVon + alpha * sharpVon;
+                        cadStress[i] = finalVon;
+                        if (finalVon > maxStress) { maxStress = finalVon; peakIdx = i; }
                     }
                 }
 
@@ -4593,8 +4765,20 @@ namespace SolidWorksExtractor.Services
                 StressSmoothingSource = stressSmoothingSource,
                 StressSmoothingSigmaM = sigma,
                 StressSmoothingRadiusM = smoothingRadiusM,
+                StressPeakPreservationMethod = peakPreservationMethod,
+                StressPeakBlendSource = peakBlendSource,
+                StressPeakBlendMin = useSharpTriangleBary ? BLEND_MIN : 0.0,
+                StressPeakBlendMax = useSharpTriangleBary ? BLEND_MAX : 0.0,
+                StressPeakBlendMeanAlpha = alphaSamples > 0 ? sumAlpha / alphaSamples : 0.0,
+                StressPeakBlendHighAlphaPct = cad.VertexCount > 0
+                    ? 100.0 * highAlphaCount / cad.VertexCount
+                    : 0.0,
             };
-            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}, sigma={sigma * 1000:F3} mm = {(sigma / Math.Max(index.MeanSpacing, 1e-12)):F2}× mean FE spacing, radius={smoothingRadiusM * 1000:F3} mm); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
+            double meanAlpha = alphaSamples > 0 ? sumAlpha / alphaSamples : 0.0;
+            double highAlphaPct = cad.VertexCount > 0
+                ? 100.0 * highAlphaCount / cad.VertexCount
+                : 0.0;
+            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}, sigma={sigma * 1000:F3} mm = {(sigma / Math.Max(index.MeanSpacing, 1e-12)):F2}× mean FE spacing, radius={smoothingRadiusM * 1000:F3} mm, peak={peakPreservationMethod}, blend [{(useSharpTriangleBary ? BLEND_MIN : 0.0):F2}, {(useSharpTriangleBary ? BLEND_MAX : 0.0):F2}], mean alpha={meanAlpha:F3}, sharp-dominated verts={highAlphaPct:F2}%); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
 
             // Capture the CAD display-mesh peak as a *display-only* diagnostic
             // — never let it shadow solver-authoritative fields:
@@ -5295,6 +5479,12 @@ namespace SolidWorksExtractor.Services
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_smoothing_source\": \"{0}\",\n", EscapeJson(cp.StressSmoothingSource ?? ""));
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_smoothing_sigma_m\": {0:G6},\n", cp.StressSmoothingSigmaM);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_smoothing_radius_m\": {0:G6},\n", cp.StressSmoothingRadiusM);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_preservation_method\": \"{0}\",\n", EscapeJson(cp.StressPeakPreservationMethod ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_source\": \"{0}\",\n", EscapeJson(cp.StressPeakBlendSource ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_min\": {0:G6},\n", cp.StressPeakBlendMin);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_max\": {0:G6},\n", cp.StressPeakBlendMax);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_mean_alpha\": {0:G6},\n", cp.StressPeakBlendMeanAlpha);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_high_alpha_pct\": {0:F2},\n", cp.StressPeakBlendHighAlphaPct);
                 if (cp.DisplayPeakStressLocationM != null && cp.DisplayPeakStressLocationM.Length == 3)
                 {
                     sb.AppendFormat(CultureInfo.InvariantCulture,

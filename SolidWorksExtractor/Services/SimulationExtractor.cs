@@ -3328,6 +3328,77 @@ namespace SolidWorksExtractor.Services
                 return null;
             }
 
+            // Bump the document's shaded image-quality (chord deviation) before
+            // calling GetTessTriangles. The default document-level value
+            // produces ~50 triangles per face on the Mounting Plate, giving
+            // a 568-tri / 276-vert mesh that looks visibly faceted in the app.
+            //
+            // swImageQualityShadedDeviation is a fraction-of-bounding-box chord
+            // deviation. The SW slider's "max quality" is ~1.24e-4; pushing to
+            // ~1.0e-5 gets us below the slider's normal range so the
+            // tessellation re-generates dense enough for a visual-quality GLB.
+            //
+            // The change is in-memory only: SetUserPreferenceDouble does not
+            // persist to disk unless the user explicitly saves the part. We
+            // restore the original value in `finally` even on exception so
+            // the user's saved-image-quality is never silently mutated.
+            double originalShadedDeviation = -1.0;
+            bool qualityBumped = false;
+            const double TARGET_DEVIATION = 1.0e-5;
+            try
+            {
+                var ext = modelDoc.Extension;
+                if (ext != null)
+                {
+                    originalShadedDeviation = ext.GetUserPreferenceDouble(
+                        (int)swUserPreferenceDoubleValue_e.swImageQualityShadedDeviation,
+                        (int)swUserPreferenceOption_e.swDetailingNoOptionSpecified);
+                    if (originalShadedDeviation > TARGET_DEVIATION)
+                    {
+                        ext.SetUserPreferenceDouble(
+                            (int)swUserPreferenceDoubleValue_e.swImageQualityShadedDeviation,
+                            (int)swUserPreferenceOption_e.swDetailingNoOptionSpecified,
+                            TARGET_DEVIATION);
+                        // Force the cached tessellation to regenerate against
+                        // the new chord tolerance. Without this, GetTessTriangles
+                        // can return the previously-cached coarse mesh.
+                        modelDoc.GraphicsRedraw2();
+                        qualityBumped = true;
+                        Console.WriteLine($"    FEA Stage 3: bumped shaded image-quality chord deviation {originalShadedDeviation:E2} -> {TARGET_DEVIATION:E2} for tessellation walk");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"    FEA Stage 3: document already at chord deviation {originalShadedDeviation:E2} (<= target {TARGET_DEVIATION:E2}); leaving unchanged");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    FEA Stage 3: image-quality bump failed ({ex.Message}); using current document tessellation");
+            }
+
+            try
+            {
+                return ExtractCadDisplayTessellationCore(partDoc);
+            }
+            finally
+            {
+                if (qualityBumped)
+                {
+                    try
+                    {
+                        modelDoc.Extension.SetUserPreferenceDouble(
+                            (int)swUserPreferenceDoubleValue_e.swImageQualityShadedDeviation,
+                            (int)swUserPreferenceOption_e.swDetailingNoOptionSpecified,
+                            originalShadedDeviation);
+                    }
+                    catch { /* best-effort restore */ }
+                }
+            }
+        }
+
+        private CadDisplayMesh ExtractCadDisplayTessellationCore(IPartDoc partDoc)
+        {
             object bodiesObj;
             try { bodiesObj = partDoc.GetBodies2((int)swBodyType_e.swSolidBody, true); }
             catch (Exception ex) { Console.WriteLine($"    FEA Stage 3: GetBodies2 threw: {ex.Message}"); return null; }

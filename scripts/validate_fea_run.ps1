@@ -27,9 +27,12 @@
 #   6. Provenance hygiene:
 #        - selection_mode != "implicit"  (warn — should normally be explicit)
 #        - extractor_git_commit not null (warn  -- worker had git on PATH)
-#   7. Visualization honesty:
-#        - manifest.visualization.approximate must be false
-#        - manifest.visualization.mode must be solver_fe_mesh
+#   7. Visualization honesty: accept either of the two honest modes
+#        - solver_fe_mesh         (raw FE mesh, approximate=false)
+#        - cad_tessellation_projected  (visual-quality CAD path, approximate=true,
+#                                  gated on >=95% per-vertex stress coverage)
+#      Reject any other combination (e.g. approximate=true outside CAD-projection,
+#      or an unknown mode string) as a non-mergeable visualization.
 #
 # What it does NOT check:
 #   - GLB binary integrity (out of scope; the visualisation layer will surface
@@ -220,23 +223,46 @@ if ($null -ne $manifest.outputs -and $manifest.outputs.Count -ge 3) {
 } else {
     Write-Fail "manifest.outputs missing or has fewer than 3 entries"
 }
-if ((Test-FieldPropertyPresent $manifest "visualization.approximate")) {
-    if ($manifest.visualization.approximate -eq $true) {
-        Write-Fail "manifest.visualization.approximate is true -- approximate visualization is not mergeable as a normal worker FEA GLB"
-    } else {
-        Write-Pass "manifest.visualization.approximate is false"
-    }
-} else {
-    Write-Fail "manifest.visualization.approximate missing"
-}
+$visMode = $null
 if ((Test-FieldNonEmpty $manifest "visualization.mode")) {
-    if ($manifest.visualization.mode -eq "solver_fe_mesh") {
-        Write-Pass "manifest.visualization.mode = solver_fe_mesh"
+    $visMode = [string]$manifest.visualization.mode
+}
+$visApproxPresent = Test-FieldPropertyPresent $manifest "visualization.approximate"
+$visApprox = $null
+if ($visApproxPresent) {
+    $visApprox = [bool]$manifest.visualization.approximate
+}
+
+if ($null -eq $visMode) {
+    Write-Fail "manifest.visualization.mode missing"
+} elseif (-not $visApproxPresent) {
+    Write-Fail "manifest.visualization.approximate missing"
+} elseif ($visMode -eq "solver_fe_mesh" -and $visApprox -eq $false) {
+    Write-Pass "manifest.visualization = solver_fe_mesh (approximate=false; raw FE mesh path)"
+} elseif ($visMode -eq "cad_tessellation_projected" -and $visApprox -eq $true) {
+    # CAD-tessellation-projected GLBs are the visual-quality path. They are
+    # gated by the extractor at >= 95% per-vertex stress coverage, and the
+    # manifest must carry a cad_projection block whose
+    # cad_verts_no_covered_stress_neighbour is 0 (every CAD vertex got a
+    # stress value from a covered FE node).
+    Write-Pass "manifest.visualization = cad_tessellation_projected (approximate=true; visual-quality CAD path)"
+    if ((Test-FieldPropertyPresent $manifest "cad_projection")) {
+        Write-Pass "manifest.cad_projection block present"
+        if ((Test-FieldPropertyPresent $manifest "cad_projection.cad_verts_no_covered_stress_neighbour")) {
+            $unc = [int]$manifest.cad_projection.cad_verts_no_covered_stress_neighbour
+            if ($unc -eq 0) {
+                Write-Pass "cad_projection.cad_verts_no_covered_stress_neighbour = 0"
+            } else {
+                Write-Fail "cad_projection.cad_verts_no_covered_stress_neighbour = $unc (must be 0 for a mergeable CAD-projected GLB)"
+            }
+        } else {
+            Write-Fail "cad_projection.cad_verts_no_covered_stress_neighbour missing"
+        }
     } else {
-        Write-Fail ("manifest.visualization.mode must be solver_fe_mesh, got '{0}'" -f $manifest.visualization.mode)
+        Write-Fail "manifest.cad_projection block missing (required when visualization.mode=cad_tessellation_projected)"
     }
 } else {
-    Write-Fail "manifest.visualization.mode missing"
+    Write-Fail ("manifest.visualization is not a mergeable mode: mode='{0}', approximate={1}. Allowed: solver_fe_mesh+approx=false, cad_tessellation_projected+approx=true." -f $visMode, $visApprox)
 }
 if ($null -ne $manifest.warnings) {
     Write-Pass ("manifest.warnings present ({0} entries)" -f $manifest.warnings.Count)

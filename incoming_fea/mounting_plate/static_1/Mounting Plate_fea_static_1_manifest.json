@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": "1",
-  "timestamp_utc": "2026-04-26T19:04:41.8493622Z",
+  "timestamp_utc": "2026-04-26T19:33:42.7716982Z",
   "extractor_version": "0.0.0.0",
-  "extractor_git_commit": "cafcafc25ed4ded5658f78330f011fc0909513a3",
+  "extractor_git_commit": "cbad31ae659ebffe31079b797303ded47f5c25c0",
   "solidworks_version": "32.5.0",
   "source": {
     "document_path": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
@@ -30,7 +30,7 @@
     "safety_factor": 0.78,
     "yield_strength_mpa": 620.422,
     "material": "Alloy Steel",
-    "surface_node_count": 1818,
+    "surface_node_count": 16906,
     "element_count": 11466,
     "has_morph_target": true
   },
@@ -54,16 +54,24 @@
     }
   },
   "cad_projection": {
-    "cad_vertex_count": 1818,
-    "cad_triangle_count": 3652,
+    "cad_vertex_count": 16906,
+    "cad_triangle_count": 33828,
+    "base_cad_vertex_count": 1818,
+    "base_cad_triangle_count": 3652,
+    "refined_cad_vertex_count": 16906,
+    "refined_cad_triangle_count": 33828,
+    "refinement_method": "midpoint-subdivision-edge-threshold",
+    "refinement_edge_threshold_m": 0.00572622,
+    "refinement_passes": 3,
+    "refinement_triangle_splits": 15078,
     "fe_surface_node_count": 2391,
     "fe_stress_covered_count": 2391,
     "fe_disp_covered_count": 2391,
     "k_neighbours": 4,
     "weighting": "inverse_distance_squared",
-    "max_neighbour_distance_m": 0.05798,
+    "max_neighbour_distance_m": 0.0684827,
     "mean_fe_node_spacing_m": 0.00163606,
-    "far_vertex_fraction_pct": 1.60,
+    "far_vertex_fraction_pct": 2.73,
     "cad_verts_no_covered_stress_neighbour": 0,
     "cad_verts_no_covered_disp_neighbour": 0,
     "approximate": true

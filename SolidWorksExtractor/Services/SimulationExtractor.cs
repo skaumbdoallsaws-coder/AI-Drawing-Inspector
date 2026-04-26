@@ -4103,13 +4103,25 @@ namespace SolidWorksExtractor.Services
             // the original CAD surface footprint that already met the 95%
             // coverage threshold. visualization.mode and approximate flags
             // do not change.
-            double refinementEdgeThresholdM = Math.Max(index.MeanSpacing * 2.5, 1e-5);
+            // Threshold = 3.5 × mean FE spacing. The user's target band is
+            // 2-3× FE spacing per edge, but midpoint subdivision compounds
+            // unevenly: at 2.5× the algorithm needed 5 passes to satisfy the
+            // bound and produced 43k vertices on the Mounting Plate — way
+            // beyond the "several thousand verts" target. 3.5× lands in the
+            // single-digit thousands while still cutting the largest plate
+            // wedges into many sub-triangles.
+            //
+            // maxPasses is capped at 3: each pass halves the longest edge,
+            // so 3 passes can shrink an oversize edge by 8×. Beyond that the
+            // returns diminish quickly and the GLB grows past what the
+            // viewer needs.
+            double refinementEdgeThresholdM = Math.Max(index.MeanSpacing * 3.5, 1e-5);
             int refinementPasses = 0;
             int refinementSplits = 0;
             CadDisplayMesh cad = RefineCadDisplayMesh(
                 cadBase,
                 refinementEdgeThresholdM,
-                maxPasses: 6,
+                maxPasses: 3,
                 out refinementPasses,
                 out refinementSplits);
             string refinementMethod = (refinementSplits > 0)

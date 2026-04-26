@@ -407,8 +407,20 @@ namespace SolidWorksExtractor.Services
         /// </summary>
         private class CadProjectionDiagnosticInfo
         {
-            public int CadVertexCount;        // Unique CAD-tessellation vertices fed into the GLB
-            public int CadTriangleCount;      // Tris in the CAD tessellation
+            public int CadVertexCount;        // Unique CAD-tessellation vertices fed into the GLB (post-refinement)
+            public int CadTriangleCount;      // Tris in the CAD tessellation (post-refinement)
+            // Mesh refinement provenance: ITessellation gives a boundary-faithful
+            // base mesh, but flat plate faces stay coarse. After ITessellation we
+            // run a midpoint-subdivision pass keyed off mean FE node spacing so
+            // result colours/morph don't interpolate across giant wedges.
+            public int BaseCadVertexCount;     // Vertex count from ITessellation, before refinement
+            public int BaseCadTriangleCount;   // Triangle count before refinement
+            public int RefinedCadVertexCount;  // Same as CadVertexCount; explicit for auditability
+            public int RefinedCadTriangleCount;
+            public string RefinementMethod;    // "midpoint-subdivision-edge-threshold" or "none"
+            public double RefinementEdgeThresholdM;  // Max edge length tolerated before subdivision (m)
+            public int RefinementPasses;        // Iterations actually used (0 = no refinement performed)
+            public int RefinementTriangleSplits; // Triangles that produced 2+ children across all passes
             public int FeSurfaceNodeCount;    // FE surface nodes used as projection sources
             public int FeStressCoveredCount;  // FE surface nodes whose stress was actually populated
             public int FeDispCoveredCount;    // FE surface nodes whose displacement was actually populated
@@ -3591,6 +3603,193 @@ namespace SolidWorksExtractor.Services
             };
         }
 
+        /// <summary>
+        /// Refine a triangle mesh by midpoint-subdividing every triangle with
+        /// an edge longer than <paramref name="maxEdgeLengthM"/>. The result
+        /// is watertight: midpoint vertices are deduplicated across shared
+        /// edges, so neighbour triangles sharing a split edge always reference
+        /// the same midpoint vertex (no T-junctions / cracks).
+        ///
+        /// Subdivision pattern is the standard "red-green" 1-to-{2,3,4} split,
+        /// driven by how many of a triangle's 3 edges exceed the threshold:
+        ///
+        ///   0 long edges -> keep as-is              (1 triangle)
+        ///   1 long edge  -> bisect along that edge  (2 triangles)
+        ///   2 long edges -> 3 sub-triangles
+        ///   3 long edges -> 4 sub-triangles (1-to-4 red split)
+        ///
+        /// Iterates up to <paramref name="maxPasses"/> times. One pass halves
+        /// the longest edge, so 6 passes can reduce an oversize edge by 64×;
+        /// in practice 1-2 passes are enough for a part-scale mesh.
+        ///
+        /// Boundary shape is preserved: a midpoint of a boundary edge is
+        /// itself on the boundary (linear interpolation between two boundary
+        /// vertices). Curved boundaries that already got dense ITessellation
+        /// (hole, fillet) come in with edges short enough to skip refinement,
+        /// while the long edges spanning flat plate regions get split.
+        ///
+        /// Vertex normals at midpoints are linearly interpolated and
+        /// renormalised — fine for downstream colour shading because the
+        /// refined regions are exactly the flat zones where neighbour
+        /// triangles already share a normal.
+        /// </summary>
+        private CadDisplayMesh RefineCadDisplayMesh(
+            CadDisplayMesh src,
+            double maxEdgeLengthM,
+            int maxPasses,
+            out int passesUsed,
+            out int totalTriangleSplits)
+        {
+            passesUsed = 0;
+            totalTriangleSplits = 0;
+            if (src == null || src.VertexCount == 0 || src.TriangleCount == 0) return src;
+            if (maxEdgeLengthM <= 0 || maxPasses <= 0) return src;
+
+            var positions = new List<float>(src.Positions);
+            var normals = new List<float>(src.Normals);
+            var indices = new List<uint>(src.Indices);
+            double thresholdSq = maxEdgeLengthM * maxEdgeLengthM;
+
+            for (int pass = 0; pass < maxPasses; pass++)
+            {
+                int triCount = indices.Count / 3;
+                var edgeMid = new Dictionary<(uint lo, uint hi), uint>();
+
+                // Pass 1: find every edge that exceeds the threshold and
+                // create its midpoint vertex (deduped across triangles that
+                // share the edge).
+                for (int t = 0; t < triCount; t++)
+                {
+                    uint a = indices[t * 3];
+                    uint b = indices[t * 3 + 1];
+                    uint c = indices[t * 3 + 2];
+                    MarkLongEdge(positions, normals, edgeMid, a, b, thresholdSq);
+                    MarkLongEdge(positions, normals, edgeMid, b, c, thresholdSq);
+                    MarkLongEdge(positions, normals, edgeMid, c, a, thresholdSq);
+                }
+
+                if (edgeMid.Count == 0) break; // no long edges left
+
+                passesUsed = pass + 1;
+
+                // Pass 2: emit subdivided triangles. A triangle is split based
+                // on which of its 3 edges have midpoints in edgeMid.
+                var newIndices = new List<uint>(indices.Count * 4);
+                int passSplits = 0;
+                for (int t = 0; t < triCount; t++)
+                {
+                    uint a = indices[t * 3];
+                    uint b = indices[t * 3 + 1];
+                    uint c = indices[t * 3 + 2];
+
+                    bool hasAB = TryGetMid(edgeMid, a, b, out uint mAB);
+                    bool hasBC = TryGetMid(edgeMid, b, c, out uint mBC);
+                    bool hasCA = TryGetMid(edgeMid, c, a, out uint mCA);
+
+                    int splitMask = (hasAB ? 1 : 0) | (hasBC ? 2 : 0) | (hasCA ? 4 : 0);
+
+                    switch (splitMask)
+                    {
+                        case 0:
+                            newIndices.Add(a); newIndices.Add(b); newIndices.Add(c);
+                            break;
+                        case 1: // AB split
+                            newIndices.Add(a); newIndices.Add(mAB); newIndices.Add(c);
+                            newIndices.Add(mAB); newIndices.Add(b); newIndices.Add(c);
+                            passSplits++;
+                            break;
+                        case 2: // BC split
+                            newIndices.Add(a); newIndices.Add(b); newIndices.Add(mBC);
+                            newIndices.Add(a); newIndices.Add(mBC); newIndices.Add(c);
+                            passSplits++;
+                            break;
+                        case 4: // CA split
+                            newIndices.Add(a); newIndices.Add(b); newIndices.Add(mCA);
+                            newIndices.Add(mCA); newIndices.Add(b); newIndices.Add(c);
+                            passSplits++;
+                            break;
+                        case 3: // AB + BC
+                            newIndices.Add(a); newIndices.Add(mAB); newIndices.Add(mBC);
+                            newIndices.Add(mAB); newIndices.Add(b); newIndices.Add(mBC);
+                            newIndices.Add(a); newIndices.Add(mBC); newIndices.Add(c);
+                            passSplits++;
+                            break;
+                        case 5: // AB + CA
+                            newIndices.Add(a); newIndices.Add(mAB); newIndices.Add(mCA);
+                            newIndices.Add(mAB); newIndices.Add(b); newIndices.Add(c);
+                            newIndices.Add(mAB); newIndices.Add(c); newIndices.Add(mCA);
+                            passSplits++;
+                            break;
+                        case 6: // BC + CA
+                            newIndices.Add(a); newIndices.Add(b); newIndices.Add(mCA);
+                            newIndices.Add(mCA); newIndices.Add(b); newIndices.Add(mBC);
+                            newIndices.Add(mCA); newIndices.Add(mBC); newIndices.Add(c);
+                            passSplits++;
+                            break;
+                        case 7: // all 3 (red 1-to-4 split)
+                            newIndices.Add(a); newIndices.Add(mAB); newIndices.Add(mCA);
+                            newIndices.Add(mAB); newIndices.Add(b); newIndices.Add(mBC);
+                            newIndices.Add(mCA); newIndices.Add(mBC); newIndices.Add(c);
+                            newIndices.Add(mAB); newIndices.Add(mBC); newIndices.Add(mCA);
+                            passSplits++;
+                            break;
+                    }
+                }
+
+                indices = newIndices;
+                totalTriangleSplits += passSplits;
+            }
+
+            return new CadDisplayMesh
+            {
+                Positions = positions.ToArray(),
+                Normals = normals.ToArray(),
+                Indices = indices.ToArray(),
+                VertexCount = positions.Count / 3,
+                TriangleCount = indices.Count / 3,
+            };
+        }
+
+        private static void MarkLongEdge(
+            List<float> positions, List<float> normals,
+            Dictionary<(uint lo, uint hi), uint> edgeMid,
+            uint v0, uint v1, double thresholdSq)
+        {
+            (uint lo, uint hi) key = v0 < v1 ? (v0, v1) : (v1, v0);
+            if (edgeMid.ContainsKey(key)) return;
+
+            int i0 = (int)v0, i1 = (int)v1;
+            float p0x = positions[i0 * 3], p0y = positions[i0 * 3 + 1], p0z = positions[i0 * 3 + 2];
+            float p1x = positions[i1 * 3], p1y = positions[i1 * 3 + 1], p1z = positions[i1 * 3 + 2];
+            float dx = p0x - p1x, dy = p0y - p1y, dz = p0z - p1z;
+            double lenSq = (double)dx * dx + (double)dy * dy + (double)dz * dz;
+            if (lenSq <= thresholdSq) return;
+
+            float mx = (p0x + p1x) * 0.5f;
+            float my = (p0y + p1y) * 0.5f;
+            float mz = (p0z + p1z) * 0.5f;
+
+            float n0x = normals[i0 * 3], n0y = normals[i0 * 3 + 1], n0z = normals[i0 * 3 + 2];
+            float n1x = normals[i1 * 3], n1y = normals[i1 * 3 + 1], n1z = normals[i1 * 3 + 2];
+            float nx = n0x + n1x, ny = n0y + n1y, nz = n0z + n1z;
+            double mag = Math.Sqrt((double)nx * nx + (double)ny * ny + (double)nz * nz);
+            if (mag > 1e-12) { nx = (float)(nx / mag); ny = (float)(ny / mag); nz = (float)(nz / mag); }
+            else { nx = n0x; ny = n0y; nz = n0z; }
+
+            uint newIdx = (uint)(positions.Count / 3);
+            positions.Add(mx); positions.Add(my); positions.Add(mz);
+            normals.Add(nx); normals.Add(ny); normals.Add(nz);
+            edgeMid[key] = newIdx;
+        }
+
+        private static bool TryGetMid(
+            Dictionary<(uint lo, uint hi), uint> edgeMid,
+            uint v0, uint v1, out uint mid)
+        {
+            (uint lo, uint hi) key = v0 < v1 ? (v0, v1) : (v1, v0);
+            return edgeMid.TryGetValue(key, out mid);
+        }
+
         private CadDisplayMesh ExtractCadDisplayTessellationCore(IPartDoc partDoc)
         {
             object bodiesObj;
@@ -3882,11 +4081,41 @@ namespace SolidWorksExtractor.Services
                 return null;
             }
 
-            CadDisplayMesh cad = ExtractCadDisplayTessellation(modelDoc);
-            if (cad == null) return null;
+            CadDisplayMesh cadBase = ExtractCadDisplayTessellation(modelDoc);
+            if (cadBase == null) return null;
 
             var index = new SurfaceNodeSpatialIndex(feSurfacePositions);
             const int K = 4;
+
+            // Refine the CAD display mesh so flat plate faces don't render as
+            // giant triangular wedges with starburst stress contours. The
+            // ITessellation upstream is curvature-driven: it only refines
+            // where geometry curves, so a flat plate keeps a handful of huge
+            // triangles even at tight chord tolerance. After it returns, run
+            // a watertight midpoint-subdivision pass that splits any triangle
+            // with an edge longer than ~2.5× the mean FE node spacing — i.e.
+            // any edge across which the IDW interpolation would smear a
+            // visibly wide stress band.
+            //
+            // Refinement is decoupled from the FE coverage gates above and
+            // adds zero new uncovered regions: every refined vertex is a
+            // midpoint of an existing CAD edge, so it lands strictly within
+            // the original CAD surface footprint that already met the 95%
+            // coverage threshold. visualization.mode and approximate flags
+            // do not change.
+            double refinementEdgeThresholdM = Math.Max(index.MeanSpacing * 2.5, 1e-5);
+            int refinementPasses = 0;
+            int refinementSplits = 0;
+            CadDisplayMesh cad = RefineCadDisplayMesh(
+                cadBase,
+                refinementEdgeThresholdM,
+                maxPasses: 6,
+                out refinementPasses,
+                out refinementSplits);
+            string refinementMethod = (refinementSplits > 0)
+                ? "midpoint-subdivision-edge-threshold"
+                : "none";
+            Console.WriteLine($"    FEA Stage 3: display mesh refinement ({refinementMethod}): base {cadBase.VertexCount:N0} verts / {cadBase.TriangleCount:N0} tris -> refined {cad.VertexCount:N0} verts / {cad.TriangleCount:N0} tris (edge threshold {refinementEdgeThresholdM * 1000.0:F3} mm = 2.5× mean FE spacing {index.MeanSpacing * 1000.0:F3} mm; {refinementPasses} passes, {refinementSplits:N0} triangle splits)");
 
             double[] cadStress = new double[cad.VertexCount];
             double[] cadDispX = new double[cad.VertexCount];
@@ -4043,6 +4272,14 @@ namespace SolidWorksExtractor.Services
             {
                 CadVertexCount = cad.VertexCount,
                 CadTriangleCount = cad.TriangleCount,
+                BaseCadVertexCount = cadBase.VertexCount,
+                BaseCadTriangleCount = cadBase.TriangleCount,
+                RefinedCadVertexCount = cad.VertexCount,
+                RefinedCadTriangleCount = cad.TriangleCount,
+                RefinementMethod = refinementMethod,
+                RefinementEdgeThresholdM = refinementEdgeThresholdM,
+                RefinementPasses = refinementPasses,
+                RefinementTriangleSplits = refinementSplits,
                 FeSurfaceNodeCount = feCount,
                 FeStressCoveredCount = feStressCoveredCount,
                 FeDispCoveredCount = feDispCoveredCount,
@@ -4715,6 +4952,14 @@ namespace SolidWorksExtractor.Services
                 sb.AppendLine("  \"cad_projection\": {");
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_vertex_count\": {0},\n", cp.CadVertexCount);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_triangle_count\": {0},\n", cp.CadTriangleCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"base_cad_vertex_count\": {0},\n", cp.BaseCadVertexCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"base_cad_triangle_count\": {0},\n", cp.BaseCadTriangleCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"refined_cad_vertex_count\": {0},\n", cp.RefinedCadVertexCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"refined_cad_triangle_count\": {0},\n", cp.RefinedCadTriangleCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"refinement_method\": \"{0}\",\n", EscapeJson(cp.RefinementMethod ?? "none"));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"refinement_edge_threshold_m\": {0:G6},\n", cp.RefinementEdgeThresholdM);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"refinement_passes\": {0},\n", cp.RefinementPasses);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"refinement_triangle_splits\": {0},\n", cp.RefinementTriangleSplits);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"fe_surface_node_count\": {0},\n", cp.FeSurfaceNodeCount);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"fe_stress_covered_count\": {0},\n", cp.FeStressCoveredCount);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"fe_disp_covered_count\": {0},\n", cp.FeDispCoveredCount);

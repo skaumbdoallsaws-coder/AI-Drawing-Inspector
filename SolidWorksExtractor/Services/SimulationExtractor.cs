@@ -4127,7 +4127,8 @@ namespace SolidWorksExtractor.Services
             string refinementMethod = (refinementSplits > 0)
                 ? "midpoint-subdivision-edge-threshold"
                 : "none";
-            Console.WriteLine($"    FEA Stage 3: display mesh refinement ({refinementMethod}): base {cadBase.VertexCount:N0} verts / {cadBase.TriangleCount:N0} tris -> refined {cad.VertexCount:N0} verts / {cad.TriangleCount:N0} tris (edge threshold {refinementEdgeThresholdM * 1000.0:F3} mm = 2.5× mean FE spacing {index.MeanSpacing * 1000.0:F3} mm; {refinementPasses} passes, {refinementSplits:N0} triangle splits)");
+            double thresholdRatio = index.MeanSpacing > 0 ? refinementEdgeThresholdM / index.MeanSpacing : 0.0;
+            Console.WriteLine($"    FEA Stage 3: display mesh refinement ({refinementMethod}): base {cadBase.VertexCount:N0} verts / {cadBase.TriangleCount:N0} tris -> refined {cad.VertexCount:N0} verts / {cad.TriangleCount:N0} tris (edge threshold {refinementEdgeThresholdM * 1000.0:F3} mm = {thresholdRatio:F2}× mean FE spacing {index.MeanSpacing * 1000.0:F3} mm; {refinementPasses} passes, {refinementSplits:N0} triangle splits)");
 
             double[] cadStress = new double[cad.VertexCount];
             double[] cadDispX = new double[cad.VertexCount];

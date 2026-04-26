@@ -2833,22 +2833,6 @@ namespace SolidWorksExtractor.Services
                         feTriIndices = triList.ToArray();
                         feTriCentroids = ctList.ToArray();
                         feTriVon = vonList.ToArray();
-                        // One-shot diagnostic: max surface-tri parent VON.
-                        // If this is materially below summary.MaxVonMisesMpa,
-                        // the per-element peak lives in an interior element
-                        // and the displayed surface peak will be capped here
-                        // regardless of how aggressive the sharp blend is.
-                        double maxFeTriVon = 0.0;
-                        int maxFeTriIdx = -1;
-                        for (int k = 0; k < feTriVon.Length; k++)
-                        {
-                            if (feTriVon[k] > maxFeTriVon)
-                            {
-                                maxFeTriVon = feTriVon[k];
-                                maxFeTriIdx = k;
-                            }
-                        }
-                        Console.WriteLine($"    FEA Stage 3 sharp-path source: max(feTriVon)={maxFeTriVon / 1e6:F2} MPa @ surfaceTri[{maxFeTriIdx}], summary.MaxVonMisesMpa={summary.MaxVonMisesMpa:F2} MPa");
                     }
                 }
 
@@ -4491,18 +4475,30 @@ namespace SolidWorksExtractor.Services
             //
             // The thresholds are explicit, recorded in the manifest, and
             // tied to physical (not visual) variance.
-            // Spread thresholds for the smooth/sharp blend, expressed as
-            // a fraction of the colour range. Picked so the per-element
-            // sharp value only dominates near a real stress concentration:
-            //   - 30% = ~236 MPa spread (e.g. 400→636 over a 3 mm
-            //     neighbourhood). The plate's bulk gradient produces less
-            //     than this, so most of the surface stays on the smooth
-            //     path with no Voronoi-cell artifacts.
-            //   - 70% = ~552 MPa spread. Only the immediate vicinity of
-            //     the stress concentration sees this — that's where we
-            //     want the per-element peak to surface.
-            const double BLEND_MIN = 0.30;
-            const double BLEND_MAX = 0.70;
+            // Blend thresholds for the smooth/sharp mix, expressed as a
+            // fraction of the colour range. Basis is delta = sharp - smooth
+            // (where sharp = nearest-FE-triangle's parent element raw VON,
+            // smooth = Gaussian-weighted nodal-averaged stress). Positive
+            // delta means the per-element peak is being hidden by nodal
+            // smoothing; that's exactly where we want to expose the sharp
+            // value:
+            //   - delta < 5% of colour range:  alpha = 0 (smooth dominates;
+            //     sharp would add nothing the smooth field doesn't already
+            //     show, so no Voronoi-cell texture leaks anywhere).
+            //   - delta > 20% of colour range: alpha = 1 (sharp dominates;
+            //     a per-element peak is significantly hidden — let it
+            //     through).
+            //   - smoothstep ramp in between.
+            //
+            // Earlier "local-spread" basis underestimated alpha at the
+            // hotspot because nodal smoothing flattened the K=12 nodal
+            // values around the peak, so spread_norm capped around 0.5
+            // even though the per-element value was 270 MPa above the
+            // smoothed average. delta directly measures "is sharp telling
+            // us something smooth missed", which is what peak preservation
+            // actually wants.
+            const double BLEND_MIN = 0.05;
+            const double BLEND_MAX = 0.20;
 
             // Pre-compute the same colour range used by MapStressToColors so
             // the blend's spread normalisation matches the legend's anchor.
@@ -4541,7 +4537,7 @@ namespace SolidWorksExtractor.Services
                 ? "per_element_nearest_blended"
                 : "none";
             string peakBlendSource = useSharpPerElement
-                ? "local_spread_normalized_by_color_range"
+                ? "sharp_minus_smooth_normalized_by_color_range"
                 : "n/a";
 
             // Diagnostics across all CAD vertices for the blend
@@ -4664,23 +4660,32 @@ namespace SolidWorksExtractor.Services
                             }
                         }
 
-                        // ---- Adaptive blend by local spread ----
+                        // ---- Adaptive blend: delta = sharp - smooth, normalised ----
+                        // Positive delta means the per-element peak is
+                        // hidden by nodal smoothing; that's where we want
+                        // sharp to win. Negative or near-zero delta means
+                        // smooth already captures the local value, no need
+                        // to introduce per-element Voronoi-cell texture.
                         double alpha = 0.0;
-                        if (useSharpPerElement && coveredCount >= 2 && sNbrMax > sNbrMin)
+                        if (useSharpPerElement)
                         {
-                            double spreadNorm = (sNbrMax - sNbrMin) / colorRangePa;
-                            if (spreadNorm <= BLEND_MIN)
+                            double delta = sharpVon - smoothVon;
+                            if (delta > 0)
                             {
-                                alpha = 0.0;
-                            }
-                            else if (spreadNorm >= BLEND_MAX)
-                            {
-                                alpha = 1.0;
-                            }
-                            else
-                            {
-                                double t = (spreadNorm - BLEND_MIN) / (BLEND_MAX - BLEND_MIN);
-                                alpha = t * t * (3.0 - 2.0 * t); // smoothstep
+                                double deltaNorm = delta / colorRangePa;
+                                if (deltaNorm <= BLEND_MIN)
+                                {
+                                    alpha = 0.0;
+                                }
+                                else if (deltaNorm >= BLEND_MAX)
+                                {
+                                    alpha = 1.0;
+                                }
+                                else
+                                {
+                                    double t = (deltaNorm - BLEND_MIN) / (BLEND_MAX - BLEND_MIN);
+                                    alpha = t * t * (3.0 - 2.0 * t); // smoothstep
+                                }
                             }
                             sumAlpha += alpha;
                             alphaSamples++;

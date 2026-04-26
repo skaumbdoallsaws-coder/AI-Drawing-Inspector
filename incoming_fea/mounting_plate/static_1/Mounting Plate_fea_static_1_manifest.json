@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": "1",
-  "timestamp_utc": "2026-04-26T21:07:19.9331046Z",
+  "timestamp_utc": "2026-04-26T21:21:52.4023391Z",
   "extractor_version": "0.0.0.0",
-  "extractor_git_commit": "a8dd8370e96c2301d6460a08cb7f2a0e9ed0a0ab",
+  "extractor_git_commit": "04f1af8a3eea5e762a99a17de67008b384cc6628",
   "solidworks_version": "32.5.0",
   "source": {
     "document_path": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
@@ -25,8 +25,8 @@
     "approximate": true
   },
   "summary": {
-    "min_von_mises_mpa": 11.9819,
-    "max_von_mises_mpa": 799.98,
+    "min_von_mises_mpa": 11.9986,
+    "max_von_mises_mpa": 799.94,
     "max_displacement_mm": 0.123501,
     "safety_factor": 0.78,
     "yield_strength_mpa": 620.422,
@@ -79,8 +79,8 @@
     "stress_projection_k": 12,
     "stress_color_mapping": "min-max-linear",
     "stress_range_source": "solver_minmax",
-    "color_range_min_pa": 1.19819E+07,
-    "color_range_max_pa": 7.9998E+08,
+    "color_range_min_pa": 1.19986E+07,
+    "color_range_max_pa": 7.9994E+08,
     "stress_smoothing_method": "gaussian",
     "stress_smoothing_source": "fe_surface_nodes",
     "stress_smoothing_sigma_m": 0.00114524,

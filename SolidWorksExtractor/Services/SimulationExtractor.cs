@@ -3337,12 +3337,14 @@ namespace SolidWorksExtractor.Services
             // still yielded the same 276-vertex / 568-triangle mesh. So we
             // ask for a fresh tessellation directly via the modern API.
             //
-            // 50 micron chord deviation + 5 degree angular deviation gives
+            // 20 micron chord deviation + 2 degree angular deviation gives
             // a smooth hole boundary and curved-edge silhouette while still
-            // collapsing co-planar regions of the plate to a small number
-            // of large triangles. Tunable via the constants below.
-            const double CHORD_TOL_M = 5.0e-5;       // 50 microns
-            const double ANGLE_TOL_RAD = 0.087266463; // 5 degrees
+            // collapsing co-planar regions of the plate to a moderate number
+            // of large triangles. At 50um/5deg the Mounting Plate produced
+            // 738 verts which still looked faceted; tightening to 20um/2deg
+            // lands in the low-thousands target without over-tessellating.
+            const double CHORD_TOL_M = 2.0e-5;       // 20 microns
+            const double ANGLE_TOL_RAD = 0.0349066;  // 2 degrees
             CadDisplayMesh dense = ExtractCadDisplayMeshViaITessellation(
                 partDoc, CHORD_TOL_M, ANGLE_TOL_RAD);
             if (dense != null && dense.VertexCount > 0)

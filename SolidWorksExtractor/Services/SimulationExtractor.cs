@@ -4593,27 +4593,58 @@ namespace SolidWorksExtractor.Services
                     }
                     else
                     {
-                        // ---- Sharp field: K=1 nearest FE surface tri's per-element raw VON ----
+                        // ---- Sharp field: closest-FE-surface-triangle's per-element raw VON ----
                         // The sharp path reads directly from the parent
                         // element's solver VON (not from area-weighted nodal
                         // values), so at the stress concentration it carries
                         // the full per-element peak (~800 MPa on this study).
-                        // This is the same per-element value the K=1 nearest-
-                        // element painting from earlier rounds used; it's
-                        // visibly Voronoi-cell-textured on its own, but the
-                        // adaptive blend keeps it gated to genuinely high-
-                        // spread regions only.
+                        //
+                        // Triangle selection uses closest-point-on-triangle
+                        // over the K nearest centroids, not just nearest
+                        // centroid. A small high-stress tri at the hole edge
+                        // can have a centroid that's marginally farther than
+                        // a neighbour's centroid even when the CAD vertex is
+                        // geometrically inside the small tri — picking by
+                        // centroid distance there would silently swap the
+                        // peak element for a neighbour with lower VON. The
+                        // closest-point-on-triangle algorithm handles all 7
+                        // Voronoi regions correctly so the geometrically
+                        // nearest triangle wins.
+                        //
+                        // The picked triangle's *parent element* VON paints
+                        // the sharp value. This is visibly Voronoi-cell-
+                        // textured on its own, but the adaptive blend keeps
+                        // it gated to genuinely high-spread regions only.
+                        const int SHARP_CANDIDATE_K = 8;
                         double sharpVon = smoothVon;
                         if (useSharpPerElement)
                         {
-                            var triCandidates = triIndex.FindNearestK(cx, cy, cz, 1);
-                            if (triCandidates.Length > 0)
+                            var triCandidates = triIndex.FindNearestK(cx, cy, cz, SHARP_CANDIDATE_K);
+                            double bestDist2 = double.MaxValue;
+                            int bestTri = -1;
+                            foreach (var c in triCandidates)
                             {
-                                int t = triCandidates[0].idx;
-                                if (t >= 0 && t < feTriCount)
+                                int t = c.idx;
+                                if (t < 0 || t >= feTriCount) continue;
+                                int v0 = feTriIndices[t * 3];
+                                int v1 = feTriIndices[t * 3 + 1];
+                                int v2 = feTriIndices[t * 3 + 2];
+                                double u, v, w, d2;
+                                ClosestPointOnTriangle(
+                                    cx, cy, cz,
+                                    feSurfacePositions[v0 * 3], feSurfacePositions[v0 * 3 + 1], feSurfacePositions[v0 * 3 + 2],
+                                    feSurfacePositions[v1 * 3], feSurfacePositions[v1 * 3 + 1], feSurfacePositions[v1 * 3 + 2],
+                                    feSurfacePositions[v2 * 3], feSurfacePositions[v2 * 3 + 1], feSurfacePositions[v2 * 3 + 2],
+                                    out u, out v, out w, out d2);
+                                if (d2 < bestDist2)
                                 {
-                                    sharpVon = feTriVon[t];
+                                    bestDist2 = d2;
+                                    bestTri = t;
                                 }
+                            }
+                            if (bestTri >= 0)
+                            {
+                                sharpVon = feTriVon[bestTri];
                             }
                         }
 

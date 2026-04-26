@@ -436,21 +436,19 @@ namespace SolidWorksExtractor.Services
             public int CadVertsNoDispNeighbour;   // CAD verts whose K-NN had no covered displacement data
             public bool Approximate;             // True (CAD-projected results are spatial approximations)
             // Stress projection / colour-mapping provenance
-            public string StressProjectionMode;   // "surface_triangle_barycentric_to_display" or "fe_node_to_display_idw"
-            public int StressProjectionK;         // For triangle-bary: number of triangle candidates checked per CAD vertex.
-                                                  // For FE-node IDW: number of nearest neighbours weighted.
+            public string StressProjectionMode;   // e.g. "surface_nodal_local_gaussian_to_display"
+            public int StressProjectionK;         // FE-surface-node neighbours considered per CAD vertex
             public string StressColorMapping;     // "min-max-linear"
             public string StressRangeSource;      // "solver_minmax" or "observed_max" (when min unavailable)
             public double ColorRangeMinPa;        // Min stress (Pa) used for the colour gradient anchor
             public double ColorRangeMaxPa;        // Max stress (Pa) used for the colour gradient anchor
-            // Triangle-barycentric projection geometry: distance from each CAD
-            // vertex to the closest point on its chosen FE surface triangle.
-            // Mean / max in metres. Useful to confirm the CAD mesh sits on
-            // (or close to) the FE surface — large values would mean the CAD
-            // tessellation drifts off the FE-meshed body and stress should be
-            // treated cautiously near those vertices.
-            public double MeanNearestTriDistanceM;
-            public double MaxNearestTriDistanceM;
+            // Smoothing kernel description for the stress contour. Tied to
+            // mean FE node spacing so the smoothing breadth scales with the
+            // physical FE discretisation rather than the display mesh.
+            public string StressSmoothingMethod;  // "gaussian" (or "none" if direct)
+            public string StressSmoothingSource;  // "fe_surface_nodes"
+            public double StressSmoothingSigmaM;  // Gaussian sigma (m); 0 if not Gaussian
+            public double StressSmoothingRadiusM; // Effective cutoff radius (~3 sigma); 0 if not applicable
             // Position of the maximum-stress vertex in the IDW-projected CAD
             // display mesh (meters). Distinct from results.max_von_mises_location_m,
             // which is the solver-authoritative location (FE node coordinates).
@@ -2756,59 +2754,6 @@ namespace SolidWorksExtractor.Services
                     PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
                 }
 
-                // Build per-FE-surface-triangle arrays for the Stage 3
-                // barycentric stress projection. Each entry parallels a
-                // surface triangle and stores:
-                //   - centroid (m, surface-vertex space) for spatial-index
-                //     candidate selection
-                //   - the three surface-vertex indices, so the projection can
-                //     read the triangle's nodal stress + position arrays
-                //
-                // Triangles whose nodes don't all remap into surface-vertex
-                // space (degenerate / unmapped) are dropped; the rest are
-                // emitted in original surfaceFaces order. The resulting
-                // arrays are passed into TryBuildCadProjectedFeaMesh, which
-                // does closest-point-on-triangle + barycentric interpolation
-                // against the per-FE-surface-node stressValues field.
-                //
-                // This replaces the prior per-element-centroid + K=1 nearest
-                // painting that produced visible Voronoi-style triangle
-                // wedges across the plate face: a piecewise-constant field
-                // can never approximate a smooth contour, no matter how
-                // fine the display mesh under it. Linear interpolation over
-                // the FE surface triangle gives a continuous piecewise-
-                // linear field that reads as smooth contours in the viewer.
-                int[] feTriIndices = null;
-                float[] feTriCentroids = null;
-                if (surfaceFaces.Count > 0 && nodeRemap != null && posArray != null)
-                {
-                    var triList = new List<int>(surfaceFaces.Count * 3);
-                    var ctList = new List<float>(surfaceFaces.Count * 3);
-                    for (int t = 0; t < surfaceFaces.Count; t++)
-                    {
-                        int[] tri = surfaceFaces[t];
-                        if (tri == null || tri.Length < 3) continue;
-                        int v0, v1, v2;
-                        if (!nodeRemap.TryGetValue(tri[0], out v0)) continue;
-                        if (!nodeRemap.TryGetValue(tri[1], out v1)) continue;
-                        if (!nodeRemap.TryGetValue(tri[2], out v2)) continue;
-                        if (v0 < 0 || v1 < 0 || v2 < 0) continue;
-                        if (v0 * 3 + 2 >= posArray.Length
-                            || v1 * 3 + 2 >= posArray.Length
-                            || v2 * 3 + 2 >= posArray.Length) continue;
-                        triList.Add(v0); triList.Add(v1); triList.Add(v2);
-                        float cx = (posArray[v0 * 3]     + posArray[v1 * 3]     + posArray[v2 * 3])     / 3f;
-                        float cy = (posArray[v0 * 3 + 1] + posArray[v1 * 3 + 1] + posArray[v2 * 3 + 1]) / 3f;
-                        float cz = (posArray[v0 * 3 + 2] + posArray[v1 * 3 + 2] + posArray[v2 * 3 + 2]) / 3f;
-                        ctList.Add(cx); ctList.Add(cy); ctList.Add(cz);
-                    }
-                    if (triList.Count > 0)
-                    {
-                        feTriIndices = triList.ToArray();
-                        feTriCentroids = ctList.ToArray();
-                    }
-                }
-
                 // Stage 3 -- Strategy A: try the CAD display tessellation
                 // with FE results projected onto its vertices. Returns null
                 // on any failure (no part doc, no bodies, all faces fail to
@@ -2819,7 +2764,6 @@ namespace SolidWorksExtractor.Services
                     posArray, stressValues,
                     dispXArrOuter, dispYArrOuter, dispZArrOuter, feHasDisp,
                     covered, dispCoveredOuter,
-                    feTriIndices, feTriCentroids,
                     summary);
                 if (cadProjected != null)
                 {
@@ -4289,8 +4233,6 @@ namespace SolidWorksExtractor.Services
             bool feSurfaceHasDisplacement,
             bool[] feStressCovered,            // per-FE-surface-node: stressValues was actually populated
             bool[] feDispCovered,              // per-FE-surface-node: disp arrays were actually populated
-            int[] feTriIndices,                // 3*Nt surface-vertex indices, null disables triangle-bary projection
-            float[] feTriCentroids,            // 3*Nt centroids in m (parallel with feTriIndices)
             FeaResultsSummary summary)
         {
             int feCount = feSurfacePositions.Length / 3;
@@ -4383,46 +4325,49 @@ namespace SolidWorksExtractor.Services
             int cadVertsNoDispNeighbour = 0;
             double farThreshold = Math.Max(index.MeanSpacing * 2.0, 1e-6);
 
-            // Stress projection: closest-point-on-triangle + barycentric
-            // interpolation over the FE surface triangle field. This is the
-            // continuous piecewise-linear field SolidWorks renders. K=1
-            // nearest-element painting (the prior mode) was strictly piecewise-
-            // constant and produced visible Voronoi-style triangle wedges
-            // across the plate face. K=4 IDW from FE-node values blurred the
-            // peaks. Barycentric interpolation lands between: each CAD vertex
-            // gets a stress value that's a linear blend of the three nodal
-            // values of its closest FE surface triangle, weighted by the bary
-            // coords of the closest point on that triangle.
+            // Stress projection: K nearest FE surface nodes weighted by a
+            // narrow Gaussian kernel (sigma tied to mean FE node spacing).
             //
-            // Candidate selection: build a spatial index over FE triangle
-            // centroids; for each CAD vertex find K=8 nearest centroids,
-            // then pick the triangle whose closest-point distance to the
-            // query is smallest. K=8 is enough for a typical convex-ish
-            // surface; if the chosen triangle's centroid happens to be far
-            // because of an oblong triangle, the closest point on it is
-            // still computed correctly. Falls back to FE-node IDW only if
-            // the triangle index is empty (older API failure modes).
-            bool useTriangleBary = feTriIndices != null
-                && feTriCentroids != null
-                && feTriIndices.Length >= 3
-                && feTriIndices.Length % 3 == 0
-                && feTriCentroids.Length == (feTriIndices.Length / 3) * 3;
-            int feTriCount = useTriangleBary ? feTriIndices.Length / 3 : 0;
-            SurfaceNodeSpatialIndex triIndex = useTriangleBary
-                ? new SurfaceNodeSpatialIndex(feTriCentroids)
-                : null;
-            const int TRI_CANDIDATE_K = 8;
-            string stressProjectionMode = useTriangleBary
-                ? "surface_triangle_barycentric_to_display"
-                : "fe_node_to_display_idw";
-            int stressProjectionK = useTriangleBary ? TRI_CANDIDATE_K : K;
-
-            // Stats across the projection: average / max distance from CAD
-            // vertex to its chosen FE surface triangle's closest point.
-            // Different from index.MeanSpacing — that's an FE-node spacing.
-            double sumNearestTriDist = 0;
-            double maxNearestTriDist = 0;
-            int triProjectionCount = 0;
+            // History of approaches that didn't fit the user's needs:
+            //   * K=1 nearest-element direct  -> piecewise-constant Voronoi
+            //                                    cells, visible "wedge fans"
+            //   * K=8 closest-point-on-triangle barycentric
+            //                                 -> piecewise-linear, removed
+            //                                    Voronoi cells but exposed
+            //                                    the FE-triangle structure
+            //                                    as G1-discontinuous "shard"
+            //                                    texture along triangle edges
+            //   * K=4 IDW over FE-node values (1/d^2) was the original path
+            //                                 -> too diffusive, "green wash"
+            //
+            // A narrow Gaussian kernel over the FE surface NODES is C-infinity
+            // smooth (no creases at node/triangle boundaries), local enough
+            // to preserve the hotspot at the hole, and avoids the diffusion
+            // of a wide IDW. With sigma = 0.7 * mean FE spacing:
+            //   - neighbours at 1*spacing get weight  exp(-1/(2*0.49)) ≈ 0.36
+            //   - neighbours at 2*spacing get weight  exp(-4/(2*0.49)) ≈ 0.017
+            //   - neighbours at 3*spacing get weight  exp(-9/(2*0.49)) ≈ 0.0001
+            // so 2-4 nearest nodes carry essentially all the weight, with
+            // distant low-stress nodes contributing negligibly even at the
+            // peak. K=12 candidate slots are ample to ensure all in-radius
+            // nodes are picked up regardless of cluster geometry.
+            //
+            // Displacement projection stays on the existing K=4 1/d^2 path:
+            // displacement is genuinely per-node from the solver, the morph
+            // shape already reads correctly, and we don't want to risk
+            // regressing it.
+            const int STRESS_K = 12;
+            double sigma = 0.7 * Math.Max(index.MeanSpacing, 1e-6);
+            double inv2SigmaSq = 1.0 / (2.0 * sigma * sigma);
+            // Effective cutoff: 3-sigma (~99.7% of weight). We don't actually
+            // gate on this — Gaussian weights vanish numerically — but it's
+            // surfaced as a diagnostic so reviewers can read the smoothing
+            // breadth at a glance.
+            double smoothingRadiusM = 3.0 * sigma;
+            string stressProjectionMode = "surface_nodal_local_gaussian_to_display";
+            int stressProjectionK = STRESS_K;
+            string stressSmoothingMethod = "gaussian";
+            string stressSmoothingSource = "fe_surface_nodes";
 
             for (int i = 0; i < cad.VertexCount; i++)
             {
@@ -4430,113 +4375,34 @@ namespace SolidWorksExtractor.Services
                 double cy = cad.Positions[i * 3 + 1];
                 double cz = cad.Positions[i * 3 + 2];
 
-                // ---- Stress: triangle-barycentric (preferred) or FE-node IDW (fallback) ----
-                if (useTriangleBary)
+                // ---- Stress: Gaussian-weighted K=12 over FE surface nodes ----
+                var stressNbrs = index.FindNearestK(cx, cy, cz, STRESS_K);
+                if (stressNbrs.Length == 0)
                 {
-                    var triCandidates = triIndex.FindNearestK(cx, cy, cz, TRI_CANDIDATE_K);
-                    if (triCandidates.Length == 0)
-                    {
-                        cadVertsNoStressNeighbour++;
-                    }
-                    else
-                    {
-                        double bestDist2 = double.MaxValue;
-                        int bestTri = -1;
-                        double bestU = 0, bestV = 0, bestW = 0;
-                        foreach (var c in triCandidates)
-                        {
-                            int t = c.idx;
-                            if (t < 0 || t >= feTriCount) continue;
-                            int v0 = feTriIndices[t * 3];
-                            int v1 = feTriIndices[t * 3 + 1];
-                            int v2 = feTriIndices[t * 3 + 2];
-                            double u, v, w, d2;
-                            ClosestPointOnTriangle(
-                                cx, cy, cz,
-                                feSurfacePositions[v0 * 3], feSurfacePositions[v0 * 3 + 1], feSurfacePositions[v0 * 3 + 2],
-                                feSurfacePositions[v1 * 3], feSurfacePositions[v1 * 3 + 1], feSurfacePositions[v1 * 3 + 2],
-                                feSurfacePositions[v2 * 3], feSurfacePositions[v2 * 3 + 1], feSurfacePositions[v2 * 3 + 2],
-                                out u, out v, out w, out d2);
-                            if (d2 < bestDist2)
-                            {
-                                bestDist2 = d2;
-                                bestTri = t;
-                                bestU = u; bestV = v; bestW = w;
-                            }
-                        }
-
-                        if (bestTri < 0)
-                        {
-                            cadVertsNoStressNeighbour++;
-                        }
-                        else
-                        {
-                            int v0 = feTriIndices[bestTri * 3];
-                            int v1 = feTriIndices[bestTri * 3 + 1];
-                            int v2 = feTriIndices[bestTri * 3 + 2];
-                            bool s0 = (feStressCovered == null || feStressCovered[v0]);
-                            bool s1 = (feStressCovered == null || feStressCovered[v1]);
-                            bool s2 = (feStressCovered == null || feStressCovered[v2]);
-                            // Re-normalise weights against only covered nodes
-                            // so an uncovered corner doesn't drag the bary
-                            // sum toward synthetic zero stress. With the
-                            // 95% coverage gate above, all three are
-                            // covered in practice.
-                            double wSum = 0, sSum = 0;
-                            if (s0) { wSum += bestU; sSum += bestU * feSurfaceStress[v0]; }
-                            if (s1) { wSum += bestV; sSum += bestV * feSurfaceStress[v1]; }
-                            if (s2) { wSum += bestW; sSum += bestW * feSurfaceStress[v2]; }
-                            if (wSum > 0)
-                            {
-                                double von = sSum / wSum;
-                                cadStress[i] = von;
-                                if (von > maxStress) { maxStress = von; peakIdx = i; }
-
-                                double bestDist = Math.Sqrt(bestDist2);
-                                sumNearestTriDist += bestDist;
-                                if (bestDist > maxNearestTriDist) maxNearestTriDist = bestDist;
-                                triProjectionCount++;
-
-                                if (bestDist > maxNeighbourDist) maxNeighbourDist = bestDist;
-                                if (bestDist > farThreshold) farVerts++;
-                            }
-                            else
-                            {
-                                cadVertsNoStressNeighbour++;
-                            }
-                        }
-                    }
+                    cadVertsNoStressNeighbour++;
                 }
                 else
                 {
-                    // Fallback: FE-node IDW (only when triangle index is unavailable).
-                    var stressNbrs = index.FindNearestK(cx, cy, cz, K);
-                    if (stressNbrs.Length == 0)
+                    if (stressNbrs[0].dist > maxNeighbourDist) maxNeighbourDist = stressNbrs[0].dist;
+                    if (stressNbrs[0].dist > farThreshold) farVerts++;
+
+                    double wSum = 0, sSum = 0;
+                    foreach (var n in stressNbrs)
                     {
-                        cadVertsNoStressNeighbour++;
+                        if (feStressCovered != null && !feStressCovered[n.idx]) continue;
+                        double w = Math.Exp(-(n.dist * n.dist) * inv2SigmaSq);
+                        wSum += w;
+                        sSum += w * feSurfaceStress[n.idx];
+                    }
+                    if (wSum > 0)
+                    {
+                        double von = sSum / wSum;
+                        cadStress[i] = von;
+                        if (von > maxStress) { maxStress = von; peakIdx = i; }
                     }
                     else
                     {
-                        if (stressNbrs[0].dist > maxNeighbourDist) maxNeighbourDist = stressNbrs[0].dist;
-                        if (stressNbrs[0].dist > farThreshold) farVerts++;
-                        double sWeight = 0, sStress = 0;
-                        foreach (var n in stressNbrs)
-                        {
-                            if (feStressCovered != null && !feStressCovered[n.idx]) continue;
-                            double w = 1.0 / Math.Max(n.dist * n.dist, 1e-18);
-                            sWeight += w;
-                            sStress += w * feSurfaceStress[n.idx];
-                        }
-                        if (sWeight > 0)
-                        {
-                            double von = sStress / sWeight;
-                            cadStress[i] = von;
-                            if (von > maxStress) { maxStress = von; peakIdx = i; }
-                        }
-                        else
-                        {
-                            cadVertsNoStressNeighbour++;
-                        }
+                        cadVertsNoStressNeighbour++;
                     }
                 }
 
@@ -4566,9 +4432,6 @@ namespace SolidWorksExtractor.Services
                     }
                 }
             }
-            double meanNearestTriDist = triProjectionCount > 0
-                ? sumNearestTriDist / triProjectionCount
-                : 0.0;
 
             // Colour mapping: solver-reported [min, max] VON when available
             // (matches the SolidWorks legend); fall back to [0, observed peak]
@@ -4686,10 +4549,12 @@ namespace SolidWorksExtractor.Services
                 StressRangeSource = stressRangeSource,
                 ColorRangeMinPa = colorMinPa,
                 ColorRangeMaxPa = colorMaxPa,
-                MeanNearestTriDistanceM = meanNearestTriDist,
-                MaxNearestTriDistanceM = maxNearestTriDist,
+                StressSmoothingMethod = stressSmoothingMethod,
+                StressSmoothingSource = stressSmoothingSource,
+                StressSmoothingSigmaM = sigma,
+                StressSmoothingRadiusM = smoothingRadiusM,
             };
-            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, mean FE spacing {index.MeanSpacing:G4} m, mean nearest-tri dist {meanNearestTriDist:G4} m, max nearest-tri dist {maxNearestTriDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
+            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}, sigma={sigma * 1000:F3} mm = {(sigma / Math.Max(index.MeanSpacing, 1e-12)):F2}× mean FE spacing, radius={smoothingRadiusM * 1000:F3} mm); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
 
             // Capture the CAD display-mesh peak as a *display-only* diagnostic
             // — never let it shadow solver-authoritative fields:
@@ -5386,8 +5251,10 @@ namespace SolidWorksExtractor.Services
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_range_source\": \"{0}\",\n", EscapeJson(cp.StressRangeSource ?? ""));
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"color_range_min_pa\": {0:G6},\n", cp.ColorRangeMinPa);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"color_range_max_pa\": {0:G6},\n", cp.ColorRangeMaxPa);
-                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"mean_nearest_triangle_distance_m\": {0:G6},\n", cp.MeanNearestTriDistanceM);
-                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_nearest_triangle_distance_m\": {0:G6},\n", cp.MaxNearestTriDistanceM);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_smoothing_method\": \"{0}\",\n", EscapeJson(cp.StressSmoothingMethod ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_smoothing_source\": \"{0}\",\n", EscapeJson(cp.StressSmoothingSource ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_smoothing_sigma_m\": {0:G6},\n", cp.StressSmoothingSigmaM);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_smoothing_radius_m\": {0:G6},\n", cp.StressSmoothingRadiusM);
                 if (cp.DisplayPeakStressLocationM != null && cp.DisplayPeakStressLocationM.Length == 3)
                 {
                     sb.AppendFormat(CultureInfo.InvariantCulture,

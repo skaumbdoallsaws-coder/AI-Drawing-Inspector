@@ -289,6 +289,9 @@ namespace SolidWorksExtractor.Services
                                                    // captured before surface dedup. Stays stable.
             public int ElementCount = 0;
             public double MaxVonMisesMpa = 0;
+            public double MinVonMisesMpa = 0; // Solver-reported minimum von Mises (Pa→MPa)
+                                              // from GetMinMaxStress[1]. Used for the
+                                              // visualisation min..max colour range.
             public double MaxDisplacementMm = 0;
             public double[] MaxStressLocation = new double[] { 0, 0, 0 };
             public double ReactionFx = 0;
@@ -432,6 +435,13 @@ namespace SolidWorksExtractor.Services
             public int CadVertsNoStressNeighbour; // CAD verts whose K-NN had no covered stress data (left at 0)
             public int CadVertsNoDispNeighbour;   // CAD verts whose K-NN had no covered displacement data
             public bool Approximate;             // True (CAD-projected results are spatial approximations)
+            // Stress projection / colour-mapping provenance
+            public string StressProjectionMode;   // "element_direct_to_display_nearest" or "fe_node_to_display_idw"
+            public int StressProjectionK;         // K used for the stress projection (1 = nearest-element direct)
+            public string StressColorMapping;     // "min-max-linear"
+            public string StressRangeSource;      // "solver_minmax" or "observed_max" (when min unavailable)
+            public double ColorRangeMinPa;        // Min stress (Pa) used for the colour gradient anchor
+            public double ColorRangeMaxPa;        // Max stress (Pa) used for the colour gradient anchor
             // Position of the maximum-stress vertex in the IDW-projected CAD
             // display mesh (meters). Distinct from results.max_von_mises_location_m,
             // which is the solver-authoritative location (FE node coordinates).
@@ -1915,11 +1925,13 @@ namespace SolidWorksExtractor.Services
                     // 1-based node IDs and must NOT be treated as values.
                     if (stressValues != null && stressValues.Length >= 4)
                     {
+                        summary.MinVonMisesMpa = stressValues[1] / 1e6;
                         summary.MaxVonMisesMpa = stressValues[3] / 1e6;
                     }
                     else if (stressValues != null && stressValues.Length >= 2)
                     {
                         // Older 2-slot layout: [min, max]
+                        summary.MinVonMisesMpa = stressValues[0] / 1e6;
                         summary.MaxVonMisesMpa = stressValues[1] / 1e6;
                     }
                 }
@@ -2249,10 +2261,16 @@ namespace SolidWorksExtractor.Services
                 // Stage 2 PRIMARY path: bulk per-element VON + area-weighted
                 // projection to surface nodes. This is the closest equivalent
                 // to SolidWorks' "averaged nodal stress" display.
+                //
+                // Keep perElemVon visible to the CAD-projection stage below so
+                // the visualization-side path can project element values
+                // directly onto the refined display mesh (avoiding a second
+                // round of node-level smoothing that diffuses the contours).
                 int stressBulkElemSourcedCount = 0;
+                Dictionary<int, double> perElemVon = null;
                 if (results != null && surfaceFaces.Count > 0)
                 {
-                    Dictionary<int, double> perElemVon = TryBulkPerElementVon(results);
+                    perElemVon = TryBulkPerElementVon(results);
                     if (perElemVon != null && perElemVon.Count > 0)
                     {
                         stressBulkElemSourcedCount = perElemVon.Count;
@@ -2471,8 +2489,17 @@ namespace SolidWorksExtractor.Services
                     ContribPerElementOfSurface = contribPerElemSurface,
                 };
 
-                // Map stress to vertex colors
-                byte[] vertexColors = MapStressToColors(stressValues, surfVertCount, maxStress > 0 ? maxStress : 1.0);
+                // Map stress to vertex colors. Use solver-reported [min, max]
+                // VON when populated (matches the SolidWorks legend); fall back
+                // to [0, peak-from-vertices] when the solver call was
+                // unavailable so the FE-mesh path is still self-consistent.
+                double colorMinPa = (summary.MinVonMisesMpa > 0 && summary.MaxVonMisesMpa > 0)
+                    ? summary.MinVonMisesMpa * 1e6
+                    : 0.0;
+                double colorMaxPa = (summary.MaxVonMisesMpa > 0)
+                    ? summary.MaxVonMisesMpa * 1e6
+                    : (maxStress > 0 ? maxStress : 1.0);
+                byte[] vertexColors = MapStressToColors(stressValues, surfVertCount, colorMinPa, colorMaxPa);
 
                 // Get nodal displacements for morph target
                 float[] morphPositions = null;
@@ -2720,6 +2747,44 @@ namespace SolidWorksExtractor.Services
                     PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
                 }
 
+                // Build a parallel array of per-surface-triangle centroids and
+                // per-element VON values for the CAD-projection stress path.
+                // Projecting these directly onto the refined display mesh
+                // avoids the diffusion that an FE-node-averaged source field
+                // would introduce as a second smoothing layer (the user-
+                // visible "everything-is-green" wash). Displacement keeps
+                // the FE-node IDW path because displacement is genuinely
+                // per-node from the solver.
+                float[] elemCentroidPositions = null;
+                double[] elemCentroidVon = null;
+                if (perElemVon != null && perElemVon.Count > 0
+                    && surfaceFaceParents != null && surfaceFaces.Count > 0)
+                {
+                    var ctList = new List<float>(surfaceFaces.Count * 3);
+                    var vonList = new List<double>(surfaceFaces.Count);
+                    for (int t = 0; t < surfaceFaces.Count; t++)
+                    {
+                        int parent = surfaceFaceParents[t];
+                        double v;
+                        if (parent < 0 || !perElemVon.TryGetValue(parent, out v)) continue;
+                        int[] tri = surfaceFaces[t];
+                        if (tri == null || tri.Length < 3) continue;
+                        int n0 = tri[0], n1 = tri[1], n2 = tri[2];
+                        if (n0 < 0 || n1 < 0 || n2 < 0) continue;
+                        if (n0 >= nodeX.Length || n1 >= nodeX.Length || n2 >= nodeX.Length) continue;
+                        float cx = (float)((nodeX[n0] + nodeX[n1] + nodeX[n2]) / 3.0);
+                        float cy = (float)((nodeY[n0] + nodeY[n1] + nodeY[n2]) / 3.0);
+                        float cz = (float)((nodeZ[n0] + nodeZ[n1] + nodeZ[n2]) / 3.0);
+                        ctList.Add(cx); ctList.Add(cy); ctList.Add(cz);
+                        vonList.Add(v);
+                    }
+                    if (vonList.Count > 0)
+                    {
+                        elemCentroidPositions = ctList.ToArray();
+                        elemCentroidVon = vonList.ToArray();
+                    }
+                }
+
                 // Stage 3 -- Strategy A: try the CAD display tessellation
                 // with FE results projected onto its vertices. Returns null
                 // on any failure (no part doc, no bodies, all faces fail to
@@ -2730,6 +2795,7 @@ namespace SolidWorksExtractor.Services
                     posArray, stressValues,
                     dispXArrOuter, dispYArrOuter, dispZArrOuter, feHasDisp,
                     covered, dispCoveredOuter,
+                    elemCentroidPositions, elemCentroidVon,
                     summary);
                 if (cadProjected != null)
                 {
@@ -2869,17 +2935,38 @@ namespace SolidWorksExtractor.Services
         }
 
         /// <summary>
-        /// Map stress values to RGBA vertex colors using the standard FEA heatmap:
-        /// Blue (0%) -> Cyan (25%) -> Green (50%) -> Yellow (75%) -> Red (100%)
+        /// Map stress values to RGBA vertex colours using the standard FEA heatmap:
+        /// Blue (0%) -> Cyan (25%) -> Green (50%) -> Yellow (75%) -> Red (100%).
+        ///
+        /// Normalisation runs over the explicit [minStress, maxStress] range,
+        /// matching the SolidWorks legend convention. The previous mapping was
+        /// abs(s)/max which (a) silently took absolute value of an already-
+        /// non-negative quantity and (b) anchored at 0 instead of the solver's
+        /// reported minimum, pushing low-stress regions toward the middle of
+        /// the gradient and producing the "everything is green" wash.
         /// </summary>
-        private byte[] MapStressToColors(double[] stressValues, int vertexCount, double maxStress)
+        private byte[] MapStressToColors(double[] stressValues, int vertexCount, double minStress, double maxStress)
         {
             byte[] colors = new byte[vertexCount * 4]; // RGBA
+            double range = maxStress - minStress;
+            // Degenerate range (max == min, or both zero, or unsigned weirdness):
+            // every vertex normalises to 0 (blue). Better than dividing by 0
+            // and getting NaN-coloured bytes.
+            bool degenerate = !(range > 1e-30);
 
             for (int i = 0; i < vertexCount; i++)
             {
-                double normalized = Math.Abs(stressValues[i]) / maxStress;
-                normalized = Math.Max(0.0, Math.Min(1.0, normalized)); // clamp [0, 1]
+                double normalized;
+                if (degenerate)
+                {
+                    normalized = 0.0;
+                }
+                else
+                {
+                    normalized = (stressValues[i] - minStress) / range;
+                    if (normalized < 0.0) normalized = 0.0;
+                    else if (normalized > 1.0) normalized = 1.0;
+                }
 
                 byte r, g, b;
                 StressToRgb(normalized, out r, out g, out b);
@@ -4061,6 +4148,8 @@ namespace SolidWorksExtractor.Services
             bool feSurfaceHasDisplacement,
             bool[] feStressCovered,            // per-FE-surface-node: stressValues was actually populated
             bool[] feDispCovered,              // per-FE-surface-node: disp arrays were actually populated
+            float[] elemCentroidPositions,     // 3*Ne meters; null disables element-direct stress projection
+            double[] elemCentroidVon,          // Ne Pa; per-element raw solver VON, parallel with positions
             FeaResultsSummary summary)
         {
             int feCount = feSurfacePositions.Length / 3;
@@ -4153,56 +4242,91 @@ namespace SolidWorksExtractor.Services
             int cadVertsNoDispNeighbour = 0;
             double farThreshold = Math.Max(index.MeanSpacing * 2.0, 1e-6);
 
+            // Stress projection source: prefer per-element centroids when
+            // available so each CAD vertex picks up its closest element's raw
+            // solver VON instead of an FE-node-averaged value (which itself
+            // came from area-weighted element averaging — a second smoothing
+            // layer). K=1 nearest-element gives the sharpest contour; this
+            // matches SolidWorks' element-display style, where a single
+            // element's VON paints the whole face. For displacement we still
+            // use the FE-node IDW with K=4: displacement is genuinely per-
+            // node from the solver, and IDW between adjacent nodes produces
+            // a smooth morph silhouette.
+            bool useElementDirectStress = elemCentroidPositions != null
+                && elemCentroidVon != null
+                && elemCentroidVon.Length > 0
+                && elemCentroidPositions.Length == elemCentroidVon.Length * 3;
+            SurfaceNodeSpatialIndex stressIndex = useElementDirectStress
+                ? new SurfaceNodeSpatialIndex(elemCentroidPositions)
+                : index;
+            int stressK = useElementDirectStress ? 1 : K;
+            string stressProjectionMode = useElementDirectStress
+                ? "element_direct_to_display_nearest"
+                : "fe_node_to_display_idw";
+
             for (int i = 0; i < cad.VertexCount; i++)
             {
                 double cx = cad.Positions[i * 3];
                 double cy = cad.Positions[i * 3 + 1];
                 double cz = cad.Positions[i * 3 + 2];
-                var neighbours = index.FindNearestK(cx, cy, cz, K);
-                if (neighbours.Length == 0) continue;
-                if (neighbours[0].dist > maxNeighbourDist) maxNeighbourDist = neighbours[0].dist;
-                if (neighbours[0].dist > farThreshold) farVerts++;
 
-                // Stress projection: only weight neighbours that actually
-                // carry a covered stress reading. Default-zero values from
-                // uncovered FE nodes would otherwise drag the IDW average
-                // toward an artificial zero-stress reading.
-                double sWeight = 0, sStress = 0;
-                double dWeight = 0, sDx = 0, sDy = 0, sDz = 0;
-                foreach (var n in neighbours)
+                // ---- Stress (per-element direct OR FE-node IDW) ----
+                var stressNbrs = stressIndex.FindNearestK(cx, cy, cz, stressK);
+                if (stressNbrs.Length == 0)
                 {
-                    double w = 1.0 / Math.Max(n.dist * n.dist, 1e-18);
-                    if (feStressCovered == null || feStressCovered[n.idx])
+                    cadVertsNoStressNeighbour++;
+                }
+                else
+                {
+                    if (stressNbrs[0].dist > maxNeighbourDist) maxNeighbourDist = stressNbrs[0].dist;
+                    if (stressNbrs[0].dist > farThreshold) farVerts++;
+
+                    if (useElementDirectStress)
                     {
-                        sWeight += w;
-                        sStress += w * feSurfaceStress[n.idx];
+                        // K=1 nearest-element direct: closest element's raw VON.
+                        cadStress[i] = elemCentroidVon[stressNbrs[0].idx];
+                        if (cadStress[i] > maxStress) { maxStress = cadStress[i]; peakIdx = i; }
                     }
-                    if (feSurfaceHasDisplacement && (feDispCovered == null || feDispCovered[n.idx]))
+                    else
                     {
+                        // Legacy FE-node IDW path. Only weight covered nodes —
+                        // default-zero values from uncovered nodes would drag
+                        // the average toward synthetic zero stress.
+                        double sWeight = 0, sStress = 0;
+                        foreach (var n in stressNbrs)
+                        {
+                            if (feStressCovered != null && !feStressCovered[n.idx]) continue;
+                            double w = 1.0 / Math.Max(n.dist * n.dist, 1e-18);
+                            sWeight += w;
+                            sStress += w * feSurfaceStress[n.idx];
+                        }
+                        if (sWeight > 0)
+                        {
+                            double von = sStress / sWeight;
+                            cadStress[i] = von;
+                            if (von > maxStress) { maxStress = von; peakIdx = i; }
+                        }
+                        else
+                        {
+                            cadVertsNoStressNeighbour++;
+                        }
+                    }
+                }
+
+                // ---- Displacement (always FE-node IDW) ----
+                if (feSurfaceHasDisplacement)
+                {
+                    var dispNbrs = (stressIndex == index) ? stressNbrs : index.FindNearestK(cx, cy, cz, K);
+                    double dWeight = 0, sDx = 0, sDy = 0, sDz = 0;
+                    foreach (var n in dispNbrs)
+                    {
+                        if (feDispCovered != null && !feDispCovered[n.idx]) continue;
+                        double w = 1.0 / Math.Max(n.dist * n.dist, 1e-18);
                         dWeight += w;
                         sDx += w * feSurfaceDispX[n.idx];
                         sDy += w * feSurfaceDispY[n.idx];
                         sDz += w * feSurfaceDispZ[n.idx];
                     }
-                }
-
-                if (sWeight > 0)
-                {
-                    double von = sStress / sWeight;
-                    cadStress[i] = von;
-                    if (Math.Abs(von) > maxStress) { maxStress = Math.Abs(von); peakIdx = i; }
-                }
-                else
-                {
-                    // No covered stress neighbour found -- leave at 0 and
-                    // surface in the diagnostic. The MIN_STRESS_COVERAGE gate
-                    // makes this rare in practice, but degenerate isolated
-                    // clusters can still hit it.
-                    cadVertsNoStressNeighbour++;
-                }
-
-                if (feSurfaceHasDisplacement)
-                {
                     if (dWeight > 0)
                     {
                         cadDispX[i] = sDx / dWeight;
@@ -4216,7 +4340,16 @@ namespace SolidWorksExtractor.Services
                 }
             }
 
-            byte[] cadColors = MapStressToColors(cadStress, cad.VertexCount, maxStress > 0 ? maxStress : 1.0);
+            // Colour mapping: solver-reported [min, max] VON when available
+            // (matches the SolidWorks legend); fall back to [0, observed peak]
+            // when min is missing (e.g. older API layout).
+            double colorMinPa = (summary.MinVonMisesMpa > 0 && summary.MaxVonMisesMpa > 0)
+                ? summary.MinVonMisesMpa * 1e6
+                : 0.0;
+            double colorMaxPa = (summary.MaxVonMisesMpa > 0)
+                ? summary.MaxVonMisesMpa * 1e6
+                : (maxStress > 0 ? maxStress : 1.0);
+            byte[] cadColors = MapStressToColors(cadStress, cad.VertexCount, colorMinPa, colorMaxPa);
 
             float[] morphPositions = null;
             float[] morphNormals = null;
@@ -4291,6 +4424,9 @@ namespace SolidWorksExtractor.Services
                 for (int i = 0; i < feDispCovered.Length; i++)
                     if (feDispCovered[i]) feDispCoveredCount++;
             }
+            string stressRangeSource = (summary.MinVonMisesMpa > 0 && summary.MaxVonMisesMpa > 0)
+                ? "solver_minmax"
+                : "observed_max";
             summary.CadProjectionDiagnostic = new CadProjectionDiagnosticInfo
             {
                 CadVertexCount = cad.VertexCount,
@@ -4314,6 +4450,12 @@ namespace SolidWorksExtractor.Services
                 CadVertsNoStressNeighbour = cadVertsNoStressNeighbour,
                 CadVertsNoDispNeighbour = cadVertsNoDispNeighbour,
                 Approximate = true,
+                StressProjectionMode = stressProjectionMode,
+                StressProjectionK = stressK,
+                StressColorMapping = "min-max-linear",
+                StressRangeSource = stressRangeSource,
+                ColorRangeMinPa = colorMinPa,
+                ColorRangeMaxPa = colorMaxPa,
             };
             Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts from {feCount:N0} FE surface nodes (stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, mean FE spacing {index.MeanSpacing:G4} m, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour})");
 
@@ -4928,6 +5070,7 @@ namespace SolidWorksExtractor.Services
             if (summary != null)
             {
                 sb.AppendLine("  \"summary\": {");
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"min_von_mises_mpa\": {0:G6},\n", summary.MinVonMisesMpa);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_von_mises_mpa\": {0:G6},\n", summary.MaxVonMisesMpa);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_displacement_mm\": {0:G6},\n", summary.MaxDisplacementMm);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"safety_factor\": {0:F2},\n", summary.SafetyFactor);
@@ -5005,6 +5148,12 @@ namespace SolidWorksExtractor.Services
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"far_vertex_fraction_pct\": {0:F2},\n", cp.FarVertexFractionPct);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_verts_no_covered_stress_neighbour\": {0},\n", cp.CadVertsNoStressNeighbour);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_verts_no_covered_disp_neighbour\": {0},\n", cp.CadVertsNoDispNeighbour);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_projection_mode\": \"{0}\",\n", EscapeJson(cp.StressProjectionMode ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_projection_k\": {0},\n", cp.StressProjectionK);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_color_mapping\": \"{0}\",\n", EscapeJson(cp.StressColorMapping ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_range_source\": \"{0}\",\n", EscapeJson(cp.StressRangeSource ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"color_range_min_pa\": {0:G6},\n", cp.ColorRangeMinPa);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"color_range_max_pa\": {0:G6},\n", cp.ColorRangeMaxPa);
                 if (cp.DisplayPeakStressLocationM != null && cp.DisplayPeakStressLocationM.Length == 3)
                 {
                     sb.AppendFormat(CultureInfo.InvariantCulture,
@@ -5063,6 +5212,7 @@ namespace SolidWorksExtractor.Services
             sb.AppendLine("  \"summary\": {");
             sb.AppendFormat(CultureInfo.InvariantCulture, "    \"surface_node_count\": {0},\n", summary.SurfaceNodeCount);
             sb.AppendFormat(CultureInfo.InvariantCulture, "    \"element_count\": {0},\n", summary.ElementCount);
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"min_von_mises_mpa\": {0:G6},\n", summary.MinVonMisesMpa);
             sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_von_mises_mpa\": {0:G6},\n", summary.MaxVonMisesMpa);
             sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_displacement_mm\": {0:G6},\n", summary.MaxDisplacementMm);
             sb.AppendFormat(CultureInfo.InvariantCulture,
@@ -5172,6 +5322,7 @@ namespace SolidWorksExtractor.Services
 
             // --- results detail ---
             sb.AppendLine("  \"results\": {");
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"min_von_mises_mpa\": {0:G6},\n", summary.MinVonMisesMpa);
             sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_von_mises_mpa\": {0:G6},\n", summary.MaxVonMisesMpa);
             sb.Append("    \"max_von_mises_node\": ").Append(summary.MaxStressNode > 0 ? summary.MaxStressNode.ToString(CultureInfo.InvariantCulture) : "null").AppendLine(",");
             sb.AppendFormat(CultureInfo.InvariantCulture,

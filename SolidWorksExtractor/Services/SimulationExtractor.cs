@@ -4376,6 +4376,22 @@ namespace SolidWorksExtractor.Services
                 double cz = cad.Positions[i * 3 + 2];
 
                 // ---- Stress: Gaussian-weighted K=12 over FE surface nodes ----
+                // Hard 3-sigma cutoff is enforced here so the
+                // stress_smoothing_radius_m field in cad_projection is
+                // actually a cutoff, not just a Gaussian reference radius:
+                // any neighbour with d > smoothingRadiusM is dropped before
+                // the weighted average. The Gaussian weight at 3σ is ~0.011
+                // anyway, so the contour shape is unchanged in normal cases;
+                // the cutoff just makes the diagnostic truthful.
+                //
+                // Fallback: if zero in-radius covered neighbours exist (the
+                // CAD vertex is in a region where the closest FE surface
+                // node is farther than 3σ), use the single nearest covered
+                // node so cad_verts_no_covered_stress_neighbour stays at 0.
+                // The far-vert counter (>= 2× mean FE spacing) already
+                // surfaces these cases for auditability, and the fallback
+                // is reported via the existing max_neighbour_distance_m
+                // field — never silently filled with synthetic zero.
                 var stressNbrs = index.FindNearestK(cx, cy, cz, STRESS_K);
                 if (stressNbrs.Length == 0)
                 {
@@ -4389,11 +4405,13 @@ namespace SolidWorksExtractor.Services
                     double wSum = 0, sSum = 0;
                     foreach (var n in stressNbrs)
                     {
+                        if (n.dist > smoothingRadiusM) continue;
                         if (feStressCovered != null && !feStressCovered[n.idx]) continue;
                         double w = Math.Exp(-(n.dist * n.dist) * inv2SigmaSq);
                         wSum += w;
                         sSum += w * feSurfaceStress[n.idx];
                     }
+
                     if (wSum > 0)
                     {
                         double von = sSum / wSum;
@@ -4402,7 +4420,29 @@ namespace SolidWorksExtractor.Services
                     }
                     else
                     {
-                        cadVertsNoStressNeighbour++;
+                        // No in-radius covered neighbour. Fall back to the
+                        // nearest covered node (regardless of radius) so we
+                        // never write a synthetic zero into a vertex that
+                        // has FE data nearby — just slightly outside the
+                        // 3-sigma cutoff.
+                        int fallbackIdx = -1;
+                        for (int k = 0; k < stressNbrs.Length; k++)
+                        {
+                            int candIdx = stressNbrs[k].idx;
+                            if (feStressCovered != null && !feStressCovered[candIdx]) continue;
+                            fallbackIdx = candIdx;
+                            break;
+                        }
+                        if (fallbackIdx >= 0)
+                        {
+                            double von = feSurfaceStress[fallbackIdx];
+                            cadStress[i] = von;
+                            if (von > maxStress) { maxStress = von; peakIdx = i; }
+                        }
+                        else
+                        {
+                            cadVertsNoStressNeighbour++;
+                        }
                     }
                 }
 

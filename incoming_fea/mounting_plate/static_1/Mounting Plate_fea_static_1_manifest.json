@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": "1",
-  "timestamp_utc": "2026-04-26T17:03:52.2995703Z",
+  "timestamp_utc": "2026-04-26T18:01:18.5514340Z",
   "extractor_version": "0.0.0.0",
-  "extractor_git_commit": "d18e70a24d150d06695234edb259d42427281b0d",
+  "extractor_git_commit": "5efe7479665746b2e283b92e7c4abc66c78d6f60",
   "solidworks_version": "32.5.0",
   "source": {
     "document_path": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
@@ -44,13 +44,13 @@
     "surface_nodes_total": 2391,
     "surface_nodes_covered": 2391,
     "covered_pct": 1.0000,
-    "bulk_per_elem_source_count": 0,
-    "primary_path": "per-element-of-surface",
+    "bulk_per_elem_source_count": 11466,
+    "primary_path": "bulk-per-element-area-weighted",
     "contributions": {
-      "bulk_per_element_area_weighted": 0,
+      "bulk_per_element_area_weighted": 2391,
       "bulk_per_node_fill": 0,
       "per_node_api": 0,
-      "per_element_of_surface": 2391
+      "per_element_of_surface": 0
     }
   },
   "cad_projection": {

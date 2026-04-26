@@ -2833,6 +2833,22 @@ namespace SolidWorksExtractor.Services
                         feTriIndices = triList.ToArray();
                         feTriCentroids = ctList.ToArray();
                         feTriVon = vonList.ToArray();
+                        // One-shot diagnostic: max surface-tri parent VON.
+                        // If this is materially below summary.MaxVonMisesMpa,
+                        // the per-element peak lives in an interior element
+                        // and the displayed surface peak will be capped here
+                        // regardless of how aggressive the sharp blend is.
+                        double maxFeTriVon = 0.0;
+                        int maxFeTriIdx = -1;
+                        for (int k = 0; k < feTriVon.Length; k++)
+                        {
+                            if (feTriVon[k] > maxFeTriVon)
+                            {
+                                maxFeTriVon = feTriVon[k];
+                                maxFeTriIdx = k;
+                            }
+                        }
+                        Console.WriteLine($"    FEA Stage 3 sharp-path source: max(feTriVon)={maxFeTriVon / 1e6:F2} MPa @ surfaceTri[{maxFeTriIdx}], summary.MaxVonMisesMpa={summary.MaxVonMisesMpa:F2} MPa");
                     }
                 }
 

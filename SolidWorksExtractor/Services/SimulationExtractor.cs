@@ -2763,19 +2763,40 @@ namespace SolidWorksExtractor.Services
                     PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
                 }
 
-                // Build per-FE-surface-triangle index/centroid arrays for
-                // the Stage 3 *sharp* contour path. Stage 3 blends a smooth
-                // Gaussian-nodal field with a sharp triangle-barycentric
-                // field (driven by local stress spread) so the contour stays
-                // smooth in low-gradient regions but preserves the local
-                // peak at the stress concentration where SolidWorks shows
-                // a red/orange hotspot.
+                // Build per-FE-surface-triangle arrays for the Stage 3
+                // *sharp* contour path. Each surface triangle carries:
+                //   - centroid (m, surface-vertex space) for spatial-index
+                //     candidate selection
+                //   - parent-element raw VON (Pa) so the sharp field can
+                //     read the per-element solver value directly, not the
+                //     area-weighted nodal-averaged value
+                //
+                // Why per-element raw VON for sharp:
+                //   * stressValues[] (per-FE-surface-vertex) is built by
+                //     area-weighted projection of element VONs, so even at
+                //     the peak node it's lower than the per-element peak
+                //     (e.g. solver reports max = 800 MPa per element, but
+                //     the node's area-weighted average is closer to 600 MPa
+                //     because adjacent elements have lower VONs).
+                //   * To match the SolidWorks contour reaching yellow/red
+                //     at the stress concentration, the sharp path must
+                //     expose the per-element peak. The blend keeps it
+                //     localised: alpha → 1 only where local spread is
+                //     large (i.e. genuinely near a concentration), so the
+                //     Voronoi-cell texture of per-element painting can't
+                //     bleed into flat regions.
+                //
+                // perElemVon was lifted out of the Stage-2 try block
+                // earlier on this branch's history, so it's accessible
+                // here.
                 int[] feTriIndices = null;
                 float[] feTriCentroids = null;
+                double[] feTriVon = null;
                 if (surfaceFaces.Count > 0 && nodeRemap != null && posArray != null)
                 {
                     var triList = new List<int>(surfaceFaces.Count * 3);
                     var ctList = new List<float>(surfaceFaces.Count * 3);
+                    var vonList = new List<double>(surfaceFaces.Count);
                     for (int t = 0; t < surfaceFaces.Count; t++)
                     {
                         int[] tri = surfaceFaces[t];
@@ -2788,16 +2809,30 @@ namespace SolidWorksExtractor.Services
                         if (v0 * 3 + 2 >= posArray.Length
                             || v1 * 3 + 2 >= posArray.Length
                             || v2 * 3 + 2 >= posArray.Length) continue;
+                        // Look up the parent element's raw VON. If
+                        // unavailable for this tri (shouldn't happen with
+                        // the bulk-per-element path on this study, but be
+                        // defensive), drop the tri from the sharp index;
+                        // sharp will fall back to bary in the helper.
+                        int parent = surfaceFaceParents[t];
+                        double von;
+                        if (parent < 0 || perElemVon == null
+                            || !perElemVon.TryGetValue(parent, out von))
+                        {
+                            continue;
+                        }
                         triList.Add(v0); triList.Add(v1); triList.Add(v2);
                         float cx = (posArray[v0 * 3]     + posArray[v1 * 3]     + posArray[v2 * 3])     / 3f;
                         float cy = (posArray[v0 * 3 + 1] + posArray[v1 * 3 + 1] + posArray[v2 * 3 + 1]) / 3f;
                         float cz = (posArray[v0 * 3 + 2] + posArray[v1 * 3 + 2] + posArray[v2 * 3 + 2]) / 3f;
                         ctList.Add(cx); ctList.Add(cy); ctList.Add(cz);
+                        vonList.Add(von);
                     }
                     if (triList.Count > 0)
                     {
                         feTriIndices = triList.ToArray();
                         feTriCentroids = ctList.ToArray();
+                        feTriVon = vonList.ToArray();
                     }
                 }
 
@@ -2811,7 +2846,7 @@ namespace SolidWorksExtractor.Services
                     posArray, stressValues,
                     dispXArrOuter, dispYArrOuter, dispZArrOuter, feHasDisp,
                     covered, dispCoveredOuter,
-                    feTriIndices, feTriCentroids,
+                    feTriIndices, feTriCentroids, feTriVon,
                     summary);
                 if (cadProjected != null)
                 {
@@ -4283,6 +4318,7 @@ namespace SolidWorksExtractor.Services
             bool[] feDispCovered,              // per-FE-surface-node: disp arrays were actually populated
             int[] feTriIndices,                // 3*Nt surface-vertex indices for the sharp/peak path; null disables peak preservation
             float[] feTriCentroids,            // 3*Nt centroids in m (parallel with feTriIndices)
+            double[] feTriVon,                 // Nt parent-element raw VON in Pa (parallel with feTriIndices)
             FeaResultsSummary summary)
         {
             int feCount = feSurfacePositions.Length / 3;
@@ -4439,8 +4475,18 @@ namespace SolidWorksExtractor.Services
             //
             // The thresholds are explicit, recorded in the manifest, and
             // tied to physical (not visual) variance.
-            const double BLEND_MIN = 0.10;  // < 10% colour range spread -> fully smooth
-            const double BLEND_MAX = 0.40;  // > 40% colour range spread -> fully sharp
+            // Spread thresholds for the smooth/sharp blend, expressed as
+            // a fraction of the colour range. Picked so the per-element
+            // sharp value only dominates near a real stress concentration:
+            //   - 30% = ~236 MPa spread (e.g. 400→636 over a 3 mm
+            //     neighbourhood). The plate's bulk gradient produces less
+            //     than this, so most of the surface stays on the smooth
+            //     path with no Voronoi-cell artifacts.
+            //   - 70% = ~552 MPa spread. Only the immediate vicinity of
+            //     the stress concentration sees this — that's where we
+            //     want the per-element peak to surface.
+            const double BLEND_MIN = 0.30;
+            const double BLEND_MAX = 0.70;
 
             // Pre-compute the same colour range used by MapStressToColors so
             // the blend's spread normalisation matches the legend's anchor.
@@ -4452,30 +4498,33 @@ namespace SolidWorksExtractor.Services
                 : 1.0;
             double colorRangePa = Math.Max(preColorMaxPa - preColorMinPa, 1e-6);
 
-            // Optional sharp-path triangle index (only used when the call
-            // site supplied feTriIndices/feTriCentroids — same fields that
-            // were re-added on this branch for peak preservation).
-            bool useSharpTriangleBary = feTriIndices != null
+            // Sharp-path index: per-FE-surface-triangle centroids carrying
+            // their parent element's raw solver VON. Only used when the
+            // call site supplied a non-empty feTriVon array (it builds it
+            // from perElemVon, so unsupported COSMOSWorks builds will
+            // simply leave the sharp path disabled and the result reverts
+            // to pure Gaussian smoothing).
+            bool useSharpPerElement = feTriIndices != null
                 && feTriCentroids != null
-                && feTriIndices.Length >= 3
-                && feTriIndices.Length % 3 == 0
-                && feTriCentroids.Length == (feTriIndices.Length / 3) * 3;
-            int feTriCount = useSharpTriangleBary ? feTriIndices.Length / 3 : 0;
-            SurfaceNodeSpatialIndex triIndex = useSharpTriangleBary
+                && feTriVon != null
+                && feTriVon.Length > 0
+                && feTriIndices.Length == feTriVon.Length * 3
+                && feTriCentroids.Length == feTriVon.Length * 3;
+            int feTriCount = useSharpPerElement ? feTriVon.Length : 0;
+            SurfaceNodeSpatialIndex triIndex = useSharpPerElement
                 ? new SurfaceNodeSpatialIndex(feTriCentroids)
                 : null;
-            const int TRI_CANDIDATE_K = 8;
 
-            string stressProjectionMode = useSharpTriangleBary
+            string stressProjectionMode = useSharpPerElement
                 ? "surface_nodal_gaussian_with_peak_preservation"
                 : "surface_nodal_local_gaussian_to_display";
             int stressProjectionK = STRESS_K;
             string stressSmoothingMethod = "gaussian";
             string stressSmoothingSource = "fe_surface_nodes";
-            string peakPreservationMethod = useSharpTriangleBary
-                ? "triangle_barycentric_blended"
+            string peakPreservationMethod = useSharpPerElement
+                ? "per_element_nearest_blended"
                 : "none";
-            string peakBlendSource = useSharpTriangleBary
+            string peakBlendSource = useSharpPerElement
                 ? "local_spread_normalized_by_color_range"
                 : "n/a";
 
@@ -4544,54 +4593,33 @@ namespace SolidWorksExtractor.Services
                     }
                     else
                     {
-                        // ---- Sharp field: triangle-barycentric (when enabled) ----
+                        // ---- Sharp field: K=1 nearest FE surface tri's per-element raw VON ----
+                        // The sharp path reads directly from the parent
+                        // element's solver VON (not from area-weighted nodal
+                        // values), so at the stress concentration it carries
+                        // the full per-element peak (~800 MPa on this study).
+                        // This is the same per-element value the K=1 nearest-
+                        // element painting from earlier rounds used; it's
+                        // visibly Voronoi-cell-textured on its own, but the
+                        // adaptive blend keeps it gated to genuinely high-
+                        // spread regions only.
                         double sharpVon = smoothVon;
-                        if (useSharpTriangleBary)
+                        if (useSharpPerElement)
                         {
-                            var triCandidates = triIndex.FindNearestK(cx, cy, cz, TRI_CANDIDATE_K);
-                            double bestDist2 = double.MaxValue;
-                            int bestTri = -1;
-                            double bestU = 0, bestV = 0, bestW = 0;
-                            foreach (var c in triCandidates)
+                            var triCandidates = triIndex.FindNearestK(cx, cy, cz, 1);
+                            if (triCandidates.Length > 0)
                             {
-                                int t = c.idx;
-                                if (t < 0 || t >= feTriCount) continue;
-                                int v0 = feTriIndices[t * 3];
-                                int v1 = feTriIndices[t * 3 + 1];
-                                int v2 = feTriIndices[t * 3 + 2];
-                                double u, v, w, d2;
-                                ClosestPointOnTriangle(
-                                    cx, cy, cz,
-                                    feSurfacePositions[v0 * 3], feSurfacePositions[v0 * 3 + 1], feSurfacePositions[v0 * 3 + 2],
-                                    feSurfacePositions[v1 * 3], feSurfacePositions[v1 * 3 + 1], feSurfacePositions[v1 * 3 + 2],
-                                    feSurfacePositions[v2 * 3], feSurfacePositions[v2 * 3 + 1], feSurfacePositions[v2 * 3 + 2],
-                                    out u, out v, out w, out d2);
-                                if (d2 < bestDist2)
+                                int t = triCandidates[0].idx;
+                                if (t >= 0 && t < feTriCount)
                                 {
-                                    bestDist2 = d2;
-                                    bestTri = t;
-                                    bestU = u; bestV = v; bestW = w;
+                                    sharpVon = feTriVon[t];
                                 }
-                            }
-                            if (bestTri >= 0)
-                            {
-                                int v0 = feTriIndices[bestTri * 3];
-                                int v1 = feTriIndices[bestTri * 3 + 1];
-                                int v2 = feTriIndices[bestTri * 3 + 2];
-                                bool s0c = (feStressCovered == null || feStressCovered[v0]);
-                                bool s1c = (feStressCovered == null || feStressCovered[v1]);
-                                bool s2c = (feStressCovered == null || feStressCovered[v2]);
-                                double bSum = 0, bWeight = 0;
-                                if (s0c) { bSum += bestU * feSurfaceStress[v0]; bWeight += bestU; }
-                                if (s1c) { bSum += bestV * feSurfaceStress[v1]; bWeight += bestV; }
-                                if (s2c) { bSum += bestW * feSurfaceStress[v2]; bWeight += bestW; }
-                                if (bWeight > 0) sharpVon = bSum / bWeight;
                             }
                         }
 
                         // ---- Adaptive blend by local spread ----
                         double alpha = 0.0;
-                        if (useSharpTriangleBary && coveredCount >= 2 && sNbrMax > sNbrMin)
+                        if (useSharpPerElement && coveredCount >= 2 && sNbrMax > sNbrMin)
                         {
                             double spreadNorm = (sNbrMax - sNbrMin) / colorRangePa;
                             if (spreadNorm <= BLEND_MIN)
@@ -4767,8 +4795,8 @@ namespace SolidWorksExtractor.Services
                 StressSmoothingRadiusM = smoothingRadiusM,
                 StressPeakPreservationMethod = peakPreservationMethod,
                 StressPeakBlendSource = peakBlendSource,
-                StressPeakBlendMin = useSharpTriangleBary ? BLEND_MIN : 0.0,
-                StressPeakBlendMax = useSharpTriangleBary ? BLEND_MAX : 0.0,
+                StressPeakBlendMin = useSharpPerElement ? BLEND_MIN : 0.0,
+                StressPeakBlendMax = useSharpPerElement ? BLEND_MAX : 0.0,
                 StressPeakBlendMeanAlpha = alphaSamples > 0 ? sumAlpha / alphaSamples : 0.0,
                 StressPeakBlendHighAlphaPct = cad.VertexCount > 0
                     ? 100.0 * highAlphaCount / cad.VertexCount
@@ -4778,7 +4806,7 @@ namespace SolidWorksExtractor.Services
             double highAlphaPct = cad.VertexCount > 0
                 ? 100.0 * highAlphaCount / cad.VertexCount
                 : 0.0;
-            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}, sigma={sigma * 1000:F3} mm = {(sigma / Math.Max(index.MeanSpacing, 1e-12)):F2}× mean FE spacing, radius={smoothingRadiusM * 1000:F3} mm, peak={peakPreservationMethod}, blend [{(useSharpTriangleBary ? BLEND_MIN : 0.0):F2}, {(useSharpTriangleBary ? BLEND_MAX : 0.0):F2}], mean alpha={meanAlpha:F3}, sharp-dominated verts={highAlphaPct:F2}%); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
+            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}, sigma={sigma * 1000:F3} mm = {(sigma / Math.Max(index.MeanSpacing, 1e-12)):F2}× mean FE spacing, radius={smoothingRadiusM * 1000:F3} mm, peak={peakPreservationMethod}, blend [{(useSharpPerElement ? BLEND_MIN : 0.0):F2}, {(useSharpPerElement ? BLEND_MAX : 0.0):F2}], mean alpha={meanAlpha:F3}, sharp-dominated verts={highAlphaPct:F2}%); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
 
             // Capture the CAD display-mesh peak as a *display-only* diagnostic
             // — never let it shadow solver-authoritative fields:

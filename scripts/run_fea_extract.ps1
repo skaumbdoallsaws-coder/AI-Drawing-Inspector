@@ -58,7 +58,15 @@ param(
     # modified since the mesh was generated), let the extractor call
     # study.MeshAndRun() to re-mesh and re-solve before extraction. Off by
     # default because re-meshing modifies the document's saved analysis state.
-    [switch]$AllowRemesh
+    [switch]$AllowRemesh,
+
+    # Wall-clock cap (seconds) on the per-element-of-surface stress fallback.
+    # 0 = no cap (run to completion). Default 60 keeps interactive runs from
+    # hanging when the COM bridge is slow. Use 0 (or a much larger value) for
+    # batch worker reruns where coverage matters more than wall-clock — without
+    # complete coverage the CAD-projection visualization path will refuse to
+    # run and the GLB falls back to FE-mesh mode.
+    [int]$StressBudgetSeconds = -1
 )
 
 $ErrorActionPreference = "Stop"
@@ -323,6 +331,13 @@ if (-not [string]::IsNullOrWhiteSpace($StudyName)) {
 
 if ($AllowRemesh) {
     $extractorArgs.Add("--fea-allow-remesh")
+}
+
+# Only forward an explicit stress budget when the caller passed one. A negative
+# placeholder default (-1) means "leave the extractor's own default in place."
+if ($StressBudgetSeconds -ge 0) {
+    $extractorArgs.Add("--fea-stress-budget-seconds")
+    $extractorArgs.Add(([int]$StressBudgetSeconds).ToString())
 }
 
 # The extractor places FEA outputs in the same directory as its --output JSON.

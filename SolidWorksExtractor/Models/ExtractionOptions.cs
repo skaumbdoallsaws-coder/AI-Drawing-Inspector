@@ -73,6 +73,20 @@ namespace SolidWorksExtractor.Models
         /// </summary>
         public bool AllowRemesh { get; set; } = false;
 
+        /// <summary>
+        /// Wall-clock budget (seconds) for the per-element-of-surface stress fallback.
+        /// When all bulk/per-node stress APIs return DBNull (some COSMOSWorks builds), the
+        /// extractor walks each surface-adjacent element and calls GetStress one-at-a-time.
+        /// On slow COM hosts that loop is the only honest way to reach &gt;= 95% per-vertex
+        /// coverage so the CAD-projection visualization can run.
+        ///
+        /// Default 60 keeps interactive runs from hanging.
+        /// 0 means "no cap" — the loop completes the full surface-parent walk regardless of
+        /// duration. Use 0 (or a much larger value) for batch worker reruns where coverage
+        /// matters more than wall-clock.
+        /// </summary>
+        public int StressFallbackBudgetSeconds { get; set; } = 60;
+
         /// <summary>Cache key for this extraction (file path + config)</summary>
         public string CacheKey { get; set; }
 

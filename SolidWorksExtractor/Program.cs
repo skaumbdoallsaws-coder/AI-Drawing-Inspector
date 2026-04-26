@@ -41,6 +41,10 @@ namespace SolidWorksExtractor
     ///   --fea-study-index <n>     Force FEA extraction to use the study at 0-based index n
     ///   --fea-allow-remesh        If the picked study's mesh is stale, re-mesh + re-solve
     ///                             via study.MeshAndRun() before extraction (modifies analysis state)
+    ///   --fea-stress-budget-seconds <n>  Wall-clock cap (seconds) on the per-element-of-surface
+    ///                                     stress fallback. 0 = no cap (run to completion).
+    ///                                     Default 60 (interactive); use 0 for batch worker reruns
+    ///                                     where coverage matters more than wall-clock.
     /// </summary>
     class Program
     {
@@ -220,6 +224,22 @@ namespace SolidWorksExtractor
                 else if (arg == "--fea-allow-remesh")
                 {
                     options.AllowRemesh = true;
+                }
+                else if (arg == "--fea-stress-budget-seconds")
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.WriteLine("ERROR: --fea-stress-budget-seconds requires an integer value (>= 0; 0 = unlimited).");
+                        return 1;
+                    }
+                    string raw = args[++i];
+                    int budget;
+                    if (!int.TryParse(raw, out budget) || budget < 0)
+                    {
+                        Console.WriteLine($"ERROR: --fea-stress-budget-seconds requires a non-negative integer; got '{raw}'.");
+                        return 1;
+                    }
+                    options.StressFallbackBudgetSeconds = budget;
                 }
                 else if (!arg.StartsWith("-") && inputFile == null)
                 {
@@ -414,7 +434,8 @@ namespace SolidWorksExtractor
                                 feaPartNumber = GetDeterministicPartNumber(partData, Path.GetFileName(doc.GetPathName()));
                             string feaGlbPath = simExtractor.ExtractSimulation(
                                 connection.Application, doc, feaOutputDir, feaPartNumber,
-                                options.FeaStudyName, options.FeaStudyIndex, options.AllowRemesh);
+                                options.FeaStudyName, options.FeaStudyIndex, options.AllowRemesh,
+                                options.StressFallbackBudgetSeconds);
                             if (feaGlbPath != null)
                             {
                                 Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
@@ -1187,7 +1208,8 @@ namespace SolidWorksExtractor
                                 var simExtractor = new SimulationExtractor();
                                 string feaGlbPath = simExtractor.ExtractSimulation(
                                     connection.Application, doc, outputFolder, partNumber,
-                                    options.FeaStudyName, options.FeaStudyIndex, options.AllowRemesh);
+                                    options.FeaStudyName, options.FeaStudyIndex, options.AllowRemesh,
+                                    options.StressFallbackBudgetSeconds);
                                 if (feaGlbPath != null)
                                     Console.WriteLine($"    FEA GLB saved: {Path.GetFileName(feaGlbPath)}");
                                 else
@@ -1408,6 +1430,10 @@ namespace SolidWorksExtractor
             Console.WriteLine("  --fea-study-index <n>  Force FEA extraction to use the study at 0-based index n");
             Console.WriteLine("  --fea-allow-remesh     If the picked study's mesh is stale, re-mesh + re-solve");
             Console.WriteLine("                         via study.MeshAndRun() before extraction (modifies analysis state)");
+            Console.WriteLine("  --fea-stress-budget-seconds <n>");
+            Console.WriteLine("                         Wall-clock cap on the per-element-of-surface stress fallback.");
+            Console.WriteLine("                         0 = no cap (run to completion). Default 60 (interactive).");
+            Console.WriteLine("                         Use 0 for batch worker reruns where coverage > wall-clock.");
             Console.WriteLine();
             Console.WriteLine("  FAST - Extracts features and properties only. Skips:");
             Console.WriteLine("         - Geometry ground truth analysis (cylinder/slot detection)");

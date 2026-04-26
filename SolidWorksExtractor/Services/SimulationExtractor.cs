@@ -47,6 +47,12 @@ namespace SolidWorksExtractor.Services
         private const int UNSIGNED_SHORT = 5123;
         private const int UNSIGNED_INT = 5125;
 
+        // Wall-clock cap (seconds) on the per-element-of-surface stress fallback.
+        // 0 means "no cap" — run the full surface-parent walk to completion.
+        // Default 60 keeps interactive runs from hanging when the COM bridge is slow.
+        // Set via the canonical ExtractSimulation(..., int stressFallbackBudgetSeconds) overload.
+        private int _stressFallbackBudgetSeconds = 60;
+
         /// <summary>
         /// Lightweight description of a single Simulation study, returned by ListStudies()
         /// for preflight reporting and explicit study selection.
@@ -466,13 +472,19 @@ namespace SolidWorksExtractor.Services
         /// </summary>
         public string ExtractSimulation(ISldWorks swApp, IModelDoc2 modelDoc, string outputFolder, string partNumber)
         {
-            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, null, -1, false);
+            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, null, -1, false, 60);
         }
 
         public string ExtractSimulation(ISldWorks swApp, IModelDoc2 modelDoc, string outputFolder, string partNumber,
             string studyName, int studyIndex)
         {
-            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, studyName, studyIndex, false);
+            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, studyName, studyIndex, false, 60);
+        }
+
+        public string ExtractSimulation(ISldWorks swApp, IModelDoc2 modelDoc, string outputFolder, string partNumber,
+            string studyName, int studyIndex, bool allowRemesh)
+        {
+            return ExtractSimulation(swApp, modelDoc, outputFolder, partNumber, studyName, studyIndex, allowRemesh, 60);
         }
 
         /// <summary>
@@ -492,10 +504,13 @@ namespace SolidWorksExtractor.Services
         /// call study.MeshAndRun() to re-mesh + re-solve before extraction. Default false —
         /// stale mesh refuses with a clear "re-mesh required" message instead of silently
         /// modifying analysis state.</param>
+        /// <param name="stressFallbackBudgetSeconds">Wall-clock cap on the per-element-of-surface
+        /// stress fallback. 0 = no cap (run to completion). Default 60.</param>
         /// <returns>Path to the GLB file, or null on failure</returns>
         public string ExtractSimulation(ISldWorks swApp, IModelDoc2 modelDoc, string outputFolder, string partNumber,
-            string studyName, int studyIndex, bool allowRemesh)
+            string studyName, int studyIndex, bool allowRemesh, int stressFallbackBudgetSeconds)
         {
+            _stressFallbackBudgetSeconds = stressFallbackBudgetSeconds;
             if (swApp == null || modelDoc == null)
             {
                 Console.WriteLine("    FEA Warning: No application or document for simulation extraction");
@@ -2385,11 +2400,14 @@ namespace SolidWorksExtractor.Services
                         // hang the run indefinitely.
                         if (totalCovered < surfVertCount && surfaceFaces.Count > 0)
                         {
-                            Console.WriteLine($"    FEA: Coverage still {totalCovered:N0}/{surfVertCount:N0} after bulk + per-node API; running per-element-of-surface fallback (60s budget).");
+                            int budgetSec = _stressFallbackBudgetSeconds;
+                            long budgetMs = budgetSec > 0 ? (long)budgetSec * 1000L : long.MaxValue;
+                            string budgetLabel = budgetSec > 0 ? $"{budgetSec}s budget" : "no budget cap";
+                            Console.WriteLine($"    FEA: Coverage still {totalCovered:N0}/{surfVertCount:N0} after bulk + per-node API; running per-element-of-surface fallback ({budgetLabel}).");
                             var perElemFromCalls = new Dictionary<int, double>();
                             int elStressOk = 0, elStressFail = 0;
+                            bool budgetExceeded = false;
                             var sw = System.Diagnostics.Stopwatch.StartNew();
-                            const long budgetMs = 60_000;
                             // Walk surface tris (not all volume elements) and
                             // ask the API for stress at each parent element ID.
                             // De-duplicate parent IDs so we don't hit the API
@@ -2401,11 +2419,17 @@ namespace SolidWorksExtractor.Services
                                 int p = surfaceFaceParents[t];
                                 if (p >= 0) parentSet.Add(p);
                             }
+                            int parentTotal = parentSet.Count;
+                            int progressEvery = Math.Max(100, parentTotal / 20); // log ~20 ticks across the walk
+                            int processed = 0;
+                            long lastLogMs = 0;
                             foreach (int parent in parentSet)
                             {
-                                if (sw.ElapsedMilliseconds > budgetMs)
+                                if (budgetSec > 0 && sw.ElapsedMilliseconds > budgetMs)
                                 {
-                                    Console.WriteLine($"    FEA: Per-element budget exceeded after {elStressOk + elStressFail}/{parentSet.Count} parents; stopping. Coverage will be partial.");
+                                    budgetExceeded = true;
+                                    Console.WriteLine($"    FEA: Per-element budget ({budgetSec}s) exceeded after {elStressOk + elStressFail}/{parentTotal} parents; stopping. Coverage will be partial.");
+                                    Console.WriteLine($"    FEA: Rerun with --fea-stress-budget-seconds 0 (or a larger value) to let the per-element fallback complete.");
                                     break;
                                 }
                                 try
@@ -2419,12 +2443,24 @@ namespace SolidWorksExtractor.Services
                                         {
                                             perElemFromCalls[parent] = sVals[9]; // VON index
                                             elStressOk++;
+                                            processed++;
+                                            if (processed % progressEvery == 0)
+                                            {
+                                                long nowMs = sw.ElapsedMilliseconds;
+                                                double pct = (double)processed / parentTotal * 100.0;
+                                                double etaSec = processed > 0
+                                                    ? (nowMs / 1000.0) * (parentTotal - processed) / processed
+                                                    : 0.0;
+                                                Console.WriteLine($"    FEA: per-element progress {processed:N0}/{parentTotal:N0} ({pct:F1}%) ok={elStressOk} fail={elStressFail} elapsed={nowMs / 1000.0:F1}s eta~{etaSec:F0}s");
+                                                lastLogMs = nowMs;
+                                            }
                                             continue;
                                         }
                                     }
                                     elStressFail++;
+                                    processed++;
                                 }
-                                catch { elStressFail++; }
+                                catch { elStressFail++; processed++; }
                             }
                             int filledByProjection = ProjectElementStressAreaWeighted(
                                 perElemFromCalls, surfaceFaces, surfaceFaceParents,
@@ -2434,7 +2470,12 @@ namespace SolidWorksExtractor.Services
                             contribPerElemSurface = filledByProjection;
                             totalCovered += filledByProjection;
                             sw.Stop();
-                            Console.WriteLine($"    FEA: Per-element-of-surface fallback: ok={elStressOk}, fail={elStressFail}, newly covered={filledByProjection:N0}/{surfVertCount:N0}, total covered={totalCovered:N0}, elapsed={sw.ElapsedMilliseconds}ms");
+                            string completionLabel = budgetExceeded ? "TIMED OUT (partial)" : "completed";
+                            Console.WriteLine($"    FEA: Per-element-of-surface fallback {completionLabel}: ok={elStressOk}, fail={elStressFail}, parents={parentTotal:N0}, newly covered={filledByProjection:N0}/{surfVertCount:N0}, total covered={totalCovered:N0}, elapsed={sw.ElapsedMilliseconds:N0}ms");
+                            if (budgetExceeded)
+                            {
+                                Warn(summary, $"Per-element-of-surface stress fallback timed out after {budgetSec}s ({elStressOk + elStressFail}/{parentTotal} parents); coverage is partial. Rerun with --fea-stress-budget-seconds 0 for full coverage.");
+                            }
                         }
                     }
                     catch (Exception ex)

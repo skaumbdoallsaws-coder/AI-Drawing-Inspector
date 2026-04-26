@@ -6688,8 +6688,15 @@
             threeFeaStudy: null,           // { slug, name, type, selection_mode, available_studies }
             threeFeaWarnings: null,        // Array of warning strings from manifest/results
             threeFeaMorphEnabled: false,   // True when has_morph_target == true
-            threeFeaMorphValue: 0,         // Slider value 0..1 -> mesh.morphTargetInfluences[0]
+            threeFeaMorphValue: 0,         // Slider value 0..1 -- physical base influence
             threeFeaMorphInconsistent: null, // Set after load if morph deltas disagree with reported max displacement; { maxAbsDeltaM, reportedMaxM, ratio }
+            // Visual-only exaggeration multiplier. Final morph influence is
+            // clamp(threeFeaMorphValue * threeFeaMorphExaggeration, 0, 100).
+            // The physical morph data in the GLB is unchanged; this only
+            // scales the on-screen deformation so small displacements (e.g.
+            // 0.1 mm on an 80 mm part) become visible. Honest UI labelling
+            // makes it clear the displayed motion is exaggerated.
+            threeFeaMorphExaggeration: 25,
             threeFeaLoadedPart: null,      // Part number of currently cached FEA scene
             threeFeaProbeInFlight: null,   // Part number currently being probed (avoid double fetch)
             _threeCameraAnimId: null, // Feature #122: camera transition animation frame
@@ -7305,6 +7312,7 @@
             state.threeFeaMorphEnabled = false;
             state.threeFeaMorphValue = 0;
             state.threeFeaMorphInconsistent = null;
+            state.threeFeaMorphExaggeration = 25;
             state.threeFeaLoadedPart = null;
             state.threeFeaProbeInFlight = null;
             // Clear part diff state and destroy viewers
@@ -19636,9 +19644,11 @@
                 }
 
                 // Apply current morph value if user already moved the slider
-                // (only when morph is still enabled after the sanity check)
+                // (only when morph is still enabled after the sanity check).
+                // Routes through _reapplyFeaMorph so the visual exaggeration
+                // multiplier is applied consistently with the panel slider.
                 if (state.threeFeaMorphEnabled && state.threeFeaMorphValue && morphMesh) {
-                    morphMesh.morphTargetInfluences[0] = state.threeFeaMorphValue;
+                    _reapplyFeaMorph();
                 }
             } catch (err) {
                 console.error('[FEA] GLB load failed:', err);
@@ -19668,18 +19678,32 @@
             }
         }
 
-        // Apply a morph influence value (0..1) to the loaded FEA mesh.
+        // Apply a physical-base morph value (0..1) to the loaded FEA mesh,
+        // then multiply by the visual exaggeration scale and clamp to a
+        // safe maximum. The stored physical base remains 0..1 so its
+        // semantic meaning is preserved; only the rendered effective
+        // influence is exaggerated.
         // No-op when the sanity check disabled morph (or when no morph is
         // available), so a programmatic event on the disabled slider element
         // can't drive the mesh against known-bad data.
+        const FEA_MAX_EFFECTIVE_INFLUENCE = 100;
         function _applyFeaMorph(value) {
             if (!state.threeFeaMorphEnabled) return;
             state.threeFeaMorphValue = value;
+            _reapplyFeaMorph();
+        }
+        // Push the current (base × exaggeration, clamped) influence into the
+        // GPU morph influence. Used both when the slider moves and when the
+        // exaggeration scale changes without the slider moving.
+        function _reapplyFeaMorph() {
             const root = state.threeFeaScene;
             if (!root) return;
             const morphMesh = root.userData._morphMesh;
             if (!morphMesh || !morphMesh.morphTargetInfluences) return;
-            morphMesh.morphTargetInfluences[0] = value;
+            const base = state.threeFeaMorphEnabled ? (state.threeFeaMorphValue || 0) : 0;
+            const exag = state.threeFeaMorphExaggeration || 1;
+            const eff = Math.min(base * exag, FEA_MAX_EFFECTIVE_INFLUENCE);
+            morphMesh.morphTargetInfluences[0] = eff;
         }
 
         // ---- No-geometry overlay notice ----
@@ -19882,6 +19906,84 @@
                 morphLblR.textContent = state.threeFeaMorphEnabled ? '0.00' : 'n/a';
             });
             morphRow.appendChild(morphReset);
+
+            // Visual-exaggeration scale. Multiplies the physical base value
+            // (0..1) by a presentation factor so small displacements are
+            // visible. Clearly labelled as "visually exaggerated" so a user
+            // doesn't mistake a 25x render for a true-scale deformation.
+            // Disabled in lockstep with the base slider (no morph data, or
+            // morph data inconsistent with reported displacement).
+            const exagRow = document.createElement('div');
+            exagRow.style.cssText = 'margin-top:6px;padding-top:4px;';
+            const exagLbl = document.createElement('div');
+            exagLbl.style.cssText = 'display:flex;justify-content:space-between;margin-bottom:4px;';
+            const exagLblL = document.createElement('span'); exagLblL.textContent = 'Exaggeration';
+            const exagLblR = document.createElement('span');
+            exagLblR.style.cssText = 'font-variant-numeric:tabular-nums;color:var(--text-secondary);';
+            const _formatEffective = () => {
+                const base = state.threeFeaMorphEnabled ? (state.threeFeaMorphValue || 0) : 0;
+                const exag = state.threeFeaMorphExaggeration || 1;
+                const eff = Math.min(base * exag, FEA_MAX_EFFECTIVE_INFLUENCE);
+                const clamped = (base * exag) > FEA_MAX_EFFECTIVE_INFLUENCE;
+                return state.threeFeaMorphEnabled
+                    ? `${exag}x  •  effective ${eff.toFixed(2)}${clamped ? ' (clamped)' : ''}`
+                    : 'n/a';
+            };
+            exagLblR.textContent = _formatEffective();
+            exagLbl.appendChild(exagLblL); exagLbl.appendChild(exagLblR);
+            exagRow.appendChild(exagLbl);
+
+            const exagOptions = [1, 5, 10, 25, 50, 100];
+            const exagBtnsWrap = document.createElement('div');
+            exagBtnsWrap.style.cssText = 'display:flex;gap:3px;flex-wrap:wrap;';
+            const _refreshExagButtons = () => {
+                exagBtnsWrap.querySelectorAll('button').forEach(btn => {
+                    const v = parseFloat(btn.dataset.exag);
+                    const active = (v === state.threeFeaMorphExaggeration);
+                    btn.style.background = active ? 'var(--accent)' : 'transparent';
+                    btn.style.color = active ? '#fff' : 'var(--text-secondary)';
+                    btn.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+                });
+                exagLblR.textContent = _formatEffective();
+            };
+            exagOptions.forEach(v => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.dataset.exag = String(v);
+                btn.textContent = v + 'x';
+                btn.style.cssText = 'flex:1;min-width:36px;background:transparent;border:1px solid var(--border);color:var(--text-secondary);padding:3px 0;font-size:10px;border-radius:3px;cursor:pointer;font-variant-numeric:tabular-nums;';
+                btn.disabled = !state.threeFeaMorphEnabled;
+                btn.addEventListener('click', () => {
+                    if (!state.threeFeaMorphEnabled) return;
+                    state.threeFeaMorphExaggeration = v;
+                    _reapplyFeaMorph();
+                    _refreshExagButtons();
+                });
+                exagBtnsWrap.appendChild(btn);
+            });
+            exagRow.appendChild(exagBtnsWrap);
+            _refreshExagButtons();
+
+            // Honest help note. Lives below the buttons so it's seen on
+            // first read. Greyed out when morph is disabled.
+            const exagHelp = document.createElement('div');
+            exagHelp.style.cssText = 'margin-top:4px;font-size:10px;color:var(--text-secondary);line-height:1.3;';
+            exagHelp.textContent = state.threeFeaMorphEnabled
+                ? 'Deformation can be visually exaggerated for inspection clarity. The underlying FEA data is unchanged.'
+                : 'Deformation control unavailable for this run.';
+            exagRow.appendChild(exagHelp);
+
+            morphRow.appendChild(exagRow);
+
+            // Slider event also needs to refresh the effective-value label
+            // since exaggeration × base shows up there.
+            morphSlider.addEventListener('input', () => {
+                exagLblR.textContent = _formatEffective();
+            });
+            morphReset.addEventListener('click', () => {
+                exagLblR.textContent = _formatEffective();
+            });
+
             panel.appendChild(morphRow);
 
             // Warnings (collapsible, never hidden)
@@ -20371,6 +20473,7 @@
             state.threeFeaMorphEnabled = false;
             state.threeFeaMorphValue = 0;
             state.threeFeaMorphInconsistent = null;
+            state.threeFeaMorphExaggeration = 25;
             state.threeFeaLoadedPart = null;
             state.threeFeaProbeInFlight = null;
             // Destroy part compare viewers on reset

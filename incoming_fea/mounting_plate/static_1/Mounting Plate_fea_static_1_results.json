@@ -84,6 +84,7 @@
     "GetReactionForcesAndMoments returned per-node array (length=165690); deferring to .OUT fallback for global resultant.",
     "GetMinMaxStrain not available on this version: Could not convert argument 2 for call to GetMinMaxStrain.",
     "Per-node strain (max_strain_node) is not exposed via the COSMOSWorks API; left null.",
-    "Numeric result extrema were populated from the SolidWorks solver .OUT file after direct COSMOSWorks result access was incomplete."
+    "Numeric result extrema were populated from the SolidWorks solver .OUT file after direct COSMOSWorks result access was incomplete.",
+    "CAD-tessellation path declined: FE stress coverage 8.1% below 95% threshold. CAD projection requires high coverage so unsolved nodes don't bias the IDW average toward synthetic zero stress."
   ]
 }

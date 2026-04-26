@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": "1",
-  "timestamp_utc": "2026-04-26T19:48:05.3724804Z",
+  "timestamp_utc": "2026-04-26T20:18:21.6913909Z",
   "extractor_version": "0.0.0.0",
-  "extractor_git_commit": "cf7fd9ab0d52c2c447c85dadee2fcad30446d508",
+  "extractor_git_commit": "b32ced5124df49ab63aa07121ccaecc14b060808",
   "solidworks_version": "32.5.0",
   "source": {
     "document_path": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
@@ -25,7 +25,8 @@
     "approximate": true
   },
   "summary": {
-    "max_von_mises_mpa": 799.98,
+    "min_von_mises_mpa": 11.9986,
+    "max_von_mises_mpa": 799.94,
     "max_displacement_mm": 0.123501,
     "safety_factor": 0.78,
     "yield_strength_mpa": 620.422,
@@ -69,12 +70,18 @@
     "fe_disp_covered_count": 2391,
     "k_neighbours": 4,
     "weighting": "inverse_distance_squared",
-    "max_neighbour_distance_m": 0.0684827,
+    "max_neighbour_distance_m": 0.109828,
     "mean_fe_node_spacing_m": 0.00163606,
-    "far_vertex_fraction_pct": 2.73,
+    "far_vertex_fraction_pct": 10.30,
     "cad_verts_no_covered_stress_neighbour": 0,
     "cad_verts_no_covered_disp_neighbour": 0,
-    "display_peak_stress_location_m": [-0.0399999991, 0.00187499984, 0.00249999994],
+    "stress_projection_mode": "element_direct_to_display_nearest",
+    "stress_projection_k": 1,
+    "stress_color_mapping": "min-max-linear",
+    "stress_range_source": "solver_minmax",
+    "color_range_min_pa": 1.19986E+07,
+    "color_range_max_pa": 7.9994E+08,
+    "display_peak_stress_location_m": [0.0399999991, -0.0133750001, 0],
     "approximate": true
   },
   "warnings": [

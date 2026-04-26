@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": "1",
-  "timestamp_utc": "2026-04-26T18:01:18.5514340Z",
+  "timestamp_utc": "2026-04-26T19:04:41.8493622Z",
   "extractor_version": "0.0.0.0",
-  "extractor_git_commit": "5efe7479665746b2e283b92e7c4abc66c78d6f60",
+  "extractor_git_commit": "cafcafc25ed4ded5658f78330f011fc0909513a3",
   "solidworks_version": "32.5.0",
   "source": {
     "document_path": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
@@ -30,7 +30,7 @@
     "safety_factor": 0.78,
     "yield_strength_mpa": 620.422,
     "material": "Alloy Steel",
-    "surface_node_count": 276,
+    "surface_node_count": 1818,
     "element_count": 11466,
     "has_morph_target": true
   },
@@ -54,16 +54,16 @@
     }
   },
   "cad_projection": {
-    "cad_vertex_count": 276,
-    "cad_triangle_count": 568,
+    "cad_vertex_count": 1818,
+    "cad_triangle_count": 3652,
     "fe_surface_node_count": 2391,
     "fe_stress_covered_count": 2391,
     "fe_disp_covered_count": 2391,
     "k_neighbours": 4,
     "weighting": "inverse_distance_squared",
-    "max_neighbour_distance_m": 0.0575329,
+    "max_neighbour_distance_m": 0.05798,
     "mean_fe_node_spacing_m": 0.00163606,
-    "far_vertex_fraction_pct": 1.45,
+    "far_vertex_fraction_pct": 1.60,
     "cad_verts_no_covered_stress_neighbour": 0,
     "cad_verts_no_covered_disp_neighbour": 0,
     "approximate": true

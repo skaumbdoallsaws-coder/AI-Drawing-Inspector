@@ -3328,20 +3328,36 @@ namespace SolidWorksExtractor.Services
                 return null;
             }
 
-            // Bump the document's shaded image-quality (chord deviation) before
-            // calling GetTessTriangles. The default document-level value
-            // produces ~50 triangles per face on the Mounting Plate, giving
-            // a 568-tri / 276-vert mesh that looks visibly faceted in the app.
+            // Primary: ITessellation with explicit chord/angular tolerance.
+            // GetTessTriangles only honours the document's image-quality
+            // slider (swImageQualityShadedDeviation), and on this build of
+            // SolidWorks the cached display tessellation does not invalidate
+            // when the slider is bumped at runtime — verified empirically:
+            // setting chord deviation 7.10e-5 -> 1.00e-5 + GraphicsRedraw2
+            // still yielded the same 276-vertex / 568-triangle mesh. So we
+            // ask for a fresh tessellation directly via the modern API.
             //
-            // swImageQualityShadedDeviation is a fraction-of-bounding-box chord
-            // deviation. The SW slider's "max quality" is ~1.24e-4; pushing to
-            // ~1.0e-5 gets us below the slider's normal range so the
-            // tessellation re-generates dense enough for a visual-quality GLB.
-            //
-            // The change is in-memory only: SetUserPreferenceDouble does not
-            // persist to disk unless the user explicitly saves the part. We
-            // restore the original value in `finally` even on exception so
-            // the user's saved-image-quality is never silently mutated.
+            // 50 micron chord deviation + 5 degree angular deviation gives
+            // a smooth hole boundary and curved-edge silhouette while still
+            // collapsing co-planar regions of the plate to a small number
+            // of large triangles. Tunable via the constants below.
+            const double CHORD_TOL_M = 5.0e-5;       // 50 microns
+            const double ANGLE_TOL_RAD = 0.087266463; // 5 degrees
+            CadDisplayMesh dense = ExtractCadDisplayMeshViaITessellation(
+                partDoc, CHORD_TOL_M, ANGLE_TOL_RAD);
+            if (dense != null && dense.VertexCount > 0)
+            {
+                return dense;
+            }
+
+            // Fallback: legacy IFace2.GetTessTriangles walk. Only reached
+            // when ITessellation is unavailable / throws / produces no
+            // vertices. The image-quality bump below tightens the slider so
+            // the legacy walk gets denser tessellation than the document's
+            // saved setting would otherwise produce; the change is restored
+            // in finally to avoid mutating the user's saved quality.
+            Console.WriteLine("    FEA Stage 3: ITessellation unavailable or empty; falling back to IFace2.GetTessTriangles legacy walk");
+
             double originalShadedDeviation = -1.0;
             bool qualityBumped = false;
             const double TARGET_DEVIATION = 1.0e-5;
@@ -3359,16 +3375,8 @@ namespace SolidWorksExtractor.Services
                             (int)swUserPreferenceDoubleValue_e.swImageQualityShadedDeviation,
                             (int)swUserPreferenceOption_e.swDetailingNoOptionSpecified,
                             TARGET_DEVIATION);
-                        // Force the cached tessellation to regenerate against
-                        // the new chord tolerance. Without this, GetTessTriangles
-                        // can return the previously-cached coarse mesh.
                         modelDoc.GraphicsRedraw2();
                         qualityBumped = true;
-                        Console.WriteLine($"    FEA Stage 3: bumped shaded image-quality chord deviation {originalShadedDeviation:E2} -> {TARGET_DEVIATION:E2} for tessellation walk");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"    FEA Stage 3: document already at chord deviation {originalShadedDeviation:E2} (<= target {TARGET_DEVIATION:E2}); leaving unchanged");
                     }
                 }
             }
@@ -3395,6 +3403,190 @@ namespace SolidWorksExtractor.Services
                     catch { /* best-effort restore */ }
                 }
             }
+        }
+
+        /// <summary>
+        /// Build a CAD display mesh using the modern ITessellation API.
+        ///
+        /// Unlike IFace2.GetTessTriangles — which honours only the document's
+        /// saved image-quality slider and may return a stale cached mesh —
+        /// ITessellation generates a fresh tessellation against an explicit
+        /// surface chord tolerance and angular tolerance. That gives the
+        /// extractor deterministic control over visual quality regardless
+        /// of the part's saved state.
+        ///
+        /// The result is per-body vertex/facet lists; vertex IDs are local
+        /// to each body, so we dedupe positions across bodies via the same
+        /// 1 nm position-key dictionary used by the legacy path.
+        ///
+        /// Returns null when the part has no solid bodies, or when every
+        /// body fails to tessellate. Callers fall back to the legacy walk.
+        /// </summary>
+        private CadDisplayMesh ExtractCadDisplayMeshViaITessellation(
+            IPartDoc partDoc, double chordTolM, double angleTolRad)
+        {
+            if (partDoc == null) return null;
+
+            object bodiesObj;
+            try { bodiesObj = partDoc.GetBodies2((int)swBodyType_e.swSolidBody, true); }
+            catch (Exception ex) { Console.WriteLine($"    FEA Stage 3: ITessellation GetBodies2 threw: {ex.Message}"); return null; }
+            if (bodiesObj == null) return null;
+            object[] bodies = bodiesObj as object[];
+            if (bodies == null || bodies.Length == 0) return null;
+
+            var dedup = new Dictionary<(long qx, long qy, long qz), int>();
+            var posList = new List<float>();
+            var normList = new List<float>();
+            var idxList = new List<uint>();
+            int bodiesOk = 0, bodiesFailed = 0, totalFacets = 0;
+
+            foreach (object bodyObj in bodies)
+            {
+                IBody2 body = bodyObj as IBody2;
+                if (body == null) continue;
+
+                ITessellation tess;
+                try
+                {
+                    object tessObj = body.GetTessellation(null);
+                    tess = tessObj as ITessellation;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"    FEA Stage 3: ITessellation: GetTessellation threw {ex.Message}");
+                    bodiesFailed++;
+                    continue;
+                }
+                if (tess == null) { bodiesFailed++; continue; }
+
+                try
+                {
+                    tess.NeedFaceFacetMap = false;
+                    tess.NeedVertexNormal = true;
+                    tess.NeedVertexParams = false;
+                    tess.NeedEdgeFinMap = false;
+                    tess.NeedErrorList = false;
+                    tess.ImprovedQuality = true;
+                    // swTesselationMatchType_e.swTesselationMatchFacetTopology = 1
+                    tess.MatchType = 1;
+                    tess.SurfacePlaneTolerance = chordTolM;
+                    tess.SurfacePlaneAngleTolerance = angleTolRad;
+                    tess.CurveChordTolerance = chordTolM;
+                    tess.CurveChordAngleTolerance = angleTolRad;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"    FEA Stage 3: ITessellation property setup threw {ex.Message}");
+                    bodiesFailed++;
+                    continue;
+                }
+
+                bool ok;
+                try { ok = tess.Tessellate(); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"    FEA Stage 3: ITessellation Tessellate() threw {ex.Message}");
+                    bodiesFailed++;
+                    continue;
+                }
+                if (!ok) { bodiesFailed++; continue; }
+
+                int vCount = tess.GetVertexCount();
+                int fCount = tess.GetFacetCount();
+                if (vCount == 0 || fCount == 0) { bodiesFailed++; continue; }
+
+                int[] bodyVertToGlobal = new int[vCount];
+                for (int v = 0; v < vCount; v++)
+                {
+                    object pObj = tess.GetVertexPoint(v);
+                    double[] p = pObj as double[];
+                    if (p == null || p.Length < 3) { bodyVertToGlobal[v] = -1; continue; }
+                    float px = (float)p[0], py = (float)p[1], pz = (float)p[2];
+
+                    float nx = 0, ny = 0, nz = 1;
+                    try
+                    {
+                        object nObj = tess.GetVertexNormal(v);
+                        double[] n = nObj as double[];
+                        if (n != null && n.Length >= 3)
+                        {
+                            nx = (float)n[0]; ny = (float)n[1]; nz = (float)n[2];
+                        }
+                    }
+                    catch { /* synthesise per-face normal below if normal missing */ }
+
+                    var key = (
+                        (long)Math.Round(px * 1e9),
+                        (long)Math.Round(py * 1e9),
+                        (long)Math.Round(pz * 1e9));
+                    int existing;
+                    if (dedup.TryGetValue(key, out existing))
+                    {
+                        bodyVertToGlobal[v] = existing;
+                    }
+                    else
+                    {
+                        int newIdx = posList.Count / 3;
+                        dedup[key] = newIdx;
+                        posList.Add(px); posList.Add(py); posList.Add(pz);
+                        normList.Add(nx); normList.Add(ny); normList.Add(nz);
+                        bodyVertToGlobal[v] = newIdx;
+                    }
+                }
+
+                for (int f = 0; f < fCount; f++)
+                {
+                    int[] fins;
+                    try { fins = ConvertToIntArray(tess.GetFacetFins(f)); }
+                    catch { continue; }
+                    if (fins == null || fins.Length < 3) continue;
+
+                    int v0, v1, v2;
+                    try
+                    {
+                        // Each facet has 3 fins forming a closed loop:
+                        //   fin0.start -> fin0.end == fin1.start -> ...
+                        // The triangle's 3 vertices are the start of each fin.
+                        int[] fv0 = ConvertToIntArray(tess.GetFinVertices(fins[0]));
+                        int[] fv1 = ConvertToIntArray(tess.GetFinVertices(fins[1]));
+                        int[] fv2 = ConvertToIntArray(tess.GetFinVertices(fins[2]));
+                        if (fv0 == null || fv1 == null || fv2 == null ||
+                            fv0.Length < 2 || fv1.Length < 2 || fv2.Length < 2) continue;
+                        v0 = fv0[0]; v1 = fv1[0]; v2 = fv2[0];
+                    }
+                    catch { continue; }
+
+                    if (v0 < 0 || v0 >= vCount || v1 < 0 || v1 >= vCount || v2 < 0 || v2 >= vCount) continue;
+                    int g0 = bodyVertToGlobal[v0];
+                    int g1 = bodyVertToGlobal[v1];
+                    int g2 = bodyVertToGlobal[v2];
+                    if (g0 < 0 || g1 < 0 || g2 < 0) continue;
+                    if (g0 == g1 || g1 == g2 || g0 == g2) continue; // skip degenerate
+                    idxList.Add((uint)g0);
+                    idxList.Add((uint)g1);
+                    idxList.Add((uint)g2);
+                }
+
+                totalFacets += fCount;
+                bodiesOk++;
+            }
+
+            if (posList.Count == 0 || idxList.Count == 0)
+            {
+                Console.WriteLine($"    FEA Stage 3: ITessellation produced no usable mesh ({bodiesOk} bodies ok, {bodiesFailed} failed)");
+                return null;
+            }
+
+            Console.WriteLine($"    FEA Stage 3: ITessellation -> {posList.Count / 3:N0} unique vertices, {idxList.Count / 3:N0} triangles ({bodiesOk} bodies ok, {bodiesFailed} failed; chord {chordTolM * 1000.0:F3}mm, angle {angleTolRad * 180.0 / Math.PI:F1}deg)");
+
+            return new CadDisplayMesh
+            {
+                Positions = posList.ToArray(),
+                Normals = normList.ToArray(),
+                Indices = idxList.ToArray(),
+                VertexCount = posList.Count / 3,
+                TriangleCount = idxList.Count / 3,
+            };
         }
 
         private CadDisplayMesh ExtractCadDisplayTessellationCore(IPartDoc partDoc)

@@ -2423,6 +2423,14 @@ namespace SolidWorksExtractor.Services
                             int progressEvery = Math.Max(100, parentTotal / 20); // log ~20 ticks across the walk
                             int processed = 0;
                             long lastLogMs = 0;
+                            int probesLogged = 0;
+                            const int PROBE_LIMIT = 5;
+                            // Track the modal array length so we can pick the right
+                            // VON slot ([nodes_per_element * 10 - 1] for the last
+                            // node's VON, or [9] for a single-set element). The COSMOSWorks
+                            // GetStress(NElementNumber,...) layout per node is
+                            // [SX, SY, SZ, TXY, TXZ, TYZ, P1, P2, P3, VON].
+                            int firstArrayLen = -1;
                             foreach (int parent in parentSet)
                             {
                                 if (budgetSec > 0 && sw.ElapsedMilliseconds > budgetMs)
@@ -2439,9 +2447,42 @@ namespace SolidWorksExtractor.Services
                                     if (sErrCode == 0 && stressData != null)
                                     {
                                         double[] sVals = ConvertToDoubleArray(stressData);
-                                        if (sVals != null && sVals.Length > 9)
+                                        if (sVals != null && sVals.Length > 0)
                                         {
-                                            perElemFromCalls[parent] = sVals[9]; // VON index
+                                            if (firstArrayLen < 0) firstArrayLen = sVals.Length;
+                                            // ----- DIAGNOSTIC PROBE -----
+                                            // Dump the first PROBE_LIMIT successful
+                                            // arrays so the COSMOSWorks layout can be
+                                            // read out of the worker log. This is
+                                            // small (5 lines) and only fires once
+                                            // per run.
+                                            if (probesLogged < PROBE_LIMIT)
+                                            {
+                                                var sb = new System.Text.StringBuilder();
+                                                sb.Append($"    FEA: GetStress(eid={parent + 1}) length={sVals.Length} values=[");
+                                                int dumpN = Math.Min(sVals.Length, 50);
+                                                for (int k = 0; k < dumpN; k++)
+                                                {
+                                                    if (k > 0) sb.Append(", ");
+                                                    sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
+                                                        "{0}:{1:E3}", k, sVals[k]);
+                                                }
+                                                if (sVals.Length > dumpN) sb.Append(", ...");
+                                                sb.Append("]");
+                                                Console.WriteLine(sb.ToString());
+                                                probesLogged++;
+                                            }
+                                            // Existing behavior kept until the
+                                            // probe diagnostic above tells us the
+                                            // actual layout — see commit message.
+                                            if (sVals.Length > 9)
+                                            {
+                                                perElemFromCalls[parent] = sVals[9];
+                                            }
+                                            else
+                                            {
+                                                perElemFromCalls[parent] = sVals[sVals.Length - 1];
+                                            }
                                             elStressOk++;
                                             processed++;
                                             if (processed % progressEvery == 0)
@@ -2462,6 +2503,7 @@ namespace SolidWorksExtractor.Services
                                 }
                                 catch { elStressFail++; processed++; }
                             }
+                            Console.WriteLine($"    FEA: per-element GetStress modal array length = {firstArrayLen} (10 components/node × NodesPerElement; VON at every 10th index ending at length-1)");
                             int filledByProjection = ProjectElementStressAreaWeighted(
                                 perElemFromCalls, surfaceFaces, surfaceFaceParents,
                                 surfaceNodes, nodeRemap,

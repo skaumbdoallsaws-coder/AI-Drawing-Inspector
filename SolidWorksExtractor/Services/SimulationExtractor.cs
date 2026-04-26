@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.cosworks;
+using SolidWorks.Interop.swconst;
 
 namespace SolidWorksExtractor.Services
 {
@@ -342,6 +343,77 @@ namespace SolidWorksExtractor.Services
             /// console output so the manifest contains the full audit trail.
             /// </summary>
             public List<string> Warnings = new List<string>();
+
+            /// <summary>
+            /// Diagnostic captured from the displacement-bulk parser: actual max
+            /// magnitude vs reported max, and which array layout the parser
+            /// chose. Surfaces in the manifest so a downstream reviewer can
+            /// confirm the morph buffer is consistent with the solver result.
+            /// </summary>
+            public MorphDiagnosticInfo MorphDiagnostic = null;
+
+            /// <summary>
+            /// Stress-projection diagnostic: how many surface nodes carry
+            /// real stress data and which path supplied it (bulk per-element +
+            /// area-weighted projection vs per-node bulk fill vs budget-capped
+            /// per-element fallback). Lets the reviewer understand whether the
+            /// rendered colours represent the full surface or only the regions
+            /// the COSMOSWorks API was willing to deliver.
+            /// </summary>
+            public StressDiagnosticInfo StressDiagnostic = null;
+
+            /// <summary>
+            /// CAD-tessellation projection diagnostic. Non-null only when the
+            /// shipped GLB uses the CAD display tessellation with FE results
+            /// projected onto it (Stage 3 Strategy A). Drives the manifest's
+            /// `cad_projection` block and the visualization mode label.
+            /// </summary>
+            public CadProjectionDiagnosticInfo CadProjectionDiagnostic = null;
+        }
+
+        private class MorphDiagnosticInfo
+        {
+            public double MaxAbsDeltaM;       // Largest |displacement| component, m
+            public double ReportedMaxMm;      // summary.MaxDisplacementMm at validation time
+            public string LayoutDetected;     // "flat-3stride", "with-nid-4stride", "per-node-fallback", etc.
+            public bool Ok;                   // True if morph was written; false if rejected by sanity check
+        }
+
+        private class StressDiagnosticInfo
+        {
+            public int SurfaceNodesTotal;     // Number of surface nodes in the visualization mesh
+            public int SurfaceNodesCovered;   // Nodes that received a stress value via any path
+            public int BulkPerElemSourceCount; // Distinct elements supplying VON in the primary path (0 if path unsupported)
+            public string PrimaryPath;        // Path that contributed the most coverage (label below)
+            // Per-path contribution counts -- nodes covered FOR THE FIRST TIME
+            // by each path (excludes overlaps; sum equals SurfaceNodesCovered).
+            public int ContribBulkPerElement;     // bulk per-element + area-weighted projection
+            public int ContribBulkPerNode;        // bulk per-node gap-fill
+            public int ContribPerNodeApi;         // per-node API gap-fill
+            public int ContribPerElementOfSurface; // budget-capped per-element-of-surface fallback
+        }
+
+        /// <summary>
+        /// Records the CAD-tessellation projection step (Stage 3 Strategy A).
+        /// Surfaces in the manifest as `cad_projection`. Populated only when
+        /// the GLB ships the CAD-display surface; null when the FE surface
+        /// mesh path was used instead.
+        /// </summary>
+        private class CadProjectionDiagnosticInfo
+        {
+            public int CadVertexCount;        // Unique CAD-tessellation vertices fed into the GLB
+            public int CadTriangleCount;      // Tris in the CAD tessellation
+            public int FeSurfaceNodeCount;    // FE surface nodes used as projection sources
+            public int FeStressCoveredCount;  // FE surface nodes whose stress was actually populated
+            public int FeDispCoveredCount;    // FE surface nodes whose displacement was actually populated
+            public int K;                     // Nearest-K neighbours used per CAD vertex
+            public string Weighting;          // "inverse_distance_squared"
+            public double MaxNeighbourDistanceM; // Max distance from a CAD vertex to its nearest FE node (m)
+            public double MeanFeNodeSpacingM;    // Coarse FE characteristic length (m)
+            public double FarVertexFractionPct;  // % of CAD verts whose nearest FE node is > 2× mean spacing
+            public int CadVertsNoStressNeighbour; // CAD verts whose K-NN had no covered stress data (left at 0)
+            public int CadVertsNoDispNeighbour;   // CAD verts whose K-NN had no covered displacement data
+            public bool Approximate;             // True (CAD-projected results are spatial approximations)
         }
 
         /// <summary>
@@ -583,8 +655,23 @@ namespace SolidWorksExtractor.Services
 
                 summary.SurfaceNodeCount = meshData.UniqueNodeCount > 0 ? meshData.UniqueNodeCount : meshData.VertexCount;
                 summary.HasMorphTarget = meshData.MorphPositions != null && meshData.MorphPositions.Length > 0;
-                summary.VisualizationMode = "solver_fe_mesh";
-                summary.VisualizationApproximate = false;
+                // Visualization mode + approximate flag must honestly reflect
+                // which surface the GLB ships. CAD-projected meshes are
+                // spatially approximated (FE results IDW-projected onto a
+                // finer surface that doesn't share the FE node set), so
+                // approximate=true. FE-mesh ships at the solver's own node
+                // resolution, so approximate=false. The downstream UI's
+                // "Approximate" banner keys on this flag.
+                if (summary.CadProjectionDiagnostic != null)
+                {
+                    summary.VisualizationMode = "cad_tessellation_projected";
+                    summary.VisualizationApproximate = true;
+                }
+                else
+                {
+                    summary.VisualizationMode = "solver_fe_mesh";
+                    summary.VisualizationApproximate = false;
+                }
 
                 // Compute safety factor
                 if (summary.YieldStrengthMpa > 0 && summary.MaxVonMisesMpa > 0)
@@ -1971,6 +2058,11 @@ namespace SolidWorksExtractor.Services
                 Console.WriteLine("    FEA: Extracting surface boundary from tet mesh...");
                 var faceCount = new Dictionary<long, int>();  // canonical face key -> count
                 var faceNodes = new Dictionary<long, int[]>(); // canonical face key -> [n0, n1, n2]
+                // Parent-element index per surface-candidate face. Used in
+                // Stage 2 to map per-element stress back onto surface tris for
+                // area-weighted projection (smoother contours than the legacy
+                // unweighted nodal accumulation).
+                var faceParentElem = new Dictionary<long, int>();
 
                 // Try bulk connectivity first, fall back to per-element
                 int connectErr = 0;
@@ -1983,7 +2075,7 @@ namespace SolidWorksExtractor.Services
                     int stride; int offset; int nodesPerElem;
                     DetectConnectivityLayout(allConnectivity, out nodesPerElem, out stride, out offset);
                     Console.WriteLine($"    FEA: Connectivity layout: nodesPerElem={nodesPerElem}, stride={stride}, offset={offset}");
-                    AppendFacesFromConnectivity(allConnectivity, nodesPerElem, stride, offset, faceCount, faceNodes);
+                    AppendFacesFromConnectivity(allConnectivity, nodesPerElem, stride, offset, faceCount, faceNodes, faceParentElem);
                 }
                 else
                 {
@@ -2002,7 +2094,7 @@ namespace SolidWorksExtractor.Services
                     int stride; int offset; int nodesPerElem;
                     DetectConnectivityLayout(elemArray, out nodesPerElem, out stride, out offset);
                     Console.WriteLine($"    FEA: GetElements layout: nodesPerElem={nodesPerElem}, stride={stride}, offset={offset}");
-                    AppendFacesFromConnectivity(elemArray, nodesPerElem, stride, offset, faceCount, faceNodes);
+                    AppendFacesFromConnectivity(elemArray, nodesPerElem, stride, offset, faceCount, faceNodes, faceParentElem);
                     // Surface (header=3) tris are also the per-element shell IDs needed
                     // for the stress-fallback loop below; preserve the array reference.
                     allConnectivity = elemArray;
@@ -2034,11 +2126,17 @@ namespace SolidWorksExtractor.Services
 
                 // Surface faces appear exactly once
                 var surfaceFaces = new List<int[]>();
+                // Parallel array: parent element index per surface tri, used by
+                // the area-weighted stress projection below. Index `-1` means
+                // unknown (parent wasn't tracked).
+                var surfaceFaceParents = new List<int>();
                 foreach (var kvp in faceCount)
                 {
                     if (kvp.Value == 1)
                     {
                         surfaceFaces.Add(faceNodes[kvp.Key]);
+                        int parent;
+                        surfaceFaceParents.Add(faceParentElem.TryGetValue(kvp.Key, out parent) ? parent : -1);
                     }
                 }
 
@@ -2092,18 +2190,61 @@ namespace SolidWorksExtractor.Services
 
                 // Get nodal von Mises stress for surface nodes
                 double[] stressValues = new double[surfVertCount];
+                // Coverage bitmap. True iff the corresponding surface node
+                // received a value from any path. Replaces the older
+                // `stressValues[i] != 0` heuristic, which incorrectly treated
+                // legitimate zero-stress nodes (constrained corners,
+                // unloaded regions) as "missing" and overwrote their values.
+                bool[] covered = new bool[surfVertCount];
+                int totalCovered = 0;
                 double maxStress = 0;
                 int peakIdx = 0;
 
-                if (results != null)
+                // Per-path contribution counters so the manifest reports
+                // honest provenance (which path supplied which surface
+                // nodes), not just a flag based on whether the bulk call
+                // returned a non-empty source map.
+                int contribPrimary = 0;
+                int contribPerNodeBulk = 0;
+                int contribPerNodeApi = 0;
+                int contribPerElemSurface = 0;
+
+                // Stage 2 PRIMARY path: bulk per-element VON + area-weighted
+                // projection to surface nodes. This is the closest equivalent
+                // to SolidWorks' "averaged nodal stress" display.
+                int stressBulkElemSourcedCount = 0;
+                if (results != null && surfaceFaces.Count > 0)
+                {
+                    Dictionary<int, double> perElemVon = TryBulkPerElementVon(results);
+                    if (perElemVon != null && perElemVon.Count > 0)
+                    {
+                        stressBulkElemSourcedCount = perElemVon.Count;
+                        contribPrimary = ProjectElementStressAreaWeighted(
+                            perElemVon, surfaceFaces, surfaceFaceParents,
+                            surfaceNodes, nodeRemap,
+                            nodeX, nodeY, nodeZ,
+                            stressValues, covered, ref maxStress, ref peakIdx);
+                        totalCovered += contribPrimary;
+                        double pct = surfVertCount > 0 ? 100.0 * totalCovered / surfVertCount : 0;
+                        Console.WriteLine($"    FEA: bulk per-element + area-weighted projection covered {contribPrimary:N0}/{surfVertCount:N0} surface nodes (cumulative {pct:F1}%)");
+                    }
+                }
+
+                // Only invoke the legacy per-node fallback chain if the area-
+                // weighted projection above did not achieve good coverage. The
+                // 95% threshold lets a small number of corner-case nodes
+                // (e.g. degenerate-area surface tris) still get filled by the
+                // per-node API without burning the full budget on a path that
+                // would mostly duplicate work.
+                bool needSecondaryStress = totalCovered < (int)Math.Round(0.95 * surfVertCount);
+                if (results != null && needSecondaryStress)
                 {
                     try
                     {
-                        int loaded = 0;
-
-                        // First try GetStressForEntities2 with null entities ("all") and
-                        // BValueByNode=true. If supported, we get every nodal stress in one
-                        // bulk COM call instead of N round-trips.
+                        // Per-node bulk fill: fills gaps left by the area-
+                        // weighted primary path. If the primary covered nothing
+                        // (e.g. bulk per-element API unsupported), this becomes
+                        // the main source.
                         try
                         {
                             int bulkErr = 0;
@@ -2129,18 +2270,29 @@ namespace SolidWorksExtractor.Services
                                         int nid = (int)Math.Round(perEntity[k]);
                                         if (nid > 0) nodeVon[nid] = perEntity[k + 1];
                                     }
+                                    int filled = 0;
                                     for (int i = 0; i < surfVertCount; i++)
                                     {
+                                        // Gap-fill only -- skip nodes already
+                                        // covered by the primary area-weighted
+                                        // projection. Coverage tracked via
+                                        // explicit boolean so a legitimate
+                                        // 0.0 von Mises value is not treated
+                                        // as missing.
+                                        if (covered[i]) continue;
                                         int nid = surfaceNodes[i];
                                         double v;
                                         if (nodeVon.TryGetValue(nid, out v))
                                         {
                                             stressValues[i] = v;
+                                            covered[i] = true;
                                             if (Math.Abs(v) > maxStress) { maxStress = Math.Abs(v); peakIdx = i; }
-                                            loaded++;
+                                            filled++;
                                         }
                                     }
-                                    Console.WriteLine($"    FEA: Nodal stress (bulk): loaded={loaded:N0}/{surfVertCount:N0}");
+                                    contribPerNodeBulk = filled;
+                                    totalCovered += filled;
+                                    Console.WriteLine($"    FEA: Nodal stress (bulk per-node fill): filled={filled:N0}/{surfVertCount:N0} gaps; total covered={totalCovered:N0}");
                                 }
                             }
                         }
@@ -2149,16 +2301,23 @@ namespace SolidWorksExtractor.Services
                             Console.WriteLine($"    FEA: GetStressForEntities2 bulk attempt threw: {bulkEx.Message}");
                         }
 
-                        // Per-node fallback (slower) only if bulk returned nothing usable.
-                        if (loaded == 0)
+                        // Per-node API fallback: runs whenever bulk paths
+                        // haven't reached full coverage. Per-node calls are
+                        // slow (one COM round-trip per surface node) so this
+                        // path is only worth running when the cheaper bulk
+                        // paths actually left gaps.
+                        if (totalCovered < surfVertCount)
                         {
                             int failed = 0;
                             int firstErr = 0;
                             string firstErrText = null;
                             bool diagPrinted = false;
 
+                            int filledHere = 0;
                             for (int i = 0; i < surfVertCount; i++)
                             {
+                                // Gap-fill only -- skip nodes already covered.
+                                if (covered[i]) continue;
                                 int nid = surfaceNodes[i];
                                 try
                                 {
@@ -2185,8 +2344,9 @@ namespace SolidWorksExtractor.Services
                                         {
                                             double von = perStep[perStep.Length - 1];
                                             stressValues[i] = von;
+                                            covered[i] = true;
                                             if (Math.Abs(von) > maxStress) { maxStress = Math.Abs(von); peakIdx = i; }
-                                            loaded++;
+                                            filledHere++;
                                         }
                                         else { failed++; if (firstErr == 0) firstErr = -1001; }
                                     }
@@ -2202,86 +2362,79 @@ namespace SolidWorksExtractor.Services
                                     if (firstErrText == null) firstErrText = ex.Message;
                                 }
                             }
-                            Console.WriteLine($"    FEA: Nodal stress (per-node): loaded={loaded:N0}/{surfVertCount:N0}, failed={failed}, firstErrCode={firstErr}, firstErrText={firstErrText ?? "(none)"}");
+                            contribPerNodeApi = filledHere;
+                            totalCovered += filledHere;
+                            Console.WriteLine($"    FEA: Nodal stress (per-node fill): filled={filledHere:N0} gaps; total covered={totalCovered:N0}/{surfVertCount:N0}, failed={failed}, firstErrCode={firstErr}, firstErrText={firstErrText ?? "(none)"}");
                         }
 
-                        // Final fallback: query per-element shell stress over the surface
-                        // tri shells and distribute to the triangle's 3 vertices. Element
-                        // numbers are 1-based and align with connectivity entry index.
-                        // This path is bounded by a wall-clock budget — on this build
-                        // each GetStress takes ~0.1-1s of COM round-trip, so 3000+ shells
-                        // can take 30+ minutes if every call is slow. We cap at 60s so a
-                        // bad run still produces a complete artifact set (with uniform
-                        // colors) instead of hanging the worker indefinitely.
-                        if (loaded == 0 && allConnectivity != null && surfaceFaces.Count > 0)
+                        // Final fallback: per-element GetStress over only the
+                        // surface-tri parent elements (a small subset of the
+                        // total mesh on solid models), feeding the same area-
+                        // weighted projection used by the primary path. This
+                        // is more accurate AND faster than the legacy "iterate
+                        // every element with naive corner accumulation" loop:
+                        //   * area weighting matches SolidWorks' nodal-average
+                        //     scheme instead of treating every shell equally
+                        //   * surface-only iteration skips internal volume
+                        //     elements whose stress would never reach the
+                        //     visualization
+                        //   * the projection helper handles tet4 / tet10 /
+                        //     shell uniformly because it consumes pre-built
+                        //     surface tris with parent IDs.
+                        // Still wall-clock budgeted so a slow COM build can't
+                        // hang the run indefinitely.
+                        if (totalCovered < surfVertCount && surfaceFaces.Count > 0)
                         {
-                            Console.WriteLine("    FEA: Per-node stress empty — falling back to per-element shell stress (60s budget).");
-                            int stride; int offset; int npe;
-                            DetectConnectivityLayout(allConnectivity, out npe, out stride, out offset);
-                            int triCount = allConnectivity.Length / stride;
-
-                            var nodeStressSum = new Dictionary<int, double>();
-                            var nodeStressCount = new Dictionary<int, int>();
+                            Console.WriteLine($"    FEA: Coverage still {totalCovered:N0}/{surfVertCount:N0} after bulk + per-node API; running per-element-of-surface fallback (60s budget).");
+                            var perElemFromCalls = new Dictionary<int, double>();
                             int elStressOk = 0, elStressFail = 0;
-                            int processed = 0;
                             var sw = System.Diagnostics.Stopwatch.StartNew();
                             const long budgetMs = 60_000;
-
-                            for (int e = 0; e < triCount; e++)
+                            // Walk surface tris (not all volume elements) and
+                            // ask the API for stress at each parent element ID.
+                            // De-duplicate parent IDs so we don't hit the API
+                            // twice for the same tet that owns multiple
+                            // surface faces.
+                            var parentSet = new HashSet<int>();
+                            for (int t = 0; t < surfaceFaceParents.Count; t++)
+                            {
+                                int p = surfaceFaceParents[t];
+                                if (p >= 0) parentSet.Add(p);
+                            }
+                            foreach (int parent in parentSet)
                             {
                                 if (sw.ElapsedMilliseconds > budgetMs)
                                 {
-                                    Console.WriteLine($"    FEA: Per-element budget exceeded at element {e}/{triCount}; stopping. Vertex colors will reflect the partial coverage.");
+                                    Console.WriteLine($"    FEA: Per-element budget exceeded after {elStressOk + elStressFail}/{parentSet.Count} parents; stopping. Coverage will be partial.");
                                     break;
                                 }
-
-                                int bi = e * stride + offset;
-                                if (bi + 2 >= allConnectivity.Length) break;
-
-                                int en0 = allConnectivity[bi];
-                                int en1 = allConnectivity[bi + 1];
-                                int en2 = allConnectivity[bi + 2];
-
                                 try
                                 {
                                     int sErrCode = 0;
-                                    object stressData = results.GetStress(e + 1, 0, null, 0, out sErrCode);
+                                    object stressData = results.GetStress(parent + 1, 0, null, 0, out sErrCode);
                                     if (sErrCode == 0 && stressData != null)
                                     {
                                         double[] sVals = ConvertToDoubleArray(stressData);
                                         if (sVals != null && sVals.Length > 9)
                                         {
-                                            double von = sVals[9]; // VON index
-                                            foreach (int nid in new[] { en0, en1, en2 })
-                                            {
-                                                if (!surfaceNodeSet.Contains(nid)) continue;
-                                                if (!nodeStressSum.ContainsKey(nid)) { nodeStressSum[nid] = 0; nodeStressCount[nid] = 0; }
-                                                nodeStressSum[nid] += von;
-                                                nodeStressCount[nid]++;
-                                            }
+                                            perElemFromCalls[parent] = sVals[9]; // VON index
                                             elStressOk++;
-                                            processed++;
                                             continue;
                                         }
                                     }
                                     elStressFail++;
-                                    processed++;
                                 }
-                                catch { elStressFail++; processed++; }
+                                catch { elStressFail++; }
                             }
-                            for (int i = 0; i < surfVertCount; i++)
-                            {
-                                int nid = surfaceNodes[i];
-                                int c;
-                                if (nodeStressCount.TryGetValue(nid, out c) && c > 0)
-                                {
-                                    double v = nodeStressSum[nid] / c;
-                                    stressValues[i] = v;
-                                    if (Math.Abs(v) > maxStress) { maxStress = Math.Abs(v); peakIdx = i; }
-                                }
-                            }
+                            int filledByProjection = ProjectElementStressAreaWeighted(
+                                perElemFromCalls, surfaceFaces, surfaceFaceParents,
+                                surfaceNodes, nodeRemap,
+                                nodeX, nodeY, nodeZ,
+                                stressValues, covered, ref maxStress, ref peakIdx);
+                            contribPerElemSurface = filledByProjection;
+                            totalCovered += filledByProjection;
                             sw.Stop();
-                            Console.WriteLine($"    FEA: Per-element shell stress: processed={processed}/{triCount}, ok={elStressOk}, fail={elStressFail}, surface nodes covered={nodeStressCount.Count:N0}/{surfVertCount:N0}, elapsed={sw.ElapsedMilliseconds}ms");
+                            Console.WriteLine($"    FEA: Per-element-of-surface fallback: ok={elStressOk}, fail={elStressFail}, newly covered={filledByProjection:N0}/{surfVertCount:N0}, total covered={totalCovered:N0}, elapsed={sw.ElapsedMilliseconds}ms");
                         }
                     }
                     catch (Exception ex)
@@ -2306,6 +2459,31 @@ namespace SolidWorksExtractor.Services
                     summary.MaxStressNode = nid;  // 1-based SolidWorks node ID
                 }
 
+                // Stress-projection diagnostic. PrimaryPath is whichever
+                // path contributed the most surface-node coverage, NOT just
+                // whichever source map happened to be non-empty -- that was
+                // the previous bug where bulk-per-element with mismatched
+                // EID convention would yield a non-empty map but project
+                // zero nodes.
+                string primaryPathLabel;
+                int bestContrib = 0;
+                primaryPathLabel = "none";
+                if (contribPrimary > bestContrib) { bestContrib = contribPrimary; primaryPathLabel = "bulk-per-element-area-weighted"; }
+                if (contribPerNodeBulk > bestContrib) { bestContrib = contribPerNodeBulk; primaryPathLabel = "bulk-per-node-fill"; }
+                if (contribPerNodeApi > bestContrib) { bestContrib = contribPerNodeApi; primaryPathLabel = "per-node-api"; }
+                if (contribPerElemSurface > bestContrib) { bestContrib = contribPerElemSurface; primaryPathLabel = "per-element-of-surface"; }
+                summary.StressDiagnostic = new StressDiagnosticInfo
+                {
+                    SurfaceNodesTotal = surfVertCount,
+                    SurfaceNodesCovered = totalCovered,
+                    BulkPerElemSourceCount = stressBulkElemSourcedCount,
+                    PrimaryPath = primaryPathLabel,
+                    ContribBulkPerElement = contribPrimary,
+                    ContribBulkPerNode = contribPerNodeBulk,
+                    ContribPerNodeApi = contribPerNodeApi,
+                    ContribPerElementOfSurface = contribPerElemSurface,
+                };
+
                 // Map stress to vertex colors
                 byte[] vertexColors = MapStressToColors(stressValues, surfVertCount, maxStress > 0 ? maxStress : 1.0);
 
@@ -2314,17 +2492,36 @@ namespace SolidWorksExtractor.Services
                 float[] morphNormals = null;
                 float[] morphBoundsMin = null;
                 float[] morphBoundsMax = null;
+                // Lifted to outer scope so the Stage 3 CAD path can reuse
+                // the per-FE-vertex displacement arrays (one source of truth
+                // per study) without re-parsing the bulk buffer.
+                double[] dispXArrOuter = new double[surfVertCount];
+                double[] dispYArrOuter = new double[surfVertCount];
+                double[] dispZArrOuter = new double[surfVertCount];
+                // Per-FE-vertex displacement coverage. The CAD projection
+                // path uses this so it does not weight an uncovered (default
+                // zero) FE node into the inverse-distance average -- which
+                // would synthesize a "no displacement" reading from data
+                // that was never solved.
+                bool[] dispCoveredOuter = new bool[surfVertCount];
+                bool feHasDisp = false;
 
                 try
                 {
-                    double[] dispXArr = new double[surfVertCount];
-                    double[] dispYArr = new double[surfVertCount];
-                    double[] dispZArr = new double[surfVertCount];
-                    bool hasDisp = false;
+                    Dictionary<int, double[]> dispByNid = null;
+                    string dispLayoutNote = null;
+                    // True iff the displacement source is inherently trustworthy:
+                    //   - bulk parser cross-checked against (maxNode, maxValue), OR
+                    //   - per-node fallback (direct API per-vertex reads).
+                    // Length-only bulk acceptance is NOT trustworthy on its own.
+                    bool dispSourceValidated = false;
 
-                    // GetTranslationalDisplacement returns all nodal displacements at once
-                    // Signature: (NStepNumber, DispPlane, NUnits, out ErrorCode) -> object
-                    // Returns a flat array of [UX1, UY1, UZ1, UX2, UY2, UZ2, ...] for all nodes
+                    // GetTranslationalDisplacement bulk path. The COSMOSWorks API in
+                    // this build returns interleaved (nodeId, value) pairs even for
+                    // GetMinMaxStress / GetMinMaxDisplacement -- so the bulk
+                    // displacement array is NOT necessarily a flat [UX,UY,UZ,...]
+                    // sequence. Detect the layout by length, then cross-validate
+                    // against (maxNode, maxValue) from GetMinMaxDisplacement.
                     try
                     {
                         int dispErrCode = 0;
@@ -2337,45 +2534,17 @@ namespace SolidWorksExtractor.Services
                         if (dispErrCode == 0 && dispBulk != null)
                         {
                             double[] allDisp = ConvertToDoubleArray(dispBulk);
-                            if (allDisp != null)
+                            if (allDisp != null && allDisp.Length > 0)
                             {
-                                // allDisp is indexed by node: allDisp[(nodeId-1)*3 + component]
-                                // nodeIds are 1-based.
-                                // Track the surface node with the largest URES magnitude
-                                // so the JSON results section can report max_displacement_node
-                                // matching the SolidWorks report layout.
-                                double bestMag = 0;
-                                int bestNid = 0;
-                                for (int i = 0; i < surfVertCount; i++)
-                                {
-                                    int nid = surfaceNodes[i];
-                                    int dIdx = (nid - 1) * 3;
-                                    if (dIdx + 2 < allDisp.Length)
-                                    {
-                                        double dxi = allDisp[dIdx];
-                                        double dyi = allDisp[dIdx + 1];
-                                        double dzi = allDisp[dIdx + 2];
-                                        dispXArr[i] = dxi;
-                                        dispYArr[i] = dyi;
-                                        dispZArr[i] = dzi;
-                                        hasDisp = true;
-                                        double mag = Math.Sqrt(dxi * dxi + dyi * dyi + dzi * dzi);
-                                        if (mag > bestMag)
-                                        {
-                                            bestMag = mag;
-                                            bestNid = nid;
-                                        }
-                                    }
-                                }
-                                if (bestNid > 0) summary.MaxDisplacementNode = bestNid;
-
-                                // Cross-check: if GetMinMaxDisplacement returned an
-                                // implausibly small value but the bulk read found real
-                                // deflection, prefer the bulk-read magnitude.
-                                double bestMagMm = bestMag * 1000.0;
-                                if (bestMagMm > summary.MaxDisplacementMm)
-                                    summary.MaxDisplacementMm = bestMagMm;
+                                Console.WriteLine($"    FEA: GetTranslationalDisplacement returned {allDisp.Length:N0} doubles for {nodeCount:N0} nodes (ratio {(double)allDisp.Length / nodeCount:F2})");
+                                bool bulkValidated;
+                                dispByNid = ParseBulkDisplacement(allDisp, nodeCount, results, out dispLayoutNote, out bulkValidated);
+                                if (dispByNid != null && bulkValidated) dispSourceValidated = true;
                             }
+                        }
+                        else
+                        {
+                            Warn(summary, $"GetTranslationalDisplacement returned errCode={dispErrCode}");
                         }
                     }
                     catch (Exception dispEx)
@@ -2383,42 +2552,170 @@ namespace SolidWorksExtractor.Services
                         Warn(summary, "GetTranslationalDisplacement failed: " + dispEx.Message);
                     }
 
-                    if (hasDisp)
+                    // Per-node fallback if bulk parse couldn't produce a usable map.
+                    // Per-node API reads are trustworthy by construction (no layout
+                    // ambiguity), so we mark the source validated even though we
+                    // didn't run the bulk cross-check on it.
+                    if (dispByNid == null || dispByNid.Count == 0)
                     {
-                        // Morph target stores DELTA positions (deformed - undeformed)
-                        morphPositions = new float[surfVertCount * 3];
-                        float mMinX = float.MaxValue, mMinY = float.MaxValue, mMinZ = float.MaxValue;
-                        float mMaxX = float.MinValue, mMaxY = float.MinValue, mMaxZ = float.MinValue;
+                        dispByNid = ReadDisplacementPerNode(results, surfaceNodes, summary);
+                        if (dispByNid != null && dispByNid.Count > 0)
+                        {
+                            dispLayoutNote = "per-node-fallback";
+                            dispSourceValidated = true;
+                        }
+                    }
 
+                    // Use the outer-scope arrays so the Stage 3 CAD path can
+                    // see per-vertex displacements after this try-block exits.
+                    double[] dispXArr = dispXArrOuter;
+                    double[] dispYArr = dispYArrOuter;
+                    double[] dispZArr = dispZArrOuter;
+                    bool hasDisp = false;
+                    double bestMag = 0;
+                    int bestNid = 0;
+
+                    if (dispByNid != null)
+                    {
                         for (int i = 0; i < surfVertCount; i++)
                         {
-                            float dx = (float)dispXArr[i];
-                            float dy = (float)dispYArr[i];
-                            float dz = (float)dispZArr[i];
-                            morphPositions[i * 3 + 0] = dx;
-                            morphPositions[i * 3 + 1] = dy;
-                            morphPositions[i * 3 + 2] = dz;
+                            int nid = surfaceNodes[i];
+                            double[] uvw;
+                            if (dispByNid.TryGetValue(nid, out uvw))
+                            {
+                                dispXArr[i] = uvw[0];
+                                dispYArr[i] = uvw[1];
+                                dispZArr[i] = uvw[2];
+                                dispCoveredOuter[i] = true;
+                                hasDisp = true;
+                                double mag = Math.Sqrt(uvw[0] * uvw[0] + uvw[1] * uvw[1] + uvw[2] * uvw[2]);
+                                if (mag > bestMag) { bestMag = mag; bestNid = nid; }
+                            }
+                        }
+                    }
 
-                            if (dx < mMinX) mMinX = dx; if (dx > mMaxX) mMaxX = dx;
-                            if (dy < mMinY) mMinY = dy; if (dy > mMaxY) mMaxY = dy;
-                            if (dz < mMinZ) mMinZ = dz; if (dz > mMaxZ) mMaxZ = dz;
+                    if (hasDisp)
+                    {
+                        feHasDisp = true; // Visible to the Stage 3 CAD path below.
+
+                        // Trusted-signal gate. Before we bake the morph buffer we
+                        // require AT LEAST ONE of:
+                        //   (1) the bulk parser cross-checked the chosen stride
+                        //       against (maxNode, maxValue) -- dispSourceValidated
+                        //   (2) summary.MaxDisplacementMm > 1e-9 (an authoritative
+                        //       value already populated from GetMinMaxDisplacement
+                        //       in ExtractStudyMetadata, OR from .OUT below)
+                        // If neither is available, attempt the .OUT fallback
+                        // EARLY so we have an independent reference. If that also
+                        // fails, refuse to write a morph that has no way to be
+                        // validated -- conservative is the right bar here.
+                        double bestMagMm = bestMag * 1000.0;
+                        double reportedMaxMm = summary.MaxDisplacementMm;
+                        if (!dispSourceValidated && reportedMaxMm <= 1e-9)
+                        {
+                            Console.WriteLine("    FEA: morph-validation gate has no API or summary signal; attempting .OUT fallback before sanity check.");
+                            try { PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ); }
+                            catch (Exception outEx) { Warn(summary, "Early .OUT fallback for morph validation failed: " + outEx.Message); }
+                            reportedMaxMm = summary.MaxDisplacementMm;
                         }
 
-                        morphBoundsMin = new float[] { mMinX, mMinY, mMinZ };
-                        morphBoundsMax = new float[] { mMaxX, mMaxY, mMaxZ };
+                        bool morphInconsistent = false;
+                        if (reportedMaxMm > 1e-9 && bestMagMm > 0)
+                        {
+                            // Have a trusted reference: enforce ratio gate.
+                            double ratio = bestMagMm / reportedMaxMm;
+                            if (ratio > 10.0 || ratio < 0.1)
+                            {
+                                morphInconsistent = true;
+                                Warn(summary,
+                                    $"Morph delta sanity check failed: max parsed magnitude {bestMagMm:G6} mm vs reported max {reportedMaxMm:G6} mm " +
+                                    $"(ratio {ratio:G4}, layout='{dispLayoutNote ?? "unknown"}'). Refusing to write corrupt morph buffer.");
+                            }
+                        }
+                        else if (dispSourceValidated)
+                        {
+                            // Parser cross-checked the chosen stride against the
+                            // API's own (maxNode, maxValue), even though
+                            // summary.MaxDisplacementMm was never populated. The
+                            // values themselves came through the validated layout,
+                            // so we can ship the morph.
+                            // Promote the parsed magnitude into summary so the
+                            // results JSON / manifest carry a usable number.
+                            summary.MaxDisplacementMm = bestMagMm;
+                        }
+                        else
+                        {
+                            // No bulk validation, no summary signal, no .OUT -- refuse.
+                            morphInconsistent = true;
+                            Warn(summary,
+                                $"Morph buffer rejected: bulk parser used length-only acceptance (layout='{dispLayoutNote ?? "unknown"}') and no GetMinMaxDisplacement / .OUT cross-check value is available to validate the data. Re-run when result database is fully populated.");
+                        }
 
-                        // Compute morph normal deltas
-                        // Build deformed positions for normal computation
-                        float[] deformedPos = new float[surfVertCount * 3];
-                        for (int i = 0; i < surfVertCount * 3; i++)
-                            deformedPos[i] = posArray[i] + morphPositions[i];
+                        if (!morphInconsistent)
+                        {
+                            if (bestNid > 0) summary.MaxDisplacementNode = bestNid;
+                            if (bestMagMm > summary.MaxDisplacementMm)
+                                summary.MaxDisplacementMm = bestMagMm;
 
-                        float[] deformedNormals = ComputeVertexNormals(deformedPos, indices, surfVertCount);
-                        morphNormals = new float[deformedNormals.Length];
-                        for (int i = 0; i < deformedNormals.Length; i++)
-                            morphNormals[i] = deformedNormals[i] - normArray[i];
+                            // Morph target stores DELTA positions (deformed - undeformed)
+                            morphPositions = new float[surfVertCount * 3];
+                            float mMinX = float.MaxValue, mMinY = float.MaxValue, mMinZ = float.MaxValue;
+                            float mMaxX = float.MinValue, mMaxY = float.MinValue, mMaxZ = float.MinValue;
 
-                        Console.WriteLine("    FEA: Displacement morph target extracted");
+                            for (int i = 0; i < surfVertCount; i++)
+                            {
+                                float dx = (float)dispXArr[i];
+                                float dy = (float)dispYArr[i];
+                                float dz = (float)dispZArr[i];
+                                morphPositions[i * 3 + 0] = dx;
+                                morphPositions[i * 3 + 1] = dy;
+                                morphPositions[i * 3 + 2] = dz;
+
+                                if (dx < mMinX) mMinX = dx; if (dx > mMaxX) mMaxX = dx;
+                                if (dy < mMinY) mMinY = dy; if (dy > mMaxY) mMaxY = dy;
+                                if (dz < mMinZ) mMinZ = dz; if (dz > mMaxZ) mMaxZ = dz;
+                            }
+
+                            morphBoundsMin = new float[] { mMinX, mMinY, mMinZ };
+                            morphBoundsMax = new float[] { mMaxX, mMaxY, mMaxZ };
+
+                            // Record diagnostic in summary so the manifest carries it
+                            summary.MorphDiagnostic = new MorphDiagnosticInfo
+                            {
+                                MaxAbsDeltaM = bestMag,
+                                ReportedMaxMm = reportedMaxMm,
+                                LayoutDetected = dispLayoutNote ?? "flat-3stride",
+                                Ok = true,
+                            };
+
+                            // Compute morph normal deltas
+                            float[] deformedPos = new float[surfVertCount * 3];
+                            for (int i = 0; i < surfVertCount * 3; i++)
+                                deformedPos[i] = posArray[i] + morphPositions[i];
+
+                            float[] deformedNormals = ComputeVertexNormals(deformedPos, indices, surfVertCount);
+                            morphNormals = new float[deformedNormals.Length];
+                            for (int i = 0; i < deformedNormals.Length; i++)
+                                morphNormals[i] = deformedNormals[i] - normArray[i];
+
+                            Console.WriteLine($"    FEA: Displacement morph target extracted (max|delta|={bestMagMm:G4} mm via {dispLayoutNote ?? "flat-3stride"})");
+                        }
+                        else
+                        {
+                            // Inconsistent: leave morphPositions/Normals null so the
+                            // viewer's own sanity check has nothing to disable.
+                            summary.MorphDiagnostic = new MorphDiagnosticInfo
+                            {
+                                MaxAbsDeltaM = bestMag,
+                                ReportedMaxMm = reportedMaxMm,
+                                LayoutDetected = dispLayoutNote ?? "unknown",
+                                Ok = false,
+                            };
+                        }
+                    }
+                    else
+                    {
+                        Warn(summary, "Displacement extraction produced no usable per-node data; morph target omitted.");
                     }
                 }
                 catch (Exception ex)
@@ -2436,7 +2733,23 @@ namespace SolidWorksExtractor.Services
                     PopulateSummaryFromSolverOut(modelDoc, summary, nodeX, nodeY, nodeZ);
                 }
 
-                // Compute bounding box
+                // Stage 3 -- Strategy A: try the CAD display tessellation
+                // with FE results projected onto its vertices. Returns null
+                // on any failure (no part doc, no bodies, all faces fail to
+                // tessellate, FE coverage too low, etc.) and we fall
+                // through to the FE-mesh path unchanged.
+                FeaMeshData cadProjected = TryBuildCadProjectedFeaMesh(
+                    modelDoc,
+                    posArray, stressValues,
+                    dispXArrOuter, dispYArrOuter, dispZArrOuter, feHasDisp,
+                    covered, dispCoveredOuter,
+                    summary);
+                if (cadProjected != null)
+                {
+                    return cadProjected;
+                }
+
+                // FE-mesh fallback path. Compute bounding box.
                 float bbMinX = float.MaxValue, bbMinY = float.MaxValue, bbMinZ = float.MaxValue;
                 float bbMaxX = float.MinValue, bbMaxY = float.MinValue, bbMaxZ = float.MinValue;
                 for (int i = 0; i < posArray.Length; i += 3)
@@ -2752,7 +3065,8 @@ namespace SolidWorksExtractor.Services
         /// Sorts the IDs and packs into a single long for fast hashing.
         /// </summary>
         private void AddFace(Dictionary<long, int> faceCount, Dictionary<long, int[]> faceNodes,
-            int n0, int n1, int n2)
+            int n0, int n1, int n2,
+            int parentElemIdx = -1, Dictionary<long, int> faceParentElem = null)
         {
             // Sort the three node IDs
             int a = n0, b = n1, c = n2;
@@ -2767,11 +3081,16 @@ namespace SolidWorksExtractor.Services
             if (faceCount.ContainsKey(key))
             {
                 faceCount[key]++;
+                // Interior face: more than one element shares it. Stress
+                // projection only uses surface faces (count == 1) so the
+                // parent of an interior face is irrelevant.
             }
             else
             {
                 faceCount[key] = 1;
                 faceNodes[key] = new int[] { n0, n1, n2 }; // preserve original winding
+                if (faceParentElem != null && parentElemIdx >= 0)
+                    faceParentElem[key] = parentElemIdx;
             }
         }
 
@@ -2801,8 +3120,708 @@ namespace SolidWorksExtractor.Services
         /// candidate triangle faces (the tet's four faces) so that AddFace's dedup picks
         /// out the boundary by count==1.
         /// </summary>
+        /// <summary>
+        /// Project per-element von Mises stress onto surface nodes via
+        /// AREA-WEIGHTED averaging. For each surface triangle (a face of the
+        /// FE mesh appearing in exactly one element), we compute the tri area
+        /// from its corner positions and accumulate `area * vonOfParent` and
+        /// `area` to each of its three corner nodes. Final per-node value is
+        /// `sum(area * von) / sum(area)`. This replaces the legacy unweighted
+        /// `sum(von) / count` accumulation, which produced visibly noisy
+        /// contours because tiny shell elements adjacent to large ones got
+        /// equal say in the average.
+        ///
+        /// Returns the number of surface nodes that received at least one
+        /// contribution (i.e., coverage). The output `stressValues` is filled
+        /// in surface-vertex order; entries that received no contribution
+        /// remain at their pre-existing value (so this can fill gaps left by
+        /// a partial bulk per-node read).
+        /// </summary>
+        private int ProjectElementStressAreaWeighted(
+            Dictionary<int, double> perElementVon,
+            List<int[]> surfaceFaces,
+            List<int> surfaceFaceParents,
+            List<int> surfaceNodes,
+            Dictionary<int, int> nodeRemap,
+            double[] nodeX, double[] nodeY, double[] nodeZ,
+            double[] stressValues, // surface-vertex-ordered output
+            bool[] covered,        // surface-vertex-ordered coverage mask (mutated)
+            ref double maxStress,
+            ref int peakIdx)
+        {
+            if (perElementVon == null || perElementVon.Count == 0) return 0;
+            if (surfaceFaces == null || surfaceFaces.Count == 0) return 0;
+
+            int surfVertCount = stressValues.Length;
+            // Per-vertex accumulators in surface-index order. Vertices that
+            // are already covered by a previous path are skipped so this
+            // function works as both primary and gap-filler.
+            double[] sumAreaVon = new double[surfVertCount];
+            double[] sumArea = new double[surfVertCount];
+
+            for (int t = 0; t < surfaceFaces.Count; t++)
+            {
+                int parent = surfaceFaceParents[t];
+                if (parent < 0) continue;
+                double von;
+                if (!perElementVon.TryGetValue(parent, out von)) continue;
+                int[] tri = surfaceFaces[t];
+                int n0 = tri[0], n1 = tri[1], n2 = tri[2];
+                double area = TriArea(nodeX, nodeY, nodeZ, n0, n1, n2);
+                if (area <= 0) continue;
+
+                int v0; if (!nodeRemap.TryGetValue(n0, out v0)) continue;
+                int v1; if (!nodeRemap.TryGetValue(n1, out v1)) continue;
+                int v2; if (!nodeRemap.TryGetValue(n2, out v2)) continue;
+
+                sumAreaVon[v0] += area * von; sumArea[v0] += area;
+                sumAreaVon[v1] += area * von; sumArea[v1] += area;
+                sumAreaVon[v2] += area * von; sumArea[v2] += area;
+            }
+
+            int newlyCovered = 0;
+            for (int i = 0; i < surfVertCount; i++)
+            {
+                if (covered[i]) continue;        // gap-filler semantics
+                if (sumArea[i] <= 0) continue;
+                double v = sumAreaVon[i] / sumArea[i];
+                stressValues[i] = v;
+                covered[i] = true;
+                newlyCovered++;
+                double abs = Math.Abs(v);
+                if (abs > maxStress) { maxStress = abs; peakIdx = i; }
+            }
+            return newlyCovered;
+        }
+
+        private static double TriArea(double[] nodeX, double[] nodeY, double[] nodeZ, int n0, int n1, int n2)
+        {
+            if (n0 <= 0 || n1 <= 0 || n2 <= 0) return 0;
+            if (n0 >= nodeX.Length || n1 >= nodeX.Length || n2 >= nodeX.Length) return 0;
+            double ax = nodeX[n1] - nodeX[n0], ay = nodeY[n1] - nodeY[n0], az = nodeZ[n1] - nodeZ[n0];
+            double bx = nodeX[n2] - nodeX[n0], by = nodeY[n2] - nodeY[n0], bz = nodeZ[n2] - nodeZ[n0];
+            // Cross product magnitude / 2
+            double cx = ay * bz - az * by;
+            double cy = az * bx - ax * bz;
+            double cz = ax * by - ay * bx;
+            return 0.5 * Math.Sqrt(cx * cx + cy * cy + cz * cz);
+        }
+
+        /// <summary>
+        /// Try the bulk per-element stress API. Returns a (ZERO-based element
+        /// index) → von Mises value (Pa) map if the call succeeds, null
+        /// otherwise. COSMOSWorks returns interleaved [eid, value, eid, value]
+        /// pairs with 1-based element IDs in this build; we subtract 1 here so
+        /// the keys match `surfaceFaceParents`, which stores the 0-based
+        /// connectivity loop index. This alignment is required by
+        /// ProjectElementStressAreaWeighted -- if it diverges, the projection
+        /// silently no-ops and produces an empty stress field.
+        /// </summary>
+        private Dictionary<int, double> TryBulkPerElementVon(ICWResults results)
+        {
+            try
+            {
+                int err = 0;
+                object bulk = results.GetStressForEntities2(
+                    false, // BValueByNode = false → per-element
+                    (int)swsStressComponent_e.swsStressComponentVON,
+                    0,
+                    null,
+                    null,
+                    0,
+                    out err);
+                LogConnectivityArrayDiagnostics("GetStressForEntities2(all,VON,byElement)", bulk, err);
+                if (err != 0 || bulk == null) return null;
+                double[] flat = ConvertToDoubleArray(bulk);
+                if (flat == null || flat.Length < 2) return null;
+                var map = new Dictionary<int, double>(flat.Length / 2);
+                for (int k = 0; k + 1 < flat.Length; k += 2)
+                {
+                    int eid = (int)Math.Round(flat[k]);
+                    // API EIDs are 1-based; convert to 0-based to match
+                    // surfaceFaceParents.
+                    if (eid > 0) map[eid - 1] = flat[k + 1];
+                }
+                Console.WriteLine($"    FEA: bulk per-element VON parsed: {map.Count:N0} elements (raw length {flat.Length:N0}; keys converted to 0-based)");
+                return map;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    FEA: bulk per-element VON threw: {ex.Message}");
+                return null;
+            }
+        }
+
+        // ====================================================================
+        // Stage 3 Strategy A -- CAD-display tessellation with projected results
+        // ====================================================================
+        //
+        // The FE surface mesh has 2-3K vertices for a typical part and follows
+        // the FE mesh discretisation (visible facets). SolidWorks' own result
+        // viewer uses the CAD display tessellation -- the same tessellation
+        // shown in the modelling viewport -- with solver values projected onto
+        // its vertices. That gives smoother surfaces (especially around curved
+        // features like fillets and holes) at no cost in result accuracy,
+        // because the FE results themselves are unchanged; only the surface
+        // they're rendered on is finer.
+        //
+        // The projection is INVERSE-DISTANCE-WEIGHTED nearest-K (K=4): for
+        // each CAD vertex, find the 4 nearest FE surface nodes and average
+        // their stress / displacement weighted by 1/distance^2. Gives smooth
+        // contours and avoids the "binary blue-with-red-spikes" appearance
+        // that an FE-mesh-only render produces.
+
+        private class CadDisplayMesh
+        {
+            public float[] Positions;   // VEC3 floats, length = VertexCount * 3
+            public float[] Normals;     // VEC3 floats, length = VertexCount * 3
+            public uint[] Indices;      // length = TriangleCount * 3
+            public int VertexCount;
+            public int TriangleCount;
+        }
+
+        /// <summary>
+        /// Walk every IFace2 of every solid body in the part and build a
+        /// deduplicated CAD display tessellation. Vertex positions are kept
+        /// in part-local coordinates (meters), matching the FE node frame so
+        /// the projection step doesn't need to apply a transform.
+        ///
+        /// Returns null if the part document yields no solid bodies or if
+        /// every face fails to tessellate -- caller falls back to FE mesh.
+        /// </summary>
+        private CadDisplayMesh ExtractCadDisplayTessellation(IModelDoc2 modelDoc)
+        {
+            if (modelDoc == null) return null;
+            IPartDoc partDoc = modelDoc as IPartDoc;
+            if (partDoc == null)
+            {
+                Console.WriteLine("    FEA Stage 3: CAD path skipped -- document is not a part.");
+                return null;
+            }
+
+            object bodiesObj;
+            try { bodiesObj = partDoc.GetBodies2((int)swBodyType_e.swSolidBody, true); }
+            catch (Exception ex) { Console.WriteLine($"    FEA Stage 3: GetBodies2 threw: {ex.Message}"); return null; }
+            if (bodiesObj == null) return null;
+            object[] bodies = bodiesObj as object[];
+            if (bodies == null || bodies.Length == 0) return null;
+
+            // Position-keyed dedupe: tessellation returns shared edges as
+            // duplicate vertex entries on every adjacent face. Round to 1 nm
+            // (1e-9 m) and key by the full quantised (qx, qy, qz) tuple.
+            // ValueTuple's auto-generated GetHashCode/Equals operate on the
+            // full 64-bit components -- collision-free across the entire
+            // coordinate range a SolidWorks part will produce. The previous
+            // bit-packed-into-long key truncated each axis to 21 bits, so
+            // points separated by multiples of 2.097 mm aliased and merged.
+            var dedup = new Dictionary<(long qx, long qy, long qz), int>();
+            var posList = new List<float>();
+            var normList = new List<float>();
+            var idxList = new List<uint>();
+
+            int facesProcessed = 0, facesFailed = 0;
+
+            foreach (object bodyObj in bodies)
+            {
+                IBody2 body = bodyObj as IBody2;
+                if (body == null) continue;
+
+                IFace2 face = body.GetFirstFace() as IFace2;
+                while (face != null)
+                {
+                    float[] tv = null, tn = null;
+                    try
+                    {
+                        tv = ConvertToFloatArray(face.GetTessTriangles(true)); // true = no unit conversion (meters)
+                        tn = ConvertToFloatArray(face.GetTessNorms());
+                    }
+                    catch { facesFailed++; face = face.GetNextFace() as IFace2; continue; }
+
+                    if (tv == null || tv.Length < 9 || tv.Length % 9 != 0)
+                    {
+                        facesFailed++;
+                        face = face.GetNextFace() as IFace2;
+                        continue;
+                    }
+                    if (tn == null || tn.Length != tv.Length)
+                    {
+                        // Synthesize per-vertex normals from the face plane
+                        tn = new float[tv.Length];
+                        for (int i = 0; i + 8 < tv.Length; i += 9)
+                        {
+                            double ax = tv[i + 3] - tv[i + 0], ay = tv[i + 4] - tv[i + 1], az = tv[i + 5] - tv[i + 2];
+                            double bx = tv[i + 6] - tv[i + 0], by = tv[i + 7] - tv[i + 1], bz = tv[i + 8] - tv[i + 2];
+                            double nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+                            double mag = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                            if (mag > 1e-12) { nx /= mag; ny /= mag; nz /= mag; }
+                            for (int k = 0; k < 3; k++)
+                            {
+                                tn[i + k * 3 + 0] = (float)nx;
+                                tn[i + k * 3 + 1] = (float)ny;
+                                tn[i + k * 3 + 2] = (float)nz;
+                            }
+                        }
+                    }
+
+                    int triCount = tv.Length / 9;
+                    for (int t = 0; t < triCount; t++)
+                    {
+                        for (int v = 0; v < 3; v++)
+                        {
+                            int srcIdx = t * 9 + v * 3;
+                            float px = tv[srcIdx + 0], py = tv[srcIdx + 1], pz = tv[srcIdx + 2];
+                            // 1 nm dedupe quantisation
+                            var key = (
+                                (long)Math.Round(px * 1e9),
+                                (long)Math.Round(py * 1e9),
+                                (long)Math.Round(pz * 1e9));
+                            int reuseIdx;
+                            if (dedup.TryGetValue(key, out reuseIdx))
+                            {
+                                idxList.Add((uint)reuseIdx);
+                            }
+                            else
+                            {
+                                int newIdx = posList.Count / 3;
+                                dedup[key] = newIdx;
+                                posList.Add(px); posList.Add(py); posList.Add(pz);
+                                normList.Add(tn[srcIdx + 0]); normList.Add(tn[srcIdx + 1]); normList.Add(tn[srcIdx + 2]);
+                                idxList.Add((uint)newIdx);
+                            }
+                        }
+                    }
+                    facesProcessed++;
+                    face = face.GetNextFace() as IFace2;
+                }
+            }
+
+            if (posList.Count == 0)
+            {
+                Console.WriteLine($"    FEA Stage 3: CAD tessellation produced no vertices ({facesProcessed} faces processed, {facesFailed} failed)");
+                return null;
+            }
+
+            Console.WriteLine($"    FEA Stage 3: CAD tessellation -> {posList.Count / 3:N0} unique vertices, {idxList.Count / 3:N0} triangles ({facesProcessed} faces ok, {facesFailed} failed)");
+
+            return new CadDisplayMesh
+            {
+                Positions = posList.ToArray(),
+                Normals = normList.ToArray(),
+                Indices = idxList.ToArray(),
+                VertexCount = posList.Count / 3,
+                TriangleCount = idxList.Count / 3,
+            };
+        }
+
+        /// <summary>
+        /// Uniform spatial-hash index over FE surface nodes. Build is O(N);
+        /// nearest-K query is O(K * cellOccupants) with cell size tuned to
+        /// average node spacing. For typical FE meshes this is much faster
+        /// than a brute-force O(N) scan per CAD vertex and avoids the kd-tree
+        /// construction overhead.
+        /// </summary>
+        private class SurfaceNodeSpatialIndex
+        {
+            private readonly float[] _x, _y, _z; // surface-vertex-ordered
+            private readonly int _count;
+            private readonly double _cell;
+            private readonly Dictionary<long, List<int>> _grid = new Dictionary<long, List<int>>();
+
+            public double MeanSpacing { get; }
+
+            public SurfaceNodeSpatialIndex(float[] surfPositions)
+            {
+                _count = surfPositions.Length / 3;
+                _x = new float[_count]; _y = new float[_count]; _z = new float[_count];
+                for (int i = 0; i < _count; i++)
+                {
+                    _x[i] = surfPositions[i * 3];
+                    _y[i] = surfPositions[i * 3 + 1];
+                    _z[i] = surfPositions[i * 3 + 2];
+                }
+
+                // Estimate mean spacing: bbox volume^(1/3) / count^(1/3).
+                if (_count > 1)
+                {
+                    float xn = float.MaxValue, xp = float.MinValue;
+                    float yn = float.MaxValue, yp = float.MinValue;
+                    float zn = float.MaxValue, zp = float.MinValue;
+                    for (int i = 0; i < _count; i++)
+                    {
+                        if (_x[i] < xn) xn = _x[i]; if (_x[i] > xp) xp = _x[i];
+                        if (_y[i] < yn) yn = _y[i]; if (_y[i] > yp) yp = _y[i];
+                        if (_z[i] < zn) zn = _z[i]; if (_z[i] > zp) zp = _z[i];
+                    }
+                    double dx = xp - xn, dy = yp - yn, dz = zp - zn;
+                    // For thin parts (e.g. plates), the smallest dim is dominated by thickness;
+                    // use the geometric mean of the two largest dims as a more representative scale.
+                    double[] dims = { dx, dy, dz };
+                    Array.Sort(dims);
+                    double area = dims[1] * dims[2];
+                    MeanSpacing = Math.Sqrt(area / Math.Max(1, _count));
+                    _cell = Math.Max(MeanSpacing * 2.0, 1e-6);
+                }
+                else
+                {
+                    MeanSpacing = 1e-3;
+                    _cell = 1e-3;
+                }
+
+                // Bucket into grid
+                for (int i = 0; i < _count; i++)
+                {
+                    long key = HashCell(_x[i], _y[i], _z[i]);
+                    List<int> bucket;
+                    if (!_grid.TryGetValue(key, out bucket))
+                    {
+                        bucket = new List<int>();
+                        _grid[key] = bucket;
+                    }
+                    bucket.Add(i);
+                }
+            }
+
+            private long HashCell(double x, double y, double z)
+            {
+                long ix = (long)Math.Floor(x / _cell);
+                long iy = (long)Math.Floor(y / _cell);
+                long iz = (long)Math.Floor(z / _cell);
+                // Pack to a single long; collisions across cells are acceptable
+                // for the bucket-coalescing dictionary because we still verify
+                // by actual distance in the search loop.
+                unchecked
+                {
+                    long h = ix * 73856093L;
+                    h = (h ^ iy) * 19349663L;
+                    h = (h ^ iz) * 83492791L;
+                    return h;
+                }
+            }
+
+            /// <summary>
+            /// Find the K nearest surface-vertex indices to (x,y,z), expanding
+            /// the cell search radius outward until at least K candidates are
+            /// found. Returns sorted by distance ascending. Each entry: (index, distance).
+            /// </summary>
+            public (int idx, double dist)[] FindNearestK(double x, double y, double z, int k)
+            {
+                long ix0 = (long)Math.Floor(x / _cell);
+                long iy0 = (long)Math.Floor(y / _cell);
+                long iz0 = (long)Math.Floor(z / _cell);
+                var found = new List<(int idx, double dist)>(k * 2);
+                for (int radius = 0; radius < 8; radius++)
+                {
+                    for (long dx = -radius; dx <= radius; dx++)
+                        for (long dy = -radius; dy <= radius; dy++)
+                            for (long dz = -radius; dz <= radius; dz++)
+                            {
+                                // Only visit shell of this radius (interior was visited at smaller radius)
+                                if (radius > 0
+                                    && Math.Abs(dx) < radius && Math.Abs(dy) < radius && Math.Abs(dz) < radius)
+                                    continue;
+                                long ix = ix0 + dx, iy = iy0 + dy, iz = iz0 + dz;
+                                long h;
+                                unchecked
+                                {
+                                    h = ix * 73856093L;
+                                    h = (h ^ iy) * 19349663L;
+                                    h = (h ^ iz) * 83492791L;
+                                }
+                                List<int> bucket;
+                                if (!_grid.TryGetValue(h, out bucket)) continue;
+                                foreach (int i in bucket)
+                                {
+                                    double ddx = _x[i] - x, ddy = _y[i] - y, ddz = _z[i] - z;
+                                    found.Add((i, Math.Sqrt(ddx * ddx + ddy * ddy + ddz * ddz)));
+                                }
+                            }
+                    if (found.Count >= k) break;
+                }
+                found.Sort((a, b) => a.dist.CompareTo(b.dist));
+                if (found.Count > k) found = found.GetRange(0, k);
+                return found.ToArray();
+            }
+        }
+
+        /// <summary>
+        /// Build the CAD-projected FeaMeshData. Returns null if any
+        /// prerequisite is missing or the projection cannot produce a coherent
+        /// surface. Caller falls back to the FE-mesh path.
+        /// </summary>
+        private FeaMeshData TryBuildCadProjectedFeaMesh(
+            IModelDoc2 modelDoc,
+            float[] feSurfacePositions,        // surfVertCount * 3, meters
+            double[] feSurfaceStress,          // Pa
+            double[] feSurfaceDispX,           // meters
+            double[] feSurfaceDispY,
+            double[] feSurfaceDispZ,
+            bool feSurfaceHasDisplacement,
+            bool[] feStressCovered,            // per-FE-surface-node: stressValues was actually populated
+            bool[] feDispCovered,              // per-FE-surface-node: disp arrays were actually populated
+            FeaResultsSummary summary)
+        {
+            int feCount = feSurfacePositions.Length / 3;
+            if (feCount < 4)
+            {
+                Console.WriteLine("    FEA Stage 3: CAD path skipped -- too few FE surface nodes for projection.");
+                return null;
+            }
+
+            // Coverage gate: if too few FE surface nodes carry real solver
+            // stress, IDW projection would weight default-zero defaults into
+            // the average and produce an artificial "blue" surface where
+            // there's no data. Refuse the CAD path and fall back to the FE
+            // mesh, which renders honest gaps as zero-stress rather than
+            // smoothing them into a misleading gradient.
+            int feStressCoveredCount = 0;
+            if (feStressCovered != null)
+            {
+                for (int i = 0; i < feStressCovered.Length; i++)
+                    if (feStressCovered[i]) feStressCoveredCount++;
+            }
+            const double MIN_STRESS_COVERAGE = 0.95;
+            double feStressCoveragePct = feCount > 0 ? (double)feStressCoveredCount / feCount : 0;
+            if (feStressCoveragePct < MIN_STRESS_COVERAGE)
+            {
+                Console.WriteLine($"    FEA Stage 3: CAD path skipped -- FE stress coverage {feStressCoveragePct:P1} < required {MIN_STRESS_COVERAGE:P0}. Fallback to FE-mesh path so the missing region is rendered honestly.");
+                Warn(summary, $"CAD-tessellation path declined: FE stress coverage {feStressCoveragePct:P1} below {MIN_STRESS_COVERAGE:P0} threshold. CAD projection requires high coverage so unsolved nodes don't bias the IDW average toward synthetic zero stress.");
+                return null;
+            }
+
+            CadDisplayMesh cad = ExtractCadDisplayTessellation(modelDoc);
+            if (cad == null) return null;
+
+            var index = new SurfaceNodeSpatialIndex(feSurfacePositions);
+            const int K = 4;
+
+            double[] cadStress = new double[cad.VertexCount];
+            double[] cadDispX = new double[cad.VertexCount];
+            double[] cadDispY = new double[cad.VertexCount];
+            double[] cadDispZ = new double[cad.VertexCount];
+            double maxStress = 0;
+            int peakIdx = 0;
+
+            double maxNeighbourDist = 0;
+            int farVerts = 0;
+            int cadVertsNoStressNeighbour = 0;
+            int cadVertsNoDispNeighbour = 0;
+            double farThreshold = Math.Max(index.MeanSpacing * 2.0, 1e-6);
+
+            for (int i = 0; i < cad.VertexCount; i++)
+            {
+                double cx = cad.Positions[i * 3];
+                double cy = cad.Positions[i * 3 + 1];
+                double cz = cad.Positions[i * 3 + 2];
+                var neighbours = index.FindNearestK(cx, cy, cz, K);
+                if (neighbours.Length == 0) continue;
+                if (neighbours[0].dist > maxNeighbourDist) maxNeighbourDist = neighbours[0].dist;
+                if (neighbours[0].dist > farThreshold) farVerts++;
+
+                // Stress projection: only weight neighbours that actually
+                // carry a covered stress reading. Default-zero values from
+                // uncovered FE nodes would otherwise drag the IDW average
+                // toward an artificial zero-stress reading.
+                double sWeight = 0, sStress = 0;
+                double dWeight = 0, sDx = 0, sDy = 0, sDz = 0;
+                foreach (var n in neighbours)
+                {
+                    double w = 1.0 / Math.Max(n.dist * n.dist, 1e-18);
+                    if (feStressCovered == null || feStressCovered[n.idx])
+                    {
+                        sWeight += w;
+                        sStress += w * feSurfaceStress[n.idx];
+                    }
+                    if (feSurfaceHasDisplacement && (feDispCovered == null || feDispCovered[n.idx]))
+                    {
+                        dWeight += w;
+                        sDx += w * feSurfaceDispX[n.idx];
+                        sDy += w * feSurfaceDispY[n.idx];
+                        sDz += w * feSurfaceDispZ[n.idx];
+                    }
+                }
+
+                if (sWeight > 0)
+                {
+                    double von = sStress / sWeight;
+                    cadStress[i] = von;
+                    if (Math.Abs(von) > maxStress) { maxStress = Math.Abs(von); peakIdx = i; }
+                }
+                else
+                {
+                    // No covered stress neighbour found -- leave at 0 and
+                    // surface in the diagnostic. The MIN_STRESS_COVERAGE gate
+                    // makes this rare in practice, but degenerate isolated
+                    // clusters can still hit it.
+                    cadVertsNoStressNeighbour++;
+                }
+
+                if (feSurfaceHasDisplacement)
+                {
+                    if (dWeight > 0)
+                    {
+                        cadDispX[i] = sDx / dWeight;
+                        cadDispY[i] = sDy / dWeight;
+                        cadDispZ[i] = sDz / dWeight;
+                    }
+                    else
+                    {
+                        cadVertsNoDispNeighbour++;
+                    }
+                }
+            }
+
+            byte[] cadColors = MapStressToColors(cadStress, cad.VertexCount, maxStress > 0 ? maxStress : 1.0);
+
+            float[] morphPositions = null;
+            float[] morphNormals = null;
+            float[] morphBoundsMin = null;
+            float[] morphBoundsMax = null;
+            if (feSurfaceHasDisplacement)
+            {
+                morphPositions = new float[cad.VertexCount * 3];
+                float mMinX = float.MaxValue, mMinY = float.MaxValue, mMinZ = float.MaxValue;
+                float mMaxX = float.MinValue, mMaxY = float.MinValue, mMaxZ = float.MinValue;
+                for (int i = 0; i < cad.VertexCount; i++)
+                {
+                    float dx = (float)cadDispX[i], dy = (float)cadDispY[i], dz = (float)cadDispZ[i];
+                    morphPositions[i * 3 + 0] = dx;
+                    morphPositions[i * 3 + 1] = dy;
+                    morphPositions[i * 3 + 2] = dz;
+                    if (dx < mMinX) mMinX = dx; if (dx > mMaxX) mMaxX = dx;
+                    if (dy < mMinY) mMinY = dy; if (dy > mMaxY) mMaxY = dy;
+                    if (dz < mMinZ) mMinZ = dz; if (dz > mMaxZ) mMaxZ = dz;
+                }
+                morphBoundsMin = new float[] { mMinX, mMinY, mMinZ };
+                morphBoundsMax = new float[] { mMaxX, mMaxY, mMaxZ };
+
+                float[] deformedPos = new float[cad.VertexCount * 3];
+                for (int i = 0; i < deformedPos.Length; i++)
+                    deformedPos[i] = cad.Positions[i] + morphPositions[i];
+                float[] deformedNormals = ComputeVertexNormals(deformedPos, cad.Indices, cad.VertexCount);
+                morphNormals = new float[deformedNormals.Length];
+                for (int i = 0; i < morphNormals.Length; i++)
+                    morphNormals[i] = deformedNormals[i] - cad.Normals[i];
+            }
+
+            // Bounding box
+            float bbMinX = float.MaxValue, bbMinY = float.MaxValue, bbMinZ = float.MaxValue;
+            float bbMaxX = float.MinValue, bbMaxY = float.MinValue, bbMaxZ = float.MinValue;
+            for (int i = 0; i < cad.Positions.Length; i += 3)
+            {
+                if (cad.Positions[i] < bbMinX) bbMinX = cad.Positions[i];
+                if (cad.Positions[i] > bbMaxX) bbMaxX = cad.Positions[i];
+                if (cad.Positions[i + 1] < bbMinY) bbMinY = cad.Positions[i + 1];
+                if (cad.Positions[i + 1] > bbMaxY) bbMaxY = cad.Positions[i + 1];
+                if (cad.Positions[i + 2] < bbMinZ) bbMinZ = cad.Positions[i + 2];
+                if (cad.Positions[i + 2] > bbMaxZ) bbMaxZ = cad.Positions[i + 2];
+            }
+
+            // Sanity: warn if the CAD bbox vs FE bbox suggest a coordinate-frame mismatch.
+            // (Purely advisory; a real mismatch would also break the projection itself.)
+            float feCx = 0, feCy = 0, feCz = 0;
+            for (int i = 0; i < feCount; i++)
+            {
+                feCx += feSurfacePositions[i * 3];
+                feCy += feSurfacePositions[i * 3 + 1];
+                feCz += feSurfacePositions[i * 3 + 2];
+            }
+            feCx /= feCount; feCy /= feCount; feCz /= feCount;
+            float cadCx = 0.5f * (bbMinX + bbMaxX);
+            float cadCy = 0.5f * (bbMinY + bbMaxY);
+            float cadCz = 0.5f * (bbMinZ + bbMaxZ);
+            double centroidShift = Math.Sqrt(
+                (feCx - cadCx) * (feCx - cadCx) +
+                (feCy - cadCy) * (feCy - cadCy) +
+                (feCz - cadCz) * (feCz - cadCz));
+            if (centroidShift > index.MeanSpacing * 5)
+            {
+                Warn(summary, $"Stage 3: CAD vs FE centroid shift {centroidShift:G4} m is large relative to mean FE spacing {index.MeanSpacing:G4} m. Check coordinate frames.");
+            }
+
+            double farPct = cad.VertexCount > 0 ? 100.0 * farVerts / cad.VertexCount : 0;
+            int feDispCoveredCount = 0;
+            if (feDispCovered != null)
+            {
+                for (int i = 0; i < feDispCovered.Length; i++)
+                    if (feDispCovered[i]) feDispCoveredCount++;
+            }
+            summary.CadProjectionDiagnostic = new CadProjectionDiagnosticInfo
+            {
+                CadVertexCount = cad.VertexCount,
+                CadTriangleCount = cad.TriangleCount,
+                FeSurfaceNodeCount = feCount,
+                FeStressCoveredCount = feStressCoveredCount,
+                FeDispCoveredCount = feDispCoveredCount,
+                K = K,
+                Weighting = "inverse_distance_squared",
+                MaxNeighbourDistanceM = maxNeighbourDist,
+                MeanFeNodeSpacingM = index.MeanSpacing,
+                FarVertexFractionPct = farPct,
+                CadVertsNoStressNeighbour = cadVertsNoStressNeighbour,
+                CadVertsNoDispNeighbour = cadVertsNoDispNeighbour,
+                Approximate = true,
+            };
+            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts from {feCount:N0} FE surface nodes (stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, mean FE spacing {index.MeanSpacing:G4} m, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour})");
+
+            // Promote per-vertex peak into summary.MaxStressLocation for the
+            // CAD path (FE-mesh path already did similar logic, but the CAD
+            // peak vertex is in CAD coordinates which we want recorded).
+            if (maxStress > 0)
+            {
+                summary.MaxStressLocation = new double[]
+                {
+                    cad.Positions[peakIdx * 3],
+                    cad.Positions[peakIdx * 3 + 1],
+                    cad.Positions[peakIdx * 3 + 2]
+                };
+                double maxMpa = maxStress / 1e6;
+                if (maxMpa > summary.MaxVonMisesMpa) summary.MaxVonMisesMpa = maxMpa;
+            }
+
+            return new FeaMeshData
+            {
+                Positions = cad.Positions,
+                Normals = cad.Normals,
+                Indices = cad.Indices,
+                VertexColors = cadColors,
+                MorphPositions = morphPositions,
+                MorphNormals = morphNormals,
+                BoundsMin = new float[] { bbMinX, bbMinY, bbMinZ },
+                BoundsMax = new float[] { bbMaxX, bbMaxY, bbMaxZ },
+                MorphBoundsMin = morphBoundsMin,
+                MorphBoundsMax = morphBoundsMax,
+                VertexCount = cad.VertexCount,
+                TriangleCount = cad.TriangleCount,
+                UniqueNodeCount = cad.VertexCount,
+            };
+        }
+
+        /// <summary>
+        /// Standard glTF type-shape coercion (object[]/double[]/float[] → float[]).
+        /// Mirrors GlbExporter's helper to avoid coupling the two files.
+        /// </summary>
+        private float[] ConvertToFloatArray(object obj)
+        {
+            if (obj == null) return null;
+            if (obj is float[] f) return f;
+            if (obj is double[] d) { var r = new float[d.Length]; for (int i = 0; i < d.Length; i++) r[i] = (float)d[i]; return r; }
+            if (obj is object[] arr)
+            {
+                var r = new float[arr.Length];
+                for (int i = 0; i < arr.Length; i++)
+                    r[i] = arr[i] != null ? Convert.ToSingle(arr[i]) : 0f;
+                return r;
+            }
+            return null;
+        }
+
+        // ====================================================================
+        // End Stage 3 helpers
+        // ====================================================================
+
         private void AppendFacesFromConnectivity(int[] connectivity, int nodesPerElem, int stride, int offset,
-            Dictionary<long, int> faceCount, Dictionary<long, int[]> faceNodes)
+            Dictionary<long, int> faceCount, Dictionary<long, int[]> faceNodes,
+            Dictionary<long, int> faceParentElem = null)
         {
             if (connectivity == null) return;
             int totalEntries = connectivity.Length / stride;
@@ -2816,7 +3835,7 @@ namespace SolidWorksExtractor.Services
                     int n0 = connectivity[baseIdx];
                     int n1 = connectivity[baseIdx + 1];
                     int n2 = connectivity[baseIdx + 2];
-                    AddFace(faceCount, faceNodes, n0, n1, n2);
+                    AddFace(faceCount, faceNodes, n0, n1, n2, e, faceParentElem);
                 }
                 else // tet4 / tet10 — corner nodes are first 4
                 {
@@ -2825,10 +3844,10 @@ namespace SolidWorksExtractor.Services
                     int n2 = connectivity[baseIdx + 2];
                     int n3 = connectivity[baseIdx + 3];
 
-                    AddFace(faceCount, faceNodes, n0, n1, n2);
-                    AddFace(faceCount, faceNodes, n0, n1, n3);
-                    AddFace(faceCount, faceNodes, n0, n2, n3);
-                    AddFace(faceCount, faceNodes, n1, n2, n3);
+                    AddFace(faceCount, faceNodes, n0, n1, n2, e, faceParentElem);
+                    AddFace(faceCount, faceNodes, n0, n1, n3, e, faceParentElem);
+                    AddFace(faceCount, faceNodes, n0, n2, n3, e, faceParentElem);
+                    AddFace(faceCount, faceNodes, n1, n2, n3, e, faceParentElem);
                 }
             }
         }
@@ -3354,6 +4373,68 @@ namespace SolidWorksExtractor.Services
                 sb.AppendLine("  },");
             }
 
+            // Morph diagnostic so reviewers can see the parser's decision at a glance.
+            // null = no displacement extraction was attempted (e.g. no nodal data).
+            if (summary != null && summary.MorphDiagnostic != null)
+            {
+                var d = summary.MorphDiagnostic;
+                sb.AppendLine("  \"morph_diagnostic\": {");
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_abs_delta_m\": {0:G6},\n", d.MaxAbsDeltaM);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"reported_max_mm\": {0:G6},\n", d.ReportedMaxMm);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"layout_detected\": \"{0}\",\n", EscapeJson(d.LayoutDetected ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"ok\": {0}\n", d.Ok ? "true" : "false");
+                sb.AppendLine("  },");
+            }
+
+            // Stress-projection diagnostic. Mirrors morph_diagnostic shape
+            // so a reviewer can audit visualization quality without opening
+            // the GLB. covered_pct < 0.95 hints that the rendered colours
+            // are partial; primary_path = "bulk-per-element-area-weighted"
+            // is the desired result.
+            if (summary != null && summary.StressDiagnostic != null)
+            {
+                var sd = summary.StressDiagnostic;
+                double pct = sd.SurfaceNodesTotal > 0 ? (double)sd.SurfaceNodesCovered / sd.SurfaceNodesTotal : 0;
+                sb.AppendLine("  \"stress_diagnostic\": {");
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"surface_nodes_total\": {0},\n", sd.SurfaceNodesTotal);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"surface_nodes_covered\": {0},\n", sd.SurfaceNodesCovered);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"covered_pct\": {0:F4},\n", pct);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"bulk_per_elem_source_count\": {0},\n", sd.BulkPerElemSourceCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"primary_path\": \"{0}\",\n", EscapeJson(sd.PrimaryPath ?? ""));
+                sb.AppendLine("    \"contributions\": {");
+                sb.AppendFormat(CultureInfo.InvariantCulture, "      \"bulk_per_element_area_weighted\": {0},\n", sd.ContribBulkPerElement);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "      \"bulk_per_node_fill\": {0},\n", sd.ContribBulkPerNode);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "      \"per_node_api\": {0},\n", sd.ContribPerNodeApi);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "      \"per_element_of_surface\": {0}\n", sd.ContribPerElementOfSurface);
+                sb.AppendLine("    }");
+                sb.AppendLine("  },");
+            }
+
+            // Stage 3 -- CAD-projection diagnostic. Non-null only when the
+            // shipped GLB uses the CAD display tessellation with FE results
+            // IDW-projected onto its vertices. Surfaced honestly: the
+            // visualization.mode flips to "cad_tessellation_projected" and
+            // visualization.approximate flips to true.
+            if (summary != null && summary.CadProjectionDiagnostic != null)
+            {
+                var cp = summary.CadProjectionDiagnostic;
+                sb.AppendLine("  \"cad_projection\": {");
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_vertex_count\": {0},\n", cp.CadVertexCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_triangle_count\": {0},\n", cp.CadTriangleCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"fe_surface_node_count\": {0},\n", cp.FeSurfaceNodeCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"fe_stress_covered_count\": {0},\n", cp.FeStressCoveredCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"fe_disp_covered_count\": {0},\n", cp.FeDispCoveredCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"k_neighbours\": {0},\n", cp.K);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"weighting\": \"{0}\",\n", EscapeJson(cp.Weighting ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_neighbour_distance_m\": {0:G6},\n", cp.MaxNeighbourDistanceM);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"mean_fe_node_spacing_m\": {0:G6},\n", cp.MeanFeNodeSpacingM);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"far_vertex_fraction_pct\": {0:F2},\n", cp.FarVertexFractionPct);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_verts_no_covered_stress_neighbour\": {0},\n", cp.CadVertsNoStressNeighbour);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"cad_verts_no_covered_disp_neighbour\": {0},\n", cp.CadVertsNoDispNeighbour);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"approximate\": {0}\n", cp.Approximate ? "true" : "false");
+                sb.AppendLine("  },");
+            }
+
             // Warnings collected during the run
             sb.AppendLine("  \"warnings\": [");
             if (summary != null && summary.Warnings != null)
@@ -3600,6 +4681,220 @@ namespace SolidWorksExtractor.Services
                     .Replace("\n", "\\n")
                     .Replace("\r", "\\r")
                     .Replace("\t", "\\t");
+        }
+
+        /// <summary>
+        /// Parse a bulk-displacement array from GetTranslationalDisplacement into
+        /// a per-node dictionary. The buffer layout varies by COSMOSWorks
+        /// version. We auto-detect by length-vs-nodeCount ratio and validate
+        /// the chosen layout against (maxNode, maxValue) returned by
+        /// GetMinMaxDisplacement -- the magnitude at the recorded max-node must
+        /// agree to within 5%, otherwise we declare the layout wrong and let
+        /// the per-node fallback take over.
+        ///
+        /// Known layouts:
+        ///   * flat-3stride:      [UX1, UY1, UZ1, UX2, UY2, UZ2, ...]
+        ///   * with-nid-4stride:  [nid1, UX1, UY1, UZ1, nid2, UX2, ...]
+        ///   * with-nid-5stride:  [nid1, MAG1, UX1, UY1, UZ1, nid2, MAG2, ...]
+        /// The corruption observed in the 2026-04-25 mounting-plate run
+        /// (interleaved integer node-IDs in the morph float buffer) is the
+        /// classic symptom of treating with-nid-4stride as flat-3stride.
+        /// </summary>
+        private Dictionary<int, double[]> ParseBulkDisplacement(
+            double[] allDisp,
+            int nodeCount,
+            ICWResults results,
+            out string layoutNote,
+            out bool validatedAgainstApi)
+        {
+            layoutNote = "unknown";
+            validatedAgainstApi = false;
+            if (allDisp == null || allDisp.Length == 0 || nodeCount <= 0) return null;
+
+            // Pull the (maxNode, maxValue) cross-check from GetMinMaxDisplacement.
+            int validateNid = 0;
+            double validateMagM = 0;
+            try
+            {
+                int err = 0;
+                object minMaxRaw = results.GetMinMaxDisplacement(
+                    (int)swsDisplacementComponent_e.swsDisplacementComponentURES,
+                    0, null, (int)swsLinearUnit_e.swsLinearUnitMeters, out err);
+                if (err == 0 && minMaxRaw != null)
+                {
+                    double[] mm = ConvertToDoubleArray(minMaxRaw);
+                    if (mm != null && mm.Length >= 4)
+                    {
+                        validateNid = (int)Math.Round(mm[2]);
+                        validateMagM = mm[3];
+                    }
+                }
+            }
+            catch { /* validation is best-effort; if missing we accept by length only */ }
+
+            // Try each layout in order. Stride 3 first (covers historical builds).
+            int[] strides = new[] { 3, 4, 5 };
+            foreach (int stride in strides)
+            {
+                if (nodeCount * stride != allDisp.Length) continue;
+
+                Dictionary<int, double[]> map = new Dictionary<int, double[]>(nodeCount);
+                if (stride == 3)
+                {
+                    // Implicit nodeId = i+1
+                    for (int i = 0; i < nodeCount; i++)
+                    {
+                        int idx = i * 3;
+                        map[i + 1] = new[] { allDisp[idx], allDisp[idx + 1], allDisp[idx + 2] };
+                    }
+                }
+                else if (stride == 4)
+                {
+                    // [nid, ux, uy, uz]
+                    for (int i = 0; i < nodeCount; i++)
+                    {
+                        int idx = i * 4;
+                        int nid = (int)Math.Round(allDisp[idx]);
+                        if (nid > 0)
+                            map[nid] = new[] { allDisp[idx + 1], allDisp[idx + 2], allDisp[idx + 3] };
+                    }
+                }
+                else // stride == 5
+                {
+                    // [nid, mag, ux, uy, uz]
+                    for (int i = 0; i < nodeCount; i++)
+                    {
+                        int idx = i * 5;
+                        int nid = (int)Math.Round(allDisp[idx]);
+                        if (nid > 0)
+                            map[nid] = new[] { allDisp[idx + 2], allDisp[idx + 3], allDisp[idx + 4] };
+                    }
+                }
+
+                // Validate against (maxNode, maxValue) if we have one.
+                if (validateNid > 0 && validateMagM > 0)
+                {
+                    double[] uvw;
+                    if (map.TryGetValue(validateNid, out uvw))
+                    {
+                        double mag = Math.Sqrt(uvw[0] * uvw[0] + uvw[1] * uvw[1] + uvw[2] * uvw[2]);
+                        double rel = (mag <= 0) ? double.PositiveInfinity : Math.Abs(mag - validateMagM) / Math.Max(mag, validateMagM);
+                        if (rel < 0.05)
+                        {
+                            layoutNote = stride == 3 ? "flat-3stride" :
+                                         stride == 4 ? "with-nid-4stride" :
+                                         "with-nid-5stride";
+                            validatedAgainstApi = true;
+                            Console.WriteLine($"    FEA: bulk displacement layout = {layoutNote} (validated against node {validateNid}: parsed |U|={mag:G6} m vs reported {validateMagM:G6} m)");
+                            return map;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"    FEA: bulk displacement stride={stride} rejected: parsed |U|={mag:G6} m at node {validateNid} disagrees with reported {validateMagM:G6} m (rel diff {rel:P1})");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"    FEA: bulk displacement stride={stride} rejected: max-node {validateNid} not present in parsed map");
+                    }
+                }
+                else
+                {
+                    // No validation possible -- accept the first stride that fits the length.
+                    layoutNote = stride == 3 ? "flat-3stride (length-only)" :
+                                 stride == 4 ? "with-nid-4stride (length-only)" :
+                                 "with-nid-5stride (length-only)";
+                    Console.WriteLine($"    FEA: bulk displacement layout = {layoutNote} (no min/max validation available)");
+                    return map;
+                }
+            }
+
+            Console.WriteLine($"    FEA: bulk displacement length {allDisp.Length} does not match any known layout for nodeCount {nodeCount}");
+            return null;
+        }
+
+        /// <summary>
+        /// Per-node displacement fallback when bulk parsing failed. Uses
+        /// GetDisplacementComponentForAllStepsAtNode for the URES (resultant)
+        /// and X/Y/Z components, mirroring the per-node stress fallback. Bounded
+        /// by a wall-clock budget so a slow COM round-trip can't hang the run.
+        /// </summary>
+        private Dictionary<int, double[]> ReadDisplacementPerNode(ICWResults results, List<int> surfaceNodes, FeaResultsSummary summary)
+        {
+            if (results == null || surfaceNodes == null || surfaceNodes.Count == 0) return null;
+
+            Console.WriteLine("    FEA: bulk displacement parse failed; falling back to per-node API (60s budget).");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            const long budgetMs = 60_000;
+            var map = new Dictionary<int, double[]>(surfaceNodes.Count);
+            int ok = 0, fail = 0;
+            int firstErr = 0;
+            string firstErrText = null;
+
+            // Try per-node X / Y / Z separately. swsDisplacementComponent_e
+            // values: UX=0, UY=1, UZ=2, URES=3 in the common enum.
+            for (int i = 0; i < surfaceNodes.Count; i++)
+            {
+                if (sw.ElapsedMilliseconds > budgetMs)
+                {
+                    Console.WriteLine($"    FEA: per-node displacement budget exceeded at {i}/{surfaceNodes.Count}; using partial map.");
+                    break;
+                }
+                int nid = surfaceNodes[i];
+                try
+                {
+                    double ux = ReadComponentAtNode(results, 0, nid, ref firstErr, ref firstErrText);
+                    double uy = ReadComponentAtNode(results, 1, nid, ref firstErr, ref firstErrText);
+                    double uz = ReadComponentAtNode(results, 2, nid, ref firstErr, ref firstErrText);
+                    if (!double.IsNaN(ux) && !double.IsNaN(uy) && !double.IsNaN(uz))
+                    {
+                        map[nid] = new[] { ux, uy, uz };
+                        ok++;
+                    }
+                    else
+                    {
+                        fail++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    fail++;
+                    if (firstErrText == null) firstErrText = ex.Message;
+                }
+            }
+            sw.Stop();
+            Console.WriteLine($"    FEA: per-node displacement: ok={ok}/{surfaceNodes.Count}, fail={fail}, firstErr={firstErr}/{firstErrText ?? "(none)"}, elapsed={sw.ElapsedMilliseconds}ms");
+            if (ok == 0)
+            {
+                Warn(summary, "Per-node displacement fallback returned 0 readings; morph target will be omitted.");
+                return null;
+            }
+            return map;
+        }
+
+        private double ReadComponentAtNode(ICWResults results, int component, int nid, ref int firstErr, ref string firstErrText)
+        {
+            try
+            {
+                int err = 0;
+                // GetDisplacementComponentForAllStepsAtNode mirrors GetStress*ForAllStepsAtNode
+                // shape; we take the last step's value (static studies have one step).
+                object raw = ((dynamic)results).GetDisplacementComponentForAllStepsAtNode(
+                    component, nid, null, (int)swsLinearUnit_e.swsLinearUnitMeters, out err);
+                if (err == 0 && raw != null)
+                {
+                    double[] perStep = ConvertToDoubleArray(raw);
+                    if (perStep != null && perStep.Length > 0)
+                        return perStep[perStep.Length - 1];
+                }
+                if (firstErr == 0) firstErr = err;
+                return double.NaN;
+            }
+            catch (Exception ex)
+            {
+                if (firstErrText == null) firstErrText = ex.Message;
+                return double.NaN;
+            }
         }
 
         /// <summary>

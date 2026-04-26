@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": "1",
-  "timestamp_utc": "2026-04-25T15:57:19.8958135Z",
+  "timestamp_utc": "2026-04-26T17:03:52.2995703Z",
   "extractor_version": "0.0.0.0",
-  "extractor_git_commit": "8bf49d42a5f6151ae5ac1df58c6c04787e44098e",
+  "extractor_git_commit": "d18e70a24d150d06695234edb259d42427281b0d",
   "solidworks_version": "32.5.0",
   "source": {
     "document_path": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
@@ -21,8 +21,8 @@
     "Mounting Plate_fea_static_1_manifest.json"
   ],
   "visualization": {
-    "mode": "solver_fe_mesh",
-    "approximate": false
+    "mode": "cad_tessellation_projected",
+    "approximate": true
   },
   "summary": {
     "max_von_mises_mpa": 799.98,
@@ -30,9 +30,43 @@
     "safety_factor": 0.78,
     "yield_strength_mpa": 620.422,
     "material": "Alloy Steel",
-    "surface_node_count": 2391,
+    "surface_node_count": 276,
     "element_count": 11466,
     "has_morph_target": true
+  },
+  "morph_diagnostic": {
+    "max_abs_delta_m": 0.000123346,
+    "reported_max_mm": 0.123501,
+    "layout_detected": "with-nid-5stride",
+    "ok": true
+  },
+  "stress_diagnostic": {
+    "surface_nodes_total": 2391,
+    "surface_nodes_covered": 2391,
+    "covered_pct": 1.0000,
+    "bulk_per_elem_source_count": 0,
+    "primary_path": "per-element-of-surface",
+    "contributions": {
+      "bulk_per_element_area_weighted": 0,
+      "bulk_per_node_fill": 0,
+      "per_node_api": 0,
+      "per_element_of_surface": 2391
+    }
+  },
+  "cad_projection": {
+    "cad_vertex_count": 276,
+    "cad_triangle_count": 568,
+    "fe_surface_node_count": 2391,
+    "fe_stress_covered_count": 2391,
+    "fe_disp_covered_count": 2391,
+    "k_neighbours": 4,
+    "weighting": "inverse_distance_squared",
+    "max_neighbour_distance_m": 0.0575329,
+    "mean_fe_node_spacing_m": 0.00163606,
+    "far_vertex_fraction_pct": 1.45,
+    "cad_verts_no_covered_stress_neighbour": 0,
+    "cad_verts_no_covered_disp_neighbour": 0,
+    "approximate": true
   },
   "warnings": [
     "Material model type (e.g. 'Linear Elastic Isotropic') is not exposed via the COSMOSWorks API; left null.",

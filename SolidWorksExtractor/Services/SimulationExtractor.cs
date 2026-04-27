@@ -265,6 +265,26 @@ namespace SolidWorksExtractor.Services
             public int VertexCount;
             public int TriangleCount;
             public int UniqueNodeCount;  // Deduplicated surface node count (for JSON summary)
+            // Per-display-vertex stress scalar in Pa, parallel with Positions
+            // (one value per vertex). Null for the FE-mesh fallback path.
+            // The app can drive its own contour rendering / legend off this
+            // array without re-deriving stress from baked vertex colours.
+            public double[] DisplayVertexStressPa;
+            // Display-surface peak (the brightest CAD vertex, distinct from
+            // the solver-authoritative max — that one may live in an
+            // interior element that doesn't paint any surface vertex).
+            public int DisplayPeakVertexIndex;
+            public double DisplayPeakStressPa;
+            public double[] DisplayPeakStressLocationM;
+            // Colour-mapping range that matches what was baked into
+            // VertexColors. The app needs this to recompute legend bands
+            // or recolour with a different palette without guessing the
+            // anchor.
+            public double DisplayColorRangeMinPa;
+            public double DisplayColorRangeMaxPa;
+            public string DisplayColorRangeSource;     // "solver_minmax" or "observed_max"
+            public string DisplayScalarFieldMode;      // e.g. "surface_nodal_gaussian_with_peak_preservation"
+            public string DisplayScalarFieldSource;    // human-readable formula description
         }
 
         /// <summary>
@@ -458,6 +478,20 @@ namespace SolidWorksExtractor.Services
             public double StressPeakBlendMax;           // smoothstep upper edge (spread fraction → fully sharp)
             public double StressPeakBlendMeanAlpha;     // average alpha across all CAD vertices (0..1)
             public double StressPeakBlendHighAlphaPct;  // % of CAD vertices where alpha > 0.5 (sharp dominated)
+            // Display-side peak / range / scalar-field metadata, surfaced in
+            // the manifest with explicit display_* prefixes so consumers
+            // can't confuse them with the solver-truth fields. The full
+            // per-display-vertex scalar array lives in the
+            // _display_scalars.json sidecar (see DisplayScalarsSidecar).
+            public double DisplayPeakStressPa;
+            public double DisplayPeakStressMpa;
+            public int    DisplayPeakVertexIndex;
+            public double DisplayColorRangeMinPa;
+            public double DisplayColorRangeMaxPa;
+            public string DisplayColorRangeSource;
+            public string DisplayScalarFieldMode;
+            public string DisplayScalarFieldSource;
+            public string DisplayScalarsSidecar;        // filename of the sidecar JSON next to the GLB
             // Position of the maximum-stress vertex in the IDW-projected CAD
             // display mesh (meters). Distinct from results.max_von_mises_location_m,
             // which is the solver-authoritative location (FE node coordinates).
@@ -762,6 +796,7 @@ namespace SolidWorksExtractor.Services
                 string glbPath = Path.Combine(outputFolder, baseName + ".glb");
                 string jsonPath = Path.Combine(outputFolder, baseName + "_results.json");
                 string manifestPath = Path.Combine(outputFolder, baseName + "_manifest.json");
+                string displayScalarsPath = Path.Combine(outputFolder, baseName + "_display_scalars.json");
 
                 // Build and write GLB
                 WriteFeaGlb(meshData, glbPath);
@@ -771,6 +806,19 @@ namespace SolidWorksExtractor.Services
                 // Write results JSON
                 WriteFeaResultsJson(summary, jsonPath);
                 Console.WriteLine($"    FEA: Results JSON written: {Path.GetFileName(jsonPath)}");
+
+                // Write display-scalars sidecar so the app can re-render its
+                // own contour bands / legend off the raw display stress field
+                // instead of being locked to the GLB's baked vertex colours.
+                // The current GLB COLOR_0 attribute is unchanged — this is
+                // strictly additive.
+                WriteFeaDisplayScalarsJson(meshData, summary, selectedStudyName, studySlug, displayScalarsPath);
+                long scalarsSizeKb = new FileInfo(displayScalarsPath).Length / 1024;
+                Console.WriteLine($"    FEA: Display scalars sidecar: {Path.GetFileName(displayScalarsPath)} ({scalarsSizeKb} KB)");
+                if (summary.CadProjectionDiagnostic != null)
+                {
+                    summary.CadProjectionDiagnostic.DisplayScalarsSidecar = Path.GetFileName(displayScalarsPath);
+                }
 
                 // Write provenance manifest. selectionMode reflects how the study was chosen.
                 string selectionMode;
@@ -791,7 +839,8 @@ namespace SolidWorksExtractor.Services
                     outputFiles: new[] {
                         Path.GetFileName(glbPath),
                         Path.GetFileName(jsonPath),
-                        Path.GetFileName(manifestPath)
+                        Path.GetFileName(manifestPath),
+                        Path.GetFileName(displayScalarsPath)
                     });
                 Console.WriteLine($"    FEA: Manifest written: {Path.GetFileName(manifestPath)}");
 
@@ -2866,6 +2915,21 @@ namespace SolidWorksExtractor.Services
                     if (posArray[i + 2] > bbMaxZ) bbMaxZ = posArray[i + 2];
                 }
 
+                // Display peak on the FE-mesh fallback path: the brightest
+                // FE surface vertex. Same semantics as the CAD path's display
+                // peak — separate from solver-authoritative peak fields.
+                int feDisplayPeakIdx = peakIdx >= 0 && peakIdx < surfVertCount ? peakIdx : -1;
+                double feDisplayPeakStressPa = feDisplayPeakIdx >= 0 ? stressValues[feDisplayPeakIdx] : 0.0;
+                double[] feDisplayPeakLoc = null;
+                if (feDisplayPeakIdx >= 0)
+                {
+                    int nid = surfaceNodes[feDisplayPeakIdx];
+                    feDisplayPeakLoc = new double[] { nodeX[nid], nodeY[nid], nodeZ[nid] };
+                }
+                string feRangeSource = (summary.MinVonMisesMpa > 0 && summary.MaxVonMisesMpa > 0)
+                    ? "solver_minmax"
+                    : "observed_max";
+
                 return new FeaMeshData
                 {
                     Positions = posArray,
@@ -2880,7 +2944,18 @@ namespace SolidWorksExtractor.Services
                     MorphBoundsMax = morphBoundsMax,
                     VertexCount = surfVertCount,
                     TriangleCount = surfaceFaces.Count,
-                    UniqueNodeCount = surfVertCount
+                    UniqueNodeCount = surfVertCount,
+                    // FE-mesh fallback path: the display scalar IS the FE
+                    // surface stress array directly (no projection).
+                    DisplayVertexStressPa = stressValues,
+                    DisplayPeakVertexIndex = feDisplayPeakIdx,
+                    DisplayPeakStressPa = feDisplayPeakStressPa,
+                    DisplayPeakStressLocationM = feDisplayPeakLoc,
+                    DisplayColorRangeMinPa = colorMinPa,
+                    DisplayColorRangeMaxPa = colorMaxPa,
+                    DisplayColorRangeSource = feRangeSource,
+                    DisplayScalarFieldMode = "fe_surface_node_stress",
+                    DisplayScalarFieldSource = "per_FE_surface_node_area_weighted_element_average",
                 };
             }
             finally
@@ -4853,6 +4928,24 @@ namespace SolidWorksExtractor.Services
                 StressPeakBlendHighAlphaPct = cad.VertexCount > 0
                     ? 100.0 * highAlphaCount / cad.VertexCount
                     : 0.0,
+                DisplayPeakStressPa = (peakIdx >= 0 && peakIdx < cad.VertexCount)
+                    ? cadStress[peakIdx]
+                    : 0.0,
+                DisplayPeakStressMpa = (peakIdx >= 0 && peakIdx < cad.VertexCount)
+                    ? cadStress[peakIdx] / 1e6
+                    : 0.0,
+                DisplayPeakVertexIndex = peakIdx,
+                DisplayColorRangeMinPa = colorMinPa,
+                DisplayColorRangeMaxPa = colorMaxPa,
+                DisplayColorRangeSource = stressRangeSource,
+                DisplayScalarFieldMode = stressProjectionMode,
+                DisplayScalarFieldSource = useSharpPerElement
+                    ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_nearest_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange)"
+                    : "gaussian_smooth_nodal",
+                // Sidecar filename is set at the caller after the file is
+                // actually written (the function name uses studySlug which
+                // isn't visible from inside this method).
+                DisplayScalarsSidecar = null,
             };
             double meanAlpha = alphaSamples > 0 ? sumAlpha / alphaSamples : 0.0;
             double highAlphaPct = cad.VertexCount > 0
@@ -4881,6 +4974,25 @@ namespace SolidWorksExtractor.Services
                 };
             }
 
+            // Display-mesh peak (the brightest CAD vertex). May be lower
+            // than summary.MaxVonMisesMpa: the solver per-element peak can
+            // live in an interior element that doesn't paint any surface
+            // vertex, so this is recorded as a separate display fact.
+            double displayPeakStressPa = (peakIdx >= 0 && peakIdx < cad.VertexCount)
+                ? cadStress[peakIdx]
+                : 0.0;
+            double[] displayPeakLoc = (peakIdx >= 0 && peakIdx < cad.VertexCount)
+                ? new double[]
+                {
+                    cad.Positions[peakIdx * 3],
+                    cad.Positions[peakIdx * 3 + 1],
+                    cad.Positions[peakIdx * 3 + 2]
+                }
+                : null;
+            string displayScalarFieldSource = useSharpPerElement
+                ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_nearest_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange)"
+                : "gaussian_smooth_nodal";
+
             return new FeaMeshData
             {
                 Positions = cad.Positions,
@@ -4902,6 +5014,19 @@ namespace SolidWorksExtractor.Services
                 // Refined display counts are reported under cad_projection.*
                 // (cad_vertex_count, refined_cad_vertex_count, etc.).
                 UniqueNodeCount = feCount,
+                // Display-side data the app needs to render its own contour
+                // bands / legend without re-deriving stress from the baked
+                // vertex colours. Length parallels Positions (one scalar per
+                // CAD vertex). Written to a sidecar JSON next to the GLB.
+                DisplayVertexStressPa = cadStress,
+                DisplayPeakVertexIndex = peakIdx,
+                DisplayPeakStressPa = displayPeakStressPa,
+                DisplayPeakStressLocationM = displayPeakLoc,
+                DisplayColorRangeMinPa = colorMinPa,
+                DisplayColorRangeMaxPa = colorMaxPa,
+                DisplayColorRangeSource = stressRangeSource,
+                DisplayScalarFieldMode = stressProjectionMode,
+                DisplayScalarFieldSource = displayScalarFieldSource,
             };
         }
 
@@ -4974,6 +5099,133 @@ namespace SolidWorksExtractor.Services
         ///   BufferView 4: Morph target positions (float32 VEC3) — if morph target present
         ///   BufferView 5: Morph target normals (float32 VEC3) — if morph target present
         /// </summary>
+        /// <summary>
+        /// Write the display-scalars sidecar JSON: per-CAD-vertex stress
+        /// scalar field, display peak metadata, and display colour-range
+        /// metadata. The app reads this alongside the GLB and renders its
+        /// own contour bands / legend without re-deriving stress from the
+        /// GLB's baked COLOR_0 attribute.
+        ///
+        /// Format (schema_version "1"):
+        ///   {
+        ///     "schema_version": "1",
+        ///     "study_name": "...",
+        ///     "study_slug": "...",
+        ///     "vertex_count": N,
+        ///     "scalar_field": {
+        ///       "mode":   stress_projection_mode,
+        ///       "source": human-readable formula description,
+        ///       "units":  "Pa",
+        ///       "values": [N float64 stress values, one per CAD vertex]
+        ///     },
+        ///     "display_color_range": {
+        ///       "min_pa":  ..., "max_pa": ..., "source": "solver_minmax", "mapping": "min-max-linear"
+        ///     },
+        ///     "display_peak": {
+        ///       "stress_pa": ..., "stress_mpa": ..., "vertex_index": ..., "location_m": [x,y,z]
+        ///     },
+        ///     "solver_peak": {
+        ///       "stress_pa": ..., "stress_mpa": ..., "node": ..., "location_m": [x,y,z]
+        ///     }
+        ///   }
+        ///
+        /// Solver peak is included for cross-reference: it can exceed the
+        /// display peak when the solver's max-stress element is interior
+        /// (no surface vertex paints it).
+        /// </summary>
+        private void WriteFeaDisplayScalarsJson(
+            FeaMeshData mesh,
+            FeaResultsSummary summary,
+            string studyName,
+            string studySlug,
+            string outputPath)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("{");
+            sb.AppendLine("  \"schema_version\": \"1\",");
+            sb.AppendFormat(CultureInfo.InvariantCulture, "  \"study_name\": \"{0}\",\n", EscapeJson(studyName ?? ""));
+            sb.AppendFormat(CultureInfo.InvariantCulture, "  \"study_slug\": \"{0}\",\n", EscapeJson(studySlug ?? ""));
+            int vCount = mesh?.VertexCount ?? 0;
+            sb.AppendFormat(CultureInfo.InvariantCulture, "  \"vertex_count\": {0},\n", vCount);
+
+            // scalar_field block
+            sb.AppendLine("  \"scalar_field\": {");
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"mode\": \"{0}\",\n", EscapeJson(mesh?.DisplayScalarFieldMode ?? ""));
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"source\": \"{0}\",\n", EscapeJson(mesh?.DisplayScalarFieldSource ?? ""));
+            sb.AppendLine("    \"units\": \"Pa\",");
+            sb.Append("    \"values\": [");
+            double[] vals = mesh?.DisplayVertexStressPa;
+            if (vals != null && vals.Length > 0)
+            {
+                for (int i = 0; i < vals.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    // G9 round-trips a double to ~9 sig figs in invariant
+                    // culture without scientific-notation surprises for the
+                    // app's JSON parser.
+                    sb.AppendFormat(CultureInfo.InvariantCulture, "{0:G9}", vals[i]);
+                }
+            }
+            sb.AppendLine("]");
+            sb.AppendLine("  },");
+
+            // display_color_range block
+            sb.AppendLine("  \"display_color_range\": {");
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"min_pa\": {0:G9},\n", mesh?.DisplayColorRangeMinPa ?? 0.0);
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"max_pa\": {0:G9},\n", mesh?.DisplayColorRangeMaxPa ?? 0.0);
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"source\": \"{0}\",\n", EscapeJson(mesh?.DisplayColorRangeSource ?? ""));
+            sb.AppendLine("    \"mapping\": \"min-max-linear\"");
+            sb.AppendLine("  },");
+
+            // display_peak block
+            sb.AppendLine("  \"display_peak\": {");
+            double dpPa = mesh?.DisplayPeakStressPa ?? 0.0;
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_pa\": {0:G9},\n", dpPa);
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_mpa\": {0:G9},\n", dpPa / 1e6);
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"vertex_index\": {0},\n", mesh?.DisplayPeakVertexIndex ?? -1);
+            double[] dpLoc = mesh?.DisplayPeakStressLocationM;
+            if (dpLoc != null && dpLoc.Length == 3)
+            {
+                sb.AppendFormat(CultureInfo.InvariantCulture,
+                    "    \"location_m\": [{0:G9}, {1:G9}, {2:G9}]\n",
+                    dpLoc[0], dpLoc[1], dpLoc[2]);
+            }
+            else
+            {
+                sb.AppendLine("    \"location_m\": null");
+            }
+            sb.AppendLine("  },");
+
+            // solver_peak block — for cross-reference only; the app must not
+            // assume display_peak == solver_peak (they differ when the solver
+            // peak lives in an interior element).
+            sb.AppendLine("  \"solver_peak\": {");
+            double solPa = (summary?.MaxVonMisesMpa ?? 0.0) * 1e6;
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_pa\": {0:G9},\n", solPa);
+            sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_mpa\": {0:G9},\n", summary?.MaxVonMisesMpa ?? 0.0);
+            int solNode = summary?.MaxStressNode ?? 0;
+            if (solNode > 0)
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"node\": {0},\n", solNode);
+            else
+                sb.AppendLine("    \"node\": null,");
+            double[] solLoc = summary?.MaxStressLocation;
+            if (solLoc != null && solLoc.Length == 3)
+            {
+                sb.AppendFormat(CultureInfo.InvariantCulture,
+                    "    \"location_m\": [{0:G9}, {1:G9}, {2:G9}]\n",
+                    solLoc[0], solLoc[1], solLoc[2]);
+            }
+            else
+            {
+                sb.AppendLine("    \"location_m\": null");
+            }
+            sb.AppendLine("  }");
+
+            sb.AppendLine("}");
+
+            File.WriteAllText(outputPath, sb.ToString());
+        }
+
         private void WriteFeaGlb(FeaMeshData mesh, string outputPath)
         {
             bool hasMorph = mesh.MorphPositions != null && mesh.MorphPositions.Length > 0;
@@ -5565,6 +5817,18 @@ namespace SolidWorksExtractor.Services
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_max\": {0:G6},\n", cp.StressPeakBlendMax);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_mean_alpha\": {0:G6},\n", cp.StressPeakBlendMeanAlpha);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"stress_peak_blend_high_alpha_pct\": {0:F2},\n", cp.StressPeakBlendHighAlphaPct);
+                // Display-side peak / range / scalar-field metadata. The
+                // full per-display-vertex scalar array is in the sidecar
+                // referenced by display_scalars_sidecar.
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_peak_stress_pa\": {0:G6},\n", cp.DisplayPeakStressPa);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_peak_stress_mpa\": {0:G6},\n", cp.DisplayPeakStressMpa);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_peak_vertex_index\": {0},\n", cp.DisplayPeakVertexIndex);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_color_range_min_pa\": {0:G6},\n", cp.DisplayColorRangeMinPa);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_color_range_max_pa\": {0:G6},\n", cp.DisplayColorRangeMaxPa);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_color_range_source\": \"{0}\",\n", EscapeJson(cp.DisplayColorRangeSource ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_scalar_field_mode\": \"{0}\",\n", EscapeJson(cp.DisplayScalarFieldMode ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_scalar_field_source\": \"{0}\",\n", EscapeJson(cp.DisplayScalarFieldSource ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_scalars_sidecar\": \"{0}\",\n", EscapeJson(cp.DisplayScalarsSidecar ?? ""));
                 if (cp.DisplayPeakStressLocationM != null && cp.DisplayPeakStressLocationM.Length == 3)
                 {
                     sb.AppendFormat(CultureInfo.InvariantCulture,

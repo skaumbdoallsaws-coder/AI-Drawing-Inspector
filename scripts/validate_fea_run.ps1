@@ -134,10 +134,11 @@ $partNumber = $baseName.Substring(0, $splitIdx)
 $studySlugFromFilename = $baseName.Substring($splitIdx + 5)
 
 $expectedFiles = @{
-    "manifest"  = $manifestFile.FullName
-    "glb"       = Join-Path $Directory ($baseName + ".glb")
-    "results"   = Join-Path $Directory ($baseName + "_results.json")
-    "part_data" = Join-Path $Directory ($partNumber + ".json")
+    "manifest"        = $manifestFile.FullName
+    "glb"             = Join-Path $Directory ($baseName + ".glb")
+    "results"         = Join-Path $Directory ($baseName + "_results.json")
+    "part_data"       = Join-Path $Directory ($partNumber + ".json")
+    "display_scalars" = Join-Path $Directory ($baseName + "_display_scalars.json")
 }
 foreach ($kvp in $expectedFiles.GetEnumerator()) {
     if (Test-Path $kvp.Value) {
@@ -149,10 +150,11 @@ foreach ($kvp in $expectedFiles.GetEnumerator()) {
 $allFiles = @(Get-ChildItem -Path $Directory -File -ErrorAction SilentlyContinue)
 $expectedLeafNames = @($expectedFiles.Values | ForEach-Object { Split-Path -Leaf $_ })
 $extraFiles = @($allFiles | Where-Object { $expectedLeafNames -notcontains $_.Name })
-if ($allFiles.Count -eq 4 -and $extraFiles.Count -eq 0) {
-    Write-Pass "Directory contains exactly the four canonical files"
+$expectedCount = $expectedFiles.Count
+if ($allFiles.Count -eq $expectedCount -and $extraFiles.Count -eq 0) {
+    Write-Pass ("Directory contains exactly the {0} canonical files" -f $expectedCount)
 } else {
-    Write-Fail ("Directory must contain exactly the four canonical files; found {0} file(s), {1} unexpected" -f $allFiles.Count, $extraFiles.Count)
+    Write-Fail ("Directory must contain exactly the {0} canonical files; found {1} file(s), {2} unexpected" -f $expectedCount, $allFiles.Count, $extraFiles.Count)
     $extraFiles | ForEach-Object { Write-Fail ("Unexpected file in canonical staging: {0}" -f $_.Name) }
 }
 

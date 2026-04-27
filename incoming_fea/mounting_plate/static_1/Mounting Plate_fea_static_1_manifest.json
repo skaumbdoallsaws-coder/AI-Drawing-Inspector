@@ -1,8 +1,8 @@
 ﻿{
   "manifest_version": "1",
-  "timestamp_utc": "2026-04-26T23:50:31.4736703Z",
+  "timestamp_utc": "2026-04-27T00:39:29.5208743Z",
   "extractor_version": "0.0.0.0",
-  "extractor_git_commit": "09c84548b5579ae30dcc7e59e7336c77a07f4347",
+  "extractor_git_commit": "eb760de15b2c078cd12a6e70cc0f4ca86c390982",
   "solidworks_version": "32.5.0",
   "source": {
     "document_path": "C:\\Users\\might\\OneDrive\\Desktop\\Simulation Essentials\\Lesson 01 Introduction and the analysis workflow\\Mounting Plate.SLDPRT",
@@ -18,7 +18,8 @@
   "outputs": [
     "Mounting Plate_fea_static_1.glb",
     "Mounting Plate_fea_static_1_results.json",
-    "Mounting Plate_fea_static_1_manifest.json"
+    "Mounting Plate_fea_static_1_manifest.json",
+    "Mounting Plate_fea_static_1_display_scalars.json"
   ],
   "visualization": {
     "mode": "cad_tessellation_projected",
@@ -91,6 +92,15 @@
     "stress_peak_blend_max": 0.2,
     "stress_peak_blend_mean_alpha": 0.0882615,
     "stress_peak_blend_high_alpha_pct": 7.66,
+    "display_peak_stress_pa": 6.2605E+08,
+    "display_peak_stress_mpa": 626.05,
+    "display_peak_vertex_index": 3964,
+    "display_color_range_min_pa": 1.19986E+07,
+    "display_color_range_max_pa": 7.9994E+08,
+    "display_color_range_source": "solver_minmax",
+    "display_scalar_field_mode": "surface_nodal_gaussian_with_peak_preservation",
+    "display_scalar_field_source": "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_nearest_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange)",
+    "display_scalars_sidecar": "Mounting Plate_fea_static_1_display_scalars.json",
     "display_peak_stress_location_m": [0.00300821755, 0.0348432064, -0.00499999989],
     "approximate": true
   },

@@ -4601,14 +4601,21 @@ namespace SolidWorksExtractor.Services
             // radius. A peak element bleeds into all CAD vertices within the
             // radius, producing a coherent patch around the concentration.
             //
-            // Radius = 1.5 × mean FE node spacing keeps the bleed local
-            // (about one FE element away in each direction) — wide enough
-            // to merge adjacent hotspot islands but tight enough that
-            // distant low-stress elements never inherit a high value. The
-            // existing α blend keeps the sharp influence gated to regions
-            // where sharp - smooth is meaningful, so the max-pool only
-            // surfaces in the actual concentration zone.
-            double sharpSupportRadiusM = Math.Max(index.MeanSpacing * 1.5, 1e-6);
+            // Radius = 1.0 × mean FE node spacing — approximately one
+            // element-step. Wide enough to merge the adjacent hotspot
+            // islands the K=1 path produced, tight enough that bulk-plate
+            // low-stress verts pick up only their immediate neighbours
+            // (whose VONs are similar) so the max-pool barely shifts the
+            // smooth value there and α stays near 0. A first try at 1.5×
+            // bled too far: bulk verts inherited mid-stress maxes from
+            // tris one element away, raising mean t from 0.30 to 0.39 and
+            // shrinking the blue/cyan bulk region from 22% to 7%.
+            //
+            // The existing α blend (smoothstep on (sharp - smooth) /
+            // colorRange) further gates the contribution: low-spread
+            // regions stay smooth-dominant even when the max-pool
+            // accumulator is non-empty.
+            double sharpSupportRadiusM = Math.Max(index.MeanSpacing * 1.0, 1e-6);
             double sharpSupportRadiusSq = sharpSupportRadiusM * sharpSupportRadiusM;
 
             // Pre-compute the same colour range used by MapStressToColors so

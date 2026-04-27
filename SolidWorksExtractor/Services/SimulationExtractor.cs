@@ -506,6 +506,16 @@ namespace SolidWorksExtractor.Services
             public double DisplayHotspotSupportRadiusRatio; // support / mean FE node spacing (e.g. 1.5)
             public double DisplayHotspotSupportCountMean;  // avg # of in-radius tris contributing per CAD vertex (≤ DisplayHotspotCandidateK)
             public int DisplayHotspotSupportCountMax;      // max # of in-radius tris contributing at any vertex (≤ DisplayHotspotCandidateK)
+            // Connected hotspot region — only CAD verts inside this region
+            // get any sharp-field contribution at all. Built via BFS through
+            // the CAD-mesh edge graph starting from the smooth field's
+            // global peak vertex, including any neighbour whose smoothVon
+            // is above the relative-from-peak threshold.
+            public string DisplayHotspotRegionMethod;       // "smooth_field_connected_component_from_peak" or "none"
+            public int DisplayHotspotRegionVertexCount;     // # of CAD verts inside the connected hotspot region
+            public double DisplayHotspotRegionThresholdRatio; // threshold position from smooth-field min (0) to peak (1)
+            public double DisplayHotspotRegionThresholdPa;  // absolute threshold (Pa) used to gate the BFS
+            public int DisplayHotspotRegionSeedVertexIndex; // CAD vertex used as the BFS seed (smooth-field peak)
             // Position of the maximum-stress vertex in the IDW-projected CAD
             // display mesh (meters). Distinct from results.max_von_mises_location_m,
             // which is the solver-authoritative location (FE node coordinates).
@@ -4680,13 +4690,13 @@ namespace SolidWorksExtractor.Services
                 : null;
 
             string stressProjectionMode = useSharpPerElement
-                ? "surface_nodal_gaussian_with_neighborhood_peak_preservation"
+                ? "surface_nodal_gaussian_with_connected_hotspot_peak_preservation"
                 : "surface_nodal_local_gaussian_to_display";
             int stressProjectionK = STRESS_K;
             string stressSmoothingMethod = "gaussian";
             string stressSmoothingSource = "fe_surface_nodes";
             string peakPreservationMethod = useSharpPerElement
-                ? "per_element_max_in_support_radius_among_k8_centroid_candidates_blended"
+                ? "per_element_max_in_support_radius_among_k8_centroid_candidates_blended_within_connected_hotspot_region"
                 : "none";
             string peakBlendSource = useSharpPerElement
                 ? "sharp_minus_smooth_normalized_by_color_range"
@@ -4702,6 +4712,16 @@ namespace SolidWorksExtractor.Services
             long totalSupportContrib = 0;
             int supportSamples = 0;
             int maxSupportContrib = 0;
+
+            // Pass 1: per-vertex compute smoothVon[i] and sharpVon[i] +
+            //         displacement. Defer α and the final blended value
+            //         to Pass 2, after the connected-hotspot mask is
+            //         known. haveSmoothVert[i] tracks vertices that got
+            //         a usable smooth value (excludes the hard zero-
+            //         coverage cases counted in cadVertsNoStressNeighbour).
+            double[] smoothVonArr = new double[cad.VertexCount];
+            double[] sharpVonArr = new double[cad.VertexCount];
+            bool[] haveSmoothVert = new bool[cad.VertexCount];
 
             for (int i = 0; i < cad.VertexCount; i++)
             {
@@ -4721,15 +4741,10 @@ namespace SolidWorksExtractor.Services
                     if (stressNbrs[0].dist > farThreshold) farVerts++;
 
                     double wSum = 0, sSum = 0;
-                    double sNbrMax = double.MinValue, sNbrMin = double.MaxValue;
-                    int coveredCount = 0;
                     foreach (var n in stressNbrs)
                     {
                         if (feStressCovered != null && !feStressCovered[n.idx]) continue;
-                        coveredCount++;
                         double sV = feSurfaceStress[n.idx];
-                        if (sV > sNbrMax) sNbrMax = sV;
-                        if (sV < sNbrMin) sNbrMin = sV;
                         if (n.dist > smoothingRadiusM) continue;
                         double w = Math.Exp(-(n.dist * n.dist) * inv2SigmaSq);
                         wSum += w;
@@ -4764,31 +4779,8 @@ namespace SolidWorksExtractor.Services
                     else
                     {
                         // ---- Sharp field: max parent-VON over in-radius subset of K=8 nearest-centroid candidates ----
-                        // Replaces the prior K=1 nearest-tri behaviour, which
-                        // painted high stress only at the CAD vertices
-                        // geometrically closest to a peak surface element. On
-                        // the curved hole boundary this fragmented the
-                        // hotspot into isolated red/orange islands because
-                        // each adjacent CAD vertex selected a different
-                        // nearest tri.
-                        //
-                        // For each CAD vertex, gather the K=8 nearest tri
-                        // centroids (SHARP_CANDIDATE_K below) and run
-                        // closest-point-on-triangle on each. Among THOSE
-                        // CANDIDATES, any tri whose closest-point distance
-                        // is within sharpSupportRadiusM contributes its
-                        // parent VON to a max accumulator. The sharp value
-                        // is that maximum — a single hotspot element in the
-                        // candidate set bleeds into the CAD vertex,
-                        // producing a contiguous high-stress patch. The
-                        // candidate cap is reflected in the recorded
-                        // support_count_max (always ≤ K). If no candidate
-                        // tri falls inside the radius (CAD vertex far from
-                        // any FE surface — rare given the 95% gate upstream),
-                        // fall back to the closest tri so the
-                        // sharp value is never undefined.
-                        // (SHARP_CANDIDATE_K declared at outer scope so
-                        // the diagnostic struct below can reference it.)
+                        // (See SHARP_CANDIDATE_K + sharpSupportRadiusM
+                        // declarations and rationale block above.)
                         double sharpVon = smoothVon;
                         int sharpSupportContribCount = 0;
                         if (useSharpPerElement)
@@ -4829,11 +4821,6 @@ namespace SolidWorksExtractor.Services
                             }
                             else if (bestTri >= 0)
                             {
-                                // Fallback: no tri within support radius
-                                // (CAD vertex sits in geometry uncovered by
-                                // the FE surface mesh). Use the closest tri
-                                // so we never write smoothVon as sharp by
-                                // accident.
                                 sharpVon = feTriVon[bestTri];
                             }
                             totalSupportContrib += sharpSupportContribCount;
@@ -4842,41 +4829,9 @@ namespace SolidWorksExtractor.Services
                             supportSamples++;
                         }
 
-                        // ---- Adaptive blend: delta = sharp - smooth, normalised ----
-                        // Positive delta means the per-element peak is
-                        // hidden by nodal smoothing; that's where we want
-                        // sharp to win. Negative or near-zero delta means
-                        // smooth already captures the local value, no need
-                        // to introduce per-element Voronoi-cell texture.
-                        double alpha = 0.0;
-                        if (useSharpPerElement)
-                        {
-                            double delta = sharpVon - smoothVon;
-                            if (delta > 0)
-                            {
-                                double deltaNorm = delta / colorRangePa;
-                                if (deltaNorm <= BLEND_MIN)
-                                {
-                                    alpha = 0.0;
-                                }
-                                else if (deltaNorm >= BLEND_MAX)
-                                {
-                                    alpha = 1.0;
-                                }
-                                else
-                                {
-                                    double t = (deltaNorm - BLEND_MIN) / (BLEND_MAX - BLEND_MIN);
-                                    alpha = t * t * (3.0 - 2.0 * t); // smoothstep
-                                }
-                            }
-                            sumAlpha += alpha;
-                            alphaSamples++;
-                            if (alpha > 0.5) highAlphaCount++;
-                        }
-
-                        double finalVon = (1.0 - alpha) * smoothVon + alpha * sharpVon;
-                        cadStress[i] = finalVon;
-                        if (finalVon > maxStress) { maxStress = finalVon; peakIdx = i; }
+                        smoothVonArr[i] = smoothVon;
+                        sharpVonArr[i] = sharpVon;
+                        haveSmoothVert[i] = true;
                     }
                 }
 
@@ -4907,15 +4862,158 @@ namespace SolidWorksExtractor.Services
                 }
             }
 
-            // Colour mapping: solver-reported [min, max] VON when available
-            // (matches the SolidWorks legend); fall back to [0, observed peak]
-            // when min is missing (e.g. older API layout).
+            // ---- Connected hotspot region from the smooth field's peak ----
+            //
+            // The earlier max-pool sharp path was applied at every CAD
+            // vertex independently. Any vertex that happened to sit near a
+            // high-stress surface element got a sharp boost — even if it
+            // was geometrically far from the actual stress concentration.
+            // The result: scattered red/yellow islands across the plate
+            // instead of one dominant patch around the hole.
+            //
+            // Fix: only allow sharp to influence vertices that belong to
+            // the SAME connected high-stress region as the smooth field's
+            // global peak. Build CAD-mesh adjacency from cad.Indices, BFS
+            // from the smooth peak through adjacency, and include any
+            // neighbour whose smooth value is above a relative threshold.
+            // Outside that connected region, the displayed value is
+            // strictly smooth — no per-element sharp contribution leaks.
+            //
+            // Threshold: smoothMin + REGION_THRESHOLD_FROM_PEAK *
+            // (smoothPeak - smoothMin). At 0.50 the region is the
+            // upper-half of the local smooth-field range; tightens
+            // automatically for parts where the peak is very high
+            // relative to the bulk, broadens for flatter fields.
+            const double REGION_THRESHOLD_FROM_PEAK = 0.50;
+
+            int smoothPeakIdxLocal = -1;
+            double smoothPeakValueLocal = double.NegativeInfinity;
+            double smoothMinValueLocal = double.PositiveInfinity;
+            for (int v = 0; v < cad.VertexCount; v++)
+            {
+                if (!haveSmoothVert[v]) continue;
+                double s = smoothVonArr[v];
+                if (s > smoothPeakValueLocal) { smoothPeakValueLocal = s; smoothPeakIdxLocal = v; }
+                if (s < smoothMinValueLocal) smoothMinValueLocal = s;
+            }
+
+            bool[] hotspotMask = new bool[cad.VertexCount];
+            int hotspotRegionVertCount = 0;
+            double regionThresholdPa = 0.0;
+            if (useSharpPerElement && smoothPeakIdxLocal >= 0
+                && smoothPeakValueLocal > smoothMinValueLocal)
+            {
+                // CAD-mesh adjacency from the indexed triangle list. Each
+                // triangle contributes 6 directed neighbour pairs; the BFS
+                // visited[] array dedupes naturally so we don't dedupe here.
+                int triCount = cad.Indices.Length / 3;
+                var adjStart = new int[cad.VertexCount + 1];
+                for (int t = 0; t < triCount; t++)
+                {
+                    int a = (int)cad.Indices[t * 3];
+                    int b = (int)cad.Indices[t * 3 + 1];
+                    int c = (int)cad.Indices[t * 3 + 2];
+                    adjStart[a]++; adjStart[a]++;
+                    adjStart[b]++; adjStart[b]++;
+                    adjStart[c]++; adjStart[c]++;
+                }
+                // CSR offsets
+                int adjTotal = 0;
+                for (int v = 0; v <= cad.VertexCount; v++)
+                {
+                    int cnt = v < cad.VertexCount ? adjStart[v] : 0;
+                    adjStart[v] = adjTotal;
+                    adjTotal += cnt;
+                }
+                var adjList = new int[adjTotal];
+                var adjFill = new int[cad.VertexCount];
+                for (int t = 0; t < triCount; t++)
+                {
+                    int a = (int)cad.Indices[t * 3];
+                    int b = (int)cad.Indices[t * 3 + 1];
+                    int c = (int)cad.Indices[t * 3 + 2];
+                    adjList[adjStart[a] + adjFill[a]++] = b;
+                    adjList[adjStart[a] + adjFill[a]++] = c;
+                    adjList[adjStart[b] + adjFill[b]++] = a;
+                    adjList[adjStart[b] + adjFill[b]++] = c;
+                    adjList[adjStart[c] + adjFill[c]++] = a;
+                    adjList[adjStart[c] + adjFill[c]++] = b;
+                }
+
+                regionThresholdPa = smoothMinValueLocal
+                    + REGION_THRESHOLD_FROM_PEAK * (smoothPeakValueLocal - smoothMinValueLocal);
+
+                var bfs = new Queue<int>();
+                hotspotMask[smoothPeakIdxLocal] = true;
+                bfs.Enqueue(smoothPeakIdxLocal);
+                hotspotRegionVertCount = 1;
+                while (bfs.Count > 0)
+                {
+                    int v = bfs.Dequeue();
+                    int s = adjStart[v];
+                    int e = adjStart[v + 1];
+                    for (int k = s; k < e; k++)
+                    {
+                        int n = adjList[k];
+                        if (hotspotMask[n]) continue;
+                        if (!haveSmoothVert[n]) continue;
+                        if (smoothVonArr[n] < regionThresholdPa) continue;
+                        hotspotMask[n] = true;
+                        hotspotRegionVertCount++;
+                        bfs.Enqueue(n);
+                    }
+                }
+            }
+
+            // ---- Pass 2: blend smooth + sharp, gated by hotspotMask ----
+            // Inside the region: alpha = smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp-smooth)/colorRange)
+            // Outside the region: alpha forced to 0 → smooth-only paint.
+            // Solver-true min..max colour range stays the legend anchor.
             double colorMinPa = (summary.MinVonMisesMpa > 0 && summary.MaxVonMisesMpa > 0)
                 ? summary.MinVonMisesMpa * 1e6
                 : 0.0;
             double colorMaxPa = (summary.MaxVonMisesMpa > 0)
                 ? summary.MaxVonMisesMpa * 1e6
-                : (maxStress > 0 ? maxStress : 1.0);
+                : 1.0;
+            colorRangePa = Math.Max(colorMaxPa - colorMinPa, 1e-6);
+
+            for (int i = 0; i < cad.VertexCount; i++)
+            {
+                if (!haveSmoothVert[i])
+                {
+                    // cadStress[i] left at 0; this vertex was already
+                    // counted in cadVertsNoStressNeighbour during pass 1.
+                    continue;
+                }
+                double smoothVon = smoothVonArr[i];
+                double sharpVon = sharpVonArr[i];
+                double alpha = 0.0;
+                if (useSharpPerElement && hotspotMask[i])
+                {
+                    double delta = sharpVon - smoothVon;
+                    if (delta > 0)
+                    {
+                        double deltaNorm = delta / colorRangePa;
+                        if (deltaNorm <= BLEND_MIN) alpha = 0.0;
+                        else if (deltaNorm >= BLEND_MAX) alpha = 1.0;
+                        else
+                        {
+                            double t = (deltaNorm - BLEND_MIN) / (BLEND_MAX - BLEND_MIN);
+                            alpha = t * t * (3.0 - 2.0 * t); // smoothstep
+                        }
+                    }
+                }
+                if (useSharpPerElement)
+                {
+                    sumAlpha += alpha;
+                    alphaSamples++;
+                    if (alpha > 0.5) highAlphaCount++;
+                }
+                double finalVon = (1.0 - alpha) * smoothVon + alpha * sharpVon;
+                cadStress[i] = finalVon;
+                if (finalVon > maxStress) { maxStress = finalVon; peakIdx = i; }
+            }
+
             byte[] cadColors = MapStressToColors(cadStress, cad.VertexCount, colorMinPa, colorMaxPa);
 
             float[] morphPositions = null;
@@ -5047,7 +5145,7 @@ namespace SolidWorksExtractor.Services
                 DisplayColorRangeSource = stressRangeSource,
                 DisplayScalarFieldMode = stressProjectionMode,
                 DisplayScalarFieldSource = useSharpPerElement
-                    ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange); sharp = max(parent_VON over in-radius subset of K=8 nearest-centroid candidate surface tris; in-radius means closest-point distance <= sharpSupportRadiusM)"
+                    ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange) when CAD vertex is inside the connected hotspot region (BFS through CAD-mesh adjacency from the smooth-field global peak, including verts whose smoothVon >= smoothMin + REGION_THRESHOLD_FROM_PEAK*(smoothPeak-smoothMin)); alpha=0 outside the region so smooth dominates and sharp can never paint isolated islands away from the actual concentration; sharp = max(parent_VON over in-radius subset of K=8 nearest-centroid candidate surface tris; in-radius means closest-point distance <= sharpSupportRadiusM)"
                     : "gaussian_smooth_nodal",
                 // Sidecar filename is set at the caller after the file is
                 // actually written (the function name uses studySlug which
@@ -5065,6 +5163,15 @@ namespace SolidWorksExtractor.Services
                     ? (double)totalSupportContrib / supportSamples
                     : 0.0,
                 DisplayHotspotSupportCountMax = maxSupportContrib,
+                DisplayHotspotRegionMethod = useSharpPerElement
+                    ? "smooth_field_connected_component_from_peak"
+                    : "none",
+                DisplayHotspotRegionVertexCount = hotspotRegionVertCount,
+                DisplayHotspotRegionThresholdRatio = useSharpPerElement
+                    ? REGION_THRESHOLD_FROM_PEAK
+                    : 0.0,
+                DisplayHotspotRegionThresholdPa = regionThresholdPa,
+                DisplayHotspotRegionSeedVertexIndex = smoothPeakIdxLocal,
             };
             double meanAlpha = alphaSamples > 0 ? sumAlpha / alphaSamples : 0.0;
             double highAlphaPct = cad.VertexCount > 0
@@ -5073,7 +5180,7 @@ namespace SolidWorksExtractor.Services
             double meanSupportContrib = supportSamples > 0
                 ? (double)totalSupportContrib / supportSamples
                 : 0.0;
-            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}, sigma={sigma * 1000:F3} mm = {(sigma / Math.Max(index.MeanSpacing, 1e-12)):F2}× mean FE spacing, radius={smoothingRadiusM * 1000:F3} mm, peak={peakPreservationMethod}, support_radius={sharpSupportRadiusM * 1000:F3} mm = {(useSharpPerElement && index.MeanSpacing > 0 ? sharpSupportRadiusM / index.MeanSpacing : 0.0):F2}× mean FE spacing, support_count_mean={meanSupportContrib:F2}/8, support_count_max={maxSupportContrib}, blend [{(useSharpPerElement ? BLEND_MIN : 0.0):F2}, {(useSharpPerElement ? BLEND_MAX : 0.0):F2}], mean alpha={meanAlpha:F3}, sharp-dominated verts={highAlphaPct:F2}%); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
+            Console.WriteLine($"    FEA Stage 3: projected {cad.VertexCount:N0} CAD verts via {stressProjectionMode} (k={stressProjectionK}, sigma={sigma * 1000:F3} mm = {(sigma / Math.Max(index.MeanSpacing, 1e-12)):F2}× mean FE spacing, radius={smoothingRadiusM * 1000:F3} mm, peak={peakPreservationMethod}, support_radius={sharpSupportRadiusM * 1000:F3} mm = {(useSharpPerElement && index.MeanSpacing > 0 ? sharpSupportRadiusM / index.MeanSpacing : 0.0):F2}× mean FE spacing, support_count_mean={meanSupportContrib:F2}/8, support_count_max={maxSupportContrib}, hotspot_region={hotspotRegionVertCount}/{cad.VertexCount} verts above {regionThresholdPa / 1e6:F1} MPa from seed {smoothPeakIdxLocal}, blend [{(useSharpPerElement ? BLEND_MIN : 0.0):F2}, {(useSharpPerElement ? BLEND_MAX : 0.0):F2}], mean alpha={meanAlpha:F3}, sharp-dominated verts={highAlphaPct:F2}%); stress covered {feStressCoveredCount}/{feCount}, disp covered {feDispCoveredCount}/{feCount}, max neighbour dist {maxNeighbourDist:G4} m, far-vert frac {farPct:F2}%, CAD verts w/o covered stress neighbour {cadVertsNoStressNeighbour}, w/o covered disp neighbour {cadVertsNoDispNeighbour}");
 
             // Capture the CAD display-mesh peak as a *display-only* diagnostic
             // — never let it shadow solver-authoritative fields:
@@ -5112,7 +5219,7 @@ namespace SolidWorksExtractor.Services
                 }
                 : null;
             string displayScalarFieldSource = useSharpPerElement
-                ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange); sharp = max(parent_VON over in-radius subset of K=8 nearest-centroid candidate surface tris; in-radius means closest-point distance <= sharpSupportRadiusM)"
+                ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange) when CAD vertex is inside the connected hotspot region (BFS through CAD-mesh adjacency from the smooth-field global peak, including verts whose smoothVon >= smoothMin + REGION_THRESHOLD_FROM_PEAK*(smoothPeak-smoothMin)); alpha=0 outside the region so smooth dominates and sharp can never paint isolated islands away from the actual concentration; sharp = max(parent_VON over in-radius subset of K=8 nearest-centroid candidate surface tris; in-radius means closest-point distance <= sharpSupportRadiusM)"
                 : "gaussian_smooth_nodal";
 
             return new FeaMeshData
@@ -5957,6 +6064,11 @@ namespace SolidWorksExtractor.Services
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_support_radius_ratio\": {0:G6},\n", cp.DisplayHotspotSupportRadiusRatio);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_support_count_mean\": {0:G6},\n", cp.DisplayHotspotSupportCountMean);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_support_count_max\": {0},\n", cp.DisplayHotspotSupportCountMax);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_region_method\": \"{0}\",\n", EscapeJson(cp.DisplayHotspotRegionMethod ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_region_vertex_count\": {0},\n", cp.DisplayHotspotRegionVertexCount);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_region_threshold_ratio\": {0:G6},\n", cp.DisplayHotspotRegionThresholdRatio);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_region_threshold_pa\": {0:G6},\n", cp.DisplayHotspotRegionThresholdPa);
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_region_seed_vertex_index\": {0},\n", cp.DisplayHotspotRegionSeedVertexIndex);
                 if (cp.DisplayPeakStressLocationM != null && cp.DisplayPeakStressLocationM.Length == 3)
                 {
                     sb.AppendFormat(CultureInfo.InvariantCulture,

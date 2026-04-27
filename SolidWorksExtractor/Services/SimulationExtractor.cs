@@ -4582,8 +4582,8 @@ namespace SolidWorksExtractor.Services
             // smoothed average. delta directly measures "is sharp telling
             // us something smooth missed", which is what peak preservation
             // actually wants.
-            const double BLEND_MIN = 0.05;
-            const double BLEND_MAX = 0.20;
+            const double BLEND_MIN = 0.15;
+            const double BLEND_MAX = 0.30;
 
             // Hotspot support radius for the sharp path's max-pool.
             //
@@ -4601,21 +4601,27 @@ namespace SolidWorksExtractor.Services
             // radius. A peak element bleeds into all CAD vertices within the
             // radius, producing a coherent patch around the concentration.
             //
-            // Radius = 1.0 × mean FE node spacing — approximately one
-            // element-step. Wide enough to merge the adjacent hotspot
-            // islands the K=1 path produced, tight enough that bulk-plate
-            // low-stress verts pick up only their immediate neighbours
-            // (whose VONs are similar) so the max-pool barely shifts the
-            // smooth value there and α stays near 0. A first try at 1.5×
-            // bled too far: bulk verts inherited mid-stress maxes from
-            // tris one element away, raising mean t from 0.30 to 0.39 and
-            // shrinking the blue/cyan bulk region from 22% to 7%.
+            // Radius = 1.5 × mean FE node spacing — wide enough to merge
+            // the adjacent hotspot islands the K=1 path produced
+            // (typically 5-6 in-radius tris contribute), but only the α
+            // blend below decides how much that max-pool actually
+            // shifts the displayed value.
             //
-            // The existing α blend (smoothstep on (sharp - smooth) /
-            // colorRange) further gates the contribution: low-spread
-            // regions stay smooth-dominant even when the max-pool
-            // accumulator is non-empty.
-            double sharpSupportRadiusM = Math.Max(index.MeanSpacing * 1.0, 1e-6);
+            // The α gate (BLEND_MIN/BLEND_MAX) is what keeps the bulk
+            // plate from green-washing: max-pool over a wide radius
+            // produces values higher than Gaussian average everywhere,
+            // but on bulk verts the gap is small (a few % of colour
+            // range) so α stays at 0 and smooth wins. At the
+            // concentration the gap is large (~30-50% of colour range)
+            // so α hits 1 and the contiguous max-pool patch surfaces.
+            //
+            // First try at 1.5× / blend [0.05, 0.20] over-shifted
+            // (mean t 0.30 → 0.39, blue/cyan fraction 22% → 7%) because
+            // the gate triggered on small intermediate deltas; raising
+            // BLEND_MIN/MAX to [0.15, 0.30] keeps bulk verts smooth-
+            // dominant while letting the actual concentration use the
+            // full max-pool value.
+            double sharpSupportRadiusM = Math.Max(index.MeanSpacing * 1.5, 1e-6);
             double sharpSupportRadiusSq = sharpSupportRadiusM * sharpSupportRadiusM;
 
             // Pre-compute the same colour range used by MapStressToColors so

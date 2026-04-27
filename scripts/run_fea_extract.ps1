@@ -407,15 +407,17 @@ $expectedNames = @(
     "$PartNumber.json",
     "$expectedBase.glb",
     "${expectedBase}_results.json",
-    "${expectedBase}_manifest.json"
+    "${expectedBase}_manifest.json",
+    "${expectedBase}_display_scalars.json"
 )
+$expectedCount = $expectedNames.Count
 $tempFiles = @(Get-ChildItem -Path $tempDir -File -ErrorAction SilentlyContinue)
 $tempNames = @($tempFiles | ForEach-Object { $_.Name })
 $unexpectedTemp = @($tempNames | Where-Object { $expectedNames -notcontains $_ })
 $missingTemp = @($expectedNames | Where-Object { $tempNames -notcontains $_ })
-if ($unexpectedTemp.Count -gt 0 -or $missingTemp.Count -gt 0 -or $tempFiles.Count -ne 4) {
+if ($unexpectedTemp.Count -gt 0 -or $missingTemp.Count -gt 0 -or $tempFiles.Count -ne $expectedCount) {
     Write-Host "ERROR: Worker FEA staging contract violation." -ForegroundColor Red
-    Write-Host "       Expected exactly these 4 files in temp staging:"
+    Write-Host ("       Expected exactly these {0} files in temp staging:" -f $expectedCount)
     $expectedNames | ForEach-Object { Write-Host "         $_" }
     if ($missingTemp.Count -gt 0) {
         Write-Host "       Missing:" -ForegroundColor Red
@@ -481,21 +483,24 @@ $canonResults = Join-Path $canonicalDir "${canonBase}_results.json"
 # incoming_fea/README.md. The extractor writes it from --output regardless of
 # the FEA path, so its absence here means the run is incomplete.
 $canonPartData = Join-Path $canonicalDir "$PartNumber.json"
+$canonDisplayScalars = Join-Path $canonicalDir "${canonBase}_display_scalars.json"
 
 $missing = @()
 if (-not (Test-Path $canonGlb)) { $missing += $canonGlb }
 if (-not (Test-Path $canonResults)) { $missing += $canonResults }
 if (-not (Test-Path $canonPartData)) { $missing += $canonPartData }
+if (-not (Test-Path $canonDisplayScalars)) { $missing += $canonDisplayScalars }
 $canonicalFiles = @(Get-ChildItem -Path $canonicalDir -File -ErrorAction SilentlyContinue)
 $canonicalNames = @($canonicalFiles | ForEach-Object { $_.Name })
 $unexpectedCanonical = @($canonicalNames | Where-Object { $expectedNames -notcontains $_ })
 
 Write-Host ""
 Write-Host "Canonical staging directory: $canonicalDir" -ForegroundColor Cyan
-Write-Host ("  manifest:  {0}" -f $canonManifest.Name) -ForegroundColor Green
-if (Test-Path $canonGlb) { Write-Host ("  glb:       {0}" -f (Split-Path -Leaf $canonGlb)) -ForegroundColor Green }
-if (Test-Path $canonResults) { Write-Host ("  results:   {0}" -f (Split-Path -Leaf $canonResults)) -ForegroundColor Green }
-if (Test-Path $canonPartData) { Write-Host ("  part-data: {0}" -f (Split-Path -Leaf $canonPartData)) -ForegroundColor Green }
+Write-Host ("  manifest:        {0}" -f $canonManifest.Name) -ForegroundColor Green
+if (Test-Path $canonGlb) { Write-Host ("  glb:             {0}" -f (Split-Path -Leaf $canonGlb)) -ForegroundColor Green }
+if (Test-Path $canonResults) { Write-Host ("  results:         {0}" -f (Split-Path -Leaf $canonResults)) -ForegroundColor Green }
+if (Test-Path $canonPartData) { Write-Host ("  part-data:       {0}" -f (Split-Path -Leaf $canonPartData)) -ForegroundColor Green }
+if (Test-Path $canonDisplayScalars) { Write-Host ("  display-scalars: {0}" -f (Split-Path -Leaf $canonDisplayScalars)) -ForegroundColor Green }
 
 if ($missing.Count -gt 0) {
     Write-Host ""
@@ -504,9 +509,9 @@ if ($missing.Count -gt 0) {
     Write-Host "       Do not commit this directory until the missing files are produced." -ForegroundColor Red
     exit 2
 }
-if ($canonicalFiles.Count -ne 4 -or $unexpectedCanonical.Count -gt 0) {
+if ($canonicalFiles.Count -ne $expectedCount -or $unexpectedCanonical.Count -gt 0) {
     Write-Host ""
-    Write-Host "ERROR: Canonical staging contains files outside the four-file contract:" -ForegroundColor Red
+    Write-Host ("ERROR: Canonical staging contains files outside the {0}-file contract:" -f $expectedCount) -ForegroundColor Red
     $unexpectedCanonical | ForEach-Object { Write-Host "   $_" }
     Write-Host "       Do not commit this directory until it contains only the canonical files." -ForegroundColor Red
     exit 2

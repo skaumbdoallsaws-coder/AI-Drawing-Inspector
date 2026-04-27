@@ -493,15 +493,19 @@ namespace SolidWorksExtractor.Services
             public string DisplayScalarFieldSource;
             public string DisplayScalarsSidecar;        // filename of the sidecar JSON next to the GLB
             // Hotspot continuity: replaces K=1 nearest-tri sharp with a
-            // max-pool over surface tris within a support radius so a peak
-            // surface element bleeds into all CAD vertices nearby instead
-            // of fragmenting into isolated red islands. Recorded so the
-            // app and reviewers can see exactly how broad the bleed was.
-            public string DisplayHotspotRefinementMethod; // "max_parent_von_within_support_radius" or "none"
+            // max-pool over the in-radius subset of the K nearest centroid
+            // candidates (NOT a full radius search of every surface tri —
+            // the candidate set caps how many tris are tested). The peak
+            // surface element bleeds into nearby CAD vertices via that
+            // capped pool, producing a contiguous red region instead of
+            // isolated islands. Recorded so the app and reviewers can see
+            // exactly how broad the bleed was.
+            public string DisplayHotspotRefinementMethod; // "max_parent_von_within_support_radius_among_k_centroid_candidates" or "none"
+            public int DisplayHotspotCandidateK;          // K (centroid candidates) per CAD vertex; the max-pool is capped to in-radius tris among these
             public double DisplayHotspotSupportRadiusM;   // Closest-point distance ceiling (m) for the max-pool
             public double DisplayHotspotSupportRadiusRatio; // support / mean FE node spacing (e.g. 1.5)
-            public double DisplayHotspotSupportCountMean;  // average # of in-radius tris contributing per CAD vertex
-            public int DisplayHotspotSupportCountMax;      // max # of in-radius tris contributing at any vertex
+            public double DisplayHotspotSupportCountMean;  // avg # of in-radius tris contributing per CAD vertex (≤ DisplayHotspotCandidateK)
+            public int DisplayHotspotSupportCountMax;      // max # of in-radius tris contributing at any vertex (≤ DisplayHotspotCandidateK)
             // Position of the maximum-stress vertex in the IDW-projected CAD
             // display mesh (meters). Distinct from results.max_von_mises_location_m,
             // which is the solver-authoritative location (FE node coordinates).
@@ -4562,26 +4566,34 @@ namespace SolidWorksExtractor.Services
             // tied to physical (not visual) variance.
             // Blend thresholds for the smooth/sharp mix, expressed as a
             // fraction of the colour range. Basis is delta = sharp - smooth
-            // (where sharp = nearest-FE-triangle's parent element raw VON,
-            // smooth = Gaussian-weighted nodal-averaged stress). Positive
-            // delta means the per-element peak is being hidden by nodal
-            // smoothing; that's exactly where we want to expose the sharp
-            // value:
-            //   - delta < 5% of colour range:  alpha = 0 (smooth dominates;
+            // (where sharp = max parent-element raw VON among the in-radius
+            // subset of the K=8 nearest-centroid candidate tris, smooth =
+            // Gaussian-weighted nodal-averaged stress). Positive delta means
+            // the per-element peak is being hidden by nodal smoothing —
+            // that's exactly where we want to expose the sharp value:
+            //
+            //   - delta < 15% of colour range:  alpha = 0 (smooth dominates;
             //     sharp would add nothing the smooth field doesn't already
             //     show, so no Voronoi-cell texture leaks anywhere).
-            //   - delta > 20% of colour range: alpha = 1 (sharp dominates;
+            //   - delta > 30% of colour range: alpha = 1 (sharp dominates;
             //     a per-element peak is significantly hidden — let it
             //     through).
             //   - smoothstep ramp in between.
             //
-            // Earlier "local-spread" basis underestimated alpha at the
-            // hotspot because nodal smoothing flattened the K=12 nodal
-            // values around the peak, so spread_norm capped around 0.5
-            // even though the per-element value was 270 MPa above the
-            // smoothed average. delta directly measures "is sharp telling
-            // us something smooth missed", which is what peak preservation
-            // actually wants.
+            // Initial [0.05, 0.20] thresholds (from the earlier per-element-
+            // nearest-blended branch) over-bled when paired with the wider
+            // max-pool sharp source on this branch: bulk verts had small
+            // but non-zero deltas which pushed alpha into the 0.3-0.7
+            // range, shifting mean t from 0.30 to 0.39 and shrinking the
+            // blue/cyan low-stress fraction from 22% to 7%. Tightening to
+            // [0.15, 0.30] keeps bulk verts smooth-dominant while still
+            // letting the actual concentration cleanly hit alpha = 1.
+            //
+            // Earlier "local-spread" basis (across the K=12 nodal
+            // neighbourhood) underestimated alpha at the hotspot because
+            // nodal smoothing flattened those values; delta directly
+            // measures "is sharp telling us something smooth missed",
+            // which is what peak preservation actually wants.
             const double BLEND_MIN = 0.15;
             const double BLEND_MAX = 0.30;
 
@@ -4596,10 +4608,19 @@ namespace SolidWorksExtractor.Services
             // isolated red/orange islands instead of a continuous patch.
             //
             // To make the high-stress region contiguous, the sharp value at
-            // each CAD vertex is now the MAX parent-element VON over every
-            // surface tri whose closest-point distance is within the support
-            // radius. A peak element bleeds into all CAD vertices within the
-            // radius, producing a coherent patch around the concentration.
+            // each CAD vertex is now the MAX parent-element VON across the
+            // **in-radius subset of the K=8 nearest-centroid candidate**
+            // surface tris (NOT a global radius search of every surface
+            // tri — the candidate set caps how many tris are tested per
+            // CAD vertex; see SHARP_CANDIDATE_K below). On a typical
+            // CAD/FE alignment most or all of the in-radius tris are
+            // already in the K=8 nearest-centroid set, so the cap rarely
+            // matters; the support-count diagnostics record exactly how
+            // many made it through per vertex.
+            //
+            // A peak element that's in the candidate set bleeds into all
+            // CAD vertices within the support radius, producing a coherent
+            // patch around the concentration.
             //
             // Radius = 1.5 × mean FE node spacing — wide enough to merge
             // the adjacent hotspot islands the K=1 path produced
@@ -4623,6 +4644,13 @@ namespace SolidWorksExtractor.Services
             // full max-pool value.
             double sharpSupportRadiusM = Math.Max(index.MeanSpacing * 1.5, 1e-6);
             double sharpSupportRadiusSq = sharpSupportRadiusM * sharpSupportRadiusM;
+            // Candidate cap for the sharp path's per-vertex tri search. The
+            // max-pool is taken over the in-radius subset of these K nearest
+            // centroids — NOT over a full radius scan of every surface tri.
+            // Recorded in the manifest as display_hotspot_candidate_k so a
+            // reviewer can see exactly how many tris were tested per CAD
+            // vertex.
+            const int SHARP_CANDIDATE_K = 8;
 
             // Pre-compute the same colour range used by MapStressToColors so
             // the blend's spread normalisation matches the legend's anchor.
@@ -4658,7 +4686,7 @@ namespace SolidWorksExtractor.Services
             string stressSmoothingMethod = "gaussian";
             string stressSmoothingSource = "fe_surface_nodes";
             string peakPreservationMethod = useSharpPerElement
-                ? "per_element_max_in_support_radius_blended"
+                ? "per_element_max_in_support_radius_among_k8_centroid_candidates_blended"
                 : "none";
             string peakBlendSource = useSharpPerElement
                 ? "sharp_minus_smooth_normalized_by_color_range"
@@ -4735,7 +4763,7 @@ namespace SolidWorksExtractor.Services
                     }
                     else
                     {
-                        // ---- Sharp field: max parent-VON over surface tris within support radius ----
+                        // ---- Sharp field: max parent-VON over in-radius subset of K=8 nearest-centroid candidates ----
                         // Replaces the prior K=1 nearest-tri behaviour, which
                         // painted high stress only at the CAD vertices
                         // geometrically closest to a peak surface element. On
@@ -4744,19 +4772,23 @@ namespace SolidWorksExtractor.Services
                         // each adjacent CAD vertex selected a different
                         // nearest tri.
                         //
-                        // For each CAD vertex, gather K=8 nearest centroids
-                        // and run closest-point-on-triangle on each. Any tri
-                        // whose closest-point distance is within
-                        // sharpSupportRadiusM contributes its parent VON to
-                        // a max accumulator. The sharp value is that
-                        // maximum — a single hotspot element bleeds into
-                        // every CAD vertex within the support radius,
-                        // producing a contiguous high-stress patch. If no
-                        // candidate tri falls inside the radius (CAD vertex
-                        // far from any FE surface — rare given the 95% gate
-                        // upstream), fall back to the closest tri so the
+                        // For each CAD vertex, gather the K=8 nearest tri
+                        // centroids (SHARP_CANDIDATE_K below) and run
+                        // closest-point-on-triangle on each. Among THOSE
+                        // CANDIDATES, any tri whose closest-point distance
+                        // is within sharpSupportRadiusM contributes its
+                        // parent VON to a max accumulator. The sharp value
+                        // is that maximum — a single hotspot element in the
+                        // candidate set bleeds into the CAD vertex,
+                        // producing a contiguous high-stress patch. The
+                        // candidate cap is reflected in the recorded
+                        // support_count_max (always ≤ K). If no candidate
+                        // tri falls inside the radius (CAD vertex far from
+                        // any FE surface — rare given the 95% gate upstream),
+                        // fall back to the closest tri so the
                         // sharp value is never undefined.
-                        const int SHARP_CANDIDATE_K = 8;
+                        // (SHARP_CANDIDATE_K declared at outer scope so
+                        // the diagnostic struct below can reference it.)
                         double sharpVon = smoothVon;
                         int sharpSupportContribCount = 0;
                         if (useSharpPerElement)
@@ -5015,15 +5047,16 @@ namespace SolidWorksExtractor.Services
                 DisplayColorRangeSource = stressRangeSource,
                 DisplayScalarFieldMode = stressProjectionMode,
                 DisplayScalarFieldSource = useSharpPerElement
-                    ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange); sharp = max(parent_VON over surface tris with closest-point distance <= sharpSupportRadiusM)"
+                    ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange); sharp = max(parent_VON over in-radius subset of K=8 nearest-centroid candidate surface tris; in-radius means closest-point distance <= sharpSupportRadiusM)"
                     : "gaussian_smooth_nodal",
                 // Sidecar filename is set at the caller after the file is
                 // actually written (the function name uses studySlug which
                 // isn't visible from inside this method).
                 DisplayScalarsSidecar = null,
                 DisplayHotspotRefinementMethod = useSharpPerElement
-                    ? "max_parent_von_within_support_radius"
+                    ? "max_parent_von_within_support_radius_among_k8_centroid_candidates"
                     : "none",
+                DisplayHotspotCandidateK = useSharpPerElement ? SHARP_CANDIDATE_K : 0,
                 DisplayHotspotSupportRadiusM = useSharpPerElement ? sharpSupportRadiusM : 0.0,
                 DisplayHotspotSupportRadiusRatio = (useSharpPerElement && index.MeanSpacing > 0)
                     ? sharpSupportRadiusM / index.MeanSpacing
@@ -5079,7 +5112,7 @@ namespace SolidWorksExtractor.Services
                 }
                 : null;
             string displayScalarFieldSource = useSharpPerElement
-                ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange); sharp = max(parent_VON over surface tris with closest-point distance <= sharpSupportRadiusM)"
+                ? "(1-alpha)*gaussian_smooth_nodal + alpha*per_element_max_within_support_sharp; alpha=smoothstep(BLEND_MIN, BLEND_MAX, max(0, sharp - smooth) / colorRange); sharp = max(parent_VON over in-radius subset of K=8 nearest-centroid candidate surface tris; in-radius means closest-point distance <= sharpSupportRadiusM)"
                 : "gaussian_smooth_nodal";
 
             return new FeaMeshData
@@ -5919,6 +5952,7 @@ namespace SolidWorksExtractor.Services
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_scalar_field_source\": \"{0}\",\n", EscapeJson(cp.DisplayScalarFieldSource ?? ""));
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_scalars_sidecar\": \"{0}\",\n", EscapeJson(cp.DisplayScalarsSidecar ?? ""));
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_refinement_method\": \"{0}\",\n", EscapeJson(cp.DisplayHotspotRefinementMethod ?? ""));
+                sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_candidate_k\": {0},\n", cp.DisplayHotspotCandidateK);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_support_radius_m\": {0:G6},\n", cp.DisplayHotspotSupportRadiusM);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_support_radius_ratio\": {0:G6},\n", cp.DisplayHotspotSupportRadiusRatio);
                 sb.AppendFormat(CultureInfo.InvariantCulture, "    \"display_hotspot_support_count_mean\": {0:G6},\n", cp.DisplayHotspotSupportCountMean);

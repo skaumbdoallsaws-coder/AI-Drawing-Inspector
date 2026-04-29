@@ -27,7 +27,7 @@ load_dotenv(dotenv_path=REPO_ROOT / ".env")
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -1779,6 +1779,347 @@ async def get_assembly_diff(assembly_number: str, revA: str = Query(...), revB: 
     diff_result["legendB"] = _build_legend(assy_b)
 
     return diff_result
+
+
+# ---------- Assembly BOM-aware Revision Package (Phase 1) ----------
+#
+# These routes back the BOM-aware compare workspace. They are intentionally
+# narrow: they list revisions, expose per-revision asset URLs, and serve the
+# raw JSON/PDF for each revision. No procurement classification, no diff
+# normalisation, no substitution detection. Those land in Phase 2.
+
+def _normalize_revision_letter(revision: str) -> str:
+    """Strip an optional leading 'rev' (case-insensitive) and uppercase the rest.
+
+    Accepts 'A', 'a', 'revA', 'Rev_a' and returns 'A'. Empty string if the
+    input contains no usable suffix. Canonicalising to uppercase keeps the
+    contract consistent with the revisions listing, which always returns
+    uppercase letters.
+    """
+    if revision is None:
+        return ""
+    cleaned = re.sub(r'[^A-Za-z0-9]', '', revision)
+    if cleaned[:3].lower() == "rev":
+        cleaned = cleaned[3:]
+    return cleaned.upper()
+
+
+def _assembly_revision_dir(safe_num: str, safe_rev: str) -> Path:
+    return Path("400S_Sorted_Library/assemblies") / safe_num / f"rev{safe_rev}"
+
+
+def _resolve_assembly_pdf_path(safe_num: str, safe_rev: str) -> Optional[Path]:
+    """Return the assembly drawing PDF path for a revision, or None if missing.
+
+    Both '.PDF' and '.pdf' on disk are accepted. Used by the package presence
+    map and the direct PDF route so they cannot disagree.
+    """
+    rev_dir = _assembly_revision_dir(safe_num, safe_rev)
+    for candidate in (rev_dir / f"{safe_num}.PDF", rev_dir / f"{safe_num}.pdf"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_assembly_compare_assets(safe_num: str, safe_rev: str) -> Dict[str, dict]:
+    """Return {asset_kind: {path: Path, exists: bool, url: Optional[str]}} for one revision.
+
+    URLs are returned only for assets that exist; missing assets get url=None so
+    the frontend can render an explicit gap rather than guess.
+    """
+    rev_dir = _assembly_revision_dir(safe_num, safe_rev)
+    base_url = f"/api/assembly-compare/{safe_num}/{safe_rev}"
+    assets = {
+        "assembly_json": {
+            "path": rev_dir / f"{safe_num}_assembly.json",
+            "url": f"{base_url}/assembly-json",
+        },
+        "glb": {
+            "path": rev_dir / f"{safe_num}_colored.glb",
+            "url": f"/api/assembly-model/{safe_num}?revision={safe_rev}",
+        },
+        "drawing_map": {
+            "path": rev_dir / f"{safe_num}_drawing_map.json",
+            "url": f"{base_url}/drawing-map",
+        },
+        "bom_highlights": {
+            "path": rev_dir / f"{safe_num}_bom_row_highlights.json",
+            "url": f"{base_url}/bom-highlights",
+        },
+        "pdf": {
+            "path": _resolve_assembly_pdf_path(safe_num, safe_rev),
+            "url": f"{base_url}/pdf",
+        },
+    }
+    for kind, info in assets.items():
+        path = info["path"]
+        info["exists"] = path is not None and path.exists()
+        if not info["exists"]:
+            info["url"] = None
+    return assets
+
+
+def _list_assembly_revisions(safe_num: str) -> List[str]:
+    """Return sorted list of revision letters available on disk for an assembly."""
+    assy_dir = Path("400S_Sorted_Library/assemblies") / safe_num
+    if not assy_dir.exists() or not assy_dir.is_dir():
+        return []
+    return sorted([
+        d.name[3:]
+        for d in assy_dir.iterdir()
+        if d.is_dir() and d.name.lower().startswith("rev")
+    ])
+
+
+@app.get("/api/assembly-compare/{assembly_number}/revisions")
+async def get_assembly_compare_revisions(assembly_number: str):
+    """List revisions for an assembly with per-revision asset presence + URLs."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    if not safe_num:
+        raise HTTPException(status_code=400, detail="Invalid assembly number")
+
+    revisions = _list_assembly_revisions(safe_num)
+    revision_packages = []
+    for rev in revisions:
+        assets = _resolve_assembly_compare_assets(safe_num, rev)
+        presence = {kind: info["exists"] for kind, info in assets.items()}
+        urls = {kind: info["url"] for kind, info in assets.items()}
+        revision_packages.append({
+            "revision": rev,
+            "presence": presence,
+            "asset_urls": urls,
+        })
+
+    return {
+        "assembly_number": safe_num,
+        "revisions": [r["revision"] for r in revision_packages],
+        "revision_packages": revision_packages,
+    }
+
+
+@app.get("/api/assembly-compare/{assembly_number}/{revision}/drawing-map")
+async def get_assembly_compare_drawing_map(assembly_number: str, revision: str):
+    """Serve the drawing map JSON for one revision of an assembly."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_num or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid assembly number or revision")
+
+    path = _assembly_revision_dir(safe_num, safe_rev) / f"{safe_num}_drawing_map.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"No drawing map for {safe_num} rev {safe_rev}")
+
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read drawing map: {e}")
+
+
+@app.get("/api/assembly-compare/{assembly_number}/{revision}/bom-highlights")
+async def get_assembly_compare_bom_highlights(assembly_number: str, revision: str):
+    """Serve the BOM row highlight JSON for one revision of an assembly."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_num or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid assembly number or revision")
+
+    path = _assembly_revision_dir(safe_num, safe_rev) / f"{safe_num}_bom_row_highlights.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"No BOM highlights for {safe_num} rev {safe_rev}")
+
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read BOM highlights: {e}")
+
+
+@app.get("/api/assembly-compare/{assembly_number}/{revision}/assembly-json")
+async def get_assembly_compare_assembly_json(assembly_number: str, revision: str):
+    """Serve the assembly JSON for one revision of an assembly."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_num or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid assembly number or revision")
+
+    path = _assembly_revision_dir(safe_num, safe_rev) / f"{safe_num}_assembly.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"No assembly JSON for {safe_num} rev {safe_rev}")
+
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read assembly JSON: {e}")
+
+
+@app.get("/api/assembly-compare/{assembly_number}/{revision}/pdf")
+async def get_assembly_compare_pdf(assembly_number: str, revision: str):
+    """Serve the assembly drawing PDF for one revision."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_num or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid assembly number or revision")
+
+    pdf_path = _resolve_assembly_pdf_path(safe_num, safe_rev)
+    if pdf_path is None:
+        raise HTTPException(status_code=404, detail=f"No PDF for {safe_num} rev {safe_rev}")
+
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=f"{safe_num}_rev{safe_rev}.pdf",
+    )
+
+
+@app.get("/api/assembly-compare/{assembly_number}/{revision}/drawing-png")
+async def get_assembly_compare_drawing_png(assembly_number: str, revision: str, page: int = 1, dpi: int = 150):
+    """Render page 1 of the assembly drawing PDF to PNG.
+
+    The default DPI matches the value recorded in *_bom_row_highlights.json's
+    'render' block so the row rectangles overlay at the same coordinate space
+    the BOM extractor used. The frontend can resample by passing ?dpi=...
+    but should expect to scale row bounds proportionally if it does.
+    """
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_num or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid assembly number or revision")
+    if dpi < 50 or dpi > 600:
+        raise HTTPException(status_code=400, detail="dpi must be in [50, 600]")
+
+    pdf_path = _resolve_assembly_pdf_path(safe_num, safe_rev)
+    if pdf_path is None:
+        raise HTTPException(status_code=404, detail=f"No PDF for {safe_num} rev {safe_rev}")
+
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PyMuPDF (fitz) is not installed")
+
+    try:
+        doc = fitz.open(str(pdf_path))
+        if page < 1 or page > len(doc):
+            doc.close()
+            raise HTTPException(status_code=400, detail=f"Invalid page {page}; PDF has {len(doc)} page(s)")
+        pdf_page = doc.load_page(page - 1)
+        zoom = dpi / 72.0
+        pix = pdf_page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+        png_bytes = pix.tobytes("png")
+        width, height = pix.width, pix.height
+        doc.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to render PDF: {e}")
+
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={
+            "X-Image-Width": str(width),
+            "X-Image-Height": str(height),
+            "X-Render-DPI": str(dpi),
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+def _supplier_spec_present(part_number: str, safe_rev: str) -> bool:
+    """Return True if a supplier_spec.json sidecar exists for a part at a revision.
+
+    Path convention is parts/{pn}/rev{rev}/{pn}_supplier_spec.json. This is
+    the only signal the BOM compare uses to flag substitution_unverified.
+    """
+    if not part_number or not safe_rev:
+        return False
+    sidecar = (
+        Path("400S_Sorted_Library/parts")
+        / part_number
+        / f"rev{safe_rev}"
+        / f"{part_number}_supplier_spec.json"
+    )
+    return sidecar.exists()
+
+
+@app.get("/api/assembly-compare/{assembly_number}/normalized")
+async def get_assembly_compare_normalized(
+    assembly_number: str,
+    revA: str = Query(...),
+    revB: str = Query(...),
+):
+    """Return the normalized BOM compare payload for two revisions.
+
+    Composes the per-revision BOM row highlight JSONs into a single row-keyed
+    response with diff status (added / removed / qty_changed / unchanged /
+    substitution_unverified) and procurement classification (purchased /
+    custom / unknown). substitution_unverified is a soft signal driven by
+    supplier-spec sidecar asymmetry; it is intentionally NOT a member of
+    'proven_changed' so the frontend filter can keep it out of 'Changed only'.
+    """
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_a = _normalize_revision_letter(revA)
+    safe_b = _normalize_revision_letter(revB)
+    if not safe_num or not safe_a or not safe_b:
+        raise HTTPException(status_code=400, detail="Invalid assembly number or revision")
+
+    bom_a_path = _assembly_revision_dir(safe_num, safe_a) / f"{safe_num}_bom_row_highlights.json"
+    bom_b_path = _assembly_revision_dir(safe_num, safe_b) / f"{safe_num}_bom_row_highlights.json"
+    if not bom_a_path.exists() or not bom_b_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"BOM highlights missing for one or both revisions ({safe_a}/{safe_b}) of {safe_num}",
+        )
+
+    try:
+        with open(bom_a_path, encoding="utf-8-sig") as f:
+            bom_a = json.load(f)
+        with open(bom_b_path, encoding="utf-8-sig") as f:
+            bom_b = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read BOM highlights: {e}")
+
+    from ai_inspector.comparison.bom_compare import compute_bom_compare
+    result = compute_bom_compare(
+        bom_a,
+        bom_b,
+        supplier_evidence_a=lambda pn: _supplier_spec_present(pn, safe_a),
+        supplier_evidence_b=lambda pn: _supplier_spec_present(pn, safe_b),
+    )
+    result["assembly_number"] = safe_num
+    result["revA"] = safe_a
+    result["revB"] = safe_b
+    return result
+
+
+@app.get("/api/assembly-compare/{assembly_number}/{revision}")
+async def get_assembly_compare_revision_package(assembly_number: str, revision: str):
+    """Return the single-revision package: asset URLs + presence flags.
+
+    No data is inlined here; the frontend fetches each asset via the URLs in
+    the response. This keeps the package response small and lets the frontend
+    decide which sidecars it actually needs for a given view.
+    """
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_num or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid assembly number or revision")
+
+    rev_dir = _assembly_revision_dir(safe_num, safe_rev)
+    if not rev_dir.exists() or not rev_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"No revision {safe_rev} for assembly {safe_num}")
+
+    assets = _resolve_assembly_compare_assets(safe_num, safe_rev)
+    presence = {kind: info["exists"] for kind, info in assets.items()}
+    urls = {kind: info["url"] for kind, info in assets.items()}
+
+    return {
+        "assembly_number": safe_num,
+        "revision": safe_rev,
+        "presence": presence,
+        "asset_urls": urls,
+    }
 
 
 # ---------- Drawing Revision Diff ----------

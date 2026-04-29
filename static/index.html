@@ -6917,6 +6917,30 @@
             viewerA: null,  // { scene, camera, renderer, controls, liveScene, partMeshMap, animId }
             viewerB: null,
             primaryViewer: 'A',  // which viewer drives camera
+            // BOM-aware compare (Phase 3 feature) — populated by _loadCompareBomPanel.
+            // filter: 'all' | 'changed' | 'purchased' | 'custom'. Note that the
+            // 'changed' filter intentionally excludes substitution_unverified.
+            // selectedKey is a part number; rows can be selected to highlight
+            // them on the drawing overlay and in both 3D viewers (Phase 4).
+            // substitution_unverified rows ARE selectable; they just are not
+            // counted as 'proven_changed'.
+            // isolation (Phase 5): 'all' | 'purchased' | 'custom' | 'selected' | 'changed'.
+            // Independent of filter — filter affects table visibility, isolation
+            // affects 3D viewer opacity. 'changed' isolation uses proven change
+            // only (added/removed/qty_changed), excluding substitution_unverified.
+            bomCompare: {
+                rows: [],
+                summary: null,
+                honestyNotes: [],
+                filter: 'all',
+                isolation: 'all',
+                assyNum: null,
+                revA: null,
+                revB: null,
+                loading: false,
+                selectedKey: null,
+                _loadedDrawingKey: null,
+            },
         };
 
         // Part revision diff state (Phase 2 feature coloring)
@@ -13748,6 +13772,9 @@
             }
             const legendEl = document.getElementById('assemblyLegend');
             if (legendEl) legendEl.innerHTML = '';
+            // The BOM panel must participate in the preview reset so it cannot
+            // drift out of sync with the currently displayed revision pair.
+            _resetBomCompareForPreview();
         }
 
         function _syncAssemblyCompareSelectors(revA, revB) {
@@ -13808,6 +13835,11 @@
                         diffState.diffHighlightActive = false;
                         diffState._agentHighlightActive = false;
                     }
+                    // Kick off BOM-aware compare in parallel with the GLB load so
+                    // the panel is ready by the time the user looks at it. Fire
+                    // and forget — the helper handles its own DOM updates and
+                    // surfaces its own error states.
+                    _loadCompareBomPanel(assyNum, revA, revB);
                 }
 
                 const [gltfA, gltfB] = await Promise.all([
@@ -14140,9 +14172,843 @@
             legend.id = 'assemblyLegend';
             container.appendChild(legend);
 
+            // BOM compare panel (Phase 3): filter pills + table. Display only —
+            // row-to-3D linking and isolation modes land in later phases.
+            container.appendChild(_buildBomComparePanelDom());
+
             if (diffState.activeRevA && diffState.activeRevB) {
                 setTimeout(() => _loadCompareViewers(assyNum, diffState.activeRevA, diffState.activeRevB), 50);
             }
+        }
+
+        // ---- BOM compare panel (Phase 3) ----
+
+        function _buildBomComparePanelDom() {
+            const panel = document.createElement('div');
+            panel.id = 'bomComparePanel';
+            panel.className = 'bom-compare-panel';
+            panel.style.cssText = 'border-top:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.18);display:flex;flex-direction:column;max-height:320px;flex-shrink:0;overflow:hidden;';
+
+            const toolbar = document.createElement('div');
+            toolbar.id = 'bomCompareToolbar';
+            toolbar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);flex-shrink:0;';
+
+            const title = document.createElement('span');
+            title.textContent = 'BOM compare';
+            title.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-secondary,#9aa5b1);text-transform:uppercase;letter-spacing:0.6px;margin-right:8px;';
+            toolbar.appendChild(title);
+
+            // Rev pair display (Phase 6 polish): the BOM panel now shows the
+            // active revision pair with the same colour scheme used by the
+            // 3D viewer corner labels (Rev A blue, Rev B amber). The text is
+            // updated by _updateBomRevPairLabel() once data arrives.
+            const revPair = document.createElement('span');
+            revPair.id = 'bomCompareRevPair';
+            revPair.style.cssText = 'display:inline-flex;align-items:center;gap:6px;font-size:11px;margin-right:8px;';
+            revPair.innerHTML = '<span class="bom-rev-tag rev-a" style="background:rgba(79,195,247,0.15);color:#4fc3f7;padding:2px 8px;border-radius:3px;font-weight:600;">Rev –</span><span style="color:var(--text-secondary,#9aa5b1);">vs</span><span class="bom-rev-tag rev-b" style="background:rgba(255,179,0,0.15);color:#FFB300;padding:2px 8px;border-radius:3px;font-weight:600;">Rev –</span>';
+            toolbar.appendChild(revPair);
+
+            // Filter rules and tooltip text live next to each other so the
+            // honesty rule (Changed only excludes substitution_unverified) is
+            // readable without reading the source.
+            const FILTER_TOOLTIPS = {
+                all:       'Show every BOM row.',
+                changed:   'Proven structural change only: added, removed, or qty changed. Substitution_unverified rows are intentionally excluded.',
+                purchased: 'Show only rows classified as purchased (1040-series or explicit allow-list).',
+                custom:    'Show only rows classified as custom (1030-series or explicit allow-list).',
+            };
+
+            const filters = [
+                { id: 'all',       label: 'All' },
+                { id: 'changed',   label: 'Changed only' },
+                { id: 'purchased', label: 'Purchased only' },
+                { id: 'custom',    label: 'Custom only' },
+            ];
+            filters.forEach(f => {
+                const pill = document.createElement('button');
+                pill.dataset.filter = f.id;
+                pill.className = 'bom-compare-filter-pill';
+                pill.textContent = f.label;
+                pill.title = FILTER_TOOLTIPS[f.id] || '';
+                pill.style.cssText = 'font-size:11px;padding:4px 10px;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:var(--text-secondary,#9aa5b1);cursor:pointer;line-height:1.2;';
+                pill.addEventListener('click', () => {
+                    diffState.bomCompare.filter = f.id;
+                    // Reconcile selection with the new filter: if the selected
+                    // row no longer survives the filter, drop it so the
+                    // drawing pane and 3D highlights cannot stay on a row
+                    // that is no longer visible in the table.
+                    const selKey = diffState.bomCompare.selectedKey;
+                    if (selKey) {
+                        const row = (diffState.bomCompare.rows || []).find(r => r.key === selKey);
+                        if (!row || !_isBomRowVisibleUnderFilter(row, f.id)) {
+                            _clearBomRowSelection();
+                        }
+                    }
+                    _renderBomCompareRows();
+                });
+                toolbar.appendChild(pill);
+            });
+
+            const summary = document.createElement('span');
+            summary.id = 'bomCompareSummary';
+            summary.style.cssText = 'margin-left:auto;font-size:11px;color:var(--text-secondary,#9aa5b1);';
+            toolbar.appendChild(summary);
+
+            panel.appendChild(toolbar);
+
+            // Isolation toolbar (Phase 5). Lives on its own row so the filter
+            // pills (which control table visibility) stay visually separate
+            // from isolation pills (which control 3D viewer opacity).
+            const isoToolbar = document.createElement('div');
+            isoToolbar.id = 'bomIsolateToolbar';
+            isoToolbar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.015);flex-shrink:0;';
+
+            const isoTitle = document.createElement('span');
+            isoTitle.textContent = '3D isolate';
+            isoTitle.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-secondary,#9aa5b1);text-transform:uppercase;letter-spacing:0.6px;margin-right:8px;';
+            isoToolbar.appendChild(isoTitle);
+
+            const ISOLATION_TOOLTIPS = {
+                all:       'Restore full opacity to every part in both 3D viewers.',
+                purchased: 'Dim everything except purchased parts in both viewers.',
+                custom:    'Dim everything except custom parts in both viewers.',
+                selected:  'Dim everything except the selected BOM row. With no selection, all parts stay visible.',
+                changed:   'Dim everything except proven-changed rows. Substitution_unverified is intentionally excluded.',
+            };
+
+            const isolations = [
+                { id: 'all',       label: 'Show all' },
+                { id: 'purchased', label: 'Purchased only' },
+                { id: 'custom',    label: 'Custom only' },
+                { id: 'selected',  label: 'Selected row only' },
+                { id: 'changed',   label: 'Changed only' },
+            ];
+            isolations.forEach(iso => {
+                const pill = document.createElement('button');
+                pill.dataset.isolation = iso.id;
+                pill.className = 'bom-compare-isolation-pill';
+                pill.textContent = iso.label;
+                pill.title = ISOLATION_TOOLTIPS[iso.id] || '';
+                pill.style.cssText = 'font-size:11px;padding:4px 10px;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:var(--text-secondary,#9aa5b1);cursor:pointer;line-height:1.2;';
+                pill.addEventListener('click', () => {
+                    const newMode = iso.id;
+                    diffState.bomCompare.isolation = newMode;
+                    // Reconcile selection with the new isolation, mirroring
+                    // the filter handler: if the selected PN is not in the
+                    // new visible set, clear it so the row highlight cannot
+                    // pierce the isolation contract.
+                    const selKey = diffState.bomCompare.selectedKey;
+                    if (selKey) {
+                        const visibleKeys = _bomIsolationVisibleKeys(newMode, diffState.bomCompare);
+                        // visibleKeys === null means 'all' / no isolation —
+                        // everything is visible and the selection survives.
+                        if (visibleKeys !== null && !visibleKeys.has(selKey)) {
+                            _clearBomRowSelection();
+                        }
+                    }
+                    _applyBomIsolationToViewers(newMode);
+                    _refreshBomIsolationPills();
+                });
+                isoToolbar.appendChild(pill);
+            });
+
+            const isoNote = document.createElement('span');
+            isoNote.id = 'bomIsolationNote';
+            isoNote.style.cssText = 'margin-left:auto;font-size:10px;color:var(--text-secondary,#9aa5b1);font-style:italic;';
+            isoToolbar.appendChild(isoNote);
+
+            panel.appendChild(isoToolbar);
+
+            // Row container holds the BOM table on the left and the drawing
+            // overlay pane on the right. The drawing pane is hidden until a
+            // row is selected so the table gets the full width by default.
+            const bodyRow = document.createElement('div');
+            bodyRow.style.cssText = 'flex:1;display:flex;min-height:0;';
+
+            const body = document.createElement('div');
+            body.id = 'bomCompareBody';
+            body.style.cssText = 'flex:1 1 auto;overflow-y:auto;padding:0 0 8px 0;min-width:0;';
+            body.innerHTML = '<div style="color:var(--text-secondary,#9aa5b1);font-size:11px;padding:18px 14px;">BOM compare loads when the Compare button runs.</div>';
+            bodyRow.appendChild(body);
+
+            // Click delegation: rows render as <tr data-bom-row-pn="...">
+            // and any click inside the body that hits one toggles selection.
+            // Delegated so the listener survives all _renderBomCompareRows()
+            // re-renders without needing reattachment.
+            body.addEventListener('click', (ev) => {
+                const tr = ev.target.closest('tr[data-bom-row-pn]');
+                if (!tr) return;
+                const pn = tr.getAttribute('data-bom-row-pn');
+                if (pn) _onBomRowClick(pn);
+            });
+
+            const drawingPane = document.createElement('div');
+            drawingPane.id = 'bomDrawingPane';
+            drawingPane.style.cssText = 'flex:1 1 50%;max-width:60%;min-width:0;border-left:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.20);display:none;flex-direction:column;';
+
+            const drawingHeader = document.createElement('div');
+            drawingHeader.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:11px;color:var(--text-secondary,#9aa5b1);flex-shrink:0;';
+            drawingHeader.innerHTML = '<span id="bomDrawingHeaderLabel" style="font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Drawing</span><span id="bomDrawingHeaderRow" style="margin-left:auto;font-family:monospace;color:#cdd5dd;"></span><button id="bomDrawingCloseBtn" style="background:transparent;border:none;color:var(--text-secondary,#9aa5b1);font-size:14px;cursor:pointer;padding:0 4px;line-height:1;" title="Close drawing">×</button>';
+            drawingPane.appendChild(drawingHeader);
+
+            const drawingScroll = document.createElement('div');
+            drawingScroll.style.cssText = 'flex:1 1 auto;overflow:auto;padding:8px;';
+            const drawingImgWrap = document.createElement('div');
+            drawingImgWrap.id = 'bomDrawingImgWrap';
+            drawingImgWrap.style.cssText = 'position:relative;display:inline-block;';
+
+            const drawingImg = document.createElement('img');
+            drawingImg.id = 'bomDrawingImg';
+            drawingImg.style.cssText = 'display:block;width:100%;height:auto;background:#1a1d22;';
+            drawingImg.alt = 'Assembly drawing';
+            drawingImgWrap.appendChild(drawingImg);
+
+            const drawingHighlight = document.createElement('div');
+            drawingHighlight.id = 'bomDrawingHighlight';
+            drawingHighlight.style.cssText = 'position:absolute;border:2px solid #00BCD4;background:rgba(0,188,212,0.18);pointer-events:none;display:none;box-shadow:0 0 12px rgba(0,188,212,0.5);';
+            drawingImgWrap.appendChild(drawingHighlight);
+
+            drawingScroll.appendChild(drawingImgWrap);
+            drawingPane.appendChild(drawingScroll);
+            bodyRow.appendChild(drawingPane);
+
+            panel.appendChild(bodyRow);
+
+            // Close drawing pane via header X. Clears selection so the 3D
+            // highlight also clears — keeps the workspace coherent.
+            drawingHeader.querySelector('#bomDrawingCloseBtn').addEventListener('click', () => {
+                _onBomRowClick(diffState.bomCompare.selectedKey);  // toggles off
+            });
+
+            const notes = document.createElement('div');
+            notes.id = 'bomCompareHonestyNotes';
+            notes.style.cssText = 'border-top:1px solid rgba(255,255,255,0.04);padding:6px 12px;font-size:10px;color:var(--text-secondary,#9aa5b1);line-height:1.5;flex-shrink:0;display:none;';
+            panel.appendChild(notes);
+
+            return panel;
+        }
+
+        function _resetBomCompareForPreview(message) {
+            // Bumping the request token invalidates any in-flight load so a
+            // late response cannot silently overwrite a cleared panel.
+            diffState._bomCompareRequestId = (diffState._bomCompareRequestId || 0) + 1;
+            const prevFilter = (diffState.bomCompare && diffState.bomCompare.filter) || 'all';
+            const prevIsolation = (diffState.bomCompare && diffState.bomCompare.isolation) || 'all';
+            // Drop any drawing/3D row highlights before mutating state so the
+            // restore pass sees the previous viewer references.
+            try { _clearBomRowSelection(); } catch (_) { /* panel may not be mounted yet */ }
+            // Restore opacity to baseline so the preview doesn't carry over a
+            // dimmed isolation state into the next compare. The new row data
+            // hasn't loaded yet, so 'all' is the only safe state.
+            try { _applyBomIsolationToViewers('all'); } catch (_) {}
+            diffState.bomCompare = {
+                rows: [],
+                summary: null,
+                honestyNotes: [],
+                filter: prevFilter,
+                isolation: prevIsolation,  // remember user's prior choice for the next load
+                assyNum: null,
+                revA: null,
+                revB: null,
+                loading: false,
+                selectedKey: null,
+                _loadedDrawingKey: null,
+            };
+            _refreshBomIsolationPills();
+            // Chips in the toolbar must follow the cleared revA/revB state so
+            // the panel cannot say "Preview updated. Click Compare…" while
+            // still displaying the previous Rev A / Rev B chip values.
+            _updateBomRevPairLabel();
+            const body = document.getElementById('bomCompareBody');
+            const summaryEl = document.getElementById('bomCompareSummary');
+            const notesEl = document.getElementById('bomCompareHonestyNotes');
+            if (!body) return;  // panel not mounted yet — nothing to reset
+            const msg = message || 'Preview updated. Click Compare to refresh BOM compare.';
+            body.innerHTML = `<div style="color:var(--text-secondary,#9aa5b1);font-size:11px;padding:14px;">${_escapeHtml(msg)}</div>`;
+            if (summaryEl) summaryEl.textContent = '';
+            if (notesEl) { notesEl.style.display = 'none'; notesEl.innerHTML = ''; }
+            // Restore active-pill highlight so the filter selection visibly persists
+            // even though the table is cleared.
+            document.querySelectorAll('.bom-compare-filter-pill').forEach(p => {
+                const active = p.dataset.filter === prevFilter;
+                p.style.background  = active ? 'rgba(86,156,214,0.20)' : 'rgba(255,255,255,0.05)';
+                p.style.color       = active ? '#fff' : 'var(--text-secondary,#9aa5b1)';
+                p.style.borderColor = active ? 'rgba(86,156,214,0.55)' : 'rgba(255,255,255,0.08)';
+            });
+        }
+
+        async function _loadCompareBomPanel(assyNum, revA, revB) {
+            if (!assyNum || !revA || !revB) return;
+            // Monotonic request token. Anything that mutates compare state
+            // (this function or _resetBomCompareForPreview) must increment it
+            // so older fetches cannot land on top of newer state.
+            const myRequestId = (diffState._bomCompareRequestId = (diffState._bomCompareRequestId || 0) + 1);
+            const body = document.getElementById('bomCompareBody');
+            if (body) body.innerHTML = '<div style="color:var(--text-secondary,#9aa5b1);font-size:11px;padding:14px;">Loading BOM compare…</div>';
+            diffState.bomCompare.loading = true;
+            try {
+                const url = `/api/assembly-compare/${encodeURIComponent(assyNum)}/normalized?revA=${encodeURIComponent(revA)}&revB=${encodeURIComponent(revB)}`;
+                const res = await fetch(url);
+                // Re-check token after each await so a newer request or a
+                // preview reset wins unconditionally.
+                if (myRequestId !== diffState._bomCompareRequestId) return;
+                if (!res.ok) {
+                    if (body) body.innerHTML = `<div style="color:var(--text-secondary,#9aa5b1);font-size:11px;padding:14px;">BOM compare unavailable (HTTP ${res.status}).</div>`;
+                    return;
+                }
+                const data = await res.json();
+                if (myRequestId !== diffState._bomCompareRequestId) return;
+                const prevFilter = (diffState.bomCompare && diffState.bomCompare.filter) || 'all';
+                const prevSelected = (diffState.bomCompare && diffState.bomCompare.selectedKey) || null;
+                const prevAssyNum = diffState.bomCompare && diffState.bomCompare.assyNum;
+                const prevRevB = diffState.bomCompare && diffState.bomCompare.revB;
+                // If the (assembly, revB) pair changed, drop any previously
+                // selected row — its row geometry/3D mapping is no longer
+                // guaranteed to be meaningful for the new pair.
+                const pairChanged = prevAssyNum !== data.assembly_number || prevRevB !== data.revB;
+                if (pairChanged) {
+                    try { _clearBomRowSelection(); } catch (_) {}
+                }
+                // Preserve selection only when the same PN still exists in the
+                // new payload AND the rev pair did not change.
+                let nextSelected = null;
+                if (!pairChanged && prevSelected) {
+                    const stillPresent = (data.rows || []).some(r => r.key === prevSelected);
+                    if (stillPresent) nextSelected = prevSelected;
+                }
+                const prevIsolation = (diffState.bomCompare && diffState.bomCompare.isolation) || 'all';
+                diffState.bomCompare = {
+                    rows: data.rows || [],
+                    summary: data.summary || null,
+                    honestyNotes: data.honesty_notes || [],
+                    filter: prevFilter,
+                    isolation: prevIsolation,  // honor the user's prior choice on reload
+                    assyNum: data.assembly_number,
+                    revA: data.revA,
+                    revB: data.revB,
+                    loading: false,
+                    selectedKey: nextSelected,
+                    _loadedDrawingKey: pairChanged ? null : (diffState.bomCompare && diffState.bomCompare._loadedDrawingKey),
+                };
+                _renderBomCompareRows();
+                if (nextSelected) {
+                    // Re-apply highlights against the freshly loaded payload so
+                    // 3D meshes re-snapshot with the new viewer's part map.
+                    _applyBomRowToDrawing(nextSelected);
+                    _applyBomRowToViewers(nextSelected);
+                }
+                // Apply isolation against the freshly loaded rows so 'changed' /
+                // 'purchased' / 'custom' modes pick up the new key sets.
+                _applyBomIsolationToViewers(prevIsolation);
+            } catch (err) {
+                if (myRequestId !== diffState._bomCompareRequestId) return;
+                console.error('[BOM Compare] Load failed:', err);
+                if (body) body.innerHTML = `<div style="color:var(--text-secondary,#9aa5b1);font-size:11px;padding:14px;">BOM compare load failed.</div>`;
+            } finally {
+                if (myRequestId === diffState._bomCompareRequestId) {
+                    diffState.bomCompare.loading = false;
+                }
+            }
+        }
+
+        function _renderBomCompareRows() {
+            const body = document.getElementById('bomCompareBody');
+            const summaryEl = document.getElementById('bomCompareSummary');
+            const notesEl = document.getElementById('bomCompareHonestyNotes');
+            if (!body) return;
+            const data = diffState.bomCompare || {};
+            const filter = data.filter || 'all';
+
+            // Update active pill style
+            document.querySelectorAll('.bom-compare-filter-pill').forEach(p => {
+                const active = p.dataset.filter === filter;
+                p.style.background    = active ? 'rgba(86,156,214,0.20)' : 'rgba(255,255,255,0.05)';
+                p.style.color         = active ? '#fff' : 'var(--text-secondary,#9aa5b1)';
+                p.style.borderColor   = active ? 'rgba(86,156,214,0.55)' : 'rgba(255,255,255,0.08)';
+            });
+
+            const rows = Array.isArray(data.rows) ? data.rows : [];
+
+            // Rev pair label (Phase 6 polish): update the Rev A / Rev B
+            // chips in the toolbar so the panel header always shows which
+            // revisions are loaded. Defensive — silently no-op if not yet
+            // mounted.
+            _updateBomRevPairLabel();
+
+            // Honesty notes panel — always reflect what the backend sent
+            if (notesEl) {
+                const notes = Array.isArray(data.honestyNotes) ? data.honestyNotes : [];
+                if (notes.length === 0) {
+                    notesEl.style.display = 'none';
+                    notesEl.innerHTML = '';
+                } else {
+                    notesEl.style.display = '';
+                    notesEl.innerHTML = notes.map(n => `<div>• ${_escapeHtml(n)}</div>`).join('');
+                }
+            }
+
+            if (rows.length === 0) {
+                body.innerHTML = '<div style="color:var(--text-secondary,#9aa5b1);font-size:11px;padding:14px;">No BOM data loaded yet.</div>';
+                if (summaryEl) summaryEl.textContent = '';
+                return;
+            }
+
+            // Filter rules live in _isBomRowVisibleUnderFilter so the pill
+            // click handler can use the same predicate to reconcile the
+            // selected row.
+            const filtered = rows.filter(r => _isBomRowVisibleUnderFilter(r, filter));
+
+            if (filtered.length === 0) {
+                let msg;
+                if (filter === 'changed') {
+                    const subCount = (data.summary && data.summary.substitution_unverified) || 0;
+                    if (subCount > 0) {
+                        const noun = subCount === 1 ? 'row' : 'rows';
+                        msg = `No proven changes (added / removed / qty changed). ${subCount} substitution_unverified ${noun} visible under All — excluded here per honesty rule.`;
+                    } else {
+                        msg = 'No proven changes (added / removed / qty changed). Substitution detection across same internal PNs needs supplier sidecars on both revisions.';
+                    }
+                } else if (filter === 'purchased') {
+                    msg = 'No purchased rows in this BOM.';
+                } else if (filter === 'custom') {
+                    msg = 'No custom rows in this BOM.';
+                } else {
+                    msg = 'No rows match the current filter.';
+                }
+                body.innerHTML = `<div style="color:var(--text-secondary,#9aa5b1);font-size:12px;padding:24px 16px;text-align:center;line-height:1.6;">${_escapeHtml(msg)}</div>`;
+            } else {
+                // Qty columns colored to match the 3D viewer rev labels so
+                // the eye can connect "Qty A" with the blue 3D pane and
+                // "Qty B" with the amber pane without re-reading.
+                const headerRowHtml = `
+                    <tr style="text-align:left;color:var(--text-secondary,#9aa5b1);border-bottom:1px solid rgba(255,255,255,0.08);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">
+                        <th style="padding:6px 8px;width:32px;font-weight:600;">#</th>
+                        <th style="padding:6px 8px;font-weight:600;">PN</th>
+                        <th style="padding:6px 8px;font-weight:600;">Description</th>
+                        <th style="padding:6px 8px;width:48px;text-align:center;font-weight:600;color:#4fc3f7;">Qty A</th>
+                        <th style="padding:6px 8px;width:48px;text-align:center;font-weight:600;color:#FFB300;">Qty B</th>
+                        <th style="padding:6px 8px;width:90px;font-weight:600;">Procurement</th>
+                        <th style="padding:6px 8px;width:170px;font-weight:600;">Status</th>
+                    </tr>
+                `;
+                body.innerHTML = `
+                    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                        <thead style="position:sticky;top:0;background:#1a1d22;z-index:1;">${headerRowHtml}</thead>
+                        <tbody>${filtered.map(r => _renderBomCompareRowHtml(r)).join('')}</tbody>
+                    </table>
+                `;
+            }
+
+            // Toolbar summary text
+            if (summaryEl) {
+                const s = data.summary || {};
+                const parts = [];
+                parts.push(`${s.total_rows ?? rows.length} rows`);
+                if (s.proven_changed) parts.push(`${s.proven_changed} proven changed`);
+                if (s.substitution_unverified) parts.push(`${s.substitution_unverified} substitution unverified`);
+                if (filtered.length !== rows.length) parts.push(`showing ${filtered.length}`);
+                summaryEl.textContent = parts.join(' · ');
+            }
+        }
+
+        // Status / procurement explanations (Phase 6 polish). These power
+        // tooltips on the badges so reviewers don't have to read the source
+        // to know what 'substitution_unverified' means.
+        const _BOM_STATUS_TOOLTIPS = {
+            added:                   'Present in Rev B, missing in Rev A.',
+            removed:                 'Present in Rev A, missing in Rev B.',
+            qty_changed:             'Same part number in both revisions, different quantity.',
+            unchanged:               'Same part number, same quantity, no supplier-evidence asymmetry.',
+            substitution_unverified: 'Same part number and quantity in both revisions, but a supplier-spec sidecar is present in only one revision. This is a soft signal only — the BOM cannot prove a substitution from internal part numbers alone.',
+        };
+        const _BOM_PROC_TOOLTIPS = {
+            purchased: 'Purchased item — sourced from a supplier (1040-series or explicit allow-list).',
+            custom:    'Custom item — manufactured in-house (1030-series or explicit allow-list).',
+            unknown:   'Procurement classification could not be inferred from the part number.',
+        };
+
+        function _renderBomCompareRowHtml(r) {
+            const a = r.rev_a || {}, b = r.rev_b || {};
+            const desc = a.description || b.description || '';
+            const STATUS_STYLE = {
+                added:                   { color: '#00E676', label: 'Added' },
+                removed:                 { color: '#FF5252', label: 'Removed' },
+                qty_changed:             { color: '#FFB300', label: 'Qty changed' },
+                unchanged:               { color: '#666',    label: 'Unchanged' },
+                substitution_unverified: { color: '#FF9800', label: 'Substitution unverified' },
+            };
+            const PROC_COLOR = { purchased: '#26C6DA', custom: '#9C27B0', unknown: '#888' };
+
+            const ss = STATUS_STYLE[r.diff_status] || STATUS_STYLE.unchanged;
+            const statusTip = _BOM_STATUS_TOOLTIPS[r.diff_status] || r.diff_status;
+            const statusBadge = `<span title="${_escapeHtml(statusTip)}" style="background:${ss.color}22;border:1px solid ${ss.color}66;color:${ss.color};padding:2px 6px;border-radius:8px;font-size:10px;font-weight:500;white-space:nowrap;">${ss.label}</span>`;
+            const procColor = PROC_COLOR[r.procurement] || '#888';
+            const procTip = _BOM_PROC_TOOLTIPS[r.procurement] || r.procurement;
+            const procBadge = `<span title="${_escapeHtml(procTip)}" style="color:${procColor};font-size:10px;text-transform:uppercase;letter-spacing:0.4px;cursor:help;">${_escapeHtml(r.procurement)}</span>`;
+
+            const selectedKey = (diffState.bomCompare && diffState.bomCompare.selectedKey) || null;
+            const isSelected = selectedKey === r.key;
+            const rowStyle = isSelected
+                ? 'border-bottom:1px solid rgba(0,188,212,0.30);background:rgba(0,188,212,0.10);cursor:pointer;'
+                : 'border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;';
+            const orderCellColor = isSelected ? '#00BCD4' : 'var(--text-secondary,#9aa5b1)';
+
+            return `
+                <tr data-bom-row-pn="${_escapeHtml(r.key)}" style="${rowStyle}">
+                    <td style="padding:6px 8px;color:${orderCellColor};font-weight:${isSelected ? '600' : '400'};">${r.display_order}</td>
+                    <td style="padding:6px 8px;font-family:monospace;color:#fff;">${_escapeHtml(r.key)}</td>
+                    <td style="padding:6px 8px;color:#cdd5dd;">${_escapeHtml(desc)}</td>
+                    <td style="padding:6px 8px;text-align:center;color:#cdd5dd;">${_escapeHtml(a.qty != null ? a.qty : '–')}</td>
+                    <td style="padding:6px 8px;text-align:center;color:#cdd5dd;">${_escapeHtml(b.qty != null ? b.qty : '–')}</td>
+                    <td style="padding:6px 8px;">${procBadge}</td>
+                    <td style="padding:6px 8px;">${statusBadge}</td>
+                </tr>
+            `;
+        }
+
+        function _updateBomRevPairLabel() {
+            // Update the Rev A vs Rev B chips in the BOM toolbar from the
+            // currently loaded compare data. Defensive — silently no-op if
+            // the toolbar isn't mounted yet.
+            const cmp = diffState.bomCompare;
+            const revA = (cmp && cmp.revA) || null;
+            const revB = (cmp && cmp.revB) || null;
+            const aTag = document.querySelector('#bomCompareRevPair .bom-rev-tag.rev-a');
+            const bTag = document.querySelector('#bomCompareRevPair .bom-rev-tag.rev-b');
+            if (aTag) aTag.textContent = revA ? `Rev ${revA}` : 'Rev –';
+            if (bTag) bTag.textContent = revB ? `Rev ${revB}` : 'Rev –';
+        }
+
+        function _escapeHtml(s) {
+            if (s == null) return '';
+            return String(s).replace(/[&<>"']/g, ch => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+            ));
+        }
+
+        // Single source of truth for filter visibility. "Changed only" is
+        // proven structural change ONLY (added, removed, qty_changed) per
+        // the Phase 0 honesty rule — substitution_unverified is intentionally
+        // excluded.
+        function _isBomRowVisibleUnderFilter(row, filter) {
+            if (!row) return false;
+            if (filter === 'all') return true;
+            if (filter === 'changed') return row.diff_status === 'added' || row.diff_status === 'removed' || row.diff_status === 'qty_changed';
+            if (filter === 'purchased') return row.procurement === 'purchased';
+            if (filter === 'custom') return row.procurement === 'custom';
+            return true;
+        }
+
+        // ---- BOM row interactions (Phase 4) ----
+        // Three actions, kept independent so each can be disabled in isolation:
+        //   1. Update selectedKey + re-render the table so the row is marked
+        //   2. Highlight the BOM row rectangle on the assembly drawing image
+        //   3. Highlight the matching part-number meshes in both 3D viewers
+        // No isolation modes here — that lands in Phase 5.
+
+        const _BOM_HIGHLIGHT_COLOR = 0x00BCD4;  // cyan, matches drawing rectangle
+
+        function _onBomRowClick(pn) {
+            if (!pn) return;
+            const cmp = diffState.bomCompare;
+            const next = (cmp.selectedKey === pn) ? null : pn;
+            cmp.selectedKey = next;
+            _renderBomCompareRows();
+            _applyBomRowToDrawing(next);
+            _applyBomRowToViewers(next);
+            // 'selected' isolation depends on selectedKey, so re-apply whenever
+            // selection changes. Other modes (purchased/custom/changed/all) are
+            // selection-independent and do not need to re-run.
+            if (cmp.isolation === 'selected') {
+                _applyBomIsolationToViewers('selected');
+            }
+        }
+
+        function _ensureBomDrawingImageLoaded(revLetter) {
+            // Lazy-load the drawing PNG and refetch when the
+            // (assembly, revision) pair changes. revLetter is the actual
+            // revision whose drawing should be shown — chosen by
+            // _applyBomRowToDrawing per-row, NOT a fixed Rev B.
+            const cmp = diffState.bomCompare;
+            const img = document.getElementById('bomDrawingImg');
+            if (!img || !cmp.assyNum || !revLetter) return;
+            const desiredKey = `${cmp.assyNum}/${revLetter}`;
+            if (cmp._loadedDrawingKey === desiredKey && img.src) return;
+            const url = `/api/assembly-compare/${encodeURIComponent(cmp.assyNum)}/${encodeURIComponent(revLetter)}/drawing-png`;
+            img.src = url;
+            cmp._loadedDrawingKey = desiredKey;
+            const headerLabel = document.getElementById('bomDrawingHeaderLabel');
+            if (headerLabel) {
+                // Match the 3D viewer corner colour: blue for Rev A, amber
+                // for Rev B. The colour follows the actual revision shown,
+                // not a fixed slot.
+                const isRevA = (cmp.revA && revLetter === cmp.revA);
+                const color = isRevA ? '#4fc3f7' : '#FFB300';
+                headerLabel.innerHTML = `Rev <span style="color:${color};">${_escapeHtml(revLetter)}</span> drawing`;
+            }
+        }
+
+        function _applyBomRowToDrawing(pn) {
+            const pane = document.getElementById('bomDrawingPane');
+            const overlayEl = document.getElementById('bomDrawingHighlight');
+            const img = document.getElementById('bomDrawingImg');
+            const headerRow = document.getElementById('bomDrawingHeaderRow');
+            if (!pane || !overlayEl || !img) return;
+            if (!pn) {
+                pane.style.display = 'none';
+                overlayEl.style.display = 'none';
+                if (headerRow) headerRow.textContent = '';
+                return;
+            }
+
+            const cmp = diffState.bomCompare;
+            const row = (cmp.rows || []).find(r => r.key === pn);
+            if (!row) {
+                pane.style.display = 'none';
+                overlayEl.style.display = 'none';
+                return;
+            }
+
+            // Pick the drawing whose BOM actually contains this row. Rev B
+            // wins when both have the row. For 'removed' rows (only in Rev A)
+            // we MUST switch the drawing to Rev A — overlaying Rev A bounds
+            // on the Rev B image would highlight the wrong location.
+            let chosenRev = null;
+            let ref = null;
+            if (row.rev_b && row.rev_b.row_bounds_image) {
+                chosenRev = cmp.revB;
+                ref = row.rev_b;
+            } else if (row.rev_a && row.rev_a.row_bounds_image) {
+                chosenRev = cmp.revA;
+                ref = row.rev_a;
+            }
+
+            pane.style.display = 'flex';
+            if (!chosenRev) {
+                // No row geometry on either side. Show pane with header but
+                // no overlay — better than silently lying with stale bounds.
+                overlayEl.style.display = 'none';
+                if (headerRow) headerRow.textContent = `${pn}${row.rev_a?.description || row.rev_b?.description ? ' · ' + (row.rev_a?.description || row.rev_b?.description) : ''} (no row geometry)`;
+                return;
+            }
+
+            _ensureBomDrawingImageLoaded(chosenRev);
+
+            if (headerRow) {
+                const desc = ref.description || '';
+                headerRow.textContent = `${pn}${desc ? ' · ' + desc : ''}`;
+            }
+
+            const bounds = ref.row_bounds_image;
+            if (!bounds || bounds.length < 4) {
+                overlayEl.style.display = 'none';
+                return;
+            }
+
+            const place = () => {
+                // bounds_image = [x_min, y_min, x_max, y_max] in pixel coords
+                // of the BOM extractor's rendered page. The /drawing-png route
+                // renders at the same DPI by default, so naturalWidth/Height
+                // matches the BOM frame of reference. We position the overlay
+                // as percentages so it tracks any CSS scaling of the img.
+                const w = img.naturalWidth || 1;
+                const h = img.naturalHeight || 1;
+                const x1 = (bounds[0] / w) * 100;
+                const y1 = (bounds[1] / h) * 100;
+                const x2 = (bounds[2] / w) * 100;
+                const y2 = (bounds[3] / h) * 100;
+                overlayEl.style.left   = x1 + '%';
+                overlayEl.style.top    = y1 + '%';
+                overlayEl.style.width  = (x2 - x1) + '%';
+                overlayEl.style.height = (y2 - y1) + '%';
+                overlayEl.style.display = 'block';
+            };
+            if (img.complete && img.naturalWidth > 0) {
+                place();
+            } else {
+                // Wait for image to finish loading before positioning. Replace
+                // any prior pending handler so we always run with the latest
+                // selection.
+                img.onload = place;
+            }
+        }
+
+        function _applyBomRowToViewers(pn) {
+            // Snapshot/restore pattern so toggling row selection cannot corrupt
+            // the underlying material state. Snapshot key is BOM-specific and
+            // independent of the existing diff-highlight system's snapshot.
+            const viewers = [diffState.viewerA, diffState.viewerB];
+            const hlColor = (typeof THREE !== 'undefined') ? new THREE.Color(_BOM_HIGHLIGHT_COLOR) : null;
+            viewers.forEach(viewer => {
+                if (!viewer || !viewer.liveScene) return;
+                const liveScene = viewer.liveScene;
+                const meshMap = viewer.partMeshMap;
+
+                liveScene.traverse(child => {
+                    if (!child.isMesh || !child.material) return;
+                    if (child.userData._bomOrigEmissive === undefined) {
+                        // Snapshot only on first contact so we capture whatever
+                        // baseline state existed (default GLB or diff-highlight).
+                        try {
+                            child.userData._bomOrigEmissive = child.material.emissive.clone();
+                        } catch (_) { /* shader material without emissive — skip */ }
+                        child.userData._bomOrigEmissiveIntensity = child.material.emissiveIntensity || 0;
+                    }
+                });
+
+                // Restore every mesh to its snapshot before applying new highlight.
+                liveScene.traverse(child => {
+                    if (!child.isMesh || !child.material) return;
+                    const snap = child.userData._bomOrigEmissive;
+                    if (snap !== undefined && child.material.emissive) {
+                        child.material.emissive.copy(snap);
+                        child.material.emissiveIntensity = child.userData._bomOrigEmissiveIntensity || 0;
+                    }
+                });
+
+                if (pn && hlColor && meshMap && meshMap[pn]) {
+                    // Defense-in-depth: even if a row click set selectedKey on
+                    // a PN that the active isolation hides, the cyan emissive
+                    // must NOT paint. Isolation is the authority over what is
+                    // visible in 3D.
+                    const isoMode = (diffState.bomCompare && diffState.bomCompare.isolation) || 'all';
+                    const visibleKeys = _bomIsolationVisibleKeys(isoMode, diffState.bomCompare);
+                    const allowedByIsolation = (visibleKeys === null) || visibleKeys.has(pn);
+                    if (allowedByIsolation) {
+                        for (const mesh of meshMap[pn]) {
+                            if (!mesh.material || !mesh.material.emissive) continue;
+                            mesh.material.emissive.copy(hlColor);
+                            mesh.material.emissiveIntensity = 0.6;
+                        }
+                    }
+                }
+            });
+        }
+
+        function _clearBomRowSelection() {
+            // Single source of truth for "drop the selection". Used by the
+            // preview reset and by re-loads on a new revision pair.
+            const cmp = diffState.bomCompare;
+            if (!cmp) return;
+            cmp.selectedKey = null;
+            _applyBomRowToDrawing(null);
+            _applyBomRowToViewers(null);
+            // If isolation depends on the selection, re-apply so the
+            // single-selected-mesh isolation drops when there is no selection.
+            if (cmp.isolation === 'selected') {
+                _applyBomIsolationToViewers('selected');
+            }
+        }
+
+        // ---- Viewport isolation (Phase 5) ----
+        // Independent of filter (which controls table visibility) and the
+        // row-click highlight (which controls emissive color). Uses its own
+        // userData snapshot keys so all three systems compose without aliasing.
+        // Mode 'changed' uses proven_changed semantics — substitution_unverified
+        // rows are intentionally NOT visible, matching the Phase 0 honesty rule.
+
+        const _BOM_ISOLATION_DIM_OPACITY = 0.05;
+
+        function _bomIsolationVisibleKeys(mode, cmp) {
+            // Return null sentinel = no isolation (everything visible).
+            // Return Set of part numbers to keep visible when isolation is on.
+            const rows = (cmp && cmp.rows) || [];
+            if (mode === 'all') return null;
+            if (mode === 'selected') {
+                // No selection means there is nothing to isolate to. Treat as
+                // 'all' so the user is not staring at a fully dimmed scene.
+                if (!cmp.selectedKey) return null;
+                return new Set([cmp.selectedKey]);
+            }
+            if (mode === 'purchased') return new Set(rows.filter(r => r.procurement === 'purchased').map(r => r.key));
+            if (mode === 'custom')    return new Set(rows.filter(r => r.procurement === 'custom').map(r => r.key));
+            if (mode === 'changed') {
+                // Proven change only — substitution_unverified excluded by design.
+                return new Set(rows.filter(r => r.diff_status === 'added' || r.diff_status === 'removed' || r.diff_status === 'qty_changed').map(r => r.key));
+            }
+            return null;
+        }
+
+        function _applyBomIsolationToViewers(mode) {
+            const cmp = diffState.bomCompare;
+            const visibleKeys = _bomIsolationVisibleKeys(mode, cmp);
+            const viewers = [diffState.viewerA, diffState.viewerB];
+
+            viewers.forEach(viewer => {
+                if (!viewer || !viewer.liveScene) return;
+                const liveScene = viewer.liveScene;
+                const meshMap = viewer.partMeshMap || {};
+
+                // Snapshot opacity-related state once per mesh. Capture the
+                // first-seen state so 'all' mode can restore exactly.
+                liveScene.traverse(child => {
+                    if (!child.isMesh || !child.material) return;
+                    if (child.userData._bomIsoOrigOpacity === undefined) {
+                        child.userData._bomIsoOrigOpacity     = child.material.opacity;
+                        child.userData._bomIsoOrigTransparent = child.material.transparent;
+                        child.userData._bomIsoOrigDepthWrite  = child.material.depthWrite;
+                    }
+                });
+
+                // Build the keep-mesh set from partMeshMap. visibleKeys=null
+                // means full restore (no isolation), so every mesh is "kept".
+                const keepMeshes = new Set();
+                if (visibleKeys === null) {
+                    liveScene.traverse(c => { if (c.isMesh) keepMeshes.add(c); });
+                } else {
+                    for (const pn of visibleKeys) {
+                        const meshes = meshMap[pn] || [];
+                        for (const m of meshes) keepMeshes.add(m);
+                    }
+                }
+
+                liveScene.traverse(child => {
+                    if (!child.isMesh || !child.material) return;
+                    if (keepMeshes.has(child)) {
+                        child.material.opacity     = child.userData._bomIsoOrigOpacity ?? 1;
+                        child.material.transparent = child.userData._bomIsoOrigTransparent ?? false;
+                        child.material.depthWrite  = child.userData._bomIsoOrigDepthWrite ?? true;
+                    } else {
+                        child.material.opacity     = _BOM_ISOLATION_DIM_OPACITY;
+                        child.material.transparent = true;
+                        child.material.depthWrite  = false;
+                    }
+                    child.material.needsUpdate = true;
+                });
+            });
+
+            _refreshBomIsolationPills();
+            _refreshBomIsolationNote(mode, visibleKeys);
+        }
+
+        function _refreshBomIsolationPills() {
+            const active = (diffState.bomCompare && diffState.bomCompare.isolation) || 'all';
+            document.querySelectorAll('.bom-compare-isolation-pill').forEach(p => {
+                const isActive = p.dataset.isolation === active;
+                p.style.background  = isActive ? 'rgba(255,179,0,0.18)' : 'rgba(255,255,255,0.05)';
+                p.style.color       = isActive ? '#fff' : 'var(--text-secondary,#9aa5b1)';
+                p.style.borderColor = isActive ? 'rgba(255,179,0,0.55)' : 'rgba(255,255,255,0.08)';
+            });
+        }
+
+        function _refreshBomIsolationNote(mode, visibleKeys) {
+            const note = document.getElementById('bomIsolationNote');
+            if (!note) return;
+            if (mode === 'all') {
+                note.textContent = '';
+                return;
+            }
+            if (mode === 'selected') {
+                const sel = diffState.bomCompare && diffState.bomCompare.selectedKey;
+                note.textContent = sel ? `Showing only ${sel}` : 'Click a BOM row to isolate';
+                return;
+            }
+            const count = visibleKeys ? visibleKeys.size : 0;
+            if (mode === 'changed' && count === 0) {
+                note.textContent = 'No proven-changed rows; everything is dimmed';
+                return;
+            }
+            note.textContent = `Showing ${count} part number${count === 1 ? '' : 's'}`;
         }
 
         function _initAssembly3DScene(container, assemblyNumber) {

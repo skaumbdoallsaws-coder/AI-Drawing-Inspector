@@ -7154,6 +7154,13 @@
             state.featureCount = profile.feature_count;
             state.autoDetected = isAuto;
 
+            // Drawing classification (Phase 3): fetch the contract for this
+            // part so the agent context picks it up on the next send. The
+            // backend will also fall back to server-side classification if
+            // this fetch hasn't completed yet, so we treat this as a cache.
+            state.drawingClassification = null;
+            _fetchDrawingClassification(pn);
+
             // Update part info display
             partInfo.innerHTML = `
                 <div class="part-info-row">
@@ -22505,6 +22512,24 @@
                 return state._geometryDiffResult;
             }
 
+            // Drawing classification cache (Phase 3). Populated by
+            // _fetchDrawingClassification when the part number changes.
+            // buildAgentAttachments() reads from state.drawingClassification
+            // when it's fresh for the current part; the backend's
+            // normalize_agent_context() injects a fallback if it isn't.
+            async function _fetchDrawingClassification(pn) {
+                if (!pn) return;
+                const requestPn = pn;
+                try {
+                    const res = await fetch(`/api/drawing-classification/${encodeURIComponent(pn)}`);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    // Stale guard: bail if the user changed parts mid-flight.
+                    if (state.partNumber !== requestPn) return;
+                    state.drawingClassification = data;
+                } catch (_) { /* silent — backend fallback handles missing cache */ }
+            }
+
             function buildAgentAttachments(agentType) {
                 const att = { schema_version: 1 };
 
@@ -22548,6 +22573,17 @@
                     page_count: state.drawingPages || 1,
                     available_views: _getAvailableViews(),
                 };
+                // Drawing classification (Phase 3): include the cached
+                // contract when we have one. The backend will also inject
+                // server-side classification during normalize_agent_context()
+                // if this object isn't populated, so missing it here is safe.
+                if (state.drawingClassification && state.drawingClassification.part_number === state.partNumber) {
+                    const dc = state.drawingClassification;
+                    att.drawing.drawing_type = dc.drawing_type;
+                    att.drawing.workflow_mode = dc.workflow_mode;
+                    att.drawing.drawing_capabilities = dc.drawing_capabilities;
+                    att.drawing.classification_reasons = dc.classification_reasons;
+                }
 
                 // INSPECTION
                 att.inspection = {

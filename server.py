@@ -40,6 +40,7 @@ from ai_inspector.utils.drawing_map import (
     list_drawing_map_revisions,
     sanitize_part_number,
 )
+from ai_inspector.classification import classify_drawing_mode
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -3284,6 +3285,106 @@ def _load_rag_images(directories: List[str], max_images: int = 4) -> List[Dict]:
     return content_blocks
 
 
+# ---------- Drawing classification (Phase 1) ----------
+
+def _compute_drawing_classification(
+    part_number: Optional[str],
+    drawing_map: Optional[dict] = None,
+) -> dict:
+    """Gather server-side signals for ``part_number`` and run the classifier.
+
+    All signal lookups are best-effort: missing files / empty profiles fall
+    through cleanly to the classifier's lower-confidence branches. The
+    function never raises — a missing or invalid ``part_number`` returns a
+    valid ``unknown`` classification.
+    """
+    safe_pn = re.sub(r'[^\w\-]', '', (part_number or '')).strip()
+    if not safe_pn:
+        return classify_drawing_mode(None, drawing_map=drawing_map)
+
+    # ── has_assembly_context ──
+    # True only when the part number IS itself an assembly's number (i.e.
+    # registered as an assembly_profiles key). Being a *component* of some
+    # assembly does NOT qualify; a component drawing is still a part drawing.
+    has_assembly_context = safe_pn in assembly_profiles
+
+    # ── has_drawing_revisions ──
+    # ≥2 rev{X} subdirectories exist. For assemblies we look in assemblies/<n>/;
+    # for parts in parts/<n>/. Single-revision parts don't qualify.
+    if has_assembly_context:
+        rev_root = Path("400S_Sorted_Library/assemblies") / safe_pn
+    else:
+        rev_root = Path("400S_Sorted_Library/parts") / safe_pn
+    has_drawing_revisions = False
+    if rev_root.exists() and rev_root.is_dir():
+        rev_dirs = [d for d in rev_root.iterdir() if d.is_dir() and d.name.lower().startswith("rev")]
+        has_drawing_revisions = len(rev_dirs) >= 2
+
+    # ── has_inspection_profile ──
+    # Standard naming: 400S_Sorted_Library/<pn>.json. We check the file system
+    # rather than asking the SpatialInspector so this stays cheap and
+    # side-effect-free.
+    has_inspection_profile = (Path("400S_Sorted_Library") / f"{safe_pn}.json").exists()
+
+    # ── drawing_map ──
+    # If the caller didn't pass one, try to load it from disk for richer
+    # signal extraction (BOM-table detection, dimension annotations). We
+    # enumerate all rev{X} subdirectories sorted alphabetically rather than
+    # hardcoding revA, so a part with only revB / revC populated still
+    # produces a usable drawing map. The flat-layout fallback is searched
+    # last because revisioned files are the source of truth when present.
+    if drawing_map is None:
+        if has_assembly_context:
+            rev_root_dir = Path("400S_Sorted_Library/assemblies") / safe_pn
+            flat_fallback = Path("400S_Sorted_Library/assemblies") / f"{safe_pn}_drawing_map.json"
+        else:
+            rev_root_dir = Path("400S_Sorted_Library/parts") / safe_pn
+            flat_fallback = Path("400S_Sorted_Library") / f"{safe_pn}_drawing_map.json"
+
+        candidates: List[Path] = []
+        if rev_root_dir.exists() and rev_root_dir.is_dir():
+            rev_subdirs = sorted(
+                (d for d in rev_root_dir.iterdir()
+                 if d.is_dir() and d.name.lower().startswith("rev")),
+                key=lambda d: d.name.lower(),
+            )
+            for rd in rev_subdirs:
+                candidates.append(rd / f"{safe_pn}_drawing_map.json")
+        candidates.append(flat_fallback)
+
+        for p in candidates:
+            if p.exists():
+                try:
+                    with open(p, encoding='utf-8-sig') as f:
+                        drawing_map = json.load(f)
+                    break
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+    return classify_drawing_mode(
+        safe_pn,
+        drawing_map=drawing_map,
+        has_assembly_context=has_assembly_context,
+        has_drawing_revisions=has_drawing_revisions,
+        has_inspection_profile=has_inspection_profile,
+    )
+
+
+@app.get("/api/drawing-classification/{part_number}")
+async def get_drawing_classification(part_number: str):
+    """Return the classification contract for ``part_number``.
+
+    Public version of :func:`_compute_drawing_classification`. The frontend
+    can call this directly when it needs the contract without going through
+    the agent context flow.
+    """
+    safe_pn = re.sub(r'[^\w\-]', '', part_number or '').strip()
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    classification = _compute_drawing_classification(safe_pn)
+    return {"part_number": safe_pn, **classification}
+
+
 def normalize_agent_context(ctx: dict) -> dict:
     """
     Normalize incoming inspection_context into structured attachments + flat compat.
@@ -3386,6 +3487,52 @@ def normalize_agent_context(ctx: dict) -> dict:
         if session.get("paused_walkthrough"):
             flat.setdefault("paused_walkthrough", session["paused_walkthrough"])
 
+    # ── Drawing classification injection (Phase 2) ──
+    # If the frontend already populated the classification fields directly on
+    # attachments.drawing (Phase 3 cache hit), reuse them as-is. Otherwise
+    # compute server-side from the part number. Either way the contract ends
+    # up under both attachments.drawing AND flat keys so legacy code paths
+    # that read flat fields work without touching the structured tree.
+    pn_for_class = flat.get("part_number")
+    drawing_attach = (attachments.get("drawing") if attachments else None) or {}
+    frontend_supplied = drawing_attach.get("drawing_type") is not None
+
+    classification = None
+    if frontend_supplied:
+        # Trust what the frontend sent — don't recompute and don't second-guess.
+        classification = {
+            "drawing_type": drawing_attach.get("drawing_type"),
+            "workflow_mode": drawing_attach.get("workflow_mode"),
+            "drawing_capabilities": drawing_attach.get("drawing_capabilities") or {},
+            "classification_reasons": drawing_attach.get("classification_reasons") or [],
+        }
+    elif pn_for_class:
+        try:
+            classification = _compute_drawing_classification(pn_for_class)
+        except Exception:
+            classification = None
+
+    if classification:
+        # Mutate the structured tree so downstream code that reads attachments
+        # gets the contract too. We attach under "drawing" because the contract
+        # is about the drawing being viewed, not the part itself.
+        if attachments is None:
+            attachments = {}
+        d = attachments.get("drawing")
+        if d is None:
+            d = {}
+            attachments["drawing"] = d
+        d["drawing_type"] = classification.get("drawing_type")
+        d["workflow_mode"] = classification.get("workflow_mode")
+        d["drawing_capabilities"] = classification.get("drawing_capabilities")
+        d["classification_reasons"] = classification.get("classification_reasons")
+        # Flat compat fields. setdefault so legacy callers that already set
+        # them upstream win.
+        flat.setdefault("drawing_type", classification.get("drawing_type"))
+        flat.setdefault("drawing_workflow_mode", classification.get("workflow_mode"))
+        flat.setdefault("drawing_capabilities", classification.get("drawing_capabilities"))
+        flat.setdefault("drawing_classification_reasons", classification.get("classification_reasons"))
+
     return {"attachments": attachments, "flat": flat}
 
 
@@ -3400,6 +3547,40 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     pname = inspection_context.get("part_name")
     if pn:
         parts.append(f"[PART]\nCurrent part: {pn} ({pname or 'unknown'})")
+
+    # ── DRAWING MODE (Phase 2) ──
+    # Render the classification near the top so the agent sees the workflow
+    # contract before any downstream fields. Preferred / deprioritized actions
+    # are derived directly from drawing_capabilities so the agent doesn't have
+    # to infer them from raw booleans.
+    dt = inspection_context.get("drawing_type")
+    wm = inspection_context.get("drawing_workflow_mode")
+    caps = inspection_context.get("drawing_capabilities") or {}
+    reasons = inspection_context.get("drawing_classification_reasons") or []
+    if dt and dt != "unknown":
+        # Capability-to-action mapping, kept here so the prompt text stays
+        # in sync with the capability matrix in classification/drawing_mode.py.
+        _CAP_TO_ACTION = {
+            "bom_compare":        "highlight_bom_rows / switch_drawing_revision",
+            "part_isolation":     "highlight_parts / isolate_parts",
+            "assembly_compare":   "assembly_revision_compare",
+            "dimension_overlay":  "dimension_overlay / dimension_highlighting",
+            "feature_overlay":    "feature_overlay",
+            "fai_mode":           "fai_table / fai_balloons",
+        }
+        preferred = [_CAP_TO_ACTION[k] for k, v in caps.items() if v and k in _CAP_TO_ACTION]
+        deprioritized = [_CAP_TO_ACTION[k] for k, v in caps.items() if (not v) and k in _CAP_TO_ACTION]
+        dm_lines = ["[DRAWING MODE]"]
+        dm_lines.append(f"Type: {dt}")
+        if wm:
+            dm_lines.append(f"Workflow: {wm}")
+        if preferred:
+            dm_lines.append("Preferred actions: " + ", ".join(preferred))
+        if deprioritized:
+            dm_lines.append("Deprioritize: " + ", ".join(deprioritized))
+        if reasons:
+            dm_lines.append("Reasons: " + "; ".join(reasons))
+        parts.append("\n".join(dm_lines))
 
     # ── INSPECTION ──
     gs = inspection_context.get("gap_summary")

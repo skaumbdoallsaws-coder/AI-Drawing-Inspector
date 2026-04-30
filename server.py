@@ -38,6 +38,7 @@ from ai_inspector.utils.drawing_map import (
     load_drawing_map,
     load_drawing_map_revision,
     list_drawing_map_revisions,
+    normalize_drawing_map,
     sanitize_part_number,
 )
 from ai_inspector.classification import classify_drawing_mode
@@ -402,6 +403,29 @@ async def detect_part_number(filename: str = Query(..., description="Filename to
     """Auto-detect part number from a filename."""
     try:
         result = inspector.detect_part_number(filename)
+        if not result.get("part_number"):
+            stem = Path(filename or "").stem
+            raw_candidates = [stem]
+            raw_candidates.extend(re.split(r"[^A-Za-z0-9_-]+", stem))
+            for raw in raw_candidates:
+                candidate = re.sub(r"[^\w\-]", "", raw or "")
+                if not candidate:
+                    continue
+                if candidate in assembly_profiles:
+                    return {
+                        "part_number": candidate,
+                        "match_type": "assembly_direct",
+                        "candidate": candidate,
+                    }
+                rev_match = re.match(r"^(.+?)[-_]?REV[-_]?[A-Z0-9]*$", candidate, re.IGNORECASE)
+                if rev_match:
+                    base = re.sub(r"[^\w\-]", "", rev_match.group(1) or "")
+                    if base in assembly_profiles:
+                        return {
+                            "part_number": base,
+                            "match_type": "assembly_direct",
+                            "candidate": candidate,
+                        }
         return result
     except ValueError as e:
         logger.warning(f"Invalid filename for detection: '{filename}': {e}")
@@ -696,6 +720,21 @@ async def get_profile_details(part_number: str):
     if not profile_path.exists():
         profile_path = library_dir / f"{safe_pn}.json"
     if not profile_path.exists():
+        assy_data = assembly_profiles.get(safe_pn)
+        if assy_data:
+            ident = assy_data.get("identity", {}) or {}
+            stats = assy_data.get("statistics", {}) or {}
+            assy_name = ident.get("description", safe_pn)
+            return {
+                "part_number": safe_pn,
+                "part_name": assy_name,
+                "part_description": assy_name,
+                "features": [],
+                "view_expectations": {},
+                "context_kind": "assembly",
+                "component_count": stats.get("totalComponents", 0),
+                "mate_count": stats.get("totalMates", 0),
+            }
         raise HTTPException(status_code=404, detail=f"No profile found for part number '{part_number}'")
 
     try:
@@ -1527,49 +1566,63 @@ def _build_part_properties(part_color_legend: list) -> list:
 
 @app.get("/api/assembly-context/{part_number}")
 async def get_assembly_context(part_number: str):
-    """Return assembly context for a part number (mates, narrative, etc.)."""
+    """Return assembly context for a part number or direct assembly number."""
     # Sanitize
     safe_pn = re.sub(r'[^\w\-]', '', part_number)
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
 
-    # Look up in reverse map
-    if safe_pn not in assembly_part_lookup:
+    # Accept either:
+    # 1. a member part number that maps back to an assembly, or
+    # 2. the assembly number itself (used by full-assembly drawings like 6000302).
+    if safe_pn in assembly_part_lookup:
+        assy_numbers = assembly_part_lookup[safe_pn]
+        assy_number = assy_numbers[0]  # Use first assembly
+        assy_data = assembly_profiles.get(assy_number, {})
+
+        # Build set of all aliases for this part (old filenames + new PN)
+        part_aliases = {safe_pn}
+        pdc = assy_data.get("partDataCache", {})
+        for old_key, pd in pdc.items():
+            old_stem = Path(old_key).stem
+            new_pn = (pd.get("identity") or {}).get("partNumber", "")
+            if safe_pn == new_pn or safe_pn == old_stem:
+                part_aliases.add(old_stem)
+                part_aliases.add(new_pn)
+                base = re.sub(r'_\d+$', '', old_stem)
+                part_aliases.add(base)
+        part_aliases.discard("")
+        context_kind = "part"
+    elif safe_pn in assembly_profiles:
+        assy_number = safe_pn
+        assy_data = assembly_profiles.get(assy_number, {})
+        part_aliases = None
+        context_kind = "assembly"
+    else:
         raise HTTPException(status_code=404, detail=f"No assembly context for part {part_number}")
-
-    assy_numbers = assembly_part_lookup[safe_pn]
-    assy_number = assy_numbers[0]  # Use first assembly
-    assy_data = assembly_profiles.get(assy_number, {})
-
-    # Build set of all aliases for this part (old filenames + new PN)
-    part_aliases = {safe_pn}
-    pdc = assy_data.get("partDataCache", {})
-    for old_key, pd in pdc.items():
-        old_stem = Path(old_key).stem
-        new_pn = (pd.get("identity") or {}).get("partNumber", "")
-        if safe_pn == new_pn or safe_pn == old_stem:
-            part_aliases.add(old_stem)
-            part_aliases.add(new_pn)
-            base = re.sub(r'_\d+$', '', old_stem)
-            part_aliases.add(base)
-    part_aliases.discard("")
 
     # Filter mates to only those involving this part
     all_mates = assy_data.get("mates", [])
-    mates_for_part = []
-    for mate in all_mates:
-        e1 = mate.get("entity1", {}).get("componentName", "")
-        e2 = mate.get("entity2", {}).get("componentName", "")
-        if any(alias in e1 or alias in e2 for alias in part_aliases):
-            mates_for_part.append(mate)
+    if part_aliases is None:
+        mates_for_part = all_mates
+    else:
+        mates_for_part = []
+        for mate in all_mates:
+            e1 = mate.get("entity1", {}).get("componentName", "")
+            e2 = mate.get("entity2", {}).get("componentName", "")
+            if any(alias in e1 or alias in e2 for alias in part_aliases):
+                mates_for_part.append(mate)
 
     # Filter mateRelationships
     all_relationships = assy_data.get("mateRelationships", [])
-    relationships_for_part = []
-    for rel in all_relationships:
-        parts_involved = rel.get("parts", [])
-        if any(any(alias in p for alias in part_aliases) for p in parts_involved):
-            relationships_for_part.append(rel)
+    if part_aliases is None:
+        relationships_for_part = all_relationships
+    else:
+        relationships_for_part = []
+        for rel in all_relationships:
+            parts_involved = rel.get("parts", [])
+            if any(any(alias in p for alias in part_aliases) for p in parts_involved):
+                relationships_for_part.append(rel)
 
     # Get assembly name
     identity = assy_data.get("identity", {})
@@ -1642,6 +1695,7 @@ async def get_assembly_context(part_number: str):
     part_properties = _build_part_properties(part_color_legend)
 
     return {
+        "context_kind": context_kind,
         "assembly_number": assy_number,
         "assembly_name": assy_name,
         "component_count": stats.get("totalComponents", 0),
@@ -2132,7 +2186,7 @@ async def get_drawing_revisions(part_number: str):
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
 
-    revisions = list_drawing_map_revisions(safe_pn, "400S_Sorted_Library")
+    revisions = _list_drawing_compare_revisions(safe_pn)
     return {"revisions": revisions, "part_number": safe_pn}
 
 
@@ -2153,8 +2207,8 @@ async def get_drawing_diff(
     if not safe_pn or not safe_a or not safe_b:
         raise HTTPException(status_code=400, detail="Invalid part number or revision")
 
-    map_a = load_drawing_map_revision(safe_pn, safe_a, "400S_Sorted_Library")
-    map_b = load_drawing_map_revision(safe_pn, safe_b, "400S_Sorted_Library")
+    map_a = _load_drawing_compare_map_revision(safe_pn, safe_a)
+    map_b = _load_drawing_compare_map_revision(safe_pn, safe_b)
 
     if map_a is None:
         raise HTTPException(status_code=404, detail=f"Drawing map not found for rev {safe_a}")
@@ -2253,6 +2307,63 @@ def _load_highlight_boxes(part_number: str, revision: str) -> Optional[dict]:
     return None
 
 
+def _is_assembly_drawing_number(part_number: str) -> bool:
+    """True when the drawing number corresponds to a loaded assembly."""
+    return part_number in assembly_profiles
+
+
+def _assembly_drawing_revision_dir(part_number: str, revision: str) -> Path:
+    return Path("400S_Sorted_Library/assemblies") / part_number / f"rev{revision}"
+
+
+def _load_drawing_compare_map_revision(part_number: str, revision: str) -> Optional[dict]:
+    """Load a revisioned drawing map from parts or assembly revision folders."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    safe_rev = re.sub(r'[^\w]', '', revision)
+    if not safe_pn or not safe_rev:
+        return None
+
+    if _is_assembly_drawing_number(safe_pn):
+        map_path = _assembly_drawing_revision_dir(safe_pn, safe_rev) / f"{safe_pn}_drawing_map.json"
+        if map_path.exists():
+            with open(map_path, "r", encoding="utf-8-sig") as handle:
+                raw_data = json.load(handle)
+            normalized = normalize_drawing_map(raw_data, part_number=safe_pn)
+            normalized["sourcePath"] = str(map_path)
+            normalized["revision"] = safe_rev
+            return normalized
+
+    return load_drawing_map_revision(safe_pn, safe_rev, "400S_Sorted_Library")
+
+
+def _list_drawing_compare_revisions(part_number: str) -> List[str]:
+    """List drawing compare revisions from parts or assembly revision folders."""
+    safe_pn = re.sub(r'[^\w\-]', '', part_number)
+    if not safe_pn:
+        return []
+
+    revisions = list_drawing_map_revisions(safe_pn, "400S_Sorted_Library")
+    if len(revisions) >= 2:
+        return revisions
+
+    if _is_assembly_drawing_number(safe_pn):
+        assy_dir = Path("400S_Sorted_Library/assemblies") / safe_pn
+        found = []
+        if assy_dir.exists() and assy_dir.is_dir():
+            for d in sorted(assy_dir.iterdir()):
+                if not d.is_dir() or not d.name.lower().startswith("rev"):
+                    continue
+                rev_label = d.name[3:]
+                has_map = (d / f"{safe_pn}_drawing_map.json").exists()
+                has_pdf = (d / f"{safe_pn}.PDF").exists() or (d / f"{safe_pn}.pdf").exists()
+                if has_map or has_pdf:
+                    found.append(rev_label)
+        if found:
+            return found
+
+    return revisions
+
+
 @app.get("/api/drawing-render/{part_number}")
 async def get_drawing_render(part_number: str, revision: str = Query(...)):
     """Serve a revision-specific rendered drawing image (raster only).
@@ -2266,6 +2377,18 @@ async def get_drawing_render(part_number: str, revision: str = Query(...)):
     safe_rev = re.sub(r'[^\w]', '', revision)
     if not safe_pn or not safe_rev:
         raise HTTPException(status_code=400, detail="Invalid part number or revision")
+
+    if _is_assembly_drawing_number(safe_pn):
+        base_dir = _assembly_drawing_revision_dir(safe_pn, safe_rev)
+        for candidate in (base_dir / f"{safe_pn}.PDF", base_dir / f"{safe_pn}.pdf"):
+            if candidate.exists():
+                import fitz
+
+                with fitz.open(candidate) as doc:
+                    if doc.page_count < 1:
+                        raise HTTPException(status_code=404, detail=f"Empty assembly drawing for {part_number} rev {revision}")
+                    pix = doc.load_page(0).get_pixmap(dpi=150, alpha=False)
+                    return Response(content=pix.tobytes("png"), media_type="image/png")
 
     base_dir = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}"
     # Raster only — PDF excluded (can't render in <img>)

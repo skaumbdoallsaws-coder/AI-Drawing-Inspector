@@ -14384,7 +14384,9 @@
             // Close drawing pane via header X. Clears selection so the 3D
             // highlight also clears — keeps the workspace coherent.
             drawingHeader.querySelector('#bomDrawingCloseBtn').addEventListener('click', () => {
-                _onBomRowClick(diffState.bomCompare.selectedKey);  // toggles off
+                const sel = diffState.bomCompare.selectedKey;
+                if (sel) _onBomRowClick(sel);  // toggles off to the full assembly drawing
+                else _hideBomDrawingPane();
             });
 
             const notes = document.createElement('div');
@@ -14426,6 +14428,7 @@
             // the panel cannot say "Preview updated. Click Compare…" while
             // still displaying the previous Rev A / Rev B chip values.
             _updateBomRevPairLabel();
+            _hideBomDrawingPane();
             const body = document.getElementById('bomCompareBody');
             const summaryEl = document.getElementById('bomCompareSummary');
             const notesEl = document.getElementById('bomCompareHonestyNotes');
@@ -14453,6 +14456,13 @@
             const body = document.getElementById('bomCompareBody');
             if (body) body.innerHTML = '<div style="color:var(--text-secondary,#9aa5b1);font-size:11px;padding:14px;">Loading BOM compare…</div>';
             diffState.bomCompare.loading = true;
+            // Start the assembly drawing load immediately so the drawing pane
+            // can come up alongside the compare viewers instead of waiting for
+            // the first BOM row click.
+            diffState.bomCompare.assyNum = assyNum;
+            diffState.bomCompare.revA = revA;
+            diffState.bomCompare.revB = revB;
+            try { _showBomAssemblyDrawingDefault(revB, 'Loading drawing…'); } catch (_) {}
             try {
                 const url = `/api/assembly-compare/${encodeURIComponent(assyNum)}/normalized?revA=${encodeURIComponent(revA)}&revB=${encodeURIComponent(revB)}`;
                 const res = await fetch(url);
@@ -14503,6 +14513,8 @@
                     // 3D meshes re-snapshot with the new viewer's part map.
                     _applyBomRowToDrawing(nextSelected);
                     _applyBomRowToViewers(nextSelected);
+                } else {
+                    _showBomAssemblyDrawingDefault(data.revB || data.revA, 'Full assembly');
                 }
                 // Apply isolation against the freshly loaded rows so 'changed' /
                 // 'purchased' / 'custom' modes pick up the new key sets.
@@ -14755,6 +14767,31 @@
             }
         }
 
+        function _hideBomDrawingPane() {
+            const pane = document.getElementById('bomDrawingPane');
+            const overlayEl = document.getElementById('bomDrawingHighlight');
+            const headerRow = document.getElementById('bomDrawingHeaderRow');
+            if (pane) pane.style.display = 'none';
+            if (overlayEl) overlayEl.style.display = 'none';
+            if (headerRow) headerRow.textContent = '';
+        }
+
+        function _showBomAssemblyDrawingDefault(revLetter, labelText) {
+            const pane = document.getElementById('bomDrawingPane');
+            const overlayEl = document.getElementById('bomDrawingHighlight');
+            const headerRow = document.getElementById('bomDrawingHeaderRow');
+            const cmp = diffState.bomCompare || {};
+            const chosenRev = revLetter || cmp.revB || cmp.revA;
+            if (!pane || !cmp.assyNum || !chosenRev) {
+                _hideBomDrawingPane();
+                return;
+            }
+            pane.style.display = 'flex';
+            if (overlayEl) overlayEl.style.display = 'none';
+            _ensureBomDrawingImageLoaded(chosenRev);
+            if (headerRow) headerRow.textContent = labelText || 'Full assembly';
+        }
+
         function _applyBomRowToDrawing(pn) {
             const pane = document.getElementById('bomDrawingPane');
             const overlayEl = document.getElementById('bomDrawingHighlight');
@@ -14762,17 +14799,19 @@
             const headerRow = document.getElementById('bomDrawingHeaderRow');
             if (!pane || !overlayEl || !img) return;
             if (!pn) {
-                pane.style.display = 'none';
-                overlayEl.style.display = 'none';
-                if (headerRow) headerRow.textContent = '';
+                const cmp = diffState.bomCompare || {};
+                if (cmp.assyNum && (cmp.revB || cmp.revA)) {
+                    _showBomAssemblyDrawingDefault(cmp.revB || cmp.revA, 'Full assembly');
+                    return;
+                }
+                _hideBomDrawingPane();
                 return;
             }
 
             const cmp = diffState.bomCompare;
             const row = (cmp.rows || []).find(r => r.key === pn);
             if (!row) {
-                pane.style.display = 'none';
-                overlayEl.style.display = 'none';
+                _hideBomDrawingPane();
                 return;
             }
 

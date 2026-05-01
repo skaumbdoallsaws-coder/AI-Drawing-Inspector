@@ -7003,6 +7003,45 @@
             return DRAWING_COMPARE_DEV_PREVIEW ? ['A', 'B'] : [];
         }
 
+        function _isCurrentSelectionAssemblyRoot() {
+            return !!(
+                assemblyContextAvailable
+                && assemblyContext
+                && state.partNumber
+                && assemblyContext.assembly_number
+                && String(assemblyContext.assembly_number) === String(state.partNumber)
+            );
+        }
+
+        function _ensureDrawingCompareRevisions(pn) {
+            if (!pn) return;
+            if (drawingDiffState.available) return;
+            if (drawingDiffState._revisionFetchPn === pn) return;
+
+            drawingDiffState._revisionFetchPn = pn;
+            fetch(`/api/drawing-revisions/${encodeURIComponent(pn)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (!data || state.partNumber !== pn) return;
+                    drawingDiffState.revisions = data.revisions || [];
+                    drawingDiffState.available = drawingDiffState.revisions.length >= 2;
+                    const revOptions = _drawingCompareRevisionOptions();
+                    if (revOptions.length >= 2) {
+                        drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
+                        drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
+                    }
+                    if (state.activeTab === 'drawing') {
+                        switchTab('drawing');
+                    }
+                })
+                .catch(() => {})
+                .finally(() => {
+                    if (drawingDiffState._revisionFetchPn === pn) {
+                        drawingDiffState._revisionFetchPn = null;
+                    }
+                });
+        }
+
         // Feature #144: Assembly context auto-load
         async function checkAssemblyContext(partNumber) {
             try {
@@ -7158,8 +7197,11 @@
             // part so the agent context picks it up on the next send. The
             // backend will also fall back to server-side classification if
             // this fetch hasn't completed yet, so we treat this as a cache.
+            // The function lives inside the setupAgentPanel IIFE and is
+            // re-exposed on `window` from there — guard the call so a
+            // missing binding never aborts the rest of selectPartNumber.
             state.drawingClassification = null;
-            _fetchDrawingClassification(pn);
+            window._fetchDrawingClassification?.(pn);
 
             // Update part info display
             partInfo.innerHTML = `
@@ -7267,9 +7309,11 @@
                             drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
                             drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
                         }
-                        // Re-render drawing tab to show Compare subtab if available
+                        // Re-render the full drawing tab so a compare pane that
+                        // was rendered early in dev-preview mode can upgrade to
+                        // the real revision dataset as soon as the async fetch lands.
                         if (_drawingCompareUiEnabled() && state.activeTab === 'drawing') {
-                            renderRibbon();
+                            switchTab('drawing');
                         }
                     }
                 })
@@ -7282,7 +7326,7 @@
                         drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
                     }
                     if (_drawingCompareUiEnabled() && state.activeTab === 'drawing') {
-                        renderRibbon();
+                        switchTab('drawing');
                     }
                 });
 
@@ -17296,6 +17340,28 @@
                 return;
             }
 
+            // Assembly-root selections like 6000302 do not have a normal
+            // part-model workflow. Fall back to the assembly viewer so the
+            // 3D tab is still useful from the normal upload path.
+            if (_isCurrentSelectionAssemblyRoot()) {
+                const wrapper = document.createElement('div');
+                wrapper.style.cssText = 'width:100%;height:100%;display:flex;flex-direction:column;';
+
+                const note = document.createElement('div');
+                note.style.cssText = 'padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;color:var(--text-secondary);';
+                note.textContent = 'Showing assembly model for assembly drawing ' + state.partNumber;
+                wrapper.appendChild(note);
+
+                const assyContainer = document.createElement('div');
+                assyContainer.className = 'viewport-assembly';
+                assyContainer.style.flex = '1';
+                wrapper.appendChild(assyContainer);
+
+                _renderSingleViewerSubtab(assyContainer);
+                viewportContent.appendChild(wrapper);
+                return;
+            }
+
             // Wrapper for subtabs + content
             const wrapper = document.createElement('div');
             wrapper.style.cssText = 'width:100%;height:100%;display:flex;flex-direction:column;';
@@ -17454,6 +17520,7 @@
         // â•â•â•â•â•â•â• Drawing Revision Compare â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         function _renderDrawingCompareSubtab(container) {
             const pn = state.partNumber;
+            _ensureDrawingCompareRevisions(pn);
             const revOptions = _drawingCompareRevisionOptions();
             const hasRealRevisions = _drawingCompareHasRealRevisions();
             const defaultA = drawingDiffState.activeRevA || revOptions[0] || 'A';
@@ -22568,6 +22635,9 @@
                     state.drawingClassification = data;
                 } catch (_) { /* silent — backend fallback handles missing cache */ }
             }
+            // Expose so selectPartNumber (outer scope) can call it; the call
+            // site uses optional-chain so a missing binding is non-fatal.
+            window._fetchDrawingClassification = _fetchDrawingClassification;
 
             function buildAgentAttachments(agentType) {
                 const att = { schema_version: 1 };

@@ -7017,6 +7017,14 @@
             if (!pn) return;
             if (drawingDiffState.available) return;
             if (drawingDiffState._revisionFetchPn === pn) return;
+            // Negative cache: a previous fetch for this PN already settled
+            // with no usable revision dataset. Without this guard the
+            // Compare subtab re-renders triggered by other events would
+            // refire the fetch on every render and never settle into the
+            // dev-preview / empty-state. The cache is cleared in
+            // selectPartNumber's drawingDiffState reset block when the
+            // user moves to a new part.
+            if (drawingDiffState._revisionFetchedPn === pn) return;
 
             drawingDiffState._revisionFetchPn = pn;
             fetch(`/api/drawing-revisions/${encodeURIComponent(pn)}`)
@@ -7030,12 +7038,18 @@
                         drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
                         drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
                     }
-                    if (state.activeTab === 'drawing') {
+                    // Only re-render when the dataset actually arrived; if it
+                    // didn't, the Compare pane already rendered preview state
+                    // and re-rendering would just call this helper again.
+                    if (drawingDiffState.available && state.activeTab === 'drawing') {
                         switchTab('drawing');
                     }
                 })
                 .catch(() => {})
                 .finally(() => {
+                    // Mark this PN as fetched (regardless of result) so the
+                    // negative-cache guard above can suppress refetches.
+                    drawingDiffState._revisionFetchedPn = pn;
                     if (drawingDiffState._revisionFetchPn === pn) {
                         drawingDiffState._revisionFetchPn = null;
                     }
@@ -7297,6 +7311,10 @@
             drawingDiffState.diffResult = null;
             drawingDiffState.loading = false;
             drawingDiffState.selectedView = null;
+            // Clear the _ensureDrawingCompareRevisions in-flight + negative
+            // caches: the new PN gets a fresh single-shot fetch attempt.
+            drawingDiffState._revisionFetchPn = null;
+            drawingDiffState._revisionFetchedPn = null;
 
             fetch(`/api/drawing-revisions/${encodeURIComponent(pn)}`)
                 .then(r => r.ok ? r.json() : null)
@@ -7309,10 +7327,14 @@
                             drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
                             drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
                         }
-                        // Re-render the full drawing tab so a compare pane that
-                        // was rendered early in dev-preview mode can upgrade to
-                        // the real revision dataset as soon as the async fetch lands.
-                        if (_drawingCompareUiEnabled() && state.activeTab === 'drawing') {
+                        // Mark the PN as fetched so a Compare-subtab render
+                        // that fires after this completes does not re-issue
+                        // the same fetch via _ensureDrawingCompareRevisions.
+                        drawingDiffState._revisionFetchedPn = pn;
+                        // Only re-render when real revisions arrived; the
+                        // dev-preview / empty-state would otherwise re-trigger
+                        // the same fetch from _renderDrawingCompareSubtab.
+                        if (drawingDiffState.available && _drawingCompareUiEnabled() && state.activeTab === 'drawing') {
                             switchTab('drawing');
                         }
                     }
@@ -7320,14 +7342,15 @@
                 .catch(() => {
                     drawingDiffState.available = false;
                     drawingDiffState.revisions = [];
+                    drawingDiffState._revisionFetchedPn = pn;
                     const revOptions = _drawingCompareRevisionOptions();
                     if (revOptions.length >= 2) {
                         drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
                         drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
                     }
-                    if (_drawingCompareUiEnabled() && state.activeTab === 'drawing') {
-                        switchTab('drawing');
-                    }
+                    // Don't re-render on the failure path; preview state is
+                    // already on screen and another switchTab would just
+                    // re-enter _ensureDrawingCompareRevisions.
                 });
 
             // Feature #144: Check assembly context for this part

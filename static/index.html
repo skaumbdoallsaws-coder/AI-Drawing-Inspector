@@ -14246,9 +14246,43 @@
             legend.id = 'assemblyLegend';
             container.appendChild(legend);
 
-            // BOM compare panel (Phase 3): filter pills + table. Display only —
-            // row-to-3D linking and isolation modes land in later phases.
-            container.appendChild(_buildBomComparePanelDom());
+            // BOM compare drawer: a slim toggle bar dock at the bottom that
+            // expands the BOM-aware compare panel (filter pills, isolation
+            // pills, row table, drawing pane) on demand. Closed by default
+            // so the split 3D compare owns the viewport height. The panel
+            // itself is built once via the existing helper and just toggled
+            // via display, which keeps every loader / row-click / isolation
+            // listener wired up exactly as before.
+            const bomDrawer = document.createElement('div');
+            bomDrawer.id = 'bomDrawer';
+            bomDrawer.style.cssText = 'display:flex;flex-direction:column;flex-shrink:0;';
+
+            const drawerToggle = document.createElement('button');
+            drawerToggle.id = 'bomDrawerToggle';
+            drawerToggle.type = 'button';
+            drawerToggle.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;height:28px;background:rgba(255,255,255,0.04);border:none;border-top:1px solid rgba(255,255,255,0.08);color:var(--text-secondary,#9aa5b1);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;cursor:pointer;flex-shrink:0;';
+
+            const bomPanel = _buildBomComparePanelDom();
+
+            const _setDrawerOpen = (open) => {
+                bomPanel.style.display = open ? 'flex' : 'none';
+                diffState._bomDrawerOpen = !!open;
+                drawerToggle.textContent = open ? '▼  BOM Compare' : '▲  BOM Compare';
+                drawerToggle.title = open
+                    ? 'Hide BOM compare panel'
+                    : 'Show BOM compare panel (filters, isolation, row table, drawing pane)';
+            };
+            // Honour any prior open/closed choice from the same compare
+            // session; default closed so the clean split-3D layout wins.
+            _setDrawerOpen(!!diffState._bomDrawerOpen);
+
+            drawerToggle.addEventListener('click', () => {
+                _setDrawerOpen(bomPanel.style.display === 'none');
+            });
+
+            bomDrawer.appendChild(drawerToggle);
+            bomDrawer.appendChild(bomPanel);
+            container.appendChild(bomDrawer);
 
             if (diffState.activeRevA && diffState.activeRevB) {
                 setTimeout(() => _loadCompareViewers(assyNum, diffState.activeRevA, diffState.activeRevB), 50);

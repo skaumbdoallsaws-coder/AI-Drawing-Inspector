@@ -14727,24 +14727,9 @@
             const bomPanel = _buildBomComparePanelDom();
 
             const _setDrawerOpen = (open) => {
-                // Closing the drawer should restore the clean split-compare
-                // state, not leave hidden BOM selection/isolation active in
-                // the 3D viewers. The table filter may stay as-is, but any
-                // row-driven highlight or viewport dimming is reset here.
-                if (!open) {
-                    _clearBomRowSelection();
-                    if (diffState.bomCompare) {
-                        diffState.bomCompare.isolation = 'all';
-                    }
-                    _applyBomIsolationToViewers('all');
-                    _refreshBomIsolationPills();
-                }
                 bomPanel.style.display = open ? 'flex' : 'none';
                 diffState._bomDrawerOpen = !!open;
-                drawerToggle.textContent = open ? '▼  BOM Compare' : '▲  BOM Compare';
-                drawerToggle.title = open
-                    ? 'Hide BOM compare panel'
-                    : 'Show BOM compare panel (filters, isolation, row table, drawing pane)';
+                _refreshBomDrawerToggle();
             };
             // Honour any prior open/closed choice from the same compare
             // session; default closed so the clean split-3D layout wins.
@@ -15017,6 +15002,7 @@
                 p.style.color       = active ? '#fff' : 'var(--text-secondary,#9aa5b1)';
                 p.style.borderColor = active ? 'rgba(86,156,214,0.55)' : 'rgba(255,255,255,0.08)';
             });
+            _refreshBomDrawerToggle();
         }
 
         async function _loadCompareBomPanel(assyNum, revA, revB) {
@@ -15079,6 +15065,7 @@
                     selectedKey: nextSelected,
                     _loadedDrawingKey: pairChanged ? null : (diffState.bomCompare && diffState.bomCompare._loadedDrawingKey),
                 };
+                _refreshBomDrawerToggle();
                 _renderBomCompareRows();
                 if (nextSelected) {
                     // Re-apply highlights against the freshly loaded payload so
@@ -15368,6 +15355,7 @@
             const cmp = diffState.bomCompare;
             const next = (cmp.selectedKey === pn) ? null : pn;
             cmp.selectedKey = next;
+            _refreshBomDrawerToggle();
             _renderBomCompareRows();
             _applyBomRowToDrawing(next);
             _applyBomRowToViewers(next);
@@ -15584,6 +15572,7 @@
             if (cmp.isolation === 'selected') {
                 _applyBomIsolationToViewers('selected');
             }
+            _refreshBomDrawerToggle();
         }
 
         // ---- Viewport isolation (Phase 5) ----
@@ -15666,6 +15655,7 @@
 
             _refreshBomIsolationPills();
             _refreshBomIsolationNote(mode, visibleKeys);
+            _refreshBomDrawerToggle();
         }
 
         function _refreshBomIsolationPills() {
@@ -15676,6 +15666,30 @@
                 p.style.color       = isActive ? '#fff' : 'var(--text-secondary,#9aa5b1)';
                 p.style.borderColor = isActive ? 'rgba(255,179,0,0.55)' : 'rgba(255,255,255,0.08)';
             });
+        }
+
+        function _refreshBomDrawerToggle() {
+            const btn = document.getElementById('bomDrawerToggle');
+            if (!btn) return;
+            const cmp = diffState.bomCompare || {};
+            const open = !!diffState._bomDrawerOpen;
+            const isoLabels = {
+                purchased: 'Purchased only',
+                custom: 'Custom only',
+                selected: 'Selected row only',
+                changed: 'Changed only',
+            };
+            const bits = [];
+            if (cmp.selectedKey) bits.push(`Selected ${cmp.selectedKey}`);
+            if (cmp.isolation && cmp.isolation !== 'all') bits.push(isoLabels[cmp.isolation] || cmp.isolation);
+            btn.textContent = open
+                ? '▼  BOM Compare'
+                : (bits.length ? `▲  BOM Compare · ${bits.join(' · ')}` : '▲  BOM Compare');
+            btn.title = open
+                ? 'Hide BOM compare panel'
+                : (bits.length
+                    ? `Show BOM compare panel. Active while collapsed: ${bits.join(', ')}.`
+                    : 'Show BOM compare panel (filters, isolation, row table, drawing pane)');
         }
 
         function _refreshBomIsolationNote(mode, visibleKeys) {

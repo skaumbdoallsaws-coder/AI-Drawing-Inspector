@@ -2192,6 +2192,204 @@ async def get_assembly_compare_revision_package(assembly_number: str, revision: 
     }
 
 
+# ---------- Supplier Spec Compare ----------
+# Three honest contracts:
+#   1. /api/part-supplier-spec/{pn}?revision=X       — single rev sidecar
+#   2. /api/part-supplier-spec-compare/{pn}?revA&revB — split-compare payload
+#   3. /api/part-supplier-spec-file/{pn}?revision=X  — raw underlying doc
+#
+# Honesty rules:
+# - Missing sidecars return exists=false. We do not fabricate fields.
+# - Field differences are surfaced as "review items", not as proven design
+#   changes. The honesty_note on the compare payload says so explicitly so
+#   the frontend cannot accidentally present them as proven changes.
+
+_SUPPLIER_SPEC_FIELDS = (
+    "supplier",
+    "manufacturer_part_number",
+    "description",
+    "finish",
+    "grade",
+    "standard",
+    "material",
+)
+
+
+def _supplier_spec_path(part_number: str, safe_rev: str) -> Path:
+    return (
+        Path("400S_Sorted_Library/parts")
+        / part_number
+        / f"rev{safe_rev}"
+        / f"{part_number}_supplier_spec.json"
+    )
+
+
+def _normalise_supplier_summary(raw: dict) -> dict:
+    """Project a raw supplier-spec sidecar onto the canonical summary
+    fields. Absent fields are explicitly null so the compare diff can
+    distinguish 'missing on this side' from 'same on both sides'.
+    """
+    if not isinstance(raw, dict):
+        return {f: None for f in _SUPPLIER_SPEC_FIELDS}
+    summary = raw.get("summary_fields") if isinstance(raw.get("summary_fields"), dict) else raw
+    return {f: (summary.get(f) if summary.get(f) not in (None, "") else None) for f in _SUPPLIER_SPEC_FIELDS}
+
+
+def _resolve_supplier_doc_path(raw: dict) -> Path | None:
+    """Locate the underlying supplier doc file referenced by a sidecar.
+    The sidecar's `document` block carries `filename` + `located_in`
+    relative to 400S_Sorted_Library. Returns None if missing.
+    """
+    if not isinstance(raw, dict):
+        return None
+    doc = raw.get("document") or {}
+    filename = doc.get("filename")
+    located_in = doc.get("located_in")
+    if not filename or not located_in:
+        return None
+    candidate = Path("400S_Sorted_Library") / located_in / filename
+    return candidate if candidate.exists() else None
+
+
+def _read_supplier_spec(part_number: str, safe_rev: str) -> dict:
+    """Return a structured sidecar payload for one revision.
+    {
+      part_number, revision, exists,
+      summary_fields: { ... canonical projection (may contain nulls) },
+      raw_spec_json: { ... or None },
+      document_url: '/api/part-supplier-spec-file/...' or None
+    }
+    """
+    path = _supplier_spec_path(part_number, safe_rev)
+    if not path.exists():
+        return {
+            "part_number": part_number,
+            "revision": safe_rev,
+            "exists": False,
+            "summary_fields": {f: None for f in _SUPPLIER_SPEC_FIELDS},
+            "raw_spec_json": None,
+            "document_url": None,
+        }
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {
+            "part_number": part_number,
+            "revision": safe_rev,
+            "exists": True,
+            "summary_fields": {f: None for f in _SUPPLIER_SPEC_FIELDS},
+            "raw_spec_json": None,
+            "document_url": None,
+            "honesty_note": "Sidecar present but unreadable.",
+        }
+    doc_path = _resolve_supplier_doc_path(raw)
+    document_url = (
+        f"/api/part-supplier-spec-file/{part_number}?revision={safe_rev}"
+        if doc_path is not None else None
+    )
+    return {
+        "part_number": part_number,
+        "revision": safe_rev,
+        "exists": True,
+        "summary_fields": _normalise_supplier_summary(raw),
+        "raw_spec_json": raw,
+        "document_url": document_url,
+    }
+
+
+@app.get("/api/part-supplier-spec/{part_number}")
+async def get_part_supplier_spec(part_number: str, revision: str = Query(...)):
+    safe_pn = re.sub(r"[^\w\-]", "", part_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_pn or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid part number or revision")
+    return _read_supplier_spec(safe_pn, safe_rev)
+
+
+@app.get("/api/part-supplier-spec-compare/{part_number}")
+async def get_part_supplier_spec_compare(
+    part_number: str,
+    revA: str = Query(...),
+    revB: str = Query(...),
+):
+    safe_pn = re.sub(r"[^\w\-]", "", part_number)
+    safe_a = _normalize_revision_letter(revA)
+    safe_b = _normalize_revision_letter(revB)
+    if not safe_pn or not safe_a or not safe_b:
+        raise HTTPException(status_code=400, detail="Invalid part number or revision")
+    spec_a = _read_supplier_spec(safe_pn, safe_a)
+    spec_b = _read_supplier_spec(safe_pn, safe_b)
+
+    diff_fields = []
+    sa = spec_a["summary_fields"] or {}
+    sb = spec_b["summary_fields"] or {}
+    for field in _SUPPLIER_SPEC_FIELDS:
+        a_val = sa.get(field)
+        b_val = sb.get(field)
+        if a_val is None and b_val is None:
+            status = "missing"
+        elif a_val is None or b_val is None:
+            status = "missing"
+        elif str(a_val).strip().lower() == str(b_val).strip().lower():
+            status = "same"
+        else:
+            status = "changed"
+        diff_fields.append({
+            "field": field,
+            "revA": a_val,
+            "revB": b_val,
+            "status": status,
+        })
+
+    honesty_note = (
+        "Supplier-side differences are review items and do not by themselves "
+        "prove a design change. A 'changed' field here means the captured "
+        "supplier evidence differs across revisions; a 'missing' field means "
+        "one or both sides have no supplier-spec sidecar for this part."
+    )
+
+    return {
+        "part_number": safe_pn,
+        "revA": safe_a,
+        "revB": safe_b,
+        "revA_spec": spec_a,
+        "revB_spec": spec_b,
+        "diff_fields": diff_fields,
+        "honesty_note": honesty_note,
+    }
+
+
+@app.get("/api/part-supplier-spec-file/{part_number}")
+async def get_part_supplier_spec_file(part_number: str, revision: str = Query(...)):
+    safe_pn = re.sub(r"[^\w\-]", "", part_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_pn or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid part number or revision")
+    sidecar_path = _supplier_spec_path(safe_pn, safe_rev)
+    if not sidecar_path.exists():
+        raise HTTPException(status_code=404, detail=f"No supplier spec sidecar for {safe_pn} rev {safe_rev}")
+    try:
+        with open(sidecar_path, encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        raise HTTPException(status_code=500, detail="Sidecar unreadable")
+    doc_path = _resolve_supplier_doc_path(raw)
+    if doc_path is None:
+        raise HTTPException(status_code=404, detail=f"No supplier document on disk for {safe_pn} rev {safe_rev}")
+    # Pick a sensible content-type from the suffix.
+    suffix = doc_path.suffix.lower()
+    media_type = {
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }.get(suffix, "application/octet-stream")
+    return FileResponse(str(doc_path), media_type=media_type, filename=doc_path.name)
+
+
 # ---------- Drawing Revision Diff ----------
 
 @app.get("/api/drawing-revisions/{part_number}")
@@ -3029,9 +3227,113 @@ If you write more than 3 sentences, you have failed. Rewrite shorter.
 
 Scope: part sourcing, supplier catalogs, fabrication vendors, material equivalents. Off-topic? Redirect to part sourcing questions."""
 
+ASSEMBLY_COMPARE_CHAT_PROMPT_APPENDIX = """
+
+================================================================
+ASSEMBLY COMPARE — CHAT-FIRST ACTION REGISTRY
+================================================================
+When the active workspace is Assembly > Compare (active_tab = 'assembly'
+and the assembly compare subtab is active), you SHOULD answer in plain
+prose AND additionally emit a [UI_ACTIONS] block immediately after the
+prose for any concrete viewer/UI action the user is asking for. The
+prose stays human-readable; the action block is a deterministic
+contract for the frontend.
+
+Format (strict JSON inside the block, no comments, no trailing commas):
+[UI_ACTIONS]
+{"workspace":"assembly_compare","actions":[ {action_obj_1}, ... ]}
+[/UI_ACTIONS]
+
+Supported action types (use only these names):
+- open_workspace        : { "type":"open_workspace", "tab":"assembly", "subtab":"compare" }
+- set_compare_revisions : { "type":"set_compare_revisions", "revA":"A", "revB":"B", "run_compare": true }
+- explode               : { "type":"explode", "side":"A|B|both", "enabled": true|false }
+- focus                 : { "type":"focus", "side":"A|B|both", "scope":{...} }   (dim non-targets, no spatial move)
+- highlight             : { "type":"highlight", "side":"A|B|both", "scope":{...} } (color/emissive only)
+- extract               : { "type":"extract", "side":"A|B|both", "scope":{...}, "camera":"keep" } (spatial pull-out)
+- select_bom_rows       : { "type":"select_bom_rows", "mode":"replace|add|remove|clear", "keys":[...], "primary":"...", "open_drawer": true|false }
+- open_supplier_spec    : { "type":"open_supplier_spec", "part_number":"1040017", "revision":"A" }
+- compare_supplier_specs: { "type":"compare_supplier_specs", "part_number":"1040017", "revA":"A", "revB":"B" }
+- clear_compare_overlays: { "type":"clear_compare_overlays" }
+
+Scope object for focus/highlight/extract:
+  { "procurement":"purchased|custom",
+    "diff_status":"changed",
+    "part_numbers":["1030031"],
+    "bom_keys":["6000302"] }
+At least one field must be set. Multiple fields union together.
+
+Vocabulary semantics (specifically for Assembly > Compare):
+- "highlight" — color/emissive glow only. Does NOT isolate or move geometry.
+- "focus"    — dim non-targets so the user can read the targets clearly.
+               No spatial movement.
+- "explode"  — per-side. Use SolidWorks explode steps for that revision.
+- "extract"  — pull a target subset spatially out of the assembly. Dims
+               non-targets. Pairs well with row selection.
+- "show me the changed parts" — only proven changed parts (added /
+  removed / qty_changed). substitution_unverified is NEVER counted as
+  changed. If 6000302 has no proven changes, say so honestly and
+  optionally redirect the user to the supplier review items.
+- "show me the purchased parts" / "custom parts" — that procurement
+  classification only.
+- "compare the supplier specs for X" — emit compare_supplier_specs
+  against the current revA/revB. Sage MUST present supplier-side
+  differences as REVIEW ITEMS, not as proven design changes.
+
+Honesty contract you MUST keep in prose:
+- substitution_unverified is a supplier-side review item, not a proven
+  design change.
+- Use phrases like "supplier-side review item",
+  "vendor-sensitive purchased hardware", or
+  "possible sourced-component substitution".
+- Do NOT say "proven changed part" unless the BOM compare actually has
+  a row with diff_status in {added, removed, qty_changed}.
+- Missing-side honesty: if a side has no spec, say "missing on this
+  side" — do not invent fields.
+
+Examples:
+
+User: "Show me the custom parts"
+Sage prose: short answer about the custom rows on this assembly.
+[UI_ACTIONS]
+{"workspace":"assembly_compare","actions":[
+  {"type":"open_workspace","tab":"assembly","subtab":"compare"},
+  {"type":"select_bom_rows","mode":"replace","keys":["1030031","6000302"],"primary":"1030031","open_drawer":true},
+  {"type":"focus","side":"both","scope":{"procurement":"custom"}}
+]}
+[/UI_ACTIONS]
+
+User: "Explode Rev A and Rev B"
+[UI_ACTIONS]
+{"workspace":"assembly_compare","actions":[
+  {"type":"explode","side":"both","enabled":true}
+]}
+[/UI_ACTIONS]
+
+User: "Extract the purchased parts"
+[UI_ACTIONS]
+{"workspace":"assembly_compare","actions":[
+  {"type":"extract","side":"both","scope":{"procurement":"purchased"},"camera":"keep"}
+]}
+[/UI_ACTIONS]
+
+User: "Compare the screw supplier specs for Rev A and Rev B"
+Prose: "These are vendor-sensitive review items, not proven design changes — see the side-by-side compare for the captured supplier evidence."
+[UI_ACTIONS]
+{"workspace":"assembly_compare","actions":[
+  {"type":"compare_supplier_specs","part_number":"1040017","revA":"A","revB":"B"}
+]}
+[/UI_ACTIONS]
+
+The block is ADDITIVE. You may also emit the legacy markers (HIGHLIGHT_PARTS,
+EXPLODE_LEVEL, etc.) when they are more natural — both pipelines run.
+But for chat commands that have a direct action mapping above, prefer
+[UI_ACTIONS] because it is explicit and deterministic.
+"""
+
 AGENT_PROMPTS = {
     "inspector": AGENT_SYSTEM_PROMPT,
-    "deviation-analyst": DEVIATION_ANALYST_PROMPT,
+    "deviation-analyst": DEVIATION_ANALYST_PROMPT + ASSEMBLY_COMPARE_CHAT_PROMPT_APPENDIX,
     "parts-finder": PARTS_FINDER_PROMPT,
 }
 
@@ -3058,6 +3360,7 @@ AGENT_TOOL_SPECS = {
         {"name": "show_geometry_diff", "description": "Show geometry diff overlay on 3D compare viewer", "args": {}},
         {"name": "animate_motion", "description": "Start or stop motion animation", "args": {"action": "start or stop"}},
         {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
+        {"name": "ui_actions", "description": "Assembly Compare chat-first action registry — workspace + ordered list of declarative UI actions (open_workspace, set_compare_revisions, explode, focus, highlight, extract, select_bom_rows, open_supplier_spec, compare_supplier_specs, clear_compare_overlays).", "args": {"workspace": "string", "actions": "list of action objects"}},
     ],
     "parts-finder": [
         {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers"}},
@@ -3110,13 +3413,23 @@ def build_tool_calls_from_result(result: dict) -> list:
         calls.append({"name": "fai_fill", "args": {"values": result["fai_fills"]}})
     if result.get("fai_tol"):
         calls.append({"name": "fai_tol", "args": {"values": result["fai_tol"]}})
+    # Assembly Compare chat-first action registry. Sage emits an additive
+    # [UI_ACTIONS] JSON block that the frontend dispatcher unpacks into the
+    # per-action handlers. Independent of the legacy markers above so the
+    # chat layer can be deterministic without rewriting the existing
+    # tool-call surface.
+    if result.get("ui_actions"):
+        calls.append({"name": "ui_actions", "args": result["ui_actions"]})
     return calls
 
 
 # === Phase 7: Guardrail Policy Maps ===
 MAX_TOOL_CALLS_PER_TURN = {
     "inspector": 4,
-    "deviation-analyst": 4,
+    # ui_actions counts as a single tool call regardless of how many actions
+    # it bundles, so deviation-analyst keeps room for the legacy markers
+    # AND the chat-first action block in the same turn.
+    "deviation-analyst": 5,
     "parts-finder": 1,
 }
 
@@ -3126,6 +3439,10 @@ MAX_TOOL_ARG_ITEMS = {
     "feature_ids": 30,
     "part_numbers": 30,
     "markers": 30,
+    # Cap the number of actions per ui_actions block. A natural-chat
+    # response should never need more than this and the cap protects
+    # against runaway model output.
+    "actions": 25,
 }
 
 VALID_ENUM_VALUES = {
@@ -4957,8 +5274,36 @@ async def agent_chat(request: AgentChatRequest):
                 isolate_parts = [p for p in raw_isolate if p in available_pns] if available_pns else raw_isolate
             response_text = isolate_pattern.sub('', response_text).strip()
 
+        # Parse [UI_ACTIONS]...[/UI_ACTIONS] block (Assembly Compare chat-first
+        # action registry). The block is JSON with shape:
+        #   { "workspace": "assembly_compare", "actions": [ {...}, ... ] }
+        # The block is additive: prose stays in response_text. Anything else
+        # the agent emits (HIGHLIGHT_PARTS, EXPLODE_LEVEL, ...) is handled by
+        # the existing pipeline above. Failure to parse JSON drops the actions
+        # silently — the prose response is still delivered honestly.
+        ui_actions_payload = None
+        ui_actions_pattern = re.compile(r'\[UI_ACTIONS\]\s*(\{.*?\})\s*\[/UI_ACTIONS\]', re.DOTALL)
+        ui_match = ui_actions_pattern.search(response_text)
+        if ui_match:
+            raw_block = ui_match.group(1)
+            try:
+                parsed = json.loads(raw_block)
+                actions = parsed.get("actions") if isinstance(parsed, dict) else None
+                if isinstance(actions, list):
+                    ui_actions_payload = {
+                        "workspace": (parsed.get("workspace") or "assembly_compare"),
+                        "actions": [a for a in actions if isinstance(a, dict) and a.get("type")],
+                    }
+                    logger.info(f"[UI_ACTIONS] parsed {len(ui_actions_payload['actions'])} action(s) for workspace={ui_actions_payload['workspace']}")
+                else:
+                    logger.warning("[UI_ACTIONS] block parsed but 'actions' missing or not a list — dropped")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"[UI_ACTIONS] block JSON parse failed: {e} — dropped")
+            response_text = ui_actions_pattern.sub('', response_text).strip()
+
         logger.info(f"[Sage parsed] highlight_parts={highlight_parts}, isolate_parts={isolate_parts}, "
                     f"narration_segments={len(narration_segments)}, camera_view={camera_view}, explode_level={explode_level}, "
+                    f"ui_actions={(len(ui_actions_payload['actions']) if ui_actions_payload else 0)}, "
                     f"available_pns sample={list(available_pns)[:5]}")
 
         # Post-process: strip markdown headers and convert to conversational prose
@@ -4985,6 +5330,8 @@ async def agent_chat(request: AgentChatRequest):
             result["camera_view"] = camera_view
         if explode_level is not None:
             result["explode_level"] = explode_level
+        if ui_actions_payload:
+            result["ui_actions"] = ui_actions_payload
 
         # Parse FAI_FILL markers (chat-driven measurement fills)
         fai_fills = {}

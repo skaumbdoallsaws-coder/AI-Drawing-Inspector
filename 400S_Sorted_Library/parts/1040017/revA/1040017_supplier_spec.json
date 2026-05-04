@@ -1,0 +1,22 @@
+{
+  "part_number": "1040017",
+  "revision": "A",
+  "summary_fields": {
+    "supplier": "McMaster-Carr",
+    "manufacturer_part_number": "91280A530",
+    "description": "Medium-Strength Class 8.8 Steel Hex Head Screw, Zinc-Plated",
+    "finish": "Zinc-Plated",
+    "grade": "Class 8.8",
+    "standard": "ISO 4014",
+    "material": "Medium-Strength Steel"
+  },
+  "thread": "M8 x 1.25 mm",
+  "length_mm": 20,
+  "head_type": "Hex",
+  "document": {
+    "filename": "Medium-Strength Class 8.8 Steel Hex Head Screw, Zinc-Plated, M8 x 1.25 mm Thread Size, 20 mm Long _ McMaster-Carr.pdf",
+    "located_in": "assemblies/6000302/revA",
+    "kind": "pdf"
+  },
+  "notes": "Sourced from McMaster-Carr in revA. Captured from the supplier datasheet that ships with the assembly directory."
+}

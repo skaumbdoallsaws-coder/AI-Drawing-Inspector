@@ -1,0 +1,21 @@
+{
+  "part_number": "1040018",
+  "revision": "B",
+  "summary_fields": {
+    "supplier": "Fastenal",
+    "manufacturer_part_number": "40307",
+    "description": "Steel Hex Nut",
+    "finish": "Plain Steel",
+    "grade": "Class 8",
+    "standard": "ISO 4032",
+    "material": "Carbon Steel"
+  },
+  "thread": "M8 x 1.25 mm",
+  "head_type": "Hex Nut",
+  "document": {
+    "filename": "nut fastenal.png",
+    "located_in": "assemblies/6000302/revB",
+    "kind": "image"
+  },
+  "notes": "Sourced from Fastenal in revB. Substitution from McMaster-Carr 90592A022 to Fastenal 40307 — supplier-side review item, NOT a proven design change."
+}

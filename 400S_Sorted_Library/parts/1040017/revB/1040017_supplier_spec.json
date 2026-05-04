@@ -1,0 +1,22 @@
+{
+  "part_number": "1040017",
+  "revision": "B",
+  "summary_fields": {
+    "supplier": "Fastenal",
+    "manufacturer_part_number": "38615",
+    "description": "Steel Cap Screw, Hex Head",
+    "finish": "Plain Steel",
+    "grade": "Class 8.8",
+    "standard": "ISO 4014",
+    "material": "Carbon Steel"
+  },
+  "thread": "M8 x 1.25 mm",
+  "length_mm": 20,
+  "head_type": "Hex Cap",
+  "document": {
+    "filename": "fastenal cap screw.png",
+    "located_in": "assemblies/6000302/revB",
+    "kind": "image"
+  },
+  "notes": "Sourced from Fastenal in revB. Substitution from McMaster-Carr 91280A530 to Fastenal 38615 — a supplier-side review item, NOT a proven design change. Mating thread, length, and grade match revA per the captured supplier evidence; finish and exact alloy are NOT independently verified."
+}

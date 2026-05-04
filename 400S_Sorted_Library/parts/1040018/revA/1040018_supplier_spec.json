@@ -1,0 +1,21 @@
+{
+  "part_number": "1040018",
+  "revision": "A",
+  "summary_fields": {
+    "supplier": "McMaster-Carr",
+    "manufacturer_part_number": "90592A022",
+    "description": "Steel Hex Nut, Medium-Strength, ISO Class 8",
+    "finish": "Plain",
+    "grade": "ISO Class 8",
+    "standard": "ISO 4032",
+    "material": "Medium-Strength Steel"
+  },
+  "thread": "M8 x 1.25 mm",
+  "head_type": "Hex Nut",
+  "document": {
+    "filename": "Steel Hex Nut, Medium-Strength, ISO Class 8, M8 x 1.25 mm Thread Size _ McMaster-Carr.pdf",
+    "located_in": "assemblies/6000302/revA",
+    "kind": "pdf"
+  },
+  "notes": "Sourced from McMaster-Carr in revA. Captured from the supplier datasheet that ships with the assembly directory."
+}

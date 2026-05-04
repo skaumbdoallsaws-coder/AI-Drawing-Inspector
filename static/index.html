@@ -6968,6 +6968,15 @@
             // affects 3D viewer opacity. 'changed' isolation uses proven change
             // only (added/removed/qty_changed), excluding substitution_unverified.
             bomCompare: {
+                // selectedKeys is the set-based multi-row selection used by
+                // 3D highlight + the new chat select_bom_rows action. primaryKey
+                // is the single row that drives the drawing pane (one drawing
+                // pane shows one row at a time). selectedKey is preserved as
+                // an alias for primaryKey so existing call sites (legacy
+                // single-select code paths, isolation 'selected' mode, the
+                // crossbrace mesh-key expander) keep working unchanged.
+                selectedKeys: [],
+                primaryKey: null,
                 rows: [],
                 summary: null,
                 honestyNotes: [],
@@ -13326,10 +13335,26 @@
                     revisionLetter: null, // e.g. 'A' or 'B' for tooltip clarity
                     enabled: false,       // user toggled explode on?
                     hasData: false,       // any usable explodeSteps for this side?
-                    steps: null,          // [{ meshes:[Mesh], direction:Vec3, distance:m }]
+                    steps: null,          // [{ meshes:[Mesh], partNumbers:[str], direction:Vec3, distance:m }]
                     level: 0,             // 0..1, current applied explode level
                     snapshotKey: '_diffOrigPosition',
                     animId: null,
+                },
+                // Per-side spatial extract layer. Sits on top of the explode
+                // layer in the unified position recompute pipeline, so an
+                // exploded side can have a target subset further pulled out.
+                // Materials are owned by isolation/highlight, NOT by extract:
+                // extract just dims non-targets to a uniform low opacity
+                // while leaving emissive untouched.
+                extract: {
+                    enabled: false,
+                    side: null,
+                    targetPartNumbers: [],   // canonical part-number set
+                    targetMeshSet: null,     // Set<Mesh> resolved from targetPartNumbers
+                    vectors: null,           // { mesh: { direction:Vec3, distance:m } }
+                    level: 0,                // 0..1, current applied extract level
+                    animId: null,
+                    snapshotKey: '_diffExtractOrigOpacity',
                 },
             };
         }
@@ -13630,8 +13655,17 @@
                     });
                 });
                 if (targetMeshSet.size > 0) {
+                    // Resolve which part numbers this step's meshes belong
+                    // to so the chat extract action can match by procurement
+                    // / diff-status / explicit PN without rebuilding the
+                    // mesh-to-PN reverse map every time.
+                    const stepPartNumbers = new Set();
+                    Object.entries(viewer.partMeshMap || {}).forEach(([pn, ms]) => {
+                        if (ms.some(m => targetMeshSet.has(m))) stepPartNumbers.add(pn);
+                    });
                     steps.push({
                         meshes: [...targetMeshSet],
+                        partNumbers: [...stepPartNumbers],
                         direction: dir,
                         distance: dist,
                     });
@@ -13642,16 +13676,29 @@
         }
 
         function _applyViewerExplodeLevel(viewer, level) {
-            // Pure position transform. Material properties are owned by
-            // the BOM isolation/highlight and diff highlight systems and
-            // remain untouched here.
-            if (!viewer || !viewer.explode.hasData || !viewer.partMeshMap) return;
-            const clamped = Math.max(0, Math.min(1, level));
-            const key = viewer.explode.snapshotKey;
-            const steps = viewer.explode.steps || [];
+            // Just records the requested level; the unified position
+            // recompute below is the single source of truth so explode and
+            // extract never overwrite each other.
+            if (!viewer || !viewer.partMeshMap) return;
+            viewer.explode.level = Math.max(0, Math.min(1, level));
+            _recomputeViewerPositions(viewer);
+        }
 
-            // Reset every mesh to its snapshot first so each apply() call
-            // is idempotent and never accumulates with prior state.
+        function _recomputeViewerPositions(viewer) {
+            // Single source of truth for compare-viewer mesh positions.
+            // Pipeline:
+            //   1. Reset every mesh to its _diffOrigPosition snapshot
+            //   2. Apply per-side EXPLODE layer (proportional to level)
+            //   3. Apply per-side EXTRACT layer (target subset, proportional)
+            // Only positions are mutated. Materials are owned by the BOM
+            // isolation / row-highlight / diff-highlight systems and remain
+            // untouched here. Extract owns its own opacity dim — see
+            // _applyExtractOpacity() — which uses a separate snapshot key.
+            if (!viewer || !viewer.partMeshMap) return;
+            const key = viewer.explode && viewer.explode.snapshotKey;
+            if (!key) return;
+
+            // 1. Reset to snapshot positions
             Object.values(viewer.partMeshMap).forEach(meshes => {
                 meshes.forEach(m => {
                     if (m.userData[key] !== undefined) {
@@ -13659,27 +13706,37 @@
                     }
                 });
             });
-            if (clamped <= 0 || steps.length === 0) {
-                viewer.explode.level = 0;
-                return;
+
+            // 2. EXPLODE layer
+            const eLevel = (viewer.explode && viewer.explode.level) || 0;
+            const steps = (viewer.explode && viewer.explode.steps) || [];
+            if (eLevel > 0 && steps.length > 0) {
+                const numSteps = steps.length;
+                const stepSize = 1.0 / numSteps;
+                for (let si = 0; si < numSteps; si++) {
+                    const stepStart = si * stepSize;
+                    const stepEnd = (si + 1) * stepSize;
+                    let progress = 0;
+                    if (eLevel >= stepEnd) progress = 1.0;
+                    else if (eLevel > stepStart) progress = (eLevel - stepStart) / stepSize;
+                    else continue;
+                    const step = steps[si];
+                    const offset = step.direction.clone().multiplyScalar(step.distance * progress);
+                    step.meshes.forEach(m => { m.position.add(offset); });
+                }
             }
 
-            // Sequential SW step model: each step contributes its full
-            // offset proportional to the slice of [0,1] it occupies.
-            const numSteps = steps.length;
-            const stepSize = 1.0 / numSteps;
-            for (let si = 0; si < numSteps; si++) {
-                const stepStart = si * stepSize;
-                const stepEnd = (si + 1) * stepSize;
-                let progress = 0;
-                if (clamped >= stepEnd) progress = 1.0;
-                else if (clamped > stepStart) progress = (clamped - stepStart) / stepSize;
-                else continue;
-                const step = steps[si];
-                const offset = step.direction.clone().multiplyScalar(step.distance * progress);
-                step.meshes.forEach(m => { m.position.add(offset); });
+            // 3. EXTRACT layer
+            const x = viewer.extract;
+            const xLevel = (x && x.level) || 0;
+            if (xLevel > 0 && x.vectors && x.targetMeshSet) {
+                x.targetMeshSet.forEach(m => {
+                    const v = x.vectors.get(m);
+                    if (!v) return;
+                    const offset = v.direction.clone().multiplyScalar(v.distance * xLevel);
+                    m.position.add(offset);
+                });
             }
-            viewer.explode.level = clamped;
         }
 
         function _animateViewerExplode(viewer, targetLevel, duration) {
@@ -13709,6 +13766,218 @@
             viewer.explode.enabled = !!enable;
             _animateViewerExplode(viewer, enable ? 1 : 0);
             _refreshDiffExplodeButton(viewer);
+        }
+
+        // ───────── Per-side EXTRACT layer ─────────
+        // extract pulls a chosen target subset of parts away from the
+        // assembly and dims everything else, leaving the rest of the
+        // material/highlight stack untouched. It is NOT the same thing as
+        // explode: explode is the full SolidWorks step replay; extract
+        // operates on an arbitrary subset specified by chat / UI.
+        // ──────────────────────────────────────────
+
+        const _DIFF_EXTRACT_DIM_OPACITY = 0.05;
+
+        function _viewerAssemblyBoundsCenter(viewer) {
+            if (!viewer || !viewer.liveScene) return null;
+            const box = new THREE.Box3();
+            box.expandByObject(viewer.liveScene);
+            if (box.isEmpty()) return null;
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            return { center, diagonal: size.length() };
+        }
+
+        function _meshGroupBoundsCenter(meshes) {
+            const box = new THREE.Box3();
+            (meshes || []).forEach(m => box.expandByObject(m));
+            if (box.isEmpty()) return null;
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            return center;
+        }
+
+        function _resolveExtractTargetMeshes(viewer, targetPartNumbers) {
+            // Returns a Set<Mesh> covering every mesh that belongs to any
+            // requested part number. Honest: missing PNs (e.g. removed/added
+            // on this side) silently contribute nothing.
+            const out = new Set();
+            if (!viewer || !viewer.partMeshMap) return out;
+            (targetPartNumbers || []).forEach(pn => {
+                (viewer.partMeshMap[pn] || []).forEach(m => out.add(m));
+            });
+            return out;
+        }
+
+        function _buildExtractVectors(viewer, targetMeshSet, targetPartNumbers) {
+            // Map<Mesh, { direction:Vec3, distance:m }>.
+            // Step coverage first: for every explode step whose partNumbers
+            // intersect the target set, apply that step's direction/distance
+            // to the meshes in the step that are also in the target set.
+            // Uncovered meshes get a deterministic radial fallback computed
+            // from the assembly bbox center.
+            const vectors = new Map();
+            if (!targetMeshSet || targetMeshSet.size === 0) return vectors;
+            const targetPnSet = new Set(targetPartNumbers || []);
+            const steps = (viewer.explode && viewer.explode.steps) || [];
+
+            // Pass 1: explode-step coverage
+            steps.forEach(step => {
+                const stepIntersects = (step.partNumbers || []).some(pn => targetPnSet.has(pn));
+                if (!stepIntersects) return;
+                step.meshes.forEach(m => {
+                    if (!targetMeshSet.has(m)) return;
+                    if (vectors.has(m)) return;  // first step wins for determinism
+                    vectors.set(m, {
+                        direction: step.direction.clone(),
+                        distance: step.distance,
+                    });
+                });
+            });
+
+            // Pass 2: deterministic radial fallback for uncovered target meshes
+            const bounds = _viewerAssemblyBoundsCenter(viewer);
+            if (!bounds) return vectors;
+            const fallbackDist = Math.max(0.05, bounds.diagonal * 0.15);
+            targetMeshSet.forEach(m => {
+                if (vectors.has(m)) return;
+                const center = _meshGroupBoundsCenter([m]);
+                if (!center) return;
+                const dir = new THREE.Vector3().subVectors(center, bounds.center);
+                if (dir.length() < 1e-6) {
+                    dir.set(1, 0, 0);
+                } else {
+                    dir.normalize();
+                }
+                vectors.set(m, { direction: dir, distance: fallbackDist });
+            });
+            return vectors;
+        }
+
+        function _snapshotExtractMaterial(viewer) {
+            // Snapshot opacity / transparent / depthWrite once so extract
+            // dim can safely paint and restore. Independent snapshot keys
+            // so it composes with BOM isolation's _bomIsoOrigOpacity.
+            if (!viewer || !viewer.liveScene) return;
+            const oKey = viewer.extract.snapshotKey;
+            const tKey = oKey + '_transparent';
+            const dKey = oKey + '_depthWrite';
+            viewer.liveScene.traverse(child => {
+                if (!child.isMesh || !child.material) return;
+                if (child.userData[oKey] === undefined) {
+                    child.userData[oKey] = child.material.opacity;
+                    child.userData[tKey] = child.material.transparent;
+                    child.userData[dKey] = child.material.depthWrite;
+                }
+            });
+        }
+
+        function _applyExtractOpacity(viewer) {
+            // Dim non-target meshes when extract is active; restore from
+            // snapshot when level returns to 0. Material restore is full —
+            // BOM isolation may re-apply its own dim on top after; that
+            // is allowed because BOM isolation uses its own snapshot keys.
+            if (!viewer || !viewer.liveScene) return;
+            const x = viewer.extract;
+            const oKey = x.snapshotKey;
+            const tKey = oKey + '_transparent';
+            const dKey = oKey + '_depthWrite';
+            const targets = x.targetMeshSet || new Set();
+            const active = !!x.enabled && (x.level || 0) > 0;
+            viewer.liveScene.traverse(child => {
+                if (!child.isMesh || !child.material) return;
+                if (child.userData[oKey] === undefined) return;
+                if (!active) {
+                    // Restore baseline so the next layer (BOM iso) can
+                    // re-apply its own dim against the true original.
+                    child.material.opacity = child.userData[oKey];
+                    child.material.transparent = child.userData[tKey];
+                    child.material.depthWrite = child.userData[dKey];
+                    return;
+                }
+                if (targets.has(child)) {
+                    // Target — full opacity from baseline
+                    child.material.opacity = child.userData[oKey];
+                    child.material.transparent = child.userData[tKey];
+                    child.material.depthWrite = child.userData[dKey];
+                } else {
+                    // Non-target — dim
+                    child.material.opacity = _DIFF_EXTRACT_DIM_OPACITY;
+                    child.material.transparent = true;
+                    child.material.depthWrite = false;
+                }
+            });
+            // After extract restores/dims its own layer, the BOM isolation
+            // layer (if active) gets the last word so chat-driven extract
+            // does not silently override a user-set isolation mode.
+            try {
+                const cmp = diffState.bomCompare;
+                if (cmp && cmp.isolation && cmp.isolation !== 'all') {
+                    _applyBomIsolationToViewers(cmp.isolation);
+                }
+            } catch (_) {}
+        }
+
+        function _setViewerExtract(viewer, opts) {
+            // opts: { targetPartNumbers: [...] } or { clear: true }
+            if (!viewer) return;
+            const x = viewer.extract;
+            x.side = (viewer.explode && viewer.explode.side) || x.side || null;
+            if (opts && opts.clear) {
+                x.enabled = false;
+                _animateViewerExtract(viewer, 0);
+                x.targetPartNumbers = [];
+                x.targetMeshSet = null;
+                x.vectors = null;
+                x.hasAnyTargets = false;
+                return;
+            }
+            const targetPns = (opts && Array.isArray(opts.targetPartNumbers))
+                ? opts.targetPartNumbers.slice() : [];
+            const targetMeshSet = _resolveExtractTargetMeshes(viewer, targetPns);
+            x.targetPartNumbers = targetPns;
+            x.targetMeshSet = targetMeshSet;
+            x.hasAnyTargets = targetMeshSet.size > 0;
+            if (!x.hasAnyTargets) {
+                // Honest: nothing to do on this side — animate back to 0
+                // so the dim layer also clears.
+                x.enabled = false;
+                x.vectors = null;
+                _animateViewerExtract(viewer, 0);
+                return;
+            }
+            _snapshotExtractMaterial(viewer);
+            x.vectors = _buildExtractVectors(viewer, targetMeshSet, targetPns);
+            x.enabled = true;
+            _animateViewerExtract(viewer, 1);
+        }
+
+        function _applyViewerExtractLevel(viewer, level) {
+            if (!viewer || !viewer.extract) return;
+            viewer.extract.level = Math.max(0, Math.min(1, level));
+            _recomputeViewerPositions(viewer);
+            _applyExtractOpacity(viewer);
+        }
+
+        function _animateViewerExtract(viewer, targetLevel, duration) {
+            if (!viewer || !viewer.extract) return;
+            duration = duration || 450;
+            if (viewer.extract.animId) cancelAnimationFrame(viewer.extract.animId);
+            const startLevel = viewer.extract.level || 0;
+            const startTime = performance.now();
+            function step(now) {
+                const t = Math.min((now - startTime) / duration, 1);
+                const eased = 1 - Math.pow(1 - t, 3);
+                _applyViewerExtractLevel(viewer, startLevel + (targetLevel - startLevel) * eased);
+                if (t < 1) {
+                    viewer.extract.animId = requestAnimationFrame(step);
+                } else {
+                    viewer.extract.animId = null;
+                }
+            }
+            viewer.extract.animId = requestAnimationFrame(step);
         }
 
         function _refreshDiffExplodeButton(viewer) {
@@ -13856,6 +14125,462 @@
 
             diffState._agentHighlightActive = (revAHighlights.size > 0 || revBHighlights.size > 0);
             _showDiffLegend(diffState._agentHighlightActive);
+        }
+
+        // ───────── Supplier spec compare modal ─────────
+        // In-app modal (NOT a popup window) so the user never loses
+        // viewport context. Shows the Rev A vs Rev B supplier evidence
+        // side by side with a field-by-field same/changed badge strip.
+        // The honesty note is always visible above the body so a viewer
+        // cannot misread "supplier-side review item" as "proven design
+        // change".
+        // ────────────────────────────────────────────────
+
+        function _ensureSupplierSpecModal() {
+            let overlay = document.getElementById('supplierSpecOverlay');
+            if (overlay) return overlay;
+
+            overlay = document.createElement('div');
+            overlay.id = 'supplierSpecOverlay';
+            overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(8,12,20,0.78);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+
+            const modal = document.createElement('div');
+            modal.id = 'supplierSpecModal';
+            modal.style.cssText = 'width:min(1280px,94vw);height:min(820px,90vh);background:#1a1d22;border:1px solid rgba(255,255,255,0.10);border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,0.5);display:flex;flex-direction:column;overflow:hidden;';
+
+            // Header
+            const header = document.createElement('div');
+            header.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);flex-shrink:0;';
+            header.innerHTML = `
+                <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary,#9aa5b1);">Supplier Spec Compare</span>
+                <span id="supplierSpecTitle" style="font-size:13px;color:#fff;font-weight:600;"></span>
+                <span id="supplierSpecRevPair" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;margin-left:auto;">
+                    <span class="bom-rev-tag rev-a" style="background:rgba(79,195,247,0.15);color:#4fc3f7;padding:2px 8px;border-radius:3px;font-weight:600;">Rev –</span>
+                    <span style="color:var(--text-secondary,#9aa5b1);">vs</span>
+                    <span class="bom-rev-tag rev-b" style="background:rgba(255,179,0,0.15);color:#FFB300;padding:2px 8px;border-radius:3px;font-weight:600;">Rev –</span>
+                </span>
+                <button id="supplierSpecCloseBtn" type="button" title="Close" style="background:transparent;border:1px solid rgba(255,255,255,0.10);color:var(--text-secondary,#9aa5b1);font-size:14px;cursor:pointer;padding:4px 10px;border-radius:3px;line-height:1;">×</button>
+            `;
+            modal.appendChild(header);
+
+            // Honesty note
+            const honestyBar = document.createElement('div');
+            honestyBar.id = 'supplierSpecHonesty';
+            honestyBar.style.cssText = 'padding:8px 16px;background:rgba(255,179,0,0.08);border-bottom:1px solid rgba(255,179,0,0.18);font-size:11px;color:#FFB300;flex-shrink:0;line-height:1.4;';
+            modal.appendChild(honestyBar);
+
+            // Field diff strip
+            const summaryStrip = document.createElement('div');
+            summaryStrip.id = 'supplierSpecSummary';
+            summaryStrip.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.015);flex-shrink:0;';
+            modal.appendChild(summaryStrip);
+
+            // Body — split panes
+            const body = document.createElement('div');
+            body.style.cssText = 'flex:1;display:flex;min-height:0;overflow:hidden;';
+
+            const buildPane = (sideClass) => {
+                const pane = document.createElement('div');
+                pane.style.cssText = 'flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;' + (sideClass === 'rev-b' ? 'border-left:1px solid rgba(255,255,255,0.06);' : '');
+                const label = document.createElement('div');
+                label.className = 'diff-viewer-label ' + sideClass;
+                label.style.cssText = 'position:relative;align-self:flex-start;margin:8px 12px 0 12px;';
+                label.dataset.sideLabel = sideClass;
+                pane.appendChild(label);
+                const fields = document.createElement('div');
+                fields.style.cssText = 'padding:8px 16px;font-size:12px;color:#cdd5dd;';
+                fields.dataset.role = 'fields';
+                pane.appendChild(fields);
+                const docWrap = document.createElement('div');
+                docWrap.style.cssText = 'flex:1;display:flex;flex-direction:column;min-height:0;background:#0f1217;border-top:1px solid rgba(255,255,255,0.06);';
+                docWrap.dataset.role = 'document';
+                pane.appendChild(docWrap);
+                return pane;
+            };
+
+            const paneA = buildPane('rev-a');
+            paneA.id = 'supplierSpecPaneA';
+            const paneB = buildPane('rev-b');
+            paneB.id = 'supplierSpecPaneB';
+            body.appendChild(paneA);
+            body.appendChild(paneB);
+            modal.appendChild(body);
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            // Close affordances
+            header.querySelector('#supplierSpecCloseBtn').addEventListener('click', _closeSupplierSpecModal);
+            overlay.addEventListener('click', (ev) => {
+                if (ev.target === overlay) _closeSupplierSpecModal();
+            });
+            document.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Escape' && overlay.style.display !== 'none') _closeSupplierSpecModal();
+            });
+            return overlay;
+        }
+
+        function _closeSupplierSpecModal() {
+            const overlay = document.getElementById('supplierSpecOverlay');
+            if (overlay) overlay.style.display = 'none';
+        }
+
+        function _renderSupplierSpecPane(paneEl, spec, side, sideRevLetter) {
+            if (!paneEl) return;
+            const labelEl = paneEl.querySelector('.diff-viewer-label');
+            const fieldsEl = paneEl.querySelector('[data-role="fields"]');
+            const docWrap = paneEl.querySelector('[data-role="document"]');
+            if (labelEl) labelEl.textContent = `Rev ${sideRevLetter || side}`;
+            if (!spec || !spec.exists) {
+                if (fieldsEl) fieldsEl.innerHTML = `<div style="padding:24px 8px;color:var(--text-secondary,#9aa5b1);font-style:italic;">No supplier spec sidecar for this part on Rev ${_escapeHtml(sideRevLetter || side)}. Honest: missing on this side.</div>`;
+                if (docWrap) docWrap.innerHTML = '';
+                return;
+            }
+            const sf = spec.summary_fields || {};
+            const fields = [
+                ['Supplier', sf.supplier],
+                ['Manufacturer P/N', sf.manufacturer_part_number],
+                ['Description', sf.description],
+                ['Finish', sf.finish],
+                ['Grade', sf.grade],
+                ['Standard', sf.standard],
+                ['Material', sf.material],
+            ];
+            if (fieldsEl) {
+                fieldsEl.innerHTML = fields.map(([k, v]) => {
+                    const val = v == null ? '<span style="color:var(--text-secondary,#9aa5b1);font-style:italic;">missing</span>' : _escapeHtml(String(v));
+                    return `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="min-width:130px;color:var(--text-secondary,#9aa5b1);font-size:11px;">${_escapeHtml(k)}</span><span style="flex:1;">${val}</span></div>`;
+                }).join('');
+            }
+            if (docWrap) {
+                docWrap.innerHTML = '';
+                const url = spec.document_url;
+                if (!url) {
+                    docWrap.innerHTML = `<div style="padding:18px;color:var(--text-secondary,#9aa5b1);font-size:11px;font-style:italic;">No supplier document attached. Showing structured summary above only.</div>`;
+                    return;
+                }
+                // Detect kind from raw_spec_json.document.kind if present
+                const docKind = (spec.raw_spec_json && spec.raw_spec_json.document && spec.raw_spec_json.document.kind) || 'pdf';
+                if (docKind === 'image') {
+                    const img = document.createElement('img');
+                    img.src = url;
+                    img.alt = `Rev ${sideRevLetter || side} supplier document`;
+                    img.style.cssText = 'max-width:100%;max-height:100%;display:block;margin:auto;object-fit:contain;background:#000;';
+                    docWrap.appendChild(img);
+                } else {
+                    const obj = document.createElement('iframe');
+                    obj.src = url;
+                    obj.style.cssText = 'width:100%;height:100%;border:0;background:#fff;';
+                    obj.setAttribute('aria-label', `Rev ${sideRevLetter || side} supplier document`);
+                    docWrap.appendChild(obj);
+                }
+            }
+        }
+
+        function _renderSupplierSpecSummary(diffFields) {
+            const wrap = document.getElementById('supplierSpecSummary');
+            if (!wrap) return;
+            wrap.innerHTML = '';
+            (diffFields || []).forEach(f => {
+                const colorMap = { same: '#66BB6A', changed: '#FFB300', missing: '#888' };
+                const color = colorMap[f.status] || '#888';
+                const pill = document.createElement('span');
+                pill.title = `Rev A: ${f.revA == null ? 'missing' : f.revA}\nRev B: ${f.revB == null ? 'missing' : f.revB}`;
+                pill.style.cssText = `font-size:10px;padding:3px 8px;border-radius:10px;background:${color}22;border:1px solid ${color}66;color:${color};text-transform:uppercase;letter-spacing:0.4px;`;
+                pill.innerHTML = `${_escapeHtml(f.field)} <span style="opacity:0.85;">${_escapeHtml(f.status)}</span>`;
+                wrap.appendChild(pill);
+            });
+        }
+
+        async function _openSupplierSpecModal({ partNumber, revision }) {
+            // Single-revision view — Rev B pane shows "missing on this side".
+            if (!partNumber || !revision) return false;
+            _ensureSupplierSpecModal();
+            const overlay = document.getElementById('supplierSpecOverlay');
+            overlay.style.display = 'flex';
+            const titleEl = document.getElementById('supplierSpecTitle');
+            const honestyEl = document.getElementById('supplierSpecHonesty');
+            const summaryEl = document.getElementById('supplierSpecSummary');
+            const revPair = document.getElementById('supplierSpecRevPair');
+            if (titleEl) titleEl.textContent = `Part ${partNumber}`;
+            if (honestyEl) honestyEl.textContent = 'Showing supplier evidence for one revision. Switch to compare mode to see Rev-vs-Rev review items.';
+            if (summaryEl) summaryEl.innerHTML = '';
+            if (revPair) {
+                const aTag = revPair.querySelector('.bom-rev-tag.rev-a');
+                const bTag = revPair.querySelector('.bom-rev-tag.rev-b');
+                if (aTag) aTag.textContent = `Rev ${revision}`;
+                if (bTag) bTag.textContent = 'Rev –';
+            }
+            try {
+                const url = `/api/part-supplier-spec/${encodeURIComponent(partNumber)}?revision=${encodeURIComponent(revision)}`;
+                const res = await fetch(url);
+                const spec = res.ok ? await res.json() : null;
+                _renderSupplierSpecPane(document.getElementById('supplierSpecPaneA'), spec, 'A', revision);
+                _renderSupplierSpecPane(document.getElementById('supplierSpecPaneB'), null, 'B', null);
+                return true;
+            } catch (err) {
+                console.error('[SupplierSpec] open failed', err);
+                return false;
+            }
+        }
+
+        async function _openSupplierSpecCompareModal({ partNumber, revA, revB }) {
+            if (!partNumber || !revA || !revB) return false;
+            _ensureSupplierSpecModal();
+            const overlay = document.getElementById('supplierSpecOverlay');
+            overlay.style.display = 'flex';
+            const titleEl = document.getElementById('supplierSpecTitle');
+            const honestyEl = document.getElementById('supplierSpecHonesty');
+            const revPair = document.getElementById('supplierSpecRevPair');
+            if (titleEl) titleEl.textContent = `Part ${partNumber} · supplier evidence`;
+            if (revPair) {
+                const aTag = revPair.querySelector('.bom-rev-tag.rev-a');
+                const bTag = revPair.querySelector('.bom-rev-tag.rev-b');
+                if (aTag) aTag.textContent = `Rev ${revA}`;
+                if (bTag) bTag.textContent = `Rev ${revB}`;
+            }
+            try {
+                const url = `/api/part-supplier-spec-compare/${encodeURIComponent(partNumber)}?revA=${encodeURIComponent(revA)}&revB=${encodeURIComponent(revB)}`;
+                const res = await fetch(url);
+                if (!res.ok) {
+                    if (honestyEl) honestyEl.textContent = `Failed to load supplier compare (HTTP ${res.status}).`;
+                    return false;
+                }
+                const data = await res.json();
+                if (honestyEl) honestyEl.textContent = data.honesty_note || '';
+                _renderSupplierSpecSummary(data.diff_fields);
+                _renderSupplierSpecPane(document.getElementById('supplierSpecPaneA'), data.revA_spec, 'A', data.revA);
+                _renderSupplierSpecPane(document.getElementById('supplierSpecPaneB'), data.revB_spec, 'B', data.revB);
+                return true;
+            } catch (err) {
+                console.error('[SupplierSpec] compare failed', err);
+                return false;
+            }
+        }
+
+        // ───────── Chat action registry — Assembly Compare ─────────
+        // Per-action handlers for the [UI_ACTIONS] block emitted by Sage.
+        // The dispatcher (_dispatchUiAction) routes by action.type and
+        // returns a boolean. Handlers are deterministic: same action +
+        // same state always produces the same outcome. They never read
+        // state from the prose — only from the explicit action payload.
+        // ────────────────────────────────────────────────────────────
+
+        function _resolveCompareScope(scope) {
+            // Resolve a scope object {procurement, diff_status, part_numbers,
+            // bom_keys} to the union of part numbers it represents, using
+            // the currently-loaded bomCompare rows and explicit PNs.
+            // Returns { partNumbers: [...], bomKeys: [...] } where bomKeys
+            // are the row keys (e.g. '6000302' subassembly key) suitable
+            // for select_bom_rows. partNumbers are the leaf mesh keys.
+            scope = scope || {};
+            const cmp = diffState.bomCompare || {};
+            const rows = Array.isArray(cmp.rows) ? cmp.rows : [];
+            const partSet = new Set();
+            const bomKeySet = new Set();
+
+            // Explicit pn list
+            (scope.part_numbers || []).forEach(pn => { if (pn) partSet.add(pn); });
+            // Explicit bom-row-keys: expand to mesh keys via _bomRowMeshKeys
+            (scope.bom_keys || []).forEach(k => {
+                if (!k) return;
+                bomKeySet.add(k);
+                const row = _findBomCompareRowByKey(k, cmp);
+                if (row) _bomRowMeshKeys(row).forEach(mk => partSet.add(mk));
+            });
+            // Procurement filter
+            if (scope.procurement) {
+                rows.forEach(r => {
+                    if (r.procurement === scope.procurement) {
+                        bomKeySet.add(r.key);
+                        _bomRowMeshKeys(r).forEach(mk => partSet.add(mk));
+                    }
+                });
+            }
+            // Diff-status filter — honest: 'changed' = proven_changed only
+            if (scope.diff_status === 'changed') {
+                rows.forEach(r => {
+                    if (r.diff_status === 'added' || r.diff_status === 'removed' || r.diff_status === 'qty_changed') {
+                        bomKeySet.add(r.key);
+                        _bomRowMeshKeys(r).forEach(mk => partSet.add(mk));
+                    }
+                });
+            } else if (scope.diff_status) {
+                // Any other diff_status is interpreted strictly — no honesty
+                // override — but we never accept 'substitution_unverified'
+                // through the proven-changed door; a caller wanting that
+                // must use that exact diff_status string and will get
+                // exactly those rows.
+                rows.forEach(r => {
+                    if (r.diff_status === scope.diff_status) {
+                        bomKeySet.add(r.key);
+                        _bomRowMeshKeys(r).forEach(mk => partSet.add(mk));
+                    }
+                });
+            }
+            return { partNumbers: [...partSet], bomKeys: [...bomKeySet] };
+        }
+
+        function _viewersForSide(side) {
+            // 'A' | 'B' | 'both'. Always returns an array.
+            if (side === 'A') return [diffState.viewerA].filter(Boolean);
+            if (side === 'B') return [diffState.viewerB].filter(Boolean);
+            return [diffState.viewerA, diffState.viewerB].filter(Boolean);
+        }
+
+        async function _waitForCompareViewers(timeoutMs) {
+            // Used by dispatchers that need viewers ready (extract / focus
+            // / highlight). Resolves true when both viewers have a
+            // partMeshMap; false on timeout.
+            timeoutMs = timeoutMs || 5000;
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+                if (diffState.viewerA && diffState.viewerB
+                    && diffState.viewerA.partMeshMap && diffState.viewerB.partMeshMap) {
+                    return true;
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+            return false;
+        }
+
+        async function _dispatchUiAction(workspace, action) {
+            if (!action || !action.type) return false;
+            // Workspace check is informational — even an action targeting
+            // a different workspace is dispatched if a handler exists, so
+            // open_workspace can fire from any tab.
+            switch (action.type) {
+
+                case 'open_workspace': {
+                    const tab = action.tab || 'assembly';
+                    if (state.activeTab !== tab) switchTab(tab);
+                    if (tab === 'assembly') {
+                        const sub = action.subtab || 'compare';
+                        if (diffState.activeSubtab !== sub) {
+                            diffState.activeSubtab = sub;
+                            switchTab('assembly');
+                        }
+                    }
+                    return true;
+                }
+
+                case 'set_compare_revisions': {
+                    const a = action.revA, b = action.revB;
+                    if (a) diffState.activeRevA = a;
+                    if (b) diffState.activeRevB = b;
+                    if (action.run_compare && assemblyContext) {
+                        await _loadCompareViewers(assemblyContext.assembly_number, diffState.activeRevA, diffState.activeRevB);
+                    }
+                    return true;
+                }
+
+                case 'explode': {
+                    if (!await _waitForCompareViewers()) return false;
+                    const enable = !!action.enabled;
+                    _viewersForSide(action.side || 'both').forEach(v => {
+                        if (v && v.explode && v.explode.hasData) _setViewerExplode(v, enable);
+                    });
+                    return true;
+                }
+
+                case 'focus': {
+                    if (!await _waitForCompareViewers()) return false;
+                    // 'focus' is BOM-isolation 'selected' against a chosen
+                    // set. The backing implementation reuses the existing
+                    // BOM isolation pipeline so opacity composes with row
+                    // highlight cleanly.
+                    const cmp = diffState.bomCompare;
+                    if (!cmp) return false;
+                    const resolved = _resolveCompareScope(action.scope);
+                    if (resolved.bomKeys.length === 0 && resolved.partNumbers.length === 0) return false;
+                    // Drive selection so the 'selected' isolation has
+                    // something to show. Prefer existing primary if it
+                    // survives the new set; otherwise first key.
+                    _setBomSelection({ mode: 'replace', keys: resolved.bomKeys });
+                    cmp.isolation = 'selected';
+                    _applyBomIsolationToViewers('selected');
+                    _refreshBomIsolationPills();
+                    _refreshBomDrawerToggle();
+                    return true;
+                }
+
+                case 'highlight': {
+                    if (!await _waitForCompareViewers()) return false;
+                    const cmp = diffState.bomCompare;
+                    if (!cmp) return false;
+                    const resolved = _resolveCompareScope(action.scope);
+                    if (resolved.bomKeys.length === 0 && resolved.partNumbers.length === 0) return false;
+                    // 'highlight' mutates the BOM selection set so the cyan
+                    // emissive paints — without forcing isolation. Caller can
+                    // explicitly set focus afterwards if they want dimming.
+                    _setBomSelection({ mode: 'replace', keys: resolved.bomKeys });
+                    return true;
+                }
+
+                case 'extract': {
+                    if (!await _waitForCompareViewers()) return false;
+                    const resolved = _resolveCompareScope(action.scope);
+                    if (resolved.partNumbers.length === 0) return false;
+                    _viewersForSide(action.side || 'both').forEach(v => {
+                        _setViewerExtract(v, { targetPartNumbers: resolved.partNumbers });
+                    });
+                    return true;
+                }
+
+                case 'select_bom_rows': {
+                    const cmp = diffState.bomCompare;
+                    if (!cmp) return false;
+                    const result = _setBomSelection({
+                        mode: action.mode || 'replace',
+                        keys: action.keys || [],
+                        primary: action.primary || null,
+                    });
+                    if (action.open_drawer && diffState._bomDrawerOpen !== true) {
+                        const btn = document.getElementById('bomDrawerToggle');
+                        if (btn) btn.click();
+                    }
+                    return result.keys.length > 0 || (action.mode || 'replace') === 'clear';
+                }
+
+                case 'open_supplier_spec': {
+                    return await _openSupplierSpecModal({
+                        partNumber: action.part_number,
+                        revision: action.revision,
+                    });
+                }
+
+                case 'compare_supplier_specs': {
+                    const a = action.revA || diffState.activeRevA;
+                    const b = action.revB || diffState.activeRevB;
+                    return await _openSupplierSpecCompareModal({
+                        partNumber: action.part_number,
+                        revA: a,
+                        revB: b,
+                    });
+                }
+
+                case 'clear_compare_overlays': {
+                    // Clear extract on both sides + reset BOM isolation +
+                    // optionally clear selection. Honest: never removes
+                    // explode (that's user-controlled per side).
+                    _viewersForSide('both').forEach(v => _setViewerExtract(v, { clear: true }));
+                    const cmp = diffState.bomCompare;
+                    if (cmp) {
+                        cmp.isolation = 'all';
+                        _applyBomIsolationToViewers('all');
+                        _refreshBomIsolationPills();
+                    }
+                    if (action.clear_selection !== false) {
+                        _clearBomRowSelection();
+                    }
+                    _refreshBomDrawerToggle();
+                    return true;
+                }
+
+                default:
+                    console.warn('[ui_actions] unknown action type:', action.type);
+                    return false;
+            }
         }
 
         async function _autoOpenAssemblyCompareAndHighlight(partIds) {
@@ -14473,6 +15198,10 @@
                     cancelAnimationFrame(viewer.explode.animId);
                     viewer.explode.animId = null;
                 }
+                if (viewer.extract && viewer.extract.animId) {
+                    cancelAnimationFrame(viewer.extract.animId);
+                    viewer.extract.animId = null;
+                }
                 if (viewer.renderer) {
                     viewer.renderer.dispose();
                     if (viewer.renderer.domElement && viewer.renderer.domElement.parentNode) {
@@ -14492,6 +15221,14 @@
                     viewer.explode.enabled = false;
                     viewer.explode.hasData = false;
                     viewer.explode.level = 0;
+                }
+                if (viewer.extract) {
+                    viewer.extract.enabled = false;
+                    viewer.extract.targetPartNumbers = [];
+                    viewer.extract.targetMeshSet = null;
+                    viewer.extract.vectors = null;
+                    viewer.extract.level = 0;
+                    viewer.extract.hasAnyTargets = false;
                 }
             });
             diffState.viewerA = null;
@@ -14839,7 +15576,7 @@
                 all:       'Restore full opacity to every part in both 3D viewers.',
                 purchased: 'Dim everything except purchased parts in both viewers.',
                 custom:    'Dim everything except custom parts in both viewers.',
-                selected:  'Dim everything except the selected BOM row. With no selection, all parts stay visible.',
+                selected:  'Dim everything except the selected BOM rows (one or many). With no selection, all parts stay visible.',
                 changed:   'Dim everything except proven-changed rows. Substitution_unverified is intentionally excluded.',
             };
 
@@ -14847,7 +15584,7 @@
                 { id: 'all',       label: 'Show all' },
                 { id: 'purchased', label: 'Purchased only' },
                 { id: 'custom',    label: 'Custom only' },
-                { id: 'selected',  label: 'Selected row only' },
+                { id: 'selected',  label: 'Selected items only' },
                 { id: 'changed',   label: 'Changed only' },
             ];
             isolations.forEach(iso => {
@@ -14903,7 +15640,7 @@
                 const tr = ev.target.closest('tr[data-bom-row-pn]');
                 if (!tr) return;
                 const pn = tr.getAttribute('data-bom-row-pn');
-                if (pn) _onBomRowClick(pn);
+                if (pn) _onBomRowClick(pn, ev);
             });
 
             const drawingPane = document.createElement('div');
@@ -14977,6 +15714,8 @@
                 revA: null,
                 revB: null,
                 loading: false,
+                selectedKeys: [],
+                primaryKey: null,
                 selectedKey: null,
                 _loadedDrawingKey: null,
             };
@@ -15052,6 +15791,22 @@
                     if (stillPresent) nextSelected = prevSelected;
                 }
                 const prevIsolation = (diffState.bomCompare && diffState.bomCompare.isolation) || 'all';
+                // Preserve the prior multi-row selection when the rev pair
+                // is unchanged AND every previously selected key still
+                // exists in the new payload. Otherwise drop the set.
+                const prevSelectedKeys = Array.isArray(diffState.bomCompare && diffState.bomCompare.selectedKeys)
+                    ? diffState.bomCompare.selectedKeys.slice()
+                    : (diffState.bomCompare && diffState.bomCompare.selectedKey
+                        ? [diffState.bomCompare.selectedKey] : []);
+                const prevPrimary = (diffState.bomCompare && diffState.bomCompare.primaryKey) || nextSelected;
+                let nextSelectedKeys = [];
+                let nextPrimary = null;
+                if (!pairChanged && prevSelectedKeys.length > 0) {
+                    const stillPresent = new Set((data.rows || []).map(r => r.key));
+                    nextSelectedKeys = prevSelectedKeys.filter(k => stillPresent.has(k));
+                    if (prevPrimary && nextSelectedKeys.indexOf(prevPrimary) >= 0) nextPrimary = prevPrimary;
+                    else if (nextSelectedKeys.length > 0) nextPrimary = nextSelectedKeys[0];
+                }
                 diffState.bomCompare = {
                     rows: data.rows || [],
                     summary: data.summary || null,
@@ -15062,9 +15817,12 @@
                     revA: data.revA,
                     revB: data.revB,
                     loading: false,
-                    selectedKey: nextSelected,
+                    selectedKeys: nextSelectedKeys,
+                    primaryKey: nextPrimary,
+                    selectedKey: nextPrimary,  // legacy alias
                     _loadedDrawingKey: pairChanged ? null : (diffState.bomCompare && diffState.bomCompare._loadedDrawingKey),
                 };
+                nextSelected = nextPrimary;
                 _refreshBomDrawerToggle();
                 _renderBomCompareRows();
                 if (nextSelected) {
@@ -15224,17 +15982,29 @@
             const procTip = _BOM_PROC_TOOLTIPS[r.procurement] || r.procurement;
             const procBadge = `<span title="${_escapeHtml(procTip)}" style="color:${procColor};font-size:10px;text-transform:uppercase;letter-spacing:0.4px;cursor:help;">${_escapeHtml(r.procurement)}</span>`;
 
-            const selectedKey = (diffState.bomCompare && diffState.bomCompare.selectedKey) || null;
-            const isSelected = selectedKey === r.key;
-            const rowStyle = isSelected
-                ? 'border-bottom:1px solid rgba(0,188,212,0.30);background:rgba(0,188,212,0.10);cursor:pointer;'
-                : 'border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;';
+            // Multi-select: every member of selectedKeys gets a soft cyan
+            // tint; the primary row gets a stronger cyan border to mark it
+            // as the row driving the drawing pane. Plain unselected rows
+            // keep their normal style.
+            const isSelected = _isBomRowSelected(r.key);
+            const isPrimary = _isBomRowPrimary(r.key);
+            let rowStyle;
+            if (isPrimary) {
+                rowStyle = 'border-left:3px solid #00BCD4;border-bottom:1px solid rgba(0,188,212,0.40);background:rgba(0,188,212,0.14);cursor:pointer;';
+            } else if (isSelected) {
+                rowStyle = 'border-left:3px solid rgba(0,188,212,0.30);border-bottom:1px solid rgba(0,188,212,0.20);background:rgba(0,188,212,0.06);cursor:pointer;';
+            } else {
+                rowStyle = 'border-left:3px solid transparent;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;';
+            }
             const orderCellColor = isSelected ? '#00BCD4' : 'var(--text-secondary,#9aa5b1)';
+            const primaryBadge = isPrimary
+                ? '<span title="Primary row — drives the drawing pane" style="margin-left:6px;background:#00BCD4;color:#06151a;padding:1px 5px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:0.4px;">PRIMARY</span>'
+                : '';
 
             return `
-                <tr data-bom-row-pn="${_escapeHtml(r.key)}" style="${rowStyle}">
+                <tr data-bom-row-pn="${_escapeHtml(r.key)}" style="${rowStyle}" title="Click to select. Ctrl/Cmd+click to add to selection.">
                     <td style="padding:6px 8px;color:${orderCellColor};font-weight:${isSelected ? '600' : '400'};">${r.display_order}</td>
-                    <td style="padding:6px 8px;font-family:monospace;color:#fff;">${_escapeHtml(r.key)}</td>
+                    <td style="padding:6px 8px;font-family:monospace;color:#fff;">${_escapeHtml(r.key)}${primaryBadge}</td>
                     <td style="padding:6px 8px;color:#cdd5dd;">${_escapeHtml(desc)}</td>
                     <td style="padding:6px 8px;text-align:center;color:#cdd5dd;">${_escapeHtml(a.qty != null ? a.qty : '–')}</td>
                     <td style="padding:6px 8px;text-align:center;color:#cdd5dd;">${_escapeHtml(b.qty != null ? b.qty : '–')}</td>
@@ -15350,20 +16120,165 @@
 
         const _BOM_HIGHLIGHT_COLOR = 0x00BCD4;  // cyan, matches drawing rectangle
 
-        function _onBomRowClick(pn) {
-            if (!pn) return;
+        // ─────────── BOM multi-row selection (set-based) ───────────
+        // selectedKeys: array of unique row keys currently selected
+        // primaryKey:   the single key that drives the drawing pane; one of
+        //               selectedKeys or null
+        // selectedKey:  legacy alias kept in sync with primaryKey so all
+        //               existing single-select code paths (mesh-key expander,
+        //               isolation 'selected', drawing pane lookups) keep
+        //               working without rewiring.
+        // ───────────────────────────────────────────────────────────
+
+        function _isBomRowSelected(key) {
+            const cmp = diffState.bomCompare || {};
+            if (!cmp.selectedKeys) return false;
+            return cmp.selectedKeys.indexOf(key) >= 0;
+        }
+
+        function _isBomRowPrimary(key) {
+            const cmp = diffState.bomCompare || {};
+            return !!key && cmp.primaryKey === key;
+        }
+
+        function _bomCanonicalSelection(rawKeys, requestedPrimary) {
+            // Normalise a candidate selection set to the unique keys that
+            // actually appear in the loaded rows. Keeps order of first
+            // appearance. Returns { keys, primary }.
+            const cmp = diffState.bomCompare || {};
+            const validKeys = new Set((cmp.rows || []).map(r => r.key));
+            const seen = new Set();
+            const keys = [];
+            (rawKeys || []).forEach(k => {
+                if (!k) return;
+                if (!validKeys.has(k)) return;
+                if (seen.has(k)) return;
+                seen.add(k);
+                keys.push(k);
+            });
+            let primary = null;
+            if (requestedPrimary && seen.has(requestedPrimary)) primary = requestedPrimary;
+            else if (keys.length > 0) primary = keys[0];
+            return { keys, primary };
+        }
+
+        function _commitBomSelection(rawKeys, requestedPrimary) {
+            // Commit a new selection state and run all the side effects:
+            // legacy alias sync, table re-render, drawing pane (primary only),
+            // 3D highlight (all selected), drawer summary, and the 'selected'
+            // isolation mode. Used by both _onBomRowClick and chat actions.
             const cmp = diffState.bomCompare;
-            const next = (cmp.selectedKey === pn) ? null : pn;
-            cmp.selectedKey = next;
+            if (!cmp) return { keys: [], primary: null };
+            const { keys, primary } = _bomCanonicalSelection(rawKeys, requestedPrimary);
+            cmp.selectedKeys = keys;
+            cmp.primaryKey = primary;
+            cmp.selectedKey = primary;  // legacy alias
             _refreshBomDrawerToggle();
             _renderBomCompareRows();
-            _applyBomRowToDrawing(next);
-            _applyBomRowToViewers(next);
-            // 'selected' isolation depends on selectedKey, so re-apply whenever
-            // selection changes. Other modes (purchased/custom/changed/all) are
-            // selection-independent and do not need to re-run.
+            _applyBomRowToDrawing(primary);
+            _applyBomRowToViewers(primary);
+            // 'selected' isolation depends on the selected set; re-apply so
+            // multi-row selection isolates on the union of mesh keys for
+            // every selected row.
             if (cmp.isolation === 'selected') {
                 _applyBomIsolationToViewers('selected');
+            }
+            return { keys, primary };
+        }
+
+        function _setBomSelection(opts) {
+            // Public API used by chat actions. opts:
+            //   { mode: 'replace' | 'add' | 'remove' | 'clear',
+            //     keys: [...],
+            //     primary: 'optional explicit primary key' }
+            const cmp = diffState.bomCompare;
+            if (!cmp) return { keys: [], primary: null };
+            const mode = (opts && opts.mode) || 'replace';
+            const incoming = Array.isArray(opts && opts.keys) ? opts.keys.slice() : [];
+            const primaryReq = (opts && opts.primary) || null;
+            let nextKeys;
+            if (mode === 'clear') {
+                nextKeys = [];
+            } else if (mode === 'add') {
+                const existing = (cmp.selectedKeys || []).slice();
+                incoming.forEach(k => { if (k && existing.indexOf(k) < 0) existing.push(k); });
+                nextKeys = existing;
+            } else if (mode === 'remove') {
+                const removeSet = new Set(incoming);
+                nextKeys = (cmp.selectedKeys || []).filter(k => !removeSet.has(k));
+            } else {  // 'replace' (default)
+                nextKeys = incoming.slice();
+            }
+            // Primary preference: explicit primary > current primary if it
+            // survived > first key.
+            let nextPrimary = null;
+            if (primaryReq && nextKeys.indexOf(primaryReq) >= 0) {
+                nextPrimary = primaryReq;
+            } else if (cmp.primaryKey && nextKeys.indexOf(cmp.primaryKey) >= 0) {
+                nextPrimary = cmp.primaryKey;
+            } else if (nextKeys.length > 0) {
+                nextPrimary = nextKeys[0];
+            }
+            return _commitBomSelection(nextKeys, nextPrimary);
+        }
+
+        function _clearBomSelectionInternal() {
+            // Internal helper that does NOT call _applyBomRowToDrawing/Viewers
+            // — used by paths that already manage downstream cleanup.
+            const cmp = diffState.bomCompare;
+            if (!cmp) return;
+            cmp.selectedKeys = [];
+            cmp.primaryKey = null;
+            cmp.selectedKey = null;
+        }
+
+        function _onBomRowClick(pn, ev) {
+            // Spec rules:
+            //   plain click on unselected   → replace selection with [pn], primary = pn
+            //   plain click on selected non-primary → promote to primary
+            //   plain click on only-selected primary → deselect all
+            //   Ctrl/Cmd + click → toggle membership; new add becomes primary;
+            //                       removing primary picks another or null
+            if (!pn) return;
+            const cmp = diffState.bomCompare;
+            if (!cmp) return;
+            const wantsToggle = !!(ev && (ev.ctrlKey || ev.metaKey));
+            const currentKeys = (cmp.selectedKeys || []).slice();
+            const isSelected = currentKeys.indexOf(pn) >= 0;
+
+            if (wantsToggle) {
+                if (isSelected) {
+                    const next = currentKeys.filter(k => k !== pn);
+                    let nextPrimary = cmp.primaryKey;
+                    if (nextPrimary === pn) {
+                        nextPrimary = next[0] || null;
+                    }
+                    _commitBomSelection(next, nextPrimary);
+                } else {
+                    const next = currentKeys.concat([pn]);
+                    _commitBomSelection(next, pn);
+                }
+                return;
+            }
+
+            // Plain click
+            if (!isSelected) {
+                _commitBomSelection([pn], pn);
+                return;
+            }
+            // pn is selected. If it isn't primary, promote.
+            if (cmp.primaryKey !== pn) {
+                _commitBomSelection(currentKeys, pn);
+                return;
+            }
+            // pn is primary. Deselect-all only when it's the sole selection;
+            // otherwise leave the set alone (clicking primary again should
+            // not collapse a multi-row selection).
+            if (currentKeys.length === 1) {
+                _commitBomSelection([], null);
+            } else {
+                // No-op: primary stays primary, selection unchanged.
+                _commitBomSelection(currentKeys, pn);
             }
         }
 
@@ -15503,14 +16418,28 @@
             }
         }
 
-        function _applyBomRowToViewers(pn) {
+        function _applyBomRowToViewers(_primaryPnHint) {
             // Snapshot/restore pattern so toggling row selection cannot corrupt
             // the underlying material state. Snapshot key is BOM-specific and
             // independent of the existing diff-highlight system's snapshot.
+            //
+            // Highlights ALL members of cmp.selectedKeys, expanded through
+            // _bomRowMeshKeys so subassembly rows light up their leaf meshes.
+            // The primary-pn argument is a backward-compatible hint; the
+            // canonical source is cmp.selectedKeys (set-based selection).
             const viewers = [diffState.viewerA, diffState.viewerB];
             const hlColor = (typeof THREE !== 'undefined') ? new THREE.Color(_BOM_HIGHLIGHT_COLOR) : null;
-            const row = pn ? _findBomCompareRowByKey(pn, diffState.bomCompare) : null;
-            const targetKeys = row ? _bomRowMeshKeys(row) : (pn ? [pn] : []);
+            const cmp = diffState.bomCompare || {};
+            const selectedKeys = Array.isArray(cmp.selectedKeys) ? cmp.selectedKeys : [];
+            // Build the union of mesh keys for every selected row.
+            const meshKeySet = new Set();
+            selectedKeys.forEach(key => {
+                const row = _findBomCompareRowByKey(key, cmp);
+                const expanded = row ? _bomRowMeshKeys(row) : [key];
+                expanded.forEach(k => { if (k) meshKeySet.add(k); });
+            });
+            const targetKeys = [...meshKeySet];
+
             viewers.forEach(viewer => {
                 if (!viewer || !viewer.liveScene) return;
                 const liveScene = viewer.liveScene;
@@ -15538,37 +16467,38 @@
                     }
                 });
 
-                if (pn && hlColor && meshMap && targetKeys.length > 0) {
-                    // Defense-in-depth: even if a row click set selectedKey on
-                    // a PN that the active isolation hides, the cyan emissive
-                    // must NOT paint. Isolation is the authority over what is
-                    // visible in 3D.
-                    const isoMode = (diffState.bomCompare && diffState.bomCompare.isolation) || 'all';
-                    const visibleKeys = _bomIsolationVisibleKeys(isoMode, diffState.bomCompare);
-                    const allowedByIsolation = (visibleKeys === null) || targetKeys.some(k => visibleKeys.has(k));
-                    if (allowedByIsolation) {
-                        for (const key of targetKeys) {
-                            for (const mesh of (meshMap[key] || [])) {
-                                if (!mesh.material || !mesh.material.emissive) continue;
-                                mesh.material.emissive.copy(hlColor);
-                                mesh.material.emissiveIntensity = 0.6;
-                            }
+                if (hlColor && meshMap && targetKeys.length > 0) {
+                    // Defense-in-depth: even if a row click adds a PN that the
+                    // active isolation hides, the cyan emissive must NOT paint
+                    // on hidden meshes. Isolation is the authority over what
+                    // is visible in 3D.
+                    const isoMode = (cmp.isolation || 'all');
+                    const visibleKeys = _bomIsolationVisibleKeys(isoMode, cmp);
+                    targetKeys.forEach(key => {
+                        if (visibleKeys !== null && !visibleKeys.has(key)) return;
+                        for (const mesh of (meshMap[key] || [])) {
+                            if (!mesh.material || !mesh.material.emissive) continue;
+                            mesh.material.emissive.copy(hlColor);
+                            mesh.material.emissiveIntensity = 0.6;
                         }
-                    }
+                    });
                 }
             });
         }
 
         function _clearBomRowSelection() {
             // Single source of truth for "drop the selection". Used by the
-            // preview reset and by re-loads on a new revision pair.
+            // preview reset and by re-loads on a new revision pair. Clears
+            // the multi-row set, the primary key, and the legacy alias.
             const cmp = diffState.bomCompare;
             if (!cmp) return;
+            cmp.selectedKeys = [];
+            cmp.primaryKey = null;
             cmp.selectedKey = null;
             _applyBomRowToDrawing(null);
             _applyBomRowToViewers(null);
             // If isolation depends on the selection, re-apply so the
-            // single-selected-mesh isolation drops when there is no selection.
+            // selected-set isolation drops when there is no selection.
             if (cmp.isolation === 'selected') {
                 _applyBomIsolationToViewers('selected');
             }
@@ -15592,9 +16522,14 @@
             if (mode === 'selected') {
                 // No selection means there is nothing to isolate to. Treat as
                 // 'all' so the user is not staring at a fully dimmed scene.
-                if (!cmp.selectedKey) return null;
-                const row = _findBomCompareRowByKey(cmp.selectedKey, cmp);
-                return _bomRowsToMeshKeySet(row ? [row] : []);
+                // Multi-row aware: every member of selectedKeys contributes
+                // its own mesh keys to the visible set.
+                const keys = (cmp && Array.isArray(cmp.selectedKeys)) ? cmp.selectedKeys : [];
+                if (keys.length === 0) return null;
+                const selRows = keys
+                    .map(k => _findBomCompareRowByKey(k, cmp))
+                    .filter(Boolean);
+                return _bomRowsToMeshKeySet(selRows);
             }
             if (mode === 'purchased') return _bomRowsToMeshKeySet(rows.filter(r => r.procurement === 'purchased'));
             if (mode === 'custom')    return _bomRowsToMeshKeySet(rows.filter(r => r.procurement === 'custom'));
@@ -15676,11 +16611,17 @@
             const isoLabels = {
                 purchased: 'Purchased only',
                 custom: 'Custom only',
-                selected: 'Selected row only',
+                selected: 'Selected items only',
                 changed: 'Changed only',
             };
             const bits = [];
-            if (cmp.selectedKey) bits.push(`Selected ${cmp.selectedKey}`);
+            const sel = Array.isArray(cmp.selectedKeys) ? cmp.selectedKeys : (cmp.selectedKey ? [cmp.selectedKey] : []);
+            if (sel.length === 1) {
+                bits.push(`Selected ${sel[0]}`);
+            } else if (sel.length > 1) {
+                const primary = cmp.primaryKey || sel[0];
+                bits.push(`Selected ${primary} +${sel.length - 1}`);
+            }
             if (cmp.isolation && cmp.isolation !== 'all') bits.push(isoLabels[cmp.isolation] || cmp.isolation);
             btn.textContent = open
                 ? '▼  BOM Compare'
@@ -25153,6 +26094,33 @@
                         return { ok: applied > 0, applied };
                     }
                 },
+                ui_actions: {
+                    // Assembly Compare chat-first action registry. Each
+                    // sub-action is dispatched in declared order through
+                    // the per-action handlers in _AssemblyCompareActions.
+                    // A failing sub-action does NOT abort the rest — it is
+                    // logged and the loop continues so the prose response
+                    // and other valid actions still take effect.
+                    agents: ['deviation-analyst'],
+                    async execute(args) {
+                        if (!args || !Array.isArray(args.actions)) {
+                            return { ok: false, error: 'no_actions' };
+                        }
+                        const workspace = args.workspace || 'assembly_compare';
+                        let applied = 0;
+                        const errors = [];
+                        for (const action of args.actions) {
+                            try {
+                                const ok = await _dispatchUiAction(workspace, action);
+                                if (ok) applied++;
+                            } catch (err) {
+                                errors.push({ type: action && action.type, error: String(err && err.message || err) });
+                                console.warn('[ui_actions] dispatch error', action, err);
+                            }
+                        }
+                        return { ok: applied > 0, applied, attempted: args.actions.length, errors };
+                    }
+                },
             };
 
             // Convert legacy response fields into canonical tool_calls array.
@@ -25206,11 +26174,17 @@
                 if (data.fai_tol && typeof data.fai_tol === 'object' && Object.keys(data.fai_tol).length > 0) {
                     calls.push({ name: 'fai_tol', args: { values: data.fai_tol } });
                 }
+                // Assembly Compare chat-first action registry. Independent of
+                // the legacy markers above so a single response can carry
+                // both legacy highlight_parts AND a [UI_ACTIONS] block.
+                if (data.ui_actions && Array.isArray(data.ui_actions.actions) && data.ui_actions.actions.length > 0) {
+                    calls.push({ name: 'ui_actions', args: data.ui_actions });
+                }
                 return calls;
             }
 
             // Phase 7: Frontend guardrails (lightweight defense-in-depth; server owns canonical validation)
-            const FE_MAX_TOOL_CALLS = { 'inspector': 4, 'deviation-analyst': 4, 'parts-finder': 1 };
+            const FE_MAX_TOOL_CALLS = { 'inspector': 4, 'deviation-analyst': 5, 'parts-finder': 1 };
             const TOOL_TIMEOUT_MS = {
                 run_inspection: 3000, show_geometry_diff: 8000,
                 compare_parts: 5000, compare_features: 5000,
@@ -25218,6 +26192,9 @@
                 highlight_features: 3000, highlight_parts: 3000,
                 isolate_parts: 4000, animate_motion: 3000,
                 set_explode_level: 3000, fai_fill: 3000, fai_tol: 3000,
+                // ui_actions can dispatch many sub-actions; allow longer
+                // ceiling because compare_supplier_specs fetches + renders.
+                ui_actions: 12000,
             };
             const DEFAULT_TOOL_TIMEOUT_MS = 3000;
 

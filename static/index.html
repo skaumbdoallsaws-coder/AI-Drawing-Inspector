@@ -14379,8 +14379,34 @@
             const partSet = new Set();
             const bomKeySet = new Set();
 
-            // Explicit pn list
-            (scope.part_numbers || []).forEach(pn => { if (pn) partSet.add(pn); });
+            // Explicit pn list. Adds each PN to the part-number set AND
+            // backfills bomKeySet so focus/highlight/select_bom_rows can
+            // drive the BOM table off this same scope. Without the
+            // backfill, an action like
+            //   { "type":"highlight", "scope":{"part_numbers":["1040017"]} }
+            // would paint nothing and clear selection — the schema
+            // advertises part_numbers but the handlers route through
+            // bomKeys. Two backfill paths:
+            //   1. PN is itself a BOM row key (purchased parts almost
+            //      always are — e.g. 1040017).
+            //   2. PN is a leaf mesh key contained in some row's expanded
+            //      set (e.g. a child of a subassembly row).
+            const explicitPns = (scope.part_numbers || []).filter(Boolean).map(String);
+            explicitPns.forEach(pn => partSet.add(pn));
+            if (explicitPns.length > 0) {
+                const explicitSet = new Set(explicitPns);
+                rows.forEach(r => {
+                    if (!r) return;
+                    if (explicitSet.has(r.key)) {
+                        bomKeySet.add(r.key);
+                        return;
+                    }
+                    const meshKeys = _bomRowMeshKeys(r);
+                    if (meshKeys.some(mk => explicitSet.has(String(mk)))) {
+                        bomKeySet.add(r.key);
+                    }
+                });
+            }
             // Explicit bom-row-keys: expand to mesh keys via _bomRowMeshKeys
             (scope.bom_keys || []).forEach(k => {
                 if (!k) return;

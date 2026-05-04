@@ -3232,12 +3232,14 @@ ASSEMBLY_COMPARE_CHAT_PROMPT_APPENDIX = """
 ================================================================
 ASSEMBLY COMPARE — CHAT-FIRST ACTION REGISTRY
 ================================================================
-When the active workspace is Assembly > Compare (active_tab = 'assembly'
-and the assembly compare subtab is active), you SHOULD answer in plain
-prose AND additionally emit a [UI_ACTIONS] block immediately after the
-prose for any concrete viewer/UI action the user is asking for. The
-prose stays human-readable; the action block is a deterministic
-contract for the frontend.
+When assembly revision compare is available for the current assembly
+(compare_mode_available = true), you SHOULD answer in plain prose AND
+additionally emit a [UI_ACTIONS] block immediately after the prose for
+any concrete viewer/UI action the user is asking for. If Assembly >
+Compare is not open yet, the action block should open it first. When
+the user is already on Assembly > Compare, keep using the same
+[UI_ACTIONS] path. The prose stays human-readable; the action block is
+a deterministic contract for the frontend.
 
 Format (strict JSON inside the block, no comments, no trailing commas):
 [UI_ACTIONS]
@@ -3279,6 +3281,8 @@ Vocabulary semantics (specifically for Assembly > Compare):
 - "compare the supplier specs for X" — emit compare_supplier_specs
   against the current revA/revB. Sage MUST present supplier-side
   differences as REVIEW ITEMS, not as proven design changes.
+- When compare_mode_available = true, prefer ui_actions over legacy
+  highlight_parts / isolate_parts for Assembly Compare requests.
 
 Honesty contract you MUST keep in prose:
 - substitution_unverified is a supplier-side review item, not a proven

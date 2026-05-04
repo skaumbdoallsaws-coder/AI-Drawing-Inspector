@@ -26001,6 +26001,27 @@
                 highlight_parts: {
                     agents: ['inspector', 'deviation-analyst', 'parts-finder'],
                     execute(args) {
+                        // Legacy bridge: if Sage falls back to highlight_parts
+                        // while the user is already in Assembly > Compare,
+                        // treat the payload as a compare-row selection rather
+                        // than the single-view assembly highlight path. This
+                        // keeps older model behavior visibly useful until the
+                        // model consistently emits ui_actions.
+                        if (currentAgent === 'deviation-analyst'
+                            && state.activeTab === 'assembly'
+                            && diffState.available
+                            && diffState.activeSubtab === 'compare') {
+                            const resolved = _resolveCompareScope({ part_numbers: args.part_numbers || [] });
+                            if (resolved.bomKeys.length > 0 || resolved.partNumbers.length > 0) {
+                                const result = _setBomSelection({ mode: 'replace', keys: resolved.bomKeys });
+                                _refreshBomDrawerToggle();
+                                return {
+                                    ok: true,
+                                    applied: Math.max(result.keys.length, resolved.partNumbers.length),
+                                    compare_bridge: true
+                                };
+                            }
+                        }
                         applyAgentPartHighlights(args.part_numbers, args.camera_view || null);
                         return { ok: true, applied: args.part_numbers.length };
                     }
@@ -26070,6 +26091,27 @@
                     agents: ['deviation-analyst'],
                     execute(args) {
                         if (state.motionPlaying) _stopMotion();
+                        // Legacy bridge: if Sage falls back to the old
+                        // single-view explode tool while the user is already
+                        // in Assembly > Compare, map the level onto both
+                        // compare viewers instead of the single assembly
+                        // viewport. This keeps legacy model behavior useful
+                        // until ui_actions/explode becomes consistent.
+                        if (currentAgent === 'deviation-analyst'
+                            && state.activeTab === 'assembly'
+                            && diffState.available
+                            && diffState.activeSubtab === 'compare') {
+                            const level = Math.max(0, Math.min(1, Number(args.level) || 0));
+                            const viewers = [diffState.viewerA, diffState.viewerB].filter(v => v && v.explode && v.explode.hasData);
+                            if (viewers.length > 0) {
+                                viewers.forEach(v => {
+                                    v.explode.enabled = level > 0;
+                                    _animateViewerExplode(v, level);
+                                    _refreshDiffExplodeButton(v);
+                                });
+                                return { ok: true, compare_bridge: true, level, applied: viewers.length };
+                            }
+                        }
                         if (state.assyPartMeshMap && state.assyExplodeVectors) {
                             _animateExplode(args.level);
                         } else {

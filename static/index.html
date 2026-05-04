@@ -14265,6 +14265,18 @@
             const bomPanel = _buildBomComparePanelDom();
 
             const _setDrawerOpen = (open) => {
+                // Closing the drawer should restore the clean split-compare
+                // state, not leave hidden BOM selection/isolation active in
+                // the 3D viewers. The table filter may stay as-is, but any
+                // row-driven highlight or viewport dimming is reset here.
+                if (!open) {
+                    _clearBomRowSelection();
+                    if (diffState.bomCompare) {
+                        diffState.bomCompare.isolation = 'all';
+                    }
+                    _applyBomIsolationToViewers('all');
+                    _refreshBomIsolationPills();
+                }
                 bomPanel.style.display = open ? 'flex' : 'none';
                 diffState._bomDrawerOpen = !!open;
                 drawerToggle.textContent = open ? '▼  BOM Compare' : '▲  BOM Compare';
@@ -14407,10 +14419,7 @@
                     // pierce the isolation contract.
                     const selKey = diffState.bomCompare.selectedKey;
                     if (selKey) {
-                        const visibleKeys = _bomIsolationVisibleKeys(newMode, diffState.bomCompare);
-                        // visibleKeys === null means 'all' / no isolation —
-                        // everything is visible and the selection survives.
-                        if (visibleKeys !== null && !visibleKeys.has(selKey)) {
+                        if (!_bomSelectionAllowedUnderIsolation(selKey, newMode, diffState.bomCompare)) {
                             _clearBomRowSelection();
                         }
                     }
@@ -14819,6 +14828,70 @@
             return true;
         }
 
+        function _findBomCompareRowByKey(key, cmp) {
+            const rows = (cmp && cmp.rows) || [];
+            return rows.find(r => r && r.key === key) || null;
+        }
+
+        function _normalizeBomAliasText(value) {
+            return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        }
+
+        function _bomRowMeshKeys(row) {
+            if (!row) return [];
+
+            const explicit = Array.isArray(row.mesh_keys)
+                ? row.mesh_keys.map(k => String(k || '').trim()).filter(Boolean)
+                : [];
+            if (explicit.length > 0) return [...new Set(explicit)];
+
+            const directKey = String(row.key || '').trim();
+            const knownMeshMaps = [
+                diffState.viewerA && diffState.viewerA.partMeshMap,
+                diffState.viewerB && diffState.viewerB.partMeshMap,
+                state.assyPartMeshMap,
+            ].filter(Boolean);
+            if (directKey && knownMeshMaps.some(map => Array.isArray(map[directKey]) && map[directKey].length > 0)) {
+                return [directKey];
+            }
+
+            const desc = _normalizeBomAliasText(
+                (row.rev_b && row.rev_b.description) ||
+                (row.rev_a && row.rev_a.description) ||
+                ''
+            );
+            const configs = Array.isArray(assemblyContext && assemblyContext.configurations)
+                ? assemblyContext.configurations
+                : [];
+            const cfg = configs.find(item => {
+                if (!item || item.icon !== 'layers' || !Array.isArray(item.parts) || item.parts.length === 0) return false;
+                const name = _normalizeBomAliasText(item.name);
+                return !!name && !!desc && desc.includes(name);
+            });
+            if (cfg) {
+                return [...new Set(cfg.parts.map(k => String(k || '').trim()).filter(Boolean))];
+            }
+
+            return directKey ? [directKey] : [];
+        }
+
+        function _bomRowsToMeshKeySet(rows) {
+            const out = new Set();
+            (rows || []).forEach(row => {
+                _bomRowMeshKeys(row).forEach(k => out.add(k));
+            });
+            return out;
+        }
+
+        function _bomSelectionAllowedUnderIsolation(selectedKey, mode, cmp) {
+            if (!selectedKey) return true;
+            const visibleKeys = _bomIsolationVisibleKeys(mode, cmp);
+            if (visibleKeys === null) return true;
+            const row = _findBomCompareRowByKey(selectedKey, cmp);
+            if (!row) return false;
+            return _bomRowMeshKeys(row).some(k => visibleKeys.has(k));
+        }
+
         // ---- BOM row interactions (Phase 4) ----
         // Three actions, kept independent so each can be disabled in isolation:
         //   1. Update selectedKey + re-render the table so the row is marked
@@ -14986,6 +15059,8 @@
             // independent of the existing diff-highlight system's snapshot.
             const viewers = [diffState.viewerA, diffState.viewerB];
             const hlColor = (typeof THREE !== 'undefined') ? new THREE.Color(_BOM_HIGHLIGHT_COLOR) : null;
+            const row = pn ? _findBomCompareRowByKey(pn, diffState.bomCompare) : null;
+            const targetKeys = row ? _bomRowMeshKeys(row) : (pn ? [pn] : []);
             viewers.forEach(viewer => {
                 if (!viewer || !viewer.liveScene) return;
                 const liveScene = viewer.liveScene;
@@ -15013,19 +15088,21 @@
                     }
                 });
 
-                if (pn && hlColor && meshMap && meshMap[pn]) {
+                if (pn && hlColor && meshMap && targetKeys.length > 0) {
                     // Defense-in-depth: even if a row click set selectedKey on
                     // a PN that the active isolation hides, the cyan emissive
                     // must NOT paint. Isolation is the authority over what is
                     // visible in 3D.
                     const isoMode = (diffState.bomCompare && diffState.bomCompare.isolation) || 'all';
                     const visibleKeys = _bomIsolationVisibleKeys(isoMode, diffState.bomCompare);
-                    const allowedByIsolation = (visibleKeys === null) || visibleKeys.has(pn);
+                    const allowedByIsolation = (visibleKeys === null) || targetKeys.some(k => visibleKeys.has(k));
                     if (allowedByIsolation) {
-                        for (const mesh of meshMap[pn]) {
-                            if (!mesh.material || !mesh.material.emissive) continue;
-                            mesh.material.emissive.copy(hlColor);
-                            mesh.material.emissiveIntensity = 0.6;
+                        for (const key of targetKeys) {
+                            for (const mesh of (meshMap[key] || [])) {
+                                if (!mesh.material || !mesh.material.emissive) continue;
+                                mesh.material.emissive.copy(hlColor);
+                                mesh.material.emissiveIntensity = 0.6;
+                            }
                         }
                     }
                 }
@@ -15065,13 +15142,14 @@
                 // No selection means there is nothing to isolate to. Treat as
                 // 'all' so the user is not staring at a fully dimmed scene.
                 if (!cmp.selectedKey) return null;
-                return new Set([cmp.selectedKey]);
+                const row = _findBomCompareRowByKey(cmp.selectedKey, cmp);
+                return _bomRowsToMeshKeySet(row ? [row] : []);
             }
-            if (mode === 'purchased') return new Set(rows.filter(r => r.procurement === 'purchased').map(r => r.key));
-            if (mode === 'custom')    return new Set(rows.filter(r => r.procurement === 'custom').map(r => r.key));
+            if (mode === 'purchased') return _bomRowsToMeshKeySet(rows.filter(r => r.procurement === 'purchased'));
+            if (mode === 'custom')    return _bomRowsToMeshKeySet(rows.filter(r => r.procurement === 'custom'));
             if (mode === 'changed') {
                 // Proven change only — substitution_unverified excluded by design.
-                return new Set(rows.filter(r => r.diff_status === 'added' || r.diff_status === 'removed' || r.diff_status === 'qty_changed').map(r => r.key));
+                return _bomRowsToMeshKeySet(rows.filter(r => r.diff_status === 'added' || r.diff_status === 'removed' || r.diff_status === 'qty_changed'));
             }
             return null;
         }

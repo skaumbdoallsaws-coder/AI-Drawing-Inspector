@@ -36,9 +36,12 @@ KNOWN_PURCHASED_PNS = frozenset({"1040016", "1040017", "1040018", "1040019"})
 KNOWN_CUSTOM_PNS = frozenset({"1030031", "1030032", "1030033"})
 
 # Numeric-prefix fallback used only when the explicit lists do not match.
-# 1040xxx is the reserved purchased-parts range; 1030xxx is custom parts.
+# 1040xxx is the reserved purchased-parts range; 1030xxx is custom parts;
+# 6000xxx is the internal assembly/subassembly range and should also be
+# treated as custom for procurement purposes.
 _PURCHASED_PREFIX = "1040"
 _CUSTOM_PREFIX = "1030"
+_ASSEMBLY_PREFIX = "6000"
 
 
 def classify_procurement(part_number: Optional[str]) -> str:
@@ -56,6 +59,8 @@ def classify_procurement(part_number: Optional[str]) -> str:
     if pn.startswith(_PURCHASED_PREFIX):
         return "purchased"
     if pn.startswith(_CUSTOM_PREFIX):
+        return "custom"
+    if pn.startswith(_ASSEMBLY_PREFIX):
         return "custom"
     return "unknown"
 

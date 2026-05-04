@@ -1644,9 +1644,24 @@ async def get_assembly_context(part_number: str):
         "#FFFFFF": "white", "#000000": "black",
     }
 
-    # Build color legend: resolve old filenames to new part numbers + descriptions
+    # Build color legend: resolve old filenames to new part numbers +
+    # descriptions. Some extracted assembly JSONs do not carry an explicit
+    # partColorMapping even though the assembly is otherwise valid. In that
+    # case we still need a stable legend / Part Explorer dataset, so fall
+    # back to deterministic palette assignment from partDataCache keys.
     color_map = assy_data.get("partColorMapping", assy_data.get("colorAssignments", {}))
     part_data_cache = assy_data.get("partDataCache", {})
+    if not color_map and part_data_cache:
+        palette = [
+            "#E6194B", "#3CB44B", "#FFE119", "#0082C8", "#F58230",
+            "#911EB4", "#46F0F0", "#F032E6", "#D2F53C", "#FABEBE",
+            "#008080", "#E6BEFF", "#AA6E28", "#FFFAC8", "#800000",
+            "#AAFFC3", "#808000", "#FFD8B1", "#000080", "#808080",
+        ]
+        color_map = {
+            old_key: palette[idx % len(palette)]
+            for idx, old_key in enumerate(sorted(part_data_cache.keys()))
+        }
     part_color_legend = []
     for old_key, color in color_map.items():
         identity = (part_data_cache.get(old_key, {}).get("identity") or {})

@@ -2129,6 +2129,45 @@
             background: rgba(255, 179, 0, 0.15);
             color: #FFB300;
         }
+        /* Per-pane Explode/Collapse toggle. Sits directly under the Rev
+           label (top-left of each pane) so the global Display settings
+           panel that lives at the splitViewport's top-right cannot
+           overlap and intercept clicks on pane B's button. */
+        .diff-explode-toggle {
+            position: absolute;
+            top: 36px;
+            left: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 3px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(0, 0, 0, 0.45);
+            color: var(--text-primary, #ffffff);
+            cursor: pointer;
+            z-index: 10;
+            line-height: 1.2;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+        }
+        .diff-explode-toggle:hover:not(:disabled) {
+            background: rgba(0, 0, 0, 0.65);
+            border-color: rgba(255, 255, 255, 0.28);
+        }
+        .diff-explode-toggle.is-on {
+            background: rgba(79, 195, 247, 0.20);
+            border-color: rgba(79, 195, 247, 0.55);
+            color: #4fc3f7;
+        }
+        .diff-explode-toggle.is-on.rev-b {
+            background: rgba(255, 179, 0, 0.18);
+            border-color: rgba(255, 179, 0, 0.55);
+            color: #FFB300;
+        }
+        .diff-explode-toggle:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
         .diff-rev-bar {
             display: none !important; /* Hidden â€” ribbon owns compare controls */
             align-items: center;
@@ -13274,6 +13313,24 @@
                 liveScene: null,
                 partMeshMap: null,
                 animId: null,
+                // Per-side explode state. Each compare viewer owns its own
+                // copy because Rev A and Rev B explode independently from
+                // their own assembly JSON. Position snapshots, animation
+                // ids, and step targets all live here so the single-view
+                // assembly tab's state.assy* explode pipeline is never
+                // touched by the compare path.
+                instanceMeshMap: null,    // { 'fastenal_38615-1': [meshes] }
+                assemblyJson: null,       // raw per-revision assembly JSON
+                explode: {
+                    side: null,           // 'A' | 'B' (filled by _initViewerExplode)
+                    revisionLetter: null, // e.g. 'A' or 'B' for tooltip clarity
+                    enabled: false,       // user toggled explode on?
+                    hasData: false,       // any usable explodeSteps for this side?
+                    steps: null,          // [{ meshes:[Mesh], direction:Vec3, distance:m }]
+                    level: 0,             // 0..1, current applied explode level
+                    snapshotKey: '_diffOrigPosition',
+                    animId: null,
+                },
             };
         }
 
@@ -13329,6 +13386,287 @@
                 child.material.roughness = 0.6;
             });
             return meshMap;
+        }
+
+        // ───────── Per-side explode pipeline ─────────
+        // The compare viewers explode independently from the single-view
+        // assembly tab. Every helper here operates ONLY on the supplied
+        // viewer's own mesh map, instance map, and assembly JSON. Nothing
+        // here reads or writes state.assy* — that path is for the single
+        // viewer.
+        //
+        // Composition contract:
+        //   - Explode mutates mesh.position only.
+        //   - Material properties (opacity, emissive, depthWrite, color)
+        //     are owned by the BOM isolation/highlight and diff highlight
+        //     systems and must NOT be touched here.
+        //   - Snapshot lives in mesh.userData[viewer.explode.snapshotKey]
+        //     and is taken once per viewer load.
+        // ────────────────────────────────────────────
+
+        function _buildDiffInstanceMeshMap(viewer, components, legend) {
+            // Mirrors the instance-resolution logic in _computeExplodeVectors
+            // but operates on viewer-local data only. Maps each per-revision
+            // component instance name (e.g. 'fastenal_38615-1') to the
+            // specific GLB meshes that represent it, by greedy nearest-
+            // neighbour matching of mesh-group centroids against component
+            // translations.
+            if (!viewer || !viewer.partMeshMap) return {};
+            const fileToPartNum = {};
+            (legend || []).forEach(item => {
+                const stem = item.old_key.replace(/\.(sldprt|SLDPRT|sldasm|SLDASM)$/i, '').toLowerCase();
+                fileToPartNum[stem] = item.part_number;
+                fileToPartNum[item.old_key.toLowerCase()] = item.part_number;
+            });
+            const comps = components || [];
+            const instanceMeshMap = {};
+
+            // Sub-assembly child lookup: 'Crossbrace-1' → list of child
+            // components nested under it (with names like 'Crossbrace-1/End Plate-1').
+            const subAssyChildComps = {};
+            comps.forEach(comp => {
+                const name = comp.name || '';
+                const parentMatch = name.match(/^(.+?-\d+)\//);
+                if (parentMatch) {
+                    const parentInstance = parentMatch[1];
+                    if (!subAssyChildComps[parentInstance]) subAssyChildComps[parentInstance] = [];
+                    subAssyChildComps[parentInstance].push(comp);
+                }
+            });
+
+            Object.entries(viewer.partMeshMap).forEach(([pn, meshes]) => {
+                const instances = comps.filter(c => {
+                    const pdk = (c.partDataKey || '').toLowerCase();
+                    const pdkStem = pdk.replace(/\.sldprt$/i, '');
+                    return fileToPartNum[pdkStem] === pn || fileToPartNum[pdk] === pn;
+                });
+                if (instances.length === 0) return;
+                if (instances.length === 1) {
+                    instanceMeshMap[instances[0].name] = [...meshes];
+                    return;
+                }
+                // Multiple instances: bucket meshes by parent node, then
+                // greedy-match each component instance to the nearest mesh
+                // group by world-position centroid.
+                const parentGroups = new Map();
+                meshes.forEach(m => {
+                    const parentId = m.parent ? m.parent.uuid : 'root';
+                    if (!parentGroups.has(parentId)) parentGroups.set(parentId, []);
+                    parentGroups.get(parentId).push(m);
+                });
+                const meshGroups = [...parentGroups.values()];
+                const groupCenters = meshGroups.map(group => {
+                    const center = new THREE.Vector3();
+                    let n = 0;
+                    group.forEach(m => {
+                        const wp = new THREE.Vector3();
+                        m.getWorldPosition(wp);
+                        center.add(wp); n++;
+                    });
+                    if (n > 0) center.divideScalar(n);
+                    return { meshes: group, center };
+                });
+                const instPositions = instances.map(c => ({
+                    name: c.name,
+                    pos: c.translation ? new THREE.Vector3(c.translation[0], c.translation[1], c.translation[2]) : null,
+                }));
+                const usedGroups = new Set();
+                instPositions.forEach(ip => {
+                    if (!ip.pos) return;
+                    let bestIdx = -1, bestDist = Infinity;
+                    groupCenters.forEach((gc, idx) => {
+                        if (usedGroups.has(idx)) return;
+                        const d = gc.center.distanceTo(ip.pos);
+                        if (d < bestDist) { bestDist = d; bestIdx = idx; }
+                    });
+                    if (bestIdx >= 0) {
+                        instanceMeshMap[ip.name] = groupCenters[bestIdx].meshes;
+                        usedGroups.add(bestIdx);
+                    }
+                });
+                groupCenters.forEach((gc, idx) => {
+                    if (usedGroups.has(idx)) return;
+                    const unmatched = instPositions.find(ip => !instanceMeshMap[ip.name]);
+                    if (unmatched) instanceMeshMap[unmatched.name] = gc.meshes;
+                });
+            });
+            return instanceMeshMap;
+        }
+
+        function _snapshotViewerOrigPositions(viewer) {
+            if (!viewer || !viewer.partMeshMap) return;
+            const key = viewer.explode.snapshotKey;
+            Object.values(viewer.partMeshMap).forEach(meshes => {
+                meshes.forEach(m => {
+                    if (m.userData[key] === undefined) {
+                        m.userData[key] = m.position.clone();
+                    }
+                });
+            });
+        }
+
+        function _initViewerExplode(viewer, assemblyJson, legend, side, revisionLetter) {
+            // Wire per-side explode state. Called once per viewer per
+            // compare load. After this runs, viewer.explode.hasData tells
+            // the UI whether the toggle should be enabled.
+            if (!viewer) return;
+            viewer.assemblyJson = assemblyJson || null;
+            viewer.explode.side = side;
+            viewer.explode.revisionLetter = revisionLetter || null;
+            viewer.explode.enabled = false;
+            viewer.explode.level = 0;
+            viewer.explode.steps = null;
+            viewer.explode.hasData = false;
+
+            if (!assemblyJson || !Array.isArray(assemblyJson.explodeSteps) || assemblyJson.explodeSteps.length === 0) {
+                viewer.instanceMeshMap = {};
+                return;
+            }
+
+            // Build instance mesh map from THIS revision's components, not
+            // from assemblyContext (which is anchored to whichever rev was
+            // loaded first into the single-view tab).
+            viewer.instanceMeshMap = _buildDiffInstanceMeshMap(
+                viewer,
+                assemblyJson.components || [],
+                legend || []
+            );
+
+            // Snapshot original positions before any explode is applied.
+            _snapshotViewerOrigPositions(viewer);
+
+            // Build sub-assembly child lookup so step targets like
+            // 'Crossbrace-1' expand to the constituent child instances.
+            const subAssyChildComps = {};
+            (assemblyJson.components || []).forEach(comp => {
+                const name = comp.name || '';
+                const parentMatch = name.match(/^(.+?-\d+)\//);
+                if (parentMatch) {
+                    const parent = parentMatch[1];
+                    if (!subAssyChildComps[parent]) subAssyChildComps[parent] = [];
+                    subAssyChildComps[parent].push(comp);
+                }
+            });
+
+            const steps = [];
+            assemblyJson.explodeSteps.forEach(step => {
+                const dirArr = step.direction || [];
+                const dist = step.distanceMeters || 0;
+                if (dirArr.length < 3 || dist === 0) return;
+                const dir = new THREE.Vector3(dirArr[0] || 0, dirArr[1] || 0, dirArr[2] || 0);
+                if (dir.length() < 0.001) return;
+                dir.normalize();
+
+                const targetMeshSet = new Set();
+                (step.componentNames || []).forEach(cn => {
+                    if (viewer.instanceMeshMap[cn]) {
+                        viewer.instanceMeshMap[cn].forEach(m => targetMeshSet.add(m));
+                        return;
+                    }
+                    // Sub-assembly: pull every child of this exact instance.
+                    const childComps = subAssyChildComps[cn] || [];
+                    childComps.forEach(child => {
+                        (viewer.instanceMeshMap[child.name] || []).forEach(m => targetMeshSet.add(m));
+                    });
+                });
+                if (targetMeshSet.size > 0) {
+                    steps.push({
+                        meshes: [...targetMeshSet],
+                        direction: dir,
+                        distance: dist,
+                    });
+                }
+            });
+            viewer.explode.steps = steps;
+            viewer.explode.hasData = steps.length > 0;
+        }
+
+        function _applyViewerExplodeLevel(viewer, level) {
+            // Pure position transform. Material properties are owned by
+            // the BOM isolation/highlight and diff highlight systems and
+            // remain untouched here.
+            if (!viewer || !viewer.explode.hasData || !viewer.partMeshMap) return;
+            const clamped = Math.max(0, Math.min(1, level));
+            const key = viewer.explode.snapshotKey;
+            const steps = viewer.explode.steps || [];
+
+            // Reset every mesh to its snapshot first so each apply() call
+            // is idempotent and never accumulates with prior state.
+            Object.values(viewer.partMeshMap).forEach(meshes => {
+                meshes.forEach(m => {
+                    if (m.userData[key] !== undefined) {
+                        m.position.copy(m.userData[key]);
+                    }
+                });
+            });
+            if (clamped <= 0 || steps.length === 0) {
+                viewer.explode.level = 0;
+                return;
+            }
+
+            // Sequential SW step model: each step contributes its full
+            // offset proportional to the slice of [0,1] it occupies.
+            const numSteps = steps.length;
+            const stepSize = 1.0 / numSteps;
+            for (let si = 0; si < numSteps; si++) {
+                const stepStart = si * stepSize;
+                const stepEnd = (si + 1) * stepSize;
+                let progress = 0;
+                if (clamped >= stepEnd) progress = 1.0;
+                else if (clamped > stepStart) progress = (clamped - stepStart) / stepSize;
+                else continue;
+                const step = steps[si];
+                const offset = step.direction.clone().multiplyScalar(step.distance * progress);
+                step.meshes.forEach(m => { m.position.add(offset); });
+            }
+            viewer.explode.level = clamped;
+        }
+
+        function _animateViewerExplode(viewer, targetLevel, duration) {
+            if (!viewer || !viewer.explode.hasData) return;
+            duration = duration || 450;
+            if (viewer.explode.animId) cancelAnimationFrame(viewer.explode.animId);
+            const startLevel = viewer.explode.level || 0;
+            const startTime = performance.now();
+            function step(now) {
+                const t = Math.min((now - startTime) / duration, 1);
+                // Cubic ease-out — reach final state without overshoot so
+                // exploded positions settle predictably on top of any active
+                // BOM isolation / row highlight.
+                const eased = 1 - Math.pow(1 - t, 3);
+                _applyViewerExplodeLevel(viewer, startLevel + (targetLevel - startLevel) * eased);
+                if (t < 1) {
+                    viewer.explode.animId = requestAnimationFrame(step);
+                } else {
+                    viewer.explode.animId = null;
+                }
+            }
+            viewer.explode.animId = requestAnimationFrame(step);
+        }
+
+        function _setViewerExplode(viewer, enable) {
+            if (!viewer || !viewer.explode.hasData) return;
+            viewer.explode.enabled = !!enable;
+            _animateViewerExplode(viewer, enable ? 1 : 0);
+            _refreshDiffExplodeButton(viewer);
+        }
+
+        function _refreshDiffExplodeButton(viewer) {
+            if (!viewer || !viewer.explode || !viewer.explode.side) return;
+            const btn = document.getElementById('diffExplodeBtn' + viewer.explode.side);
+            if (!btn) return;
+            if (!viewer.explode.hasData) {
+                btn.disabled = true;
+                btn.textContent = 'Explode';
+                btn.classList.remove('is-on');
+                btn.title = 'No exploded view data for Rev ' + (viewer.explode.revisionLetter || viewer.explode.side);
+                return;
+            }
+            btn.disabled = false;
+            const on = !!viewer.explode.enabled;
+            btn.classList.toggle('is-on', on);
+            btn.textContent = on ? 'Collapse' : 'Explode';
+            btn.title = (on ? 'Collapse Rev ' : 'Explode Rev ') + (viewer.explode.revisionLetter || viewer.explode.side);
         }
 
         function _applyDiffHighlightsToViewer(viewer, diffResult, side) {
@@ -13936,6 +14274,25 @@
                 _fitCameraToGroup(diffState.viewerA.camera, diffState.viewerA.controls, liveA);
                 _fitCameraToGroup(diffState.viewerB.camera, diffState.viewerB.controls, liveB);
 
+                // Per-side explode init: each viewer fetches its own
+                // revision's assembly JSON (containing explodeSteps,
+                // components, partColorMapping). Failure on either side
+                // just disables that side's button — the other side stays
+                // available. Run in parallel; await before enabling so
+                // the toggles flip from disabled to active in one paint.
+                const fetchAssemblyJson = (rev) =>
+                    fetch(`/api/assembly-compare/${encodeURIComponent(assyNum)}/${encodeURIComponent(rev)}/assembly-json`)
+                        .then(r => r.ok ? r.json() : null)
+                        .catch(() => null);
+                const [jsonForA, jsonForB] = await Promise.all([
+                    fetchAssemblyJson(revA),
+                    fetchAssemblyJson(revB),
+                ]);
+                _initViewerExplode(diffState.viewerA, jsonForA, diffState.legendA, 'A', revA);
+                _initViewerExplode(diffState.viewerB, jsonForB, diffState.legendB, 'B', revB);
+                _refreshDiffExplodeButton(diffState.viewerA);
+                _refreshDiffExplodeButton(diffState.viewerB);
+
                 // Phase 3: Click handlers for diff detail panel
                 _addDiffClickHandler(paneA, diffState.viewerA);
                 _addDiffClickHandler(paneB, diffState.viewerB);
@@ -14049,6 +14406,13 @@
             }
             [diffState.viewerA, diffState.viewerB].forEach(viewer => {
                 if (!viewer) return;
+                // Cancel any in-flight per-viewer explode animation. Without
+                // this the next compare load can race a stale tween against
+                // the new viewer's snapshots and produce ghost positions.
+                if (viewer.explode && viewer.explode.animId) {
+                    cancelAnimationFrame(viewer.explode.animId);
+                    viewer.explode.animId = null;
+                }
                 if (viewer.renderer) {
                     viewer.renderer.dispose();
                     if (viewer.renderer.domElement && viewer.renderer.domElement.parentNode) {
@@ -14061,6 +14425,14 @@
                 viewer.controls = null;
                 viewer.liveScene = null;
                 viewer.partMeshMap = null;
+                viewer.instanceMeshMap = null;
+                viewer.assemblyJson = null;
+                if (viewer.explode) {
+                    viewer.explode.steps = null;
+                    viewer.explode.enabled = false;
+                    viewer.explode.hasData = false;
+                    viewer.explode.level = 0;
+                }
             });
             diffState.viewerA = null;
             diffState.viewerB = null;
@@ -14228,6 +14600,23 @@
             lblA.textContent = 'Rev ' + defaultA;
             lblA.id = 'diffLabelA';
             paneA.appendChild(lblA);
+            // Per-pane Explode toggle. Disabled until _initViewerExplode
+            // confirms the side has explode data; the click handler reads
+            // diffState.viewerA at fire-time so re-loads can swap targets
+            // without rebinding the listener.
+            const explodeBtnA = document.createElement('button');
+            explodeBtnA.id = 'diffExplodeBtnA';
+            explodeBtnA.type = 'button';
+            explodeBtnA.className = 'diff-explode-toggle rev-a';
+            explodeBtnA.textContent = 'Explode';
+            explodeBtnA.disabled = true;
+            explodeBtnA.title = 'Explode Rev ' + defaultA;
+            explodeBtnA.addEventListener('click', () => {
+                const v = diffState.viewerA;
+                if (!v || !v.explode || !v.explode.hasData) return;
+                _setViewerExplode(v, !v.explode.enabled);
+            });
+            paneA.appendChild(explodeBtnA);
             splitViewport.appendChild(paneA);
 
             const paneB = document.createElement('div');
@@ -14238,6 +14627,19 @@
             lblB.textContent = 'Rev ' + defaultB;
             lblB.id = 'diffLabelB';
             paneB.appendChild(lblB);
+            const explodeBtnB = document.createElement('button');
+            explodeBtnB.id = 'diffExplodeBtnB';
+            explodeBtnB.type = 'button';
+            explodeBtnB.className = 'diff-explode-toggle rev-b';
+            explodeBtnB.textContent = 'Explode';
+            explodeBtnB.disabled = true;
+            explodeBtnB.title = 'Explode Rev ' + defaultB;
+            explodeBtnB.addEventListener('click', () => {
+                const v = diffState.viewerB;
+                if (!v || !v.explode || !v.explode.hasData) return;
+                _setViewerExplode(v, !v.explode.enabled);
+            });
+            paneB.appendChild(explodeBtnB);
             splitViewport.appendChild(paneB);
             container.appendChild(splitViewport);
 

@@ -14180,19 +14180,49 @@
             body.style.cssText = 'flex:1;display:flex;min-height:0;overflow:hidden;';
 
             const buildPane = (sideClass) => {
+                // Per-pane structure for true independent scroll:
+                //   pane (flex column, no scroll itself)
+                //     labelRow      — Rev tag + type badge (Missing | PDF | Image)
+                //     fields        — structured summary, OWN scroll if long
+                //     utilBar       — "Open in new tab ↗" escape hatch
+                //     docWrap       — document viewport, OWN scroll (PDF/img live here)
+                // The two panes are siblings of the modal body which is
+                // overflow:hidden, so fields and doc scroll independently
+                // per side and never affect the other side or the modal
+                // chrome (header/honesty/summary strip stay fixed).
                 const pane = document.createElement('div');
-                pane.style.cssText = 'flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;' + (sideClass === 'rev-b' ? 'border-left:1px solid rgba(255,255,255,0.06);' : '');
+                pane.style.cssText = 'flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;' + (sideClass === 'rev-b' ? 'border-left:1px solid rgba(255,255,255,0.06);' : '');
+
+                const labelRow = document.createElement('div');
+                labelRow.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px 4px 12px;flex-shrink:0;';
                 const label = document.createElement('div');
                 label.className = 'diff-viewer-label ' + sideClass;
-                label.style.cssText = 'position:relative;align-self:flex-start;margin:8px 12px 0 12px;';
+                label.style.cssText = 'position:relative;align-self:center;';
                 label.dataset.sideLabel = sideClass;
-                pane.appendChild(label);
+                labelRow.appendChild(label);
+                const typeBadge = document.createElement('span');
+                typeBadge.dataset.role = 'typeBadge';
+                typeBadge.style.cssText = 'font-size:9px;letter-spacing:0.6px;padding:2px 7px;border-radius:8px;font-weight:700;text-transform:uppercase;display:none;';
+                labelRow.appendChild(typeBadge);
+                pane.appendChild(labelRow);
+
                 const fields = document.createElement('div');
-                fields.style.cssText = 'padding:8px 16px;font-size:12px;color:#cdd5dd;';
+                // Own scroll for the structured summary so a long
+                // description never pushes the doc viewport off-screen.
+                fields.style.cssText = 'padding:4px 16px 10px 16px;font-size:12px;color:#cdd5dd;flex-shrink:0;max-height:240px;overflow-y:auto;';
                 fields.dataset.role = 'fields';
                 pane.appendChild(fields);
+
+                const utilBar = document.createElement('div');
+                utilBar.dataset.role = 'utilBar';
+                utilBar.style.cssText = 'display:none;align-items:center;justify-content:flex-end;gap:10px;padding:5px 12px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.025);font-size:10px;color:var(--text-secondary,#9aa5b1);flex-shrink:0;text-transform:uppercase;letter-spacing:0.5px;';
+                pane.appendChild(utilBar);
+
                 const docWrap = document.createElement('div');
-                docWrap.style.cssText = 'flex:1;display:flex;flex-direction:column;min-height:0;background:#0f1217;border-top:1px solid rgba(255,255,255,0.06);';
+                // Independent scroll container for the document. Distinct
+                // background so a blank PDF page does not visually merge
+                // into the modal chrome — the user always sees a frame.
+                docWrap.style.cssText = 'flex:1;min-height:0;background:#15191f;border-top:1px solid rgba(255,255,255,0.10);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04);overflow:auto;position:relative;display:flex;align-items:flex-start;justify-content:center;';
                 docWrap.dataset.role = 'document';
                 pane.appendChild(docWrap);
                 return pane;
@@ -14229,13 +14259,43 @@
             if (!paneEl) return;
             const labelEl = paneEl.querySelector('.diff-viewer-label');
             const fieldsEl = paneEl.querySelector('[data-role="fields"]');
+            const utilBar = paneEl.querySelector('[data-role="utilBar"]');
             const docWrap = paneEl.querySelector('[data-role="document"]');
-            if (labelEl) labelEl.textContent = `Rev ${sideRevLetter || side}`;
+            const typeBadge = paneEl.querySelector('[data-role="typeBadge"]');
+            const revLabel = `Rev ${sideRevLetter || side}`;
+            if (labelEl) labelEl.textContent = revLabel;
+
+            // Reset every per-pane region so a re-render cannot leak old state.
+            if (utilBar) { utilBar.style.display = 'none'; utilBar.innerHTML = ''; }
+            if (docWrap) { docWrap.innerHTML = ''; }
+
+            // Type badge styling per state
+            const setBadge = (text, kind) => {
+                if (!typeBadge) return;
+                typeBadge.textContent = text;
+                typeBadge.style.display = '';
+                const palette = {
+                    pdf:     { fg: '#FF7043', bg: 'rgba(255,112,67,0.15)', bd: 'rgba(255,112,67,0.45)' },
+                    image:   { fg: '#26C6DA', bg: 'rgba(38,198,218,0.15)', bd: 'rgba(38,198,218,0.45)' },
+                    missing: { fg: '#9aa5b1', bg: 'rgba(154,165,177,0.10)', bd: 'rgba(154,165,177,0.35)' },
+                };
+                const p = palette[kind] || palette.missing;
+                typeBadge.style.color = p.fg;
+                typeBadge.style.background = p.bg;
+                typeBadge.style.border = '1px solid ' + p.bd;
+            };
+
+            // ── Missing side ──
             if (!spec || !spec.exists) {
-                if (fieldsEl) fieldsEl.innerHTML = `<div style="padding:24px 8px;color:var(--text-secondary,#9aa5b1);font-style:italic;">No supplier spec sidecar for this part on Rev ${_escapeHtml(sideRevLetter || side)}. Honest: missing on this side.</div>`;
-                if (docWrap) docWrap.innerHTML = '';
+                setBadge('Missing', 'missing');
+                if (fieldsEl) fieldsEl.innerHTML = `<div style="padding:24px 8px;color:var(--text-secondary,#9aa5b1);font-style:italic;">No supplier spec sidecar for this part on ${_escapeHtml(revLabel)}. Honest: missing on this side.</div>`;
+                if (docWrap) {
+                    docWrap.innerHTML = `<div style="padding:24px 16px;color:var(--text-secondary,#9aa5b1);font-size:11px;font-style:italic;align-self:center;text-align:center;max-width:300px;">No supplier document on file for ${_escapeHtml(revLabel)}.<br>The compare panel above still works against the other side; this pane is intentionally empty rather than fabricated.</div>`;
+                }
                 return;
             }
+
+            // ── Present side ──
             const sf = spec.summary_fields || {};
             const fields = [
                 ['Supplier', sf.supplier],
@@ -14249,31 +14309,71 @@
             if (fieldsEl) {
                 fieldsEl.innerHTML = fields.map(([k, v]) => {
                     const val = v == null ? '<span style="color:var(--text-secondary,#9aa5b1);font-style:italic;">missing</span>' : _escapeHtml(String(v));
-                    return `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="min-width:130px;color:var(--text-secondary,#9aa5b1);font-size:11px;">${_escapeHtml(k)}</span><span style="flex:1;">${val}</span></div>`;
+                    return `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="min-width:130px;color:var(--text-secondary,#9aa5b1);font-size:11px;">${_escapeHtml(k)}</span><span style="flex:1;word-break:break-word;">${val}</span></div>`;
                 }).join('');
             }
-            if (docWrap) {
-                docWrap.innerHTML = '';
-                const url = spec.document_url;
-                if (!url) {
-                    docWrap.innerHTML = `<div style="padding:18px;color:var(--text-secondary,#9aa5b1);font-size:11px;font-style:italic;">No supplier document attached. Showing structured summary above only.</div>`;
-                    return;
+
+            const url = spec.document_url;
+            if (!url) {
+                setBadge('No doc', 'missing');
+                if (docWrap) {
+                    docWrap.innerHTML = `<div style="padding:18px;color:var(--text-secondary,#9aa5b1);font-size:11px;font-style:italic;align-self:center;">No supplier document attached. Structured summary above is the only evidence on this side.</div>`;
                 }
-                // Detect kind from raw_spec_json.document.kind if present
-                const docKind = (spec.raw_spec_json && spec.raw_spec_json.document && spec.raw_spec_json.document.kind) || 'pdf';
-                if (docKind === 'image') {
+                return;
+            }
+
+            // Kind detection — sidecar declares image|pdf; default to pdf.
+            const docKind = (spec.raw_spec_json && spec.raw_spec_json.document && spec.raw_spec_json.document.kind) || 'pdf';
+
+            // Utility bar (Open in new tab ↗) — escape hatch when the
+            // embedded viewer is awkward. Always present for both PDF and
+            // image so the user has a one-click way to open the underlying
+            // file at full fidelity.
+            if (utilBar) {
+                utilBar.style.display = 'flex';
+                const link = document.createElement('a');
+                link.href = url;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = 'Open in new tab ↗';
+                link.title = 'Open the supplier document in a new browser tab at full fidelity';
+                link.style.cssText = 'color:#4fc3f7;text-decoration:none;font-weight:600;cursor:pointer;';
+                link.addEventListener('mouseenter', () => { link.style.textDecoration = 'underline'; });
+                link.addEventListener('mouseleave', () => { link.style.textDecoration = 'none'; });
+                utilBar.appendChild(link);
+            }
+
+            if (docKind === 'image') {
+                setBadge('Image', 'image');
+                if (docWrap) {
+                    // Image rendered at natural width up to the pane width;
+                    // doc viewport scrolls vertically if the image is taller.
+                    // No max-height and no object-fit:contain — those squashed
+                    // it into an unreadable thumbnail before.
                     const img = document.createElement('img');
                     img.src = url;
-                    img.alt = `Rev ${sideRevLetter || side} supplier document`;
-                    img.style.cssText = 'max-width:100%;max-height:100%;display:block;margin:auto;object-fit:contain;background:#000;';
+                    img.alt = `${revLabel} supplier document`;
+                    img.style.cssText = 'display:block;width:100%;height:auto;background:#000;';
                     docWrap.appendChild(img);
-                } else {
-                    const obj = document.createElement('iframe');
-                    obj.src = url;
-                    obj.style.cssText = 'width:100%;height:100%;border:0;background:#fff;';
-                    obj.setAttribute('aria-label', `Rev ${sideRevLetter || side} supplier document`);
-                    docWrap.appendChild(obj);
                 }
+                return;
+            }
+
+            // PDF
+            setBadge('PDF', 'pdf');
+            if (docWrap) {
+                // PDF viewer hints (#view=FitH&zoom=page-width) are honoured
+                // by Chromium's built-in PDF viewer and cause it to fit the
+                // page width by default — which is what makes the iframe
+                // actually look like a document instead of a blank slab.
+                // The hash is appended after any existing query string so
+                // /api/...?revision=A becomes /api/...?revision=A#view=FitH...
+                const hashedUrl = url + (url.indexOf('#') === -1 ? '#view=FitH&zoom=page-width' : '');
+                const iframe = document.createElement('iframe');
+                iframe.src = hashedUrl;
+                iframe.setAttribute('aria-label', `${revLabel} supplier document`);
+                iframe.style.cssText = 'width:100%;min-height:100%;border:0;background:#fff;display:block;';
+                docWrap.appendChild(iframe);
             }
         }
 

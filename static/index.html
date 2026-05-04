@@ -13455,34 +13455,94 @@
                     parentGroups.get(parentId).push(m);
                 });
                 const meshGroups = [...parentGroups.values()];
+                // Compute world-space centroid from each group's bounding
+                // box. mesh.getWorldPosition() only returns the mesh's
+                // local origin in world space — for GLBs that bake the
+                // per-instance offset into vertex coordinates (which is
+                // what the SolidWorks-to-GLB exporter does), the local
+                // origin is identical for every instance and the centroid
+                // collapses to a single point. Box3.setFromObject walks
+                // the actual vertices through every parent transform and
+                // gives the visual centroid we need to disambiguate
+                // repeated-instance parts.
                 const groupCenters = meshGroups.map(group => {
+                    const box = new THREE.Box3();
+                    group.forEach(m => box.expandByObject(m));
                     const center = new THREE.Vector3();
-                    let n = 0;
-                    group.forEach(m => {
-                        const wp = new THREE.Vector3();
-                        m.getWorldPosition(wp);
-                        center.add(wp); n++;
-                    });
-                    if (n > 0) center.divideScalar(n);
+                    if (!box.isEmpty()) box.getCenter(center);
                     return { meshes: group, center };
                 });
-                const instPositions = instances.map(c => ({
-                    name: c.name,
-                    pos: c.translation ? new THREE.Vector3(c.translation[0], c.translation[1], c.translation[2]) : null,
-                }));
-                const usedGroups = new Set();
-                instPositions.forEach(ip => {
-                    if (!ip.pos) return;
-                    let bestIdx = -1, bestDist = Infinity;
-                    groupCenters.forEach((gc, idx) => {
-                        if (usedGroups.has(idx)) return;
-                        const d = gc.center.distanceTo(ip.pos);
-                        if (d < bestDist) { bestDist = d; bestIdx = idx; }
+                // Component position lives at c.transform.translation in the
+                // raw assembly JSON served by /api/assembly-compare/.../
+                // assembly-json. /api/assembly-context (single-view path)
+                // flattens the same value to c.translation. Read both shapes
+                // so this helper works for either source. Without
+                // transform.translation, the per-revision compare path was
+                // silently dropping every position to null, which collapsed
+                // the greedy nearest-neighbour pass into the unmatched-
+                // fallback branch and assigned mesh groups to instance names
+                // arbitrarily — breaking per-instance step targeting for any
+                // assembly with repeated hardware.
+                const instPositions = instances.map(c => {
+                    const t = (c.transform && c.transform.translation) || c.translation || null;
+                    return {
+                        name: c.name,
+                        pos: (t && t.length >= 3)
+                            ? new THREE.Vector3(t[0] || 0, t[1] || 0, t[2] || 0)
+                            : null,
+                    };
+                });
+                // SolidWorks JSON translations and GLB world centroids are
+                // in different frames (the GLB exporter often re-centres the
+                // assembly at the origin while the SW values stay in the
+                // SW assembly's coordinate system). Absolute distance between
+                // the two frames is meaningless. Mean-centre both sets so
+                // we compare RELATIVE positions — which is what survives a
+                // rigid translation between frames.
+                const validInsts = instPositions.filter(ip => ip.pos);
+                if (validInsts.length === 0) {
+                    // Nothing to disambiguate — fall through to the
+                    // unmatched-fallback assignment below.
+                } else {
+                    const swMean = new THREE.Vector3();
+                    validInsts.forEach(ip => swMean.add(ip.pos));
+                    swMean.divideScalar(validInsts.length);
+                    const glbMean = new THREE.Vector3();
+                    let glbCount = 0;
+                    groupCenters.forEach(gc => { glbMean.add(gc.center); glbCount++; });
+                    if (glbCount > 0) glbMean.divideScalar(glbCount);
+
+                    const swRel = validInsts.map(ip => ({
+                        name: ip.name,
+                        pos: ip.pos.clone().sub(swMean),
+                    }));
+                    const glbRel = groupCenters.map((gc, idx) => ({
+                        idx,
+                        meshes: gc.meshes,
+                        pos: gc.center.clone().sub(glbMean),
+                    }));
+
+                    const usedGroups = new Set();
+                    swRel.forEach(ip => {
+                        let bestIdx = -1, bestDist = Infinity;
+                        glbRel.forEach(gr => {
+                            if (usedGroups.has(gr.idx)) return;
+                            const d = gr.pos.distanceTo(ip.pos);
+                            if (d < bestDist) { bestDist = d; bestIdx = gr.idx; }
+                        });
+                        if (bestIdx >= 0) {
+                            instanceMeshMap[ip.name] = groupCenters[bestIdx].meshes;
+                            usedGroups.add(bestIdx);
+                        }
                     });
-                    if (bestIdx >= 0) {
-                        instanceMeshMap[ip.name] = groupCenters[bestIdx].meshes;
-                        usedGroups.add(bestIdx);
-                    }
+                }
+                // Re-derive usedGroups for the unmatched-fallback pass below
+                // so it sees what got assigned by mean-centred matching above.
+                const usedGroups = new Set();
+                Object.entries(instanceMeshMap).forEach(([name, meshes]) => {
+                    groupCenters.forEach((gc, idx) => {
+                        if (gc.meshes === meshes) usedGroups.add(idx);
+                    });
                 });
                 groupCenters.forEach((gc, idx) => {
                     if (usedGroups.has(idx)) return;

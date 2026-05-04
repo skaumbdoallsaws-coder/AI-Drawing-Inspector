@@ -2288,6 +2288,16 @@ def _read_supplier_spec(part_number: str, safe_rev: str) -> dict:
         f"/api/part-supplier-spec-file/{part_number}?revision={safe_rev}"
         if doc_path is not None else None
     )
+    # image_url normalises both PDF and image documents to a single image
+    # endpoint the frontend can render with <img> + zoom controls. PDFs
+    # are rendered server-side to a stacked PNG by /api/part-supplier-
+    # spec-image; images are streamed through the same endpoint as-is.
+    # That eliminates the browser PDF-plugin dependency that left
+    # iframe-embedded PDFs as blank white panes.
+    image_url = (
+        f"/api/part-supplier-spec-image/{part_number}?revision={safe_rev}"
+        if doc_path is not None else None
+    )
     return {
         "part_number": part_number,
         "revision": safe_rev,
@@ -2295,6 +2305,7 @@ def _read_supplier_spec(part_number: str, safe_rev: str) -> dict:
         "summary_fields": _normalise_supplier_summary(raw),
         "raw_spec_json": raw,
         "document_url": document_url,
+        "image_url": image_url,
     }
 
 
@@ -2388,6 +2399,120 @@ async def get_part_supplier_spec_file(part_number: str, revision: str = Query(..
         ".webp": "image/webp",
     }.get(suffix, "application/octet-stream")
     return FileResponse(str(doc_path), media_type=media_type, filename=doc_path.name)
+
+
+def _render_supplier_pdf_pages_to_png_bytes(pdf_path: Path, dpi: int = 150) -> bytes:
+    """Render every page of a supplier PDF stacked vertically into a single
+    PNG. Returns raw PNG bytes. Caller is responsible for caching / serving.
+
+    150 dpi is the same default used by the assembly-drawing PNG renderer
+    elsewhere in this module — readable on screen, ~200-500 KB per page,
+    scales naturally under client-side zoom on the canvas.
+    """
+    import fitz  # PyMuPDF
+    from PIL import Image
+    zoom = dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom)
+    page_images = []
+    with fitz.open(str(pdf_path)) as doc:
+        for page in doc:
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            page_images.append(img)
+    if not page_images:
+        raise HTTPException(status_code=500, detail="PDF rendered zero pages")
+
+    # Stack pages vertically with a thin separator strip so multi-page
+    # documents are visually distinguishable when scrolled.
+    sep_height = 4
+    sep_color = (40, 40, 40)
+    width = max(p.width for p in page_images)
+    total_h = sum(p.height for p in page_images) + sep_height * (len(page_images) - 1)
+    canvas = Image.new("RGB", (width, total_h), (255, 255, 255))
+    y = 0
+    for i, p in enumerate(page_images):
+        # Center horizontally if this page is narrower than the widest.
+        x = (width - p.width) // 2
+        canvas.paste(p, (x, y))
+        y += p.height
+        if i + 1 < len(page_images):
+            sep = Image.new("RGB", (width, sep_height), sep_color)
+            canvas.paste(sep, (0, y))
+            y += sep_height
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+# Disk cache for rendered supplier PDFs. Key = (part, rev, dpi); value =
+# bytes. Populated on first request, served from memory thereafter for the
+# lifetime of the server process. Bounded by part / rev count, which is
+# small (tens of files at most), so no eviction policy needed yet.
+_SUPPLIER_PDF_RENDER_CACHE: dict = {}
+
+
+@app.get("/api/part-supplier-spec-image/{part_number}")
+async def get_part_supplier_spec_image(
+    part_number: str,
+    revision: str = Query(...),
+    dpi: int = Query(150),
+):
+    """Serve the supplier document as a PNG image regardless of source kind.
+
+    Why: embedded PDF iframes show as blank white panes in some browser
+    configurations (no PDF plugin, headless contexts, custom security
+    profiles). Rendering server-side via PyMuPDF makes the modal work
+    everywhere AND lets the frontend drive a real zoom control with
+    plain CSS scaling on the resulting <img>.
+
+    Image documents (.png, .jpg, etc.) are streamed through unchanged.
+    """
+    safe_pn = re.sub(r"[^\w\-]", "", part_number)
+    safe_rev = _normalize_revision_letter(revision)
+    if not safe_pn or not safe_rev:
+        raise HTTPException(status_code=400, detail="Invalid part number or revision")
+    # Clamp dpi: too low is unreadable; too high blows up memory.
+    dpi = max(72, min(int(dpi), 300))
+
+    sidecar_path = _supplier_spec_path(safe_pn, safe_rev)
+    if not sidecar_path.exists():
+        raise HTTPException(status_code=404, detail=f"No supplier spec sidecar for {safe_pn} rev {safe_rev}")
+    try:
+        with open(sidecar_path, encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        raise HTTPException(status_code=500, detail="Sidecar unreadable")
+    doc_path = _resolve_supplier_doc_path(raw)
+    if doc_path is None:
+        raise HTTPException(status_code=404, detail=f"No supplier document on disk for {safe_pn} rev {safe_rev}")
+
+    suffix = doc_path.suffix.lower()
+    if suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        media_type = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+        }[suffix]
+        return FileResponse(str(doc_path), media_type=media_type, filename=doc_path.name)
+
+    if suffix != ".pdf":
+        raise HTTPException(status_code=415, detail=f"Unsupported supplier document type: {suffix}")
+
+    cache_key = (safe_pn, safe_rev, dpi)
+    cached = _SUPPLIER_PDF_RENDER_CACHE.get(cache_key)
+    if cached is None:
+        try:
+            cached = _render_supplier_pdf_pages_to_png_bytes(doc_path, dpi=dpi)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error(f"[supplier-spec-image] render failed for {safe_pn} rev {safe_rev}: {exc}")
+            raise HTTPException(status_code=500, detail=f"PDF render failed: {exc}")
+        _SUPPLIER_PDF_RENDER_CACHE[cache_key] = cached
+    return Response(content=cached, media_type="image/png")
 
 
 # ---------- Drawing Revision Diff ----------

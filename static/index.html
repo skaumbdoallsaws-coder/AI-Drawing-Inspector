@@ -14313,8 +14313,9 @@
                 }).join('');
             }
 
-            const url = spec.document_url;
-            if (!url) {
+            const docUrl = spec.document_url;       // raw underlying file (for "Open in new tab")
+            const imageUrl = spec.image_url;          // server-rendered PNG (for embedded view)
+            if (!docUrl && !imageUrl) {
                 setBadge('No doc', 'missing');
                 if (docWrap) {
                     docWrap.innerHTML = `<div style="padding:18px;color:var(--text-secondary,#9aa5b1);font-size:11px;font-style:italic;align-self:center;">No supplier document attached. Structured summary above is the only evidence on this side.</div>`;
@@ -14324,57 +14325,91 @@
 
             // Kind detection — sidecar declares image|pdf; default to pdf.
             const docKind = (spec.raw_spec_json && spec.raw_spec_json.document && spec.raw_spec_json.document.kind) || 'pdf';
+            setBadge(docKind === 'image' ? 'Image' : 'PDF', docKind === 'image' ? 'image' : 'pdf');
 
-            // Utility bar (Open in new tab ↗) — escape hatch when the
-            // embedded viewer is awkward. Always present for both PDF and
-            // image so the user has a one-click way to open the underlying
-            // file at full fidelity.
-            if (utilBar) {
+            // Utility bar: zoom controls + "Open in new tab ↗" escape hatch.
+            // Embedded view is always a PNG (PDF rendered server-side via
+            // PyMuPDF) so we get consistent zoom UX across PDF and image
+            // sources. The "Open in new tab" link still points at the
+            // ORIGINAL document so the user can grab the native PDF or
+            // full-size image at any time.
+            if (utilBar && docWrap) {
                 utilBar.style.display = 'flex';
+                utilBar.style.justifyContent = 'space-between';
+
+                // Zoom controls (left side of util bar)
+                const zoomGroup = document.createElement('div');
+                zoomGroup.style.cssText = 'display:flex;align-items:center;gap:6px;';
+                const mkZoomBtn = (label, title, action) => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.textContent = label;
+                    b.title = title;
+                    b.style.cssText = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);color:#cdd5dd;font-size:10px;padding:2px 7px;border-radius:3px;cursor:pointer;font-weight:600;letter-spacing:0.4px;line-height:1.2;min-width:24px;';
+                    b.addEventListener('click', action);
+                    b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,255,255,0.14)'; });
+                    b.addEventListener('mouseleave', () => { b.style.background = 'rgba(255,255,255,0.06)'; });
+                    return b;
+                };
+                const zoomLabel = document.createElement('span');
+                zoomLabel.dataset.role = 'zoomLabel';
+                zoomLabel.style.cssText = 'min-width:42px;text-align:center;color:#cdd5dd;font-variant-numeric:tabular-nums;font-weight:600;';
+                zoomLabel.textContent = '100%';
+                const stepZoom = (delta) => {
+                    const cur = parseInt(paneEl.dataset.zoomPct || '100', 10);
+                    const next = Math.max(25, Math.min(400, cur + delta));
+                    _setSupplierPaneZoom(paneEl, next);
+                };
+                zoomGroup.appendChild(mkZoomBtn('−', 'Zoom out', () => stepZoom(-25)));
+                zoomGroup.appendChild(zoomLabel);
+                zoomGroup.appendChild(mkZoomBtn('+', 'Zoom in', () => stepZoom(25)));
+                zoomGroup.appendChild(mkZoomBtn('Fit', 'Reset to fit pane width (100%)', () => _setSupplierPaneZoom(paneEl, 100)));
+                utilBar.appendChild(zoomGroup);
+
+                // Open-in-new-tab link (right side)
                 const link = document.createElement('a');
-                link.href = url;
+                link.href = docUrl || imageUrl;
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
                 link.textContent = 'Open in new tab ↗';
-                link.title = 'Open the supplier document in a new browser tab at full fidelity';
+                link.title = 'Open the original supplier document in a new browser tab at full fidelity';
                 link.style.cssText = 'color:#4fc3f7;text-decoration:none;font-weight:600;cursor:pointer;';
                 link.addEventListener('mouseenter', () => { link.style.textDecoration = 'underline'; });
                 link.addEventListener('mouseleave', () => { link.style.textDecoration = 'none'; });
                 utilBar.appendChild(link);
             }
 
-            if (docKind === 'image') {
-                setBadge('Image', 'image');
-                if (docWrap) {
-                    // Image rendered at natural width up to the pane width;
-                    // doc viewport scrolls vertically if the image is taller.
-                    // No max-height and no object-fit:contain — those squashed
-                    // it into an unreadable thumbnail before.
-                    const img = document.createElement('img');
-                    img.src = url;
-                    img.alt = `${revLabel} supplier document`;
-                    img.style.cssText = 'display:block;width:100%;height:auto;background:#000;';
-                    docWrap.appendChild(img);
-                }
-                return;
+            // Embedded view is always an <img> (PDF rendered server-side
+            // → stacked PNG). Solves the iframe-blank-PDF problem AND
+            // gives us a single zoom path for both source kinds.
+            if (docWrap && imageUrl) {
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                img.alt = `${revLabel} supplier document`;
+                img.dataset.role = 'docImage';
+                // Width 100% by default = fits the pane; docWrap is
+                // overflow:auto so taller-than-pane content scrolls
+                // vertically. Zoom controls scale the width directly.
+                img.style.cssText = 'display:block;width:100%;height:auto;background:#fff;';
+                docWrap.appendChild(img);
+                paneEl.dataset.zoomPct = '100';
             }
+        }
 
-            // PDF
-            setBadge('PDF', 'pdf');
-            if (docWrap) {
-                // PDF viewer hints (#view=FitH&zoom=page-width) are honoured
-                // by Chromium's built-in PDF viewer and cause it to fit the
-                // page width by default — which is what makes the iframe
-                // actually look like a document instead of a blank slab.
-                // The hash is appended after any existing query string so
-                // /api/...?revision=A becomes /api/...?revision=A#view=FitH...
-                const hashedUrl = url + (url.indexOf('#') === -1 ? '#view=FitH&zoom=page-width' : '');
-                const iframe = document.createElement('iframe');
-                iframe.src = hashedUrl;
-                iframe.setAttribute('aria-label', `${revLabel} supplier document`);
-                iframe.style.cssText = 'width:100%;min-height:100%;border:0;background:#fff;display:block;';
-                docWrap.appendChild(iframe);
-            }
+        function _setSupplierPaneZoom(paneEl, pct) {
+            // Apply the requested zoom % to the embedded supplier doc
+            // image. docWrap is overflow:auto so resizing the img beyond
+            // the pane width drives a horizontal scrollbar; resizing
+            // beyond the pane height drives the existing vertical one.
+            // Zoom % is stored on the pane element so the per-side state
+            // survives re-renders triggered by adjacent UI events.
+            if (!paneEl) return;
+            const clamped = Math.max(25, Math.min(400, pct | 0));
+            paneEl.dataset.zoomPct = String(clamped);
+            const img = paneEl.querySelector('[data-role="docImage"]');
+            if (img) img.style.width = clamped + '%';
+            const zoomLabel = paneEl.querySelector('[data-role="zoomLabel"]');
+            if (zoomLabel) zoomLabel.textContent = clamped + '%';
         }
 
         function _renderSupplierSpecSummary(diffFields) {

@@ -16,6 +16,7 @@ import math
 import shutil
 import threading
 import asyncio
+from collections import OrderedDict
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
@@ -2401,6 +2402,11 @@ async def get_part_supplier_spec_file(part_number: str, revision: str = Query(..
     return FileResponse(str(doc_path), media_type=media_type, filename=doc_path.name)
 
 
+_SUPPLIER_PDF_RENDER_MAX_OUTPUT_PIXELS = 28_000_000  # ~84 MB RGB canvas
+_SUPPLIER_PDF_RENDER_CACHE_MAX_ITEMS = 12
+_SUPPLIER_PDF_RENDER_CACHE_MAX_BYTES = 24 * 1024 * 1024
+
+
 def _render_supplier_pdf_pages_to_png_bytes(pdf_path: Path, dpi: int = 150) -> bytes:
     """Render every page of a supplier PDF stacked vertically into a single
     PNG. Returns raw PNG bytes. Caller is responsible for caching / serving.
@@ -2413,43 +2419,84 @@ def _render_supplier_pdf_pages_to_png_bytes(pdf_path: Path, dpi: int = 150) -> b
     from PIL import Image
     zoom = dpi / 72.0
     matrix = fitz.Matrix(zoom, zoom)
-    page_images = []
     with fitz.open(str(pdf_path)) as doc:
+        if doc.page_count <= 0:
+            raise HTTPException(status_code=500, detail="PDF rendered zero pages")
+
+        # Pre-compute the final canvas size from page boxes so we can render
+        # one page at a time rather than holding every full-size page image in
+        # memory simultaneously.
+        sep_height = 4
+        sep_color = (40, 40, 40)
+        page_sizes = []
+        width = 0
+        total_h = 0
         for page in doc:
+            page_w = int(round(page.rect.width * zoom))
+            page_h = int(round(page.rect.height * zoom))
+            page_sizes.append((page_w, page_h))
+            width = max(width, page_w)
+            total_h += page_h
+        total_h += sep_height * (len(page_sizes) - 1)
+
+        total_pixels = width * total_h
+        if total_pixels > _SUPPLIER_PDF_RENDER_MAX_OUTPUT_PIXELS:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Supplier PDF too large to render in-app at this zoom. "
+                    "Use the original document link instead."
+                ),
+            )
+
+        canvas = Image.new("RGB", (width, total_h), (255, 255, 255))
+        y = 0
+        for page_index, page in enumerate(doc):
             pix = page.get_pixmap(matrix=matrix, alpha=False)
             img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-            page_images.append(img)
-    if not page_images:
-        raise HTTPException(status_code=500, detail="PDF rendered zero pages")
-
-    # Stack pages vertically with a thin separator strip so multi-page
-    # documents are visually distinguishable when scrolled.
-    sep_height = 4
-    sep_color = (40, 40, 40)
-    width = max(p.width for p in page_images)
-    total_h = sum(p.height for p in page_images) + sep_height * (len(page_images) - 1)
-    canvas = Image.new("RGB", (width, total_h), (255, 255, 255))
-    y = 0
-    for i, p in enumerate(page_images):
-        # Center horizontally if this page is narrower than the widest.
-        x = (width - p.width) // 2
-        canvas.paste(p, (x, y))
-        y += p.height
-        if i + 1 < len(page_images):
-            sep = Image.new("RGB", (width, sep_height), sep_color)
-            canvas.paste(sep, (0, y))
-            y += sep_height
+            # Center horizontally if this page is narrower than the widest.
+            x = (width - img.width) // 2
+            canvas.paste(img, (x, y))
+            y += img.height
+            if page_index + 1 < len(page_sizes):
+                sep = Image.new("RGB", (width, sep_height), sep_color)
+                canvas.paste(sep, (0, y))
+                y += sep_height
+            img.close()
 
     buf = io.BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 
 
-# Disk cache for rendered supplier PDFs. Key = (part, rev, dpi); value =
-# bytes. Populated on first request, served from memory thereafter for the
-# lifetime of the server process. Bounded by part / rev count, which is
-# small (tens of files at most), so no eviction policy needed yet.
-_SUPPLIER_PDF_RENDER_CACHE: dict = {}
+# Small byte-bounded in-process cache for rendered supplier PDFs. This keeps
+# repeat modal opens fast without letting one unexpectedly large document stay
+# resident forever.
+_SUPPLIER_PDF_RENDER_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
+_SUPPLIER_PDF_RENDER_CACHE_BYTES = 0
+
+
+def _supplier_pdf_cache_get(cache_key: tuple):
+    cached = _SUPPLIER_PDF_RENDER_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    _SUPPLIER_PDF_RENDER_CACHE.move_to_end(cache_key)
+    return cached
+
+
+def _supplier_pdf_cache_put(cache_key: tuple, payload: bytes):
+    global _SUPPLIER_PDF_RENDER_CACHE_BYTES
+    if cache_key in _SUPPLIER_PDF_RENDER_CACHE:
+        old = _SUPPLIER_PDF_RENDER_CACHE.pop(cache_key)
+        _SUPPLIER_PDF_RENDER_CACHE_BYTES -= len(old)
+    _SUPPLIER_PDF_RENDER_CACHE[cache_key] = payload
+    _SUPPLIER_PDF_RENDER_CACHE_BYTES += len(payload)
+    while (
+        len(_SUPPLIER_PDF_RENDER_CACHE) > _SUPPLIER_PDF_RENDER_CACHE_MAX_ITEMS
+        or _SUPPLIER_PDF_RENDER_CACHE_BYTES > _SUPPLIER_PDF_RENDER_CACHE_MAX_BYTES
+    ):
+        _, evicted = _SUPPLIER_PDF_RENDER_CACHE.popitem(last=False)
+        _SUPPLIER_PDF_RENDER_CACHE_BYTES -= len(evicted)
 
 
 @app.get("/api/part-supplier-spec-image/{part_number}")
@@ -2502,7 +2549,7 @@ async def get_part_supplier_spec_image(
         raise HTTPException(status_code=415, detail=f"Unsupported supplier document type: {suffix}")
 
     cache_key = (safe_pn, safe_rev, dpi)
-    cached = _SUPPLIER_PDF_RENDER_CACHE.get(cache_key)
+    cached = _supplier_pdf_cache_get(cache_key)
     if cached is None:
         try:
             cached = _render_supplier_pdf_pages_to_png_bytes(doc_path, dpi=dpi)
@@ -2511,7 +2558,7 @@ async def get_part_supplier_spec_image(
         except Exception as exc:
             logger.error(f"[supplier-spec-image] render failed for {safe_pn} rev {safe_rev}: {exc}")
             raise HTTPException(status_code=500, detail=f"PDF render failed: {exc}")
-        _SUPPLIER_PDF_RENDER_CACHE[cache_key] = cached
+        _supplier_pdf_cache_put(cache_key, cached)
     return Response(content=cached, media_type="image/png")
 
 

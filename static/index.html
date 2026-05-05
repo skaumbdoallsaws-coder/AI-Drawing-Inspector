@@ -4519,73 +4519,188 @@
             padding: 12px;
             border-top: 1px solid rgba(255,255,255,0.08);
             background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.008) 100%);
-            display: flex;
-            gap: 8px;
         }
-        .agent-panel-input input {
-            flex: 1;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,0.065) 0%, rgba(255,255,255,0.028) 100%),
-                rgba(24, 30, 39, 0.96);
-            border: 1px solid rgba(255,255,255,0.11);
-            border-radius: 6px;
-            padding: 8px 12px;
-            color: var(--text-primary);
-            font-size: 14px;
-            font-family: inherit;
-            outline: none;
-            box-shadow:
-                inset 0 1px 0 rgba(255,255,255,0.045),
-                0 1px 0 rgba(0,0,0,0.16);
+        .agent-composer-shell {
+            position: relative;
+            display: flex;
+            width: 100%;
+            min-height: 88px;
+            background: #eef4fb;
+            border: 1px solid rgba(42, 135, 223, 0.22);
+            border-radius: 22px;
+            box-shadow: 0 1px 0 rgba(255,255,255,0.45), inset 0 1px 0 rgba(255,255,255,0.55);
             transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
         }
-        .agent-panel-input input:focus {
-            border-color: var(--accent);
-            box-shadow:
-                inset 0 1px 0 rgba(255,255,255,0.055),
-                0 0 0 1px rgba(79,195,247,0.16),
-                0 0 0 4px rgba(79,195,247,0.08);
-            background:
-                linear-gradient(180deg, rgba(255,255,255,0.075) 0%, rgba(255,255,255,0.032) 100%),
-                rgba(24, 30, 39, 0.98);
+        .agent-composer-shell:focus-within {
+            border-color: rgba(21, 101, 192, 0.46);
+            box-shadow: 0 0 0 3px rgba(42, 135, 223, 0.16);
         }
-        .agent-panel-input input::placeholder {
-            color: #bcc5d1;
-        }
-        .agent-panel-input button {
-            background: var(--primary-btn);
+        .agent-panel-input textarea {
+            flex: 1;
+            min-height: 86px;
+            max-height: 190px;
+            resize: none;
+            overflow-y: auto;
+            background: transparent;
             border: none;
-            border-radius: 6px;
-            color: #fff;
-            padding: 8px 12px;
-            cursor: pointer;
-            font-size: 13px;
+            padding: 14px 16px 52px 16px;
+            color: #2a231b;
+            font-size: 14px;
+            line-height: 1.45;
             font-family: inherit;
-            transition: opacity 0.2s;
+            outline: none;
         }
-        .agent-panel-input button:hover {
-            opacity: 0.85;
+        .agent-panel-input textarea::placeholder {
+            color: #7d756b;
+        }
+        .agent-panel-input textarea::-webkit-scrollbar {
+            width: 8px;
+        }
+        .agent-panel-input textarea::-webkit-scrollbar-thumb {
+            background: rgba(99,89,76,0.18);
+            border-radius: 999px;
         }
         .agent-panel-input button:disabled {
             opacity: 0.4;
             cursor: not-allowed;
         }
+        .agent-composer-footer {
+            position: absolute;
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .agent-composer-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .agent-model-select {
+            position: relative;
+        }
+        .agent-model-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            height: 28px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: #6f675b;
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            cursor: pointer;
+            transition: color 0.18s ease;
+        }
+        .agent-model-btn:hover,
+        .agent-model-btn.open {
+            color: #30271f;
+        }
+        .agent-model-btn svg {
+            width: 12px;
+            height: 12px;
+            opacity: 0.8;
+            flex-shrink: 0;
+        }
+        .agent-model-menu {
+            position: absolute;
+            right: 0;
+            bottom: calc(100% + 8px);
+            min-width: 220px;
+            padding: 6px;
+            border-radius: 14px;
+            border: 1px solid rgba(214, 205, 192, 0.95);
+            background: #fbf8f2;
+            box-shadow: 0 16px 32px rgba(0,0,0,0.18);
+            display: none;
+            z-index: 25;
+        }
+        .agent-model-menu.open {
+            display: block;
+        }
+        .agent-model-menu-header {
+            padding: 8px 10px 6px;
+            color: #857b6f;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .agent-model-option {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+            padding: 9px 10px;
+            border: none;
+            border-radius: 10px;
+            background: transparent;
+            color: #2d261f;
+            font-family: inherit;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.16s ease;
+        }
+        .agent-model-option:hover {
+            background: rgba(137, 110, 74, 0.08);
+        }
+        .agent-model-option.active {
+            background: rgba(198, 170, 130, 0.14);
+            outline: 1px solid rgba(176, 138, 87, 0.24);
+        }
+        .agent-model-option-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: inherit;
+        }
+        .agent-model-option-note {
+            font-size: 10px;
+            color: #857b6f;
+        }
+        .agent-camera-btn {
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: #7a7266;
+            cursor: pointer;
+            font-size: 26px;
+            line-height: 1;
+            padding: 0;
+            transition: color 0.18s ease;
+        }
+        .agent-camera-btn:hover {
+            color: #2f271f;
+        }
         #agentSendBtn {
-            width: 42px;
-            min-width: 42px;
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
             padding: 0;
             display: flex;
             align-items: center;
             justify-content: center;
             border-radius: 10px;
+            border: none;
+            cursor: pointer;
             background: linear-gradient(180deg, #2a87df 0%, #1565c0 100%);
             box-shadow:
-                inset 0 1px 0 rgba(255,255,255,0.14),
-                0 4px 10px rgba(21,101,192,0.22);
+                inset 0 1px 0 rgba(255,255,255,0.2),
+                0 4px 10px rgba(21,101,192,0.24);
+            transition: opacity 0.2s, filter 0.2s;
         }
         #agentSendBtn svg {
-            width: 22px;
-            height: 22px;
+            width: 18px;
+            height: 18px;
             display: block;
         }
         #agentSendBtn:hover {
@@ -4647,30 +4762,12 @@
             border-color: rgba(255,255,255,0.08) !important;
             box-shadow: 0 10px 24px rgba(0,0,0,0.32) !important;
         }
-        /* Camera capture button */
-        .agent-camera-btn {
-            background: linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.012) 100%);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 6px;
-            color: var(--text-secondary);
-            padding: 6px 8px;
-            cursor: pointer;
-            font-size: 15px;
-            line-height: 1;
-            transition: color 0.2s, border-color 0.2s, background 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
-        }
-        .agent-camera-btn:hover {
-            color: var(--accent);
-            border-color: var(--accent);
-        }
+        /* Composer left-side attach placeholder */
         .agent-camera-btn.has-capture {
-            color: var(--accent);
-            border-color: var(--accent);
-            background: rgba(79, 195, 247, 0.1);
+            color: #2f271f;
+        }
+        .voice-controls-bar {
+            display: none !important;
         }
         /* --- Voice Controls Bar (SolidWorks-style) --- */
         .voice-controls-bar {
@@ -6408,14 +6505,47 @@
                     </div>
                     <div class="agent-icons-strip" id="agentIconsStrip"></div>
                     <div class="agent-panel-input">
-                        <input type="text" id="agentInput" placeholder="Type a message..." autocomplete="off">
-                        <button class="agent-camera-btn" id="agentCameraBtn" title="Capture screenshot of current viewport">&#x1F4F7;</button>
-                        <button id="agentSendBtn" type="button" aria-label="Send message" title="Send message" disabled>
-                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <path d="M12 17V7" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round"></path>
-                                <path d="M7.8 11.2L12 7l4.2 4.2" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
-                            </svg>
-                        </button>
+                        <div class="agent-composer-shell">
+                            <textarea id="agentInput" placeholder="Message Sage..." autocomplete="off" rows="1"></textarea>
+                            <div class="agent-composer-footer">
+                                <button class="agent-camera-btn" id="agentCameraBtn" type="button" title="Attachment options coming soon">+</button>
+                                <div class="agent-composer-actions">
+                                    <div class="agent-model-select">
+                                        <button id="agentModelBtn" class="agent-model-btn" type="button" title="UI placeholder only — does not change the backend model yet">
+                                        <span id="agentModelLabel">Opus 4.7 Adaptive</span>
+                                        <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                            <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        </svg>
+                                        </button>
+                                        <div id="agentModelMenu" class="agent-model-menu" aria-hidden="true">
+                                            <div class="agent-model-menu-header">Choose model</div>
+                                            <button class="agent-model-option active" type="button" data-model-label="Opus 4.7 Adaptive">
+                                                <span class="agent-model-option-title">Opus 4.7 Adaptive</span>
+                                                <span class="agent-model-option-note">Claude-style default placeholder</span>
+                                            </button>
+                                            <button class="agent-model-option" type="button" data-model-label="Sonnet 4">
+                                                <span class="agent-model-option-title">Sonnet 4</span>
+                                                <span class="agent-model-option-note">Lighter Claude-family placeholder</span>
+                                            </button>
+                                            <button class="agent-model-option" type="button" data-model-label="GPT-5">
+                                                <span class="agent-model-option-title">GPT-5</span>
+                                                <span class="agent-model-option-note">General-purpose flagship placeholder</span>
+                                            </button>
+                                            <button class="agent-model-option" type="button" data-model-label="GPT-5.4 Mini">
+                                                <span class="agent-model-option-title">GPT-5.4 Mini</span>
+                                                <span class="agent-model-option-note">Smaller, faster placeholder option</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <button id="agentSendBtn" type="button" aria-label="Send message" title="Send message" disabled>
+                                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                            <path d="M12 17V7" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round"></path>
+                                            <path d="M7.8 11.2L12 7l4.2 4.2" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="voice-controls-bar" id="voiceControlsBar">
                         <button class="voice-mic-btn" id="voiceMicBtn" title="Voice message">&#x1F3A4;</button>
@@ -14391,6 +14521,13 @@
                 // overflow:auto so taller-than-pane content scrolls
                 // vertically. Zoom controls scale the width directly.
                 img.style.cssText = 'display:block;width:100%;height:auto;background:#fff;';
+                img.addEventListener('error', () => {
+                    if (docWrap) {
+                        docWrap.innerHTML = `<div style="padding:20px 18px;color:var(--text-secondary,#9aa5b1);font-size:11px;line-height:1.5;align-self:center;text-align:center;max-width:320px;">Unable to render the embedded supplier preview for ${_escapeHtml(revLabel)}. The original source document may still be valid. Use <strong style="color:#cdd5dd;">Open in new tab ↗</strong> above to review the canonical file directly.</div>`;
+                    }
+                    const zoomLabel = paneEl.querySelector('[data-role="zoomLabel"]');
+                    if (zoomLabel) zoomLabel.textContent = 'ERR';
+                }, { once: true });
                 docWrap.appendChild(img);
                 paneEl.dataset.zoomPct = '100';
             }
@@ -14721,20 +14858,32 @@
                 }
 
                 case 'clear_compare_overlays': {
-                    // Clear extract on both sides + reset BOM isolation +
-                    // optionally clear selection. Honest: never removes
-                    // explode (that's user-controlled per side).
-                    _viewersForSide('both').forEach(v => _setViewerExtract(v, { clear: true }));
+                    // Full compare visual reset for demo / review cleanup:
+                    // collapse both panes, clear extract, remove selection /
+                    // isolation / diff paint, and return everything to a
+                    // neutral gray baseline.
+                    _viewersForSide('both').forEach(v => _forceResetCompareViewerOverlays(v));
                     const cmp = diffState.bomCompare;
                     if (cmp) {
                         cmp.isolation = 'all';
-                        _applyBomIsolationToViewers('all');
-                        _refreshBomIsolationPills();
                     }
-                    if (action.clear_selection !== false) {
-                        _clearBomRowSelection();
+                    const shouldClearSelection = action.clear_selection !== false;
+                    if (shouldClearSelection) {
+                        _clearBomSelectionInternal();
                     }
+                    _resetDiffViewersToGray();
+                    [diffState.viewerA, diffState.viewerB].forEach(v => _clearBomViewerVisualSnapshots(v));
+                    if (cmp) {
+                        _renderBomCompareRows();
+                    }
+                    _applyBomRowToDrawing(shouldClearSelection ? null : (cmp && cmp.primaryKey) || null);
+                    _refreshBomIsolationPills();
+                    _refreshBomIsolationNote('all', null);
                     _refreshBomDrawerToggle();
+                    diffState._agentHighlightActive = false;
+                    _showDiffLegend(false);
+                    _closeDiffPanel();
+                    _closeSupplierSpecModal();
                     return true;
                 }
 
@@ -16391,6 +16540,64 @@
             cmp.selectedKeys = [];
             cmp.primaryKey = null;
             cmp.selectedKey = null;
+        }
+
+        function _clearBomViewerVisualSnapshots(viewer) {
+            // Remove BOM-specific snapshot keys so the next highlight /
+            // isolation action re-snapshots from the current neutral state
+            // instead of restoring stale diff-highlight colors or dimmed
+            // opacities captured earlier in the session.
+            if (!viewer || !viewer.liveScene) return;
+            viewer.liveScene.traverse(child => {
+                if (!child || !child.userData) return;
+                delete child.userData._bomOrigEmissive;
+                delete child.userData._bomOrigEmissiveIntensity;
+                delete child.userData._bomIsoOrigOpacity;
+                delete child.userData._bomIsoOrigTransparent;
+                delete child.userData._bomIsoOrigDepthWrite;
+            });
+        }
+
+        function _forceResetCompareViewerOverlays(viewer) {
+            // Immediate reset used by clear_compare_overlays. We do NOT
+            // animate out here because extract owns an opacity snapshot that
+            // can otherwise re-apply stale dimming on later animation frames.
+            if (!viewer) return;
+
+            if (viewer.extract) {
+                if (viewer.extract.animId) cancelAnimationFrame(viewer.extract.animId);
+                viewer.extract.animId = null;
+                viewer.extract.enabled = false;
+                viewer.extract.level = 0;
+                viewer.extract.targetPartNumbers = [];
+                viewer.extract.targetMeshSet = null;
+                viewer.extract.vectors = null;
+                viewer.extract.hasAnyTargets = false;
+            }
+
+            if (viewer.explode) {
+                if (viewer.explode.animId) cancelAnimationFrame(viewer.explode.animId);
+                viewer.explode.animId = null;
+                viewer.explode.enabled = false;
+                viewer.explode.level = 0;
+                _refreshDiffExplodeButton(viewer);
+            }
+
+            if (viewer.liveScene) {
+                const extractOpacityKey = viewer.extract && viewer.extract.snapshotKey;
+                const extractTransparentKey = extractOpacityKey ? extractOpacityKey + '_transparent' : null;
+                const extractDepthWriteKey = extractOpacityKey ? extractOpacityKey + '_depthWrite' : null;
+                viewer.liveScene.traverse(child => {
+                    if (!child || !child.userData) return;
+                    if (extractOpacityKey) delete child.userData[extractOpacityKey];
+                    if (extractTransparentKey) delete child.userData[extractTransparentKey];
+                    if (extractDepthWriteKey) delete child.userData[extractDepthWriteKey];
+                });
+            }
+
+            if (viewer.partMeshMap) {
+                _recomputeViewerPositions(viewer);
+            }
         }
 
         function _onBomRowClick(pn, ev) {
@@ -23538,6 +23745,9 @@
             const agentSendBtn = $('agentSendBtn');
             const agentMessages = $('agentMessages');
             const agentCameraBtn = $('agentCameraBtn');
+            const agentModelBtn = $('agentModelBtn');
+            const agentModelLabel = $('agentModelLabel');
+            const agentModelMenu = $('agentModelMenu');
             const voiceMicBtn = $('voiceMicBtn');
             const voiceOrb = $('voiceOrb');
             const voiceStopBtn = $('voiceStopBtn');
@@ -23554,6 +23764,7 @@
             let suggestionsVisible = false;
             let lastSuggestionsContext = null; // Track which results generated the suggestions
             let agentCapturedImage = null; // Base64 screenshot data URL
+            let agentModelUiSelection = 'Opus 4.7 Adaptive'; // UI-only placeholder; not wired to backend model routing
 
             // Feature #142: Cross-agent context (summaries + pendingCrossContext live in sessions)
             let crossContextReady = Promise.resolve(); // resolves when summarize completes
@@ -24635,6 +24846,7 @@
                 removeSuggestions();
                 // Set input and trigger send
                 agentInput.value = text;
+                syncAgentInputHeight();
                 handleAgentSend();
             }
 
@@ -24916,6 +25128,47 @@
                 }
             }
 
+            function syncAgentInputHeight() {
+                if (!agentInput) return;
+                const minHeight = 86;
+                const maxHeight = 190;
+                agentInput.style.height = '0px';
+                const nextHeight = Math.max(minHeight, Math.min(agentInput.scrollHeight, maxHeight));
+                agentInput.style.height = nextHeight + 'px';
+                agentInput.style.overflowY = agentInput.scrollHeight > maxHeight ? 'auto' : 'hidden';
+            }
+
+            function setAgentModelUiSelection(label) {
+                agentModelUiSelection = label || 'Auto';
+                if (agentModelLabel) agentModelLabel.textContent = agentModelUiSelection;
+                const options = agentModelMenu ? Array.from(agentModelMenu.querySelectorAll('.agent-model-option')) : [];
+                options.forEach(opt => {
+                    const active = (opt.dataset.modelLabel || '') === agentModelUiSelection;
+                    opt.classList.toggle('active', active);
+                });
+            }
+
+            function closeAgentModelMenu() {
+                if (!agentModelMenu || !agentModelBtn) return;
+                agentModelMenu.classList.remove('open');
+                agentModelBtn.classList.remove('open');
+                agentModelBtn.setAttribute('aria-expanded', 'false');
+                agentModelMenu.setAttribute('aria-hidden', 'true');
+            }
+
+            function toggleAgentModelMenu(forceOpen) {
+                if (!agentModelMenu || !agentModelBtn) return;
+                const shouldOpen = typeof forceOpen === 'boolean'
+                    ? forceOpen
+                    : !agentModelMenu.classList.contains('open');
+                agentModelMenu.classList.toggle('open', shouldOpen);
+                agentModelBtn.classList.toggle('open', shouldOpen);
+                agentModelBtn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+                agentModelMenu.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+            }
+
+            setAgentModelUiSelection(agentModelLabel ? agentModelLabel.textContent.trim() : agentModelUiSelection);
+
             function updateSendButtonState() {
                 // Allow send if there's text OR a captured image
                 const hasText = agentInput.value.trim().length > 0;
@@ -24923,6 +25176,7 @@
                 const _w = getCurrentAgentSession().waiting;
                 agentSendBtn.disabled = _w || (!hasText && !hasImage);
                 voiceMicBtn.disabled = _w || micState === 'transcribing';
+                syncAgentInputHeight();
             }
 
             // ---- Camera Capture ----
@@ -25057,25 +25311,31 @@
                 return await _renderPdfPageOnServer();
             }
 
-            agentCameraBtn.addEventListener('click', async function() {
-                if (getCurrentAgentSession().waiting) return;
-                // Briefly show loading state on camera button for async capture
-                agentCameraBtn.style.opacity = '0.5';
-                agentCameraBtn.style.pointerEvents = 'none';
-                try {
-                    const dataUrl = await captureViewportScreenshot();
-                    if (dataUrl) {
-                        setAgentCapture(dataUrl);
-                    } else {
-                        // No content to capture ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â briefly flash the button red
-                        agentCameraBtn.style.color = '#FF1744';
-                        setTimeout(() => { agentCameraBtn.style.color = ''; }, 500);
-                    }
-                } finally {
-                    agentCameraBtn.style.opacity = '';
-                    agentCameraBtn.style.pointerEvents = '';
-                }
+            agentCameraBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                closeAgentModelMenu();
             });
+
+            if (agentModelBtn && agentModelMenu) {
+                agentModelBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleAgentModelMenu();
+                });
+                agentModelMenu.querySelectorAll('.agent-model-option').forEach(opt => {
+                    opt.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        const nextLabel = opt.dataset.modelLabel || 'Opus 4.7 Adaptive';
+                        setAgentModelUiSelection(nextLabel);
+                        closeAgentModelMenu();
+                    });
+                });
+                document.addEventListener('click', function(e) {
+                    if (!agentModelMenu.classList.contains('open')) return;
+                    if (agentModelBtn.contains(e.target) || agentModelMenu.contains(e.target)) return;
+                    closeAgentModelMenu();
+                });
+            }
 
             agentCaptureDismiss.addEventListener('click', clearAgentCapture);
 
@@ -26453,11 +26713,11 @@
             }
 
             // Execute all tool calls in order with guardrails. Returns array of results.
-            async function executeToolCalls(toolCalls, originAgent) {
-                const guarded = applyFrontendToolGuardrails(toolCalls, originAgent);
-                const results = [];
-                for (const tc of guarded) {
-                    results.push(await executeToolCall(tc, originAgent));
+        async function executeToolCalls(toolCalls, originAgent) {
+            const guarded = applyFrontendToolGuardrails(toolCalls, originAgent);
+            const results = [];
+            for (const tc of guarded) {
+                results.push(await executeToolCall(tc, originAgent));
                 }
                 if (guarded.length > 0) {
                     console.log('[ToolDispatch] Summary:', {
@@ -26466,14 +26726,168 @@
                         guarded: guarded.length,
                         results: results.map(r => `${r.name}:${r.ok ? 'ok' : r.error}`)
                     });
-                }
-                return results;
             }
+            return results;
+        }
 
-            function shouldSuppressAssistantResponseForToolCalls(response, toolCalls) {
-                if (!Array.isArray(toolCalls) || !toolCalls.some(tc => tc && tc.name === 'run_inspection')) {
-                    return false;
+        function _toolCallsContainSupplierSpecCompare(toolCalls) {
+            return (toolCalls || []).some(tc => {
+                if (!tc || !tc.name) return false;
+                if (tc.name === 'compare_supplier_specs' || tc.name === 'open_supplier_spec') return true;
+                if (tc.name !== 'ui_actions') return false;
+                const actions = tc.args && Array.isArray(tc.args.actions) ? tc.args.actions : [];
+                return actions.some(a => a && (a.type === 'compare_supplier_specs' || a.type === 'open_supplier_spec'));
+            });
+        }
+
+        function _toolCallsContainUiAction(toolCalls, predicate) {
+            return (toolCalls || []).some(tc => {
+                if (!tc || tc.name !== 'ui_actions') return false;
+                const actions = tc.args && Array.isArray(tc.args.actions) ? tc.args.actions : [];
+                return actions.some(a => {
+                    try { return !!predicate(a || {}); } catch (_) { return false; }
+                });
+            });
+        }
+
+        async function _maybeApplyAssemblyCompareCommandFallback(messageText, toolCalls, originAgent) {
+            if (originAgent !== 'deviation-analyst') return false;
+            const query = _normalizeBomAliasText(messageText || '');
+            const cmp = diffState.bomCompare || {};
+            const rows = Array.isArray(cmp.rows) ? cmp.rows : [];
+            if (!query || rows.length === 0) return false;
+
+            const mentionsPurchased = query.includes('purchased part');
+            const mentionsCustom = query.includes('custom part');
+            const wantsExtract = query.includes('extract') || query.includes('pull out') || query.includes('pullout');
+            const wantsFocus = query.includes('show') || query.includes('highlight') || query.includes('focus');
+
+            const applyProcurementFallback = async (procurement, mode) => {
+                const keys = rows
+                    .filter(r => r && r.procurement === procurement)
+                    .map(r => r.key)
+                    .filter(Boolean);
+                if (keys.length === 0) return false;
+                const primary = keys[0];
+                const actions = [
+                    { type: 'open_workspace', tab: 'assembly', subtab: 'compare' },
+                    { type: 'clear_compare_overlays', clear_selection: false },
+                    { type: 'select_bom_rows', mode: 'replace', keys, primary, open_drawer: false },
+                ];
+                if (mode === 'extract') {
+                    actions.push({ type: 'extract', side: 'both', scope: { procurement }, camera: 'keep' });
+                } else {
+                    actions.push({ type: 'focus', side: 'both', scope: { procurement } });
                 }
+                await executeToolCalls([{ name: 'ui_actions', args: { workspace: 'assembly_compare', actions } }], originAgent);
+                console.log('[ToolDispatch] Applied compare fallback for', procurement, mode);
+                return true;
+            };
+
+            if (mentionsPurchased && wantsExtract) {
+                const alreadyHandled = _toolCallsContainUiAction(toolCalls, a =>
+                    a.type === 'extract' && a.scope && a.scope.procurement === 'purchased'
+                );
+                if (!alreadyHandled) {
+                    return await applyProcurementFallback('purchased', 'extract');
+                }
+            }
+            if (mentionsCustom && wantsExtract) {
+                const alreadyHandled = _toolCallsContainUiAction(toolCalls, a =>
+                    a.type === 'extract' && a.scope && a.scope.procurement === 'custom'
+                );
+                if (!alreadyHandled) {
+                    return await applyProcurementFallback('custom', 'extract');
+                }
+            }
+            if (mentionsPurchased && wantsFocus) {
+                const alreadyHandled = _toolCallsContainUiAction(toolCalls, a =>
+                    (a.type === 'focus' || a.type === 'highlight') && a.scope && a.scope.procurement === 'purchased'
+                );
+                if (!alreadyHandled) {
+                    return await applyProcurementFallback('purchased', 'focus');
+                }
+            }
+            if (mentionsCustom && wantsFocus) {
+                const alreadyHandled = _toolCallsContainUiAction(toolCalls, a =>
+                    (a.type === 'focus' || a.type === 'highlight') && a.scope && a.scope.procurement === 'custom'
+                );
+                if (!alreadyHandled) {
+                    return await applyProcurementFallback('custom', 'focus');
+                }
+            }
+            return false;
+        }
+
+        function _resolveSupplierSpecComparePartNumber(messageText) {
+            const cmp = diffState.bomCompare || {};
+            const rows = Array.isArray(cmp.rows) ? cmp.rows : [];
+            if (rows.length === 0) return null;
+            const query = _normalizeBomAliasText(messageText || '');
+            if (!query) return null;
+
+            // Exact part-number mention wins immediately.
+            const exact = rows.find(r => r && r.key && query.includes(_normalizeBomAliasText(r.key)));
+            if (exact && exact.key) return exact.key;
+
+            const stop = new Set([
+                'compare', 'show', 'open', 'the', 'supplier', 'spec', 'specs', 'sheet', 'sheets',
+                'for', 'rev', 'and', 'a', 'b', 'side', 'by', 'side'
+            ]);
+
+            let best = null;
+            for (const row of rows) {
+                if (!row || !row.key) continue;
+                const desc = _normalizeBomAliasText(
+                    (row.rev_b && row.rev_b.description) ||
+                    (row.rev_a && row.rev_a.description) ||
+                    ''
+                );
+                const haystack = `${_normalizeBomAliasText(row.key)} ${desc}`.trim();
+                if (!haystack) continue;
+                let score = 0;
+                if (desc && query.includes(desc)) score += 8;
+                const tokens = [...new Set(haystack.split(' ').filter(t => t && !stop.has(t) && t.length >= 3))];
+                tokens.forEach(tok => {
+                    if (query.includes(tok)) score += 2;
+                });
+                if (!best || score > best.score) best = { key: row.key, score };
+            }
+            return best && best.score > 0 ? best.key : null;
+        }
+
+        async function _maybeApplySupplierSpecCompareFallback(messageText, toolCalls, originAgent) {
+            if (originAgent !== 'deviation-analyst') return false;
+            if (_toolCallsContainSupplierSpecCompare(toolCalls)) return false;
+            const query = _normalizeBomAliasText(messageText || '');
+            if (!query) return false;
+            const looksLikeSupplierSpecCompare =
+                (query.includes('supplier spec') || query.includes('supplier specs') || query.includes('spec sheet') || query.includes('spec sheets'))
+                && (query.includes('compare') || query.includes('open') || query.includes('show'));
+            if (!looksLikeSupplierSpecCompare) return false;
+            const partNumber = _resolveSupplierSpecComparePartNumber(messageText);
+            if (!partNumber) return false;
+            const revA = diffState.activeRevA;
+            const revB = diffState.activeRevB;
+            if (!revA || !revB) return false;
+            await executeToolCalls([{
+                name: 'ui_actions',
+                args: {
+                    workspace: 'assembly_compare',
+                    actions: [
+                        { type: 'open_workspace', tab: 'assembly', subtab: 'compare' },
+                        { type: 'compare_supplier_specs', part_number: partNumber, revA, revB }
+                    ]
+                }
+            }], originAgent);
+            console.log('[ToolDispatch] Applied supplier-spec fallback for', partNumber);
+            return true;
+        }
+
+        function shouldSuppressAssistantResponseForToolCalls(response, toolCalls) {
+            if (!Array.isArray(toolCalls) || !toolCalls.some(tc => tc && tc.name === 'run_inspection')) {
+                return false;
+            }
                 if (typeof response !== 'string') return false;
                 const text = response.trim();
                 if (!text) return true;
@@ -26629,6 +27043,8 @@
                             if (toolCalls.length > 0) {
                                 await executeToolCalls(toolCalls, originAgent);
                             }
+                            await _maybeApplyAssemblyCompareCommandFallback(messageText, toolCalls, originAgent);
+                            await _maybeApplySupplierSpecCompareFallback(messageText, toolCalls, originAgent);
                             // Clear feature highlights if no highlight_features tool was dispatched
                             if (state.featureHighlightActive && !toolCalls.some(tc => tc.name === 'highlight_features')) {
                                 clearFeatureHighlights();
@@ -27469,6 +27885,7 @@
                         setTimeout(() => { agentMessages.scrollTop = activeSession.scrollTop || 0; }, 50);
                     }
                     agentInput.value = activeSession.pendingInput || '';
+                    syncAgentInputHeight();
                     console.log('[ChatRegistry] Restored â€” conv:', _currentConversationId,
                         'agent:', currentAgent, 'messages:', activeSession.messages.length);
                 }

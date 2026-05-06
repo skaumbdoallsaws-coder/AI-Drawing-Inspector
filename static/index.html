@@ -1,13 +1,30 @@
 ﻿<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#0a0e18">
+    <meta name="theme-color" content="#0a0e18" id="metaThemeColor">
     <link rel="manifest" href="/static/manifest.json">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/logo_192.png">
     <link rel="apple-touch-icon" href="/static/logo_192.png">
     <title>InspectorPro</title>
+    <script>
+        // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
+        // so the page never paints with the wrong theme tokens. Reads
+        // inspectorpro.theme from localStorage; defaults to 'dark'. The
+        // matching meta theme-color value is set here too so the browser
+        // chrome (mobile address bar, taskbar tint) follows the theme
+        // even before the rest of the JS loads.
+        (function () {
+            try {
+                var stored = localStorage.getItem('inspectorpro.theme');
+                var theme = (stored === 'light' || stored === 'dark') ? stored : 'dark';
+                document.documentElement.setAttribute('data-theme', theme);
+                var meta = document.getElementById('metaThemeColor');
+                if (meta) meta.setAttribute('content', theme === 'light' ? '#dfe5ea' : '#0a0e18');
+            } catch (_) { /* localStorage may be blocked — keep default */ }
+        })();
+    </script>
     <style>
         /* ============================================================
            InspectorPro - SolidWorks-Inspired Dark Theme
@@ -20,19 +37,41 @@
             box-sizing: border-box;
         }
 
-        :root {
+        /* ── Theme tokens ──
+           Two themes only:
+             dark   = original SolidWorks-inspired engineering chrome
+             light  = neutral analytical FEA-style grey palette
+           Status colours (added/removed/changed/severity) deliberately
+           share values across themes so diagnostic colour language
+           does not flip when the user switches themes. */
+        :root[data-theme="dark"] {
+            /* shell / surfaces */
             --bg-main: #252B36;
             --bg-panel: #1C2029;
             --bg-toolbar: #0D1016;
             --bg-ribbon: #232931;
             --bg-tab: #141820;
+            --bg-elevated: #1a1d22;
+            --bg-input: #161a22;
+            --bg-hover: rgba(255,255,255,0.06);
+            --bg-selected: rgba(79,195,247,0.16);
+            /* structure */
             --border: rgba(255,255,255,0.06);
             --border-soft: rgba(255,255,255,0.04);
             --border-structure: rgba(255,255,255,0.08);
+            --border-strong: rgba(255,255,255,0.14);
+            --shadow-color: rgba(0,0,0,0.50);
+            /* text */
             --text-primary: #E3E6EB;
             --text-secondary: #9AA3AF;
+            --text-muted: #707782;
+            --text-on-accent: #ffffff;
+            /* interactive */
             --accent: #4fc3f7;
+            --accent-strong: #29b6f6;
             --primary-btn: #1565c0;
+            --focus-ring: rgba(79,195,247,0.45);
+            /* status */
             --present: #00E676;
             --missing: #FF1744;
             --partial: #FFD600;
@@ -42,6 +81,125 @@
             --severity-major: #FF6D00;
             --severity-minor: #FFD600;
             --severity-info: #666666;
+            /* viewport / 3D chrome */
+            --viewport-bg: #22272F;
+            --viewport-bg-secondary: #1B1F26;
+            --viewport-frame: rgba(255,255,255,0.10);
+            --overlay-bg: rgba(18,22,30,0.92);
+            --overlay-border: rgba(255,255,255,0.10);
+            --legend-bg: rgba(18,22,30,0.85);
+            --gridline: rgba(255,255,255,0.05);
+            --viewport-empty-text: #707782;
+            /* chat */
+            --chat-composer-bg: #1a1d22;
+            --chat-composer-border: rgba(255,255,255,0.08);
+            --chat-bubble-user: rgba(79,195,247,0.14);
+            --chat-bubble-assistant: rgba(255,255,255,0.04);
+            --chat-bubble-system: rgba(255,179,0,0.10);
+        }
+
+        :root[data-theme="light"] {
+            /* Light analytical FEA palette — neutral cool grey, restrained
+               blue accents, dense graphite text. Should read as a lab
+               instrument rather than a generic web app light mode. */
+            --bg-main: #dfe5ea;
+            --bg-panel: #eef2f5;
+            --bg-toolbar: #d4dbe1;
+            --bg-ribbon: #e3e8ed;
+            --bg-tab: #f3f6f8;
+            --bg-elevated: #f7f9fb;
+            --bg-input: #edf2f6;
+            --bg-hover: rgba(43,119,191,0.08);
+            --bg-selected: rgba(43,119,191,0.12);
+            --border: rgba(38,52,66,0.12);
+            --border-soft: rgba(38,52,66,0.08);
+            --border-structure: rgba(38,52,66,0.14);
+            --border-strong: rgba(38,52,66,0.18);
+            --shadow-color: rgba(26,36,46,0.14);
+            --text-primary: #23313d;
+            --text-secondary: #526372;
+            --text-muted: #70808f;
+            --text-on-accent: #ffffff;
+            --accent: #2b77bf;
+            --accent-strong: #155fa8;
+            --primary-btn: #1565c0;
+            --focus-ring: rgba(43,119,191,0.28);
+            /* Status colours intentionally identical to dark mode so the
+               compare/inspection diagnostic language does not change. */
+            --present: #00a86b;
+            --missing: #d9363e;
+            --partial: #d6a400;
+            --discrepant: #d96a00;
+            --gauge-amber: #c99200;
+            --severity-critical: #d9363e;
+            --severity-major: #d96a00;
+            --severity-minor: #d6a400;
+            --severity-info: #707782;
+            /* viewport */
+            --viewport-bg: #c9d2da;
+            --viewport-bg-secondary: #b8c2ca;
+            --viewport-frame: #b8c2ca;
+            --overlay-bg: rgba(245,248,250,0.92);
+            --overlay-border: rgba(38,52,66,0.14);
+            --legend-bg: rgba(238,243,247,0.92);
+            --gridline: rgba(60,76,92,0.10);
+            --viewport-empty-text: #60717f;
+            /* chat */
+            --chat-composer-bg: #edf4fa;
+            --chat-composer-border: rgba(43,119,191,0.16);
+            --chat-bubble-user: #dceaf7;
+            --chat-bubble-assistant: #f2f5f7;
+            --chat-bubble-system: #e8eef2;
+        }
+
+        /* Fallback for the brief moment between page parse and the boot
+           script that sets data-theme — keeps :root token references
+           valid even before the attribute is on <html>. */
+        :root {
+            --bg-main: #252B36;
+            --bg-panel: #1C2029;
+            --bg-toolbar: #0D1016;
+            --bg-ribbon: #232931;
+            --bg-tab: #141820;
+            --bg-elevated: #1a1d22;
+            --bg-input: #161a22;
+            --bg-hover: rgba(255,255,255,0.06);
+            --bg-selected: rgba(79,195,247,0.16);
+            --border: rgba(255,255,255,0.06);
+            --border-soft: rgba(255,255,255,0.04);
+            --border-structure: rgba(255,255,255,0.08);
+            --border-strong: rgba(255,255,255,0.14);
+            --shadow-color: rgba(0,0,0,0.50);
+            --text-primary: #E3E6EB;
+            --text-secondary: #9AA3AF;
+            --text-muted: #707782;
+            --text-on-accent: #ffffff;
+            --accent: #4fc3f7;
+            --accent-strong: #29b6f6;
+            --primary-btn: #1565c0;
+            --focus-ring: rgba(79,195,247,0.45);
+            --present: #00E676;
+            --missing: #FF1744;
+            --partial: #FFD600;
+            --discrepant: #FF6D00;
+            --gauge-amber: #FFB300;
+            --severity-critical: #FF1744;
+            --severity-major: #FF6D00;
+            --severity-minor: #FFD600;
+            --severity-info: #666666;
+            --viewport-bg: #22272F;
+            --viewport-bg-secondary: #1B1F26;
+            --viewport-frame: rgba(255,255,255,0.10);
+            --overlay-bg: rgba(18,22,30,0.92);
+            --overlay-border: rgba(255,255,255,0.10);
+            --legend-bg: rgba(18,22,30,0.85);
+            --gridline: rgba(255,255,255,0.05);
+            --viewport-empty-text: #707782;
+            --chat-composer-bg: #1a1d22;
+            --chat-composer-border: rgba(255,255,255,0.08);
+            --chat-bubble-user: rgba(79,195,247,0.14);
+            --chat-bubble-assistant: rgba(255,255,255,0.04);
+            --chat-bubble-system: rgba(255,179,0,0.10);
         }
 
         html, body {
@@ -52,7 +210,111 @@
             color: var(--text-primary);
         }
 
-        /* Custom Scrollbars - WebKit (Chrome, Edge, Safari) */
+        /* Theme-toggle icon swap. The button paints whichever glyph
+           matches the action the click would take: in dark mode the
+           sun shows ("switch to light"); in light mode the moon shows. */
+        .theme-icon { width: 18px; height: 18px; }
+        :root[data-theme="dark"] .theme-icon-moon { display: none; }
+        :root[data-theme="light"] .theme-icon-sun { display: none; }
+
+        /* ── Light-theme surface overrides ──
+           A handful of chrome surfaces ship with hardcoded dark
+           gradients so the dark-theme look is byte-stable. In light
+           mode we swap those gradients for tokenized neutral surfaces
+           so the panel chrome matches the FEA-style shell instead of
+           bleeding dark grey through a light app. */
+        :root[data-theme="light"] .activity-bar {
+            background: linear-gradient(to bottom, var(--bg-panel) 0%, var(--bg-ribbon) 100%);
+            border-right: 1px solid var(--border);
+            box-shadow: inset -1px 0 0 var(--border-soft);
+        }
+        :root[data-theme="light"] .right-activity-rail {
+            background: linear-gradient(to bottom, var(--bg-panel) 0%, var(--bg-ribbon) 100%);
+            border-left: 1px solid var(--border);
+        }
+        :root[data-theme="light"] .ribbon {
+            background: linear-gradient(to bottom, var(--bg-ribbon) 0%, var(--bg-panel) 100%);
+            border-bottom: 1px solid var(--border-structure);
+        }
+        :root[data-theme="light"] .left-panel {
+            background:
+                linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 16%, rgba(0,0,0,0) 100%),
+                linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-ribbon) 100%);
+            border-right: 1px solid var(--border);
+            box-shadow:
+                inset -1px 0 0 var(--border-soft),
+                10px 0 24px var(--shadow-color);
+        }
+        :root[data-theme="light"] .right-panel {
+            background:
+                linear-gradient(180deg, rgba(0,0,0,0.015) 0%, rgba(0,0,0,0.004) 18%, rgba(0,0,0,0) 100%),
+                linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-ribbon) 100%);
+        }
+        /* Tab bar — the dark gradient under the main Drawing/3D Model/
+           Assembly/Training/Report tabs needs a neutral light surface
+           in light mode so the active tab's pill remains the focal
+           point. */
+        :root[data-theme="light"] .tab-bar {
+            background:
+                linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0) 26%),
+                linear-gradient(180deg, var(--bg-toolbar) 0%, var(--bg-ribbon) 100%);
+            border-bottom: 1px solid var(--border-structure);
+            box-shadow:
+                inset 0 1px var(--border-soft),
+                inset 0 -1px var(--shadow-color);
+        }
+        :root[data-theme="light"] .tab {
+            color: var(--text-secondary);
+            background: linear-gradient(180deg, rgba(0,0,0,0.015), rgba(0,0,0,0));
+        }
+        :root[data-theme="light"] .tab:hover {
+            color: var(--text-primary);
+            background: linear-gradient(180deg, rgba(43,119,191,0.08), rgba(43,119,191,0.02));
+            border-color: var(--border);
+        }
+        :root[data-theme="light"] .tab.active {
+            color: var(--text-primary);
+            background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-panel) 48%, var(--bg-ribbon) 100%);
+            border-color: var(--border-strong);
+            box-shadow:
+                inset 0 1px rgba(255,255,255,0.7),
+                0 -1px 0 var(--shadow-color),
+                0 1px 0 rgba(255,255,255,0.4);
+        }
+        :root[data-theme="light"] .tab.active .tab-shortcut {
+            color: var(--text-secondary);
+            border-color: var(--border);
+            background: var(--bg-hover);
+        }
+        /* Center viewport — the radial dark gradient was the dominant
+           dark surface behind every tab body. In light mode we use a
+           subtle radial centred on the same ellipse so the FEA-shell
+           feeling is preserved (slight vignette toward the edges)
+           without flooding to pure white. */
+        :root[data-theme="light"] .viewport-content {
+            background: radial-gradient(ellipse at 50% 40%, var(--bg-elevated) 0%, var(--bg-main) 50%, var(--bg-toolbar) 100%);
+            box-shadow: inset 0 3px 6px var(--shadow-color);
+        }
+        /* Defensive canvas background. The compare/assembly THREE.js
+           renderers paint on rAF — between frames the canvas element's
+           own background colour shows through. Default is transparent
+           (which renders black on most browsers). Tying the canvas
+           element bg to --viewport-bg means even a paused or orphan
+           canvas shows the theme's neutral analytical surface instead
+           of pure black, which is what was making the light-mode
+           compare panes look broken. Scoped to viewer panes so
+           inspection canvases and PDF render images stay untouched. */
+        .diff-viewer-pane canvas,
+        .viewport-assembly canvas,
+        #three-container canvas,
+        #assy-3d-container canvas {
+            background-color: var(--viewport-bg);
+        }
+
+        /* Custom Scrollbars - WebKit (Chrome, Edge, Safari).
+           Track stays transparent in both themes; thumb tint follows
+           theme so light mode does not hold a dark thumb on a light
+           track. */
         ::-webkit-scrollbar {
             width: 6px;
         }
@@ -60,17 +322,26 @@
             background: transparent;
         }
         ::-webkit-scrollbar-thumb {
-            background: #3D4452;
+            background: rgba(255,255,255,0.12);
             border-radius: 3px;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #4D5562;
+            background: rgba(255,255,255,0.20);
+        }
+        :root[data-theme="light"] ::-webkit-scrollbar-thumb {
+            background: rgba(38,52,66,0.22);
+        }
+        :root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+            background: rgba(38,52,66,0.36);
         }
 
         /* Custom Scrollbars - Firefox */
         * {
             scrollbar-width: thin;
-            scrollbar-color: #3D4452 transparent;
+            scrollbar-color: rgba(255,255,255,0.12) transparent;
+        }
+        :root[data-theme="light"] * {
+            scrollbar-color: rgba(38,52,66,0.22) transparent;
         }
 
         /* ---- Layout ---- */
@@ -6108,6 +6379,24 @@
                 <button class="btn-agent" id="agentToggleBtn" title="Toggle Agent panel" style="display:none;">Agent</button>
                 <button class="btn btn-primary" id="runBtn" style="font-size:11px;padding:4px 14px;">Run Inspection</button>
                 <div class="toolbar-controls">
+                    <button class="toolbar-control-btn" id="themeToggleBtn" title="Toggle theme (Dark / Light)" aria-label="Toggle theme" aria-pressed="false">
+                        <!-- Sun icon (visible in dark mode → click switches to light) -->
+                        <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="4.2"/>
+                            <line x1="12" y1="2.8" x2="12" y2="5.2"/>
+                            <line x1="12" y1="18.8" x2="12" y2="21.2"/>
+                            <line x1="2.8" y1="12" x2="5.2" y2="12"/>
+                            <line x1="18.8" y1="12" x2="21.2" y2="12"/>
+                            <line x1="5.4" y1="5.4" x2="7.0" y2="7.0"/>
+                            <line x1="17.0" y1="17.0" x2="18.6" y2="18.6"/>
+                            <line x1="5.4" y1="18.6" x2="7.0" y2="17.0"/>
+                            <line x1="17.0" y1="7.0" x2="18.6" y2="5.4"/>
+                        </svg>
+                        <!-- Moon icon (visible in light mode → click switches to dark) -->
+                        <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>
+                        </svg>
+                    </button>
                     <button class="toolbar-control-btn" id="accountBtn" title="Account">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                     </button>
@@ -13419,6 +13708,89 @@
             }
         }
 
+        // ---- Theme-aware viewport background helper ----
+        // Reads the active theme's --viewport-bg CSS token and returns a
+        // value usable by THREE.Color. Used by every scene initializer so
+        // the 3D viewports follow the theme without each call site
+        // hardcoding a colour. Live scenes also subscribe via
+        // onThemeChange below to re-skin on theme flip.
+        function _themeViewportBgColor() {
+            try {
+                const v = getComputedStyle(document.documentElement).getPropertyValue('--viewport-bg').trim();
+                if (v) return new THREE.Color(v);
+            } catch (_) { /* fall through to theme-aware fallback */ }
+            const t = document.documentElement.getAttribute('data-theme');
+            return new THREE.Color(t === 'light' ? '#c9d2da' : '#22272F');
+        }
+        // Track every live THREE scene + renderer pair so the theme-change
+        // hook can repaint backgrounds (scene.background AND the renderer's
+        // GL-level clearColor). Without the renderer's setClearColor the
+        // canvas can keep painting the default 0x000000 clear under some
+        // browsers / GL configurations even after scene.background changes.
+        if (typeof window.__themedScenes === 'undefined') {
+            window.__themedScenes = new Set();
+        }
+        if (typeof window.__themedRenderers === 'undefined') {
+            window.__themedRenderers = new Set();
+        }
+        function _registerThemedScene(scene) {
+            if (scene && window.__themedScenes) window.__themedScenes.add(scene);
+        }
+        function _registerThemedRenderer(renderer) {
+            if (renderer && window.__themedRenderers) {
+                window.__themedRenderers.add(renderer);
+                try {
+                    const c = _themeViewportBgColor();
+                    renderer.setClearColor(c, 1);
+                } catch (_) {}
+            }
+        }
+        function _repaintAllThemedViewports() {
+            const c = _themeViewportBgColor();
+            window.__themedScenes.forEach(s => { try { s.background = c.clone(); } catch (_) {} });
+            window.__themedRenderers.forEach(r => {
+                try {
+                    r.setClearColor(c, 1);
+                    // Force one immediate clear so the canvas repaints to
+                    // the new theme colour even when its render loop is
+                    // paused (compare viewers can be idle while the user
+                    // is on another subtab).
+                    r.clear();
+                } catch (_) {}
+            });
+            // Also kick any live diff viewers + assembly scene through one
+            // render tick so the new background fills the canvas surface
+            // without waiting on rAF.
+            try {
+                if (typeof diffState !== 'undefined') {
+                    [diffState.viewerA, diffState.viewerB].forEach(v => {
+                        if (v && v.renderer && v.scene && v.camera) {
+                            v.renderer.render(v.scene, v.camera);
+                        }
+                    });
+                }
+                if (typeof state !== 'undefined' && state.assyRenderer && state.assyScene && state.assyCamera) {
+                    state.assyRenderer.render(state.assyScene, state.assyCamera);
+                }
+                if (typeof state !== 'undefined' && state.threeRenderer && state.threeScene && state.threeCamera) {
+                    state.threeRenderer.render(state.threeScene, state.threeCamera);
+                }
+            } catch (_) {}
+        }
+        if (typeof window.onThemeChange === 'function') {
+            window.onThemeChange(_repaintAllThemedViewports);
+        } else {
+            // The toolbar controller may register onThemeChange after this
+            // script block runs. Defer registration until it exists.
+            const _themeReadyTimer = setInterval(() => {
+                if (typeof window.onThemeChange === 'function') {
+                    clearInterval(_themeReadyTimer);
+                    window.onThemeChange(_repaintAllThemedViewports);
+                }
+            }, 200);
+            setTimeout(() => clearInterval(_themeReadyTimer), 5000);
+        }
+
         // ---- Phase 2: Dual Viewer for Compare Mode ----
 
         function _createDiffViewerContext(container) {
@@ -13426,12 +13798,14 @@
             const height = container.clientHeight || 400;
 
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x22272F);
+            scene.background = _themeViewportBgColor();
+            _registerThemedScene(scene);
 
             const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
             const renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(width, height);
             renderer.setPixelRatio(window.devicePixelRatio);
+            _registerThemedRenderer(renderer);
             renderer.toneMapping = THREE.LinearToneMapping;
             container.appendChild(renderer.domElement);
 
@@ -14272,18 +14646,18 @@
 
             overlay = document.createElement('div');
             overlay.id = 'supplierSpecOverlay';
-            overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(8,12,20,0.78);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+            overlay.style.cssText = 'display:none;position:fixed;inset:0;background:var(--shadow-color);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
 
             const modal = document.createElement('div');
             modal.id = 'supplierSpecModal';
-            modal.style.cssText = 'width:min(1280px,94vw);height:min(820px,90vh);background:#1a1d22;border:1px solid rgba(255,255,255,0.10);border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,0.5);display:flex;flex-direction:column;overflow:hidden;';
+            modal.style.cssText = 'width:min(1280px,94vw);height:min(820px,90vh);background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:8px;box-shadow:0 20px 60px var(--shadow-color);display:flex;flex-direction:column;overflow:hidden;color:var(--text-primary);';
 
             // Header
             const header = document.createElement('div');
-            header.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);flex-shrink:0;';
+            header.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border-strong);background:var(--bg-toolbar);flex-shrink:0;color:var(--text-primary);';
             header.innerHTML = `
                 <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary,#9aa5b1);">Supplier Spec Compare</span>
-                <span id="supplierSpecTitle" style="font-size:13px;color:#fff;font-weight:600;"></span>
+                <span id="supplierSpecTitle" style="font-size:13px;color:var(--text-primary);font-weight:600;"></span>
                 <span id="supplierSpecRevPair" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;margin-left:auto;">
                     <span class="bom-rev-tag rev-a" style="background:rgba(79,195,247,0.15);color:#4fc3f7;padding:2px 8px;border-radius:3px;font-weight:600;">Rev –</span>
                     <span style="color:var(--text-secondary,#9aa5b1);">vs</span>
@@ -14296,13 +14670,13 @@
             // Honesty note
             const honestyBar = document.createElement('div');
             honestyBar.id = 'supplierSpecHonesty';
-            honestyBar.style.cssText = 'padding:8px 16px;background:rgba(255,179,0,0.08);border-bottom:1px solid rgba(255,179,0,0.18);font-size:11px;color:#FFB300;flex-shrink:0;line-height:1.4;';
+            honestyBar.style.cssText = 'padding:8px 16px;background:rgba(255,179,0,0.10);border-bottom:1px solid rgba(255,179,0,0.22);font-size:11px;color:var(--gauge-amber);flex-shrink:0;line-height:1.4;';
             modal.appendChild(honestyBar);
 
             // Field diff strip
             const summaryStrip = document.createElement('div');
             summaryStrip.id = 'supplierSpecSummary';
-            summaryStrip.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.015);flex-shrink:0;';
+            summaryStrip.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-ribbon);flex-shrink:0;';
             modal.appendChild(summaryStrip);
 
             // Body — split panes
@@ -14339,7 +14713,7 @@
                 const fields = document.createElement('div');
                 // Own scroll for the structured summary so a long
                 // description never pushes the doc viewport off-screen.
-                fields.style.cssText = 'padding:4px 16px 10px 16px;font-size:12px;color:#cdd5dd;flex-shrink:0;max-height:240px;overflow-y:auto;';
+                fields.style.cssText = 'padding:4px 16px 10px 16px;font-size:12px;color:var(--text-primary);flex-shrink:0;max-height:240px;overflow-y:auto;';
                 fields.dataset.role = 'fields';
                 pane.appendChild(fields);
 
@@ -14352,7 +14726,7 @@
                 // Independent scroll container for the document. Distinct
                 // background so a blank PDF page does not visually merge
                 // into the modal chrome — the user always sees a frame.
-                docWrap.style.cssText = 'flex:1;min-height:0;background:#15191f;border-top:1px solid rgba(255,255,255,0.10);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04);overflow:auto;position:relative;display:flex;align-items:flex-start;justify-content:center;';
+                docWrap.style.cssText = 'flex:1;min-height:0;background:var(--viewport-bg-secondary);border-top:1px solid var(--border-strong);box-shadow:inset 0 0 0 1px var(--border-soft);overflow:auto;position:relative;display:flex;align-items:flex-start;justify-content:center;';
                 docWrap.dataset.role = 'document';
                 pane.appendChild(docWrap);
                 return pane;
@@ -14475,7 +14849,7 @@
                     b.type = 'button';
                     b.textContent = label;
                     b.title = title;
-                    b.style.cssText = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);color:#cdd5dd;font-size:10px;padding:2px 7px;border-radius:3px;cursor:pointer;font-weight:600;letter-spacing:0.4px;line-height:1.2;min-width:24px;';
+                    b.style.cssText = 'background:var(--bg-hover);border:1px solid var(--border-strong);color:var(--text-primary);font-size:10px;padding:2px 7px;border-radius:3px;cursor:pointer;font-weight:600;letter-spacing:0.4px;line-height:1.2;min-width:24px;';
                     b.addEventListener('click', action);
                     b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,255,255,0.14)'; });
                     b.addEventListener('mouseleave', () => { b.style.background = 'rgba(255,255,255,0.06)'; });
@@ -14483,7 +14857,7 @@
                 };
                 const zoomLabel = document.createElement('span');
                 zoomLabel.dataset.role = 'zoomLabel';
-                zoomLabel.style.cssText = 'min-width:42px;text-align:center;color:#cdd5dd;font-variant-numeric:tabular-nums;font-weight:600;';
+                zoomLabel.style.cssText = 'min-width:42px;text-align:center;color:var(--text-primary);font-variant-numeric:tabular-nums;font-weight:600;';
                 zoomLabel.textContent = '100%';
                 const stepZoom = (delta) => {
                     const cur = parseInt(paneEl.dataset.zoomPct || '100', 10);
@@ -15414,7 +15788,7 @@
                             '<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#FF5252;margin-right:4px;vertical-align:middle;"></span>Removed</span>' +
                             '<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#444;margin-right:4px;vertical-align:middle;"></span>Unchanged</span>' +
                             '</div>' +
-                            '<button id="diffShowAllBtn" style="margin:4px 12px;padding:4px 12px;font-size:11px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:rgba(255,255,255,0.6);cursor:pointer;" title="Show all revision differences">Show All Differences</button>';
+                            '<button id="diffShowAllBtn" style="margin:4px 12px;padding:4px 12px;font-size:11px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:4px;color:var(--text-secondary);cursor:pointer;" title="Show all revision differences">Show All Differences</button>';
                         const showAllBtn = document.getElementById('diffShowAllBtn');
                         if (showAllBtn) {
                             showAllBtn.addEventListener('click', () => {
@@ -15769,7 +16143,7 @@
             const drawerToggle = document.createElement('button');
             drawerToggle.id = 'bomDrawerToggle';
             drawerToggle.type = 'button';
-            drawerToggle.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;height:28px;background:rgba(255,255,255,0.04);border:none;border-top:1px solid rgba(255,255,255,0.08);color:var(--text-secondary,#9aa5b1);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;cursor:pointer;flex-shrink:0;';
+            drawerToggle.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;height:28px;background:var(--bg-toolbar);border:none;border-top:1px solid var(--border-structure);color:var(--text-secondary);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;cursor:pointer;flex-shrink:0;';
 
             const bomPanel = _buildBomComparePanelDom();
 
@@ -15801,11 +16175,11 @@
             const panel = document.createElement('div');
             panel.id = 'bomComparePanel';
             panel.className = 'bom-compare-panel';
-            panel.style.cssText = 'border-top:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.18);display:flex;flex-direction:column;max-height:320px;flex-shrink:0;overflow:hidden;';
+            panel.style.cssText = 'border-top:1px solid var(--border-structure);background:var(--bg-panel);display:flex;flex-direction:column;max-height:320px;flex-shrink:0;overflow:hidden;color:var(--text-primary);';
 
             const toolbar = document.createElement('div');
             toolbar.id = 'bomCompareToolbar';
-            toolbar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);flex-shrink:0;';
+            toolbar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg-ribbon);flex-shrink:0;color:var(--text-primary);';
 
             const title = document.createElement('span');
             title.textContent = 'BOM compare';
@@ -15844,7 +16218,7 @@
                 pill.className = 'bom-compare-filter-pill';
                 pill.textContent = f.label;
                 pill.title = FILTER_TOOLTIPS[f.id] || '';
-                pill.style.cssText = 'font-size:11px;padding:4px 10px;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:var(--text-secondary,#9aa5b1);cursor:pointer;line-height:1.2;';
+                pill.style.cssText = 'font-size:11px;padding:4px 10px;border-radius:12px;background:var(--bg-hover);border:1px solid var(--border-structure);color:var(--text-secondary);cursor:pointer;line-height:1.2;';
                 pill.addEventListener('click', () => {
                     diffState.bomCompare.filter = f.id;
                     // Reconcile selection with the new filter: if the selected
@@ -15875,7 +16249,7 @@
             // from isolation pills (which control 3D viewer opacity).
             const isoToolbar = document.createElement('div');
             isoToolbar.id = 'bomIsolateToolbar';
-            isoToolbar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.015);flex-shrink:0;';
+            isoToolbar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg-tab);flex-shrink:0;color:var(--text-primary);';
 
             const isoTitle = document.createElement('span');
             isoTitle.textContent = '3D isolate';
@@ -15903,7 +16277,7 @@
                 pill.className = 'bom-compare-isolation-pill';
                 pill.textContent = iso.label;
                 pill.title = ISOLATION_TOOLTIPS[iso.id] || '';
-                pill.style.cssText = 'font-size:11px;padding:4px 10px;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:var(--text-secondary,#9aa5b1);cursor:pointer;line-height:1.2;';
+                pill.style.cssText = 'font-size:11px;padding:4px 10px;border-radius:12px;background:var(--bg-hover);border:1px solid var(--border-structure);color:var(--text-secondary);cursor:pointer;line-height:1.2;';
                 pill.addEventListener('click', () => {
                     const newMode = iso.id;
                     diffState.bomCompare.isolation = newMode;
@@ -15959,7 +16333,7 @@
 
             const drawingHeader = document.createElement('div');
             drawingHeader.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:11px;color:var(--text-secondary,#9aa5b1);flex-shrink:0;';
-            drawingHeader.innerHTML = '<span id="bomDrawingHeaderLabel" style="font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Drawing</span><span id="bomDrawingHeaderRow" style="margin-left:auto;font-family:monospace;color:#cdd5dd;"></span><button id="bomDrawingCloseBtn" style="background:transparent;border:none;color:var(--text-secondary,#9aa5b1);font-size:14px;cursor:pointer;padding:0 4px;line-height:1;" title="Close drawing">×</button>';
+            drawingHeader.innerHTML = '<span id="bomDrawingHeaderLabel" style="font-weight:600;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-secondary);">Drawing</span><span id="bomDrawingHeaderRow" style="margin-left:auto;font-family:monospace;color:var(--text-primary);"></span><button id="bomDrawingCloseBtn" style="background:transparent;border:none;color:var(--text-secondary);font-size:14px;cursor:pointer;padding:0 4px;line-height:1;" title="Close drawing">×</button>';
             drawingPane.appendChild(drawingHeader);
 
             const drawingScroll = document.createElement('div');
@@ -15970,7 +16344,7 @@
 
             const drawingImg = document.createElement('img');
             drawingImg.id = 'bomDrawingImg';
-            drawingImg.style.cssText = 'display:block;width:100%;height:auto;background:#1a1d22;';
+            drawingImg.style.cssText = 'display:block;width:100%;height:auto;background:var(--bg-elevated);';
             drawingImg.alt = 'Assembly drawing';
             drawingImgWrap.appendChild(drawingImg);
 
@@ -16239,7 +16613,7 @@
                 `;
                 body.innerHTML = `
                     <table style="width:100%;border-collapse:collapse;font-size:11px;">
-                        <thead style="position:sticky;top:0;background:#1a1d22;z-index:1;">${headerRowHtml}</thead>
+                        <thead style="position:sticky;top:0;background:var(--bg-elevated);z-index:1;">${headerRowHtml}</thead>
                         <tbody>${filtered.map(r => _renderBomCompareRowHtml(r)).join('')}</tbody>
                     </table>
                 `;
@@ -16314,10 +16688,10 @@
             return `
                 <tr data-bom-row-pn="${_escapeHtml(r.key)}" style="${rowStyle}" title="Click to select. Ctrl/Cmd+click to add to selection.">
                     <td style="padding:6px 8px;color:${orderCellColor};font-weight:${isSelected ? '600' : '400'};">${r.display_order}</td>
-                    <td style="padding:6px 8px;font-family:monospace;color:#fff;">${_escapeHtml(r.key)}${primaryBadge}</td>
-                    <td style="padding:6px 8px;color:#cdd5dd;">${_escapeHtml(desc)}</td>
-                    <td style="padding:6px 8px;text-align:center;color:#cdd5dd;">${_escapeHtml(a.qty != null ? a.qty : '–')}</td>
-                    <td style="padding:6px 8px;text-align:center;color:#cdd5dd;">${_escapeHtml(b.qty != null ? b.qty : '–')}</td>
+                    <td style="padding:6px 8px;font-family:monospace;color:var(--text-primary);">${_escapeHtml(r.key)}${primaryBadge}</td>
+                    <td style="padding:6px 8px;color:var(--text-primary);">${_escapeHtml(desc)}</td>
+                    <td style="padding:6px 8px;text-align:center;color:var(--text-primary);">${_escapeHtml(a.qty != null ? a.qty : '–')}</td>
+                    <td style="padding:6px 8px;text-align:center;color:var(--text-primary);">${_escapeHtml(b.qty != null ? b.qty : '–')}</td>
                     <td style="padding:6px 8px;">${procBadge}</td>
                     <td style="padding:6px 8px;">${statusBadge}</td>
                 </tr>
@@ -17027,7 +17401,8 @@
 
             // Scene ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â dark background per IDEAS.md
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x22272F);
+            scene.background = _themeViewportBgColor();
+            _registerThemedScene(scene);
 
             // Camera
             const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
@@ -17036,6 +17411,7 @@
             const renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(width, height);
             renderer.setPixelRatio(window.devicePixelRatio);
+            _registerThemedRenderer(renderer);
             renderer.toneMapping = THREE.LinearToneMapping;
             renderer.toneMappingExposure = 1.0;
             renderer.outputEncoding = THREE.sRGBEncoding;
@@ -21483,7 +21859,8 @@
 
             // Scene
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x22272F);
+            scene.background = _themeViewportBgColor();
+            _registerThemedScene(scene);
 
             // Camera
             const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
@@ -21492,6 +21869,7 @@
             const renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(width, height);
             renderer.setPixelRatio(window.devicePixelRatio);
+            _registerThemedRenderer(renderer);
             container.appendChild(renderer.domElement);
 
             // Lighting: ambient + 3 directional lights for good coverage
@@ -28213,6 +28591,55 @@
             document.getElementById('accountBtn')?.addEventListener('click', () => {
                 if (window._toast) window._toast('Account settings coming soon', 'info');
             });
+
+            // ── Theme controller ──
+            // Flips data-theme on <html>, persists in localStorage, updates
+            // the meta theme-color, and notifies any registered viewport
+            // backgrounds so 3D scenes re-skin without a reload.
+            const themeBtn = document.getElementById('themeToggleBtn');
+            const metaTheme = document.getElementById('metaThemeColor');
+            const META_COLOR = { dark: '#0a0e18', light: '#dfe5ea' };
+
+            function _currentTheme() {
+                const t = document.documentElement.getAttribute('data-theme');
+                return (t === 'light') ? 'light' : 'dark';
+            }
+
+            // Public hook so unrelated systems (THREE.js scenes,
+            // canvas-based overlays) can subscribe to theme changes.
+            window.__themeChangeListeners = window.__themeChangeListeners || [];
+            window.onThemeChange = function (fn) {
+                if (typeof fn === 'function') window.__themeChangeListeners.push(fn);
+            };
+
+            function _applyTheme(theme) {
+                if (theme !== 'light' && theme !== 'dark') theme = 'dark';
+                document.documentElement.setAttribute('data-theme', theme);
+                if (metaTheme) metaTheme.setAttribute('content', META_COLOR[theme]);
+                if (themeBtn) {
+                    themeBtn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+                    themeBtn.title = theme === 'light' ? 'Theme: Light (click to switch to Dark)' : 'Theme: Dark (click to switch to Light)';
+                }
+                try { localStorage.setItem('inspectorpro.theme', theme); } catch (_) {}
+                (window.__themeChangeListeners || []).forEach(fn => {
+                    try { fn(theme); } catch (e) { console.warn('[theme] listener error', e); }
+                });
+            }
+
+            // Apply once at load to sync button label/aria with the
+            // attribute the head-script already set.
+            _applyTheme(_currentTheme());
+
+            if (themeBtn) {
+                themeBtn.addEventListener('click', () => {
+                    const next = _currentTheme() === 'light' ? 'dark' : 'light';
+                    _applyTheme(next);
+                });
+            }
+
+            // Expose for chat actions and tests.
+            window.setInspectorProTheme = _applyTheme;
+            window.getInspectorProTheme = _currentTheme;
         })();
 
         // Activity Bar â€” icon click routing with state sync

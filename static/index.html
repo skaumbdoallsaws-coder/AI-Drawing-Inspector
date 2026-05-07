@@ -116,9 +116,9 @@
             --border-structure: rgba(38,52,66,0.14);
             --border-strong: rgba(38,52,66,0.18);
             --shadow-color: rgba(26,36,46,0.14);
-            --text-primary: #23313d;
-            --text-secondary: #526372;
-            --text-muted: #70808f;
+            --text-primary: #1f2b35;
+            --text-secondary: #405363;
+            --text-muted: #596b7a;
             --text-on-accent: #ffffff;
             --accent: #2b77bf;
             --accent-strong: #155fa8;
@@ -143,7 +143,7 @@
             --overlay-border: rgba(38,52,66,0.14);
             --legend-bg: rgba(238,243,247,0.92);
             --gridline: rgba(60,76,92,0.10);
-            --viewport-empty-text: #60717f;
+            --viewport-empty-text: #536574;
             /* chat */
             --chat-composer-bg: #edf4fa;
             --chat-composer-border: rgba(43,119,191,0.16);
@@ -1487,6 +1487,30 @@
             flex-direction: column;
             overflow-y: auto;
             scroll-behavior: smooth;
+        }
+
+        .left-restore-strip {
+            display: none;
+            width: 6px;
+            min-width: 6px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            cursor: pointer;
+            position: relative;
+            box-shadow: inset -1px 0 0 rgba(0,0,0,0.12);
+        }
+        .left-restore-strip .restore-glyph {
+            position: absolute;
+            top: 50%;
+            left: 1px;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            font-size: 10px;
+            opacity: 0.7;
+        }
+        .left-restore-strip:hover {
+            background: var(--bg-hover);
+            border-right-color: var(--border-strong);
         }
 
         .panel-section {
@@ -5965,6 +5989,398 @@
             font-size: 9px;
             color: var(--text-secondary);
             margin-top: 2px;
+        }
+
+        /* Late light-theme corrections for surfaces declared after the
+           initial theme block. These keep dark mode untouched while fixing
+           the visible dark remnants in the light analysis theme. */
+        :root[data-theme="light"] .toolbar-brand {
+            color: var(--text-primary);
+        }
+        :root[data-theme="light"] .toolbar-brand .pro {
+            color: var(--accent);
+        }
+        :root[data-theme="light"] .toolbar-search-wrap {
+            background: var(--bg-input);
+            border-color: var(--border);
+        }
+        :root[data-theme="light"] .toolbar-search-wrap:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-strong);
+        }
+        :root[data-theme="light"] .toolbar-search-input,
+        :root[data-theme="light"] .toolbar-search-icon,
+        :root[data-theme="light"] .toolbar-control-btn,
+        :root[data-theme="light"] .icon-tb-btn {
+            color: var(--text-secondary);
+        }
+        :root[data-theme="light"] .toolbar-control-btn:hover,
+        :root[data-theme="light"] .icon-tb-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        :root[data-theme="light"] #iconSave svg > rect[width="96"][height="96"],
+        :root[data-theme="light"] #iconSettings svg > rect[width="96"][height="96"] {
+            fill: transparent;
+        }
+        :root[data-theme="light"] #iconSave svg [stroke="#FFF"],
+        :root[data-theme="light"] #iconSave svg [stroke="#FFFFFF"],
+        :root[data-theme="light"] #iconSettings svg [stroke="#FFF"],
+        :root[data-theme="light"] #iconSettings svg [stroke="#FFFFFF"] {
+            stroke: var(--accent-strong);
+        }
+        :root[data-theme="light"] #iconSave svg [fill="#FFF"],
+        :root[data-theme="light"] #iconSave svg [fill="#FFFFFF"],
+        :root[data-theme="light"] #iconSettings svg [fill="#FFF"],
+        :root[data-theme="light"] #iconSettings svg [fill="#FFFFFF"] {
+            fill: var(--accent-strong);
+        }
+        :root[data-theme="light"] #iconSave svg [stroke="#2A2A2A"],
+        :root[data-theme="light"] #iconSettings svg [stroke="#2A2A2A"] {
+            stroke: var(--text-secondary);
+        }
+        :root[data-theme="light"] #iconSave svg [fill="#2A2A2A"],
+        :root[data-theme="light"] #iconSettings svg [fill="#2A2A2A"] {
+            fill: var(--text-secondary);
+        }
+        :root[data-theme="light"] .toolbar-controls {
+            border-left-color: var(--border);
+        }
+        :root[data-theme="light"] .icon-toolbar-sep {
+            background: var(--border);
+        }
+        :root[data-theme="light"] .three-toolbar-popup {
+            background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-panel) 100%);
+            border-color: var(--border);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.72),
+                0 12px 26px var(--shadow-color);
+        }
+        :root[data-theme="light"] .three-toolbar-popup .three-toolbar-menu-item {
+            color: var(--text-secondary);
+        }
+        :root[data-theme="light"] .three-toolbar-popup .three-toolbar-menu-item:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-strong);
+            color: var(--text-primary);
+        }
+        :root[data-theme="light"] .three-toolbar-popup .three-toolbar-menu-item:active {
+            background: var(--bg-selected);
+            color: var(--accent-strong);
+        }
+        :root[data-theme="light"] .three-toolbar-caret {
+            color: var(--text-muted);
+        }
+
+        :root[data-theme="light"] .ribbon-group-label,
+        :root[data-theme="light"] .ribbon-label,
+        :root[data-theme="light"] .ribbon-compare-label,
+        :root[data-theme="light"] .ribbon-inline-vs,
+        :root[data-theme="light"] .ribbon-legend-item {
+            color: var(--text-muted);
+        }
+        :root[data-theme="light"] .ribbon-btn,
+        :root[data-theme="light"] .ribbon-chip,
+        :root[data-theme="light"] .ribbon-select,
+        :root[data-theme="light"] .ribbon-subtab-btn,
+        :root[data-theme="light"] .ribbon-overlay-row,
+        :root[data-theme="light"] .window-ctrl-btn,
+        :root[data-theme="light"] .app-menu-item,
+        :root[data-theme="light"] .app-menu-dropdown button {
+            color: var(--text-secondary);
+        }
+        :root[data-theme="light"] .ribbon-overlay-label {
+            color: inherit;
+        }
+        :root[data-theme="light"] .ribbon-btn:hover,
+        :root[data-theme="light"] .ribbon-subtab-btn:hover,
+        :root[data-theme="light"] .ribbon-overlay-row:hover,
+        :root[data-theme="light"] .window-ctrl-btn:hover,
+        :root[data-theme="light"] .app-menu-item:hover,
+        :root[data-theme="light"] .app-menu-dropdown button:hover {
+            color: var(--text-primary);
+        }
+        :root[data-theme="light"] .ribbon-btn:hover,
+        :root[data-theme="light"] .ribbon-subtab-btn:hover,
+        :root[data-theme="light"] .ribbon-overlay-row:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-strong);
+        }
+        :root[data-theme="light"] .ribbon-btn.active,
+        :root[data-theme="light"] .ribbon-subtab-btn.active,
+        :root[data-theme="light"] .ribbon-overlay-row.active {
+            color: var(--accent-strong);
+        }
+        :root[data-theme="light"] .ribbon-btn.active,
+        :root[data-theme="light"] .ribbon-overlay-row.active {
+            background: var(--bg-selected);
+            box-shadow: inset 2px 0 0 var(--accent);
+        }
+        :root[data-theme="light"] .ribbon-subtab-btn {
+            background: linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
+            border-color: var(--border);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+        }
+        :root[data-theme="light"] .ribbon-subtab-btn::before {
+            background: rgba(255,255,255,0.58);
+        }
+        :root[data-theme="light"] .ribbon-subtab-btn.active {
+            background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-panel) 52%, var(--bg-ribbon) 100%);
+            border-color: var(--border-strong);
+            box-shadow:
+                inset 0 1px rgba(255,255,255,0.75),
+                0 -1px 0 var(--shadow-color);
+        }
+        :root[data-theme="light"] .ribbon-btn.primary,
+        :root[data-theme="light"] .ribbon-btn.primary:hover {
+            background: var(--primary-btn);
+            color: var(--text-on-accent);
+        }
+        :root[data-theme="light"] .ribbon-select,
+        :root[data-theme="light"] .ribbon-select.compare-rev-select {
+            background: var(--bg-input);
+            border-color: var(--border);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+        }
+        :root[data-theme="light"] .ribbon-chip {
+            background: var(--bg-elevated);
+            border-color: var(--border);
+        }
+        :root[data-theme="light"] .ribbon-sep {
+            background: var(--border);
+        }
+        /* JS-generated panels still carry a few inline dark-theme text
+           colours. These exact-value guards normalize common chrome
+           greys in light mode without touching diagnostic/status colors. */
+        :root[data-theme="light"] [style*="color:#737C89" i],
+        :root[data-theme="light"] [style*="color: #737C89" i],
+        :root[data-theme="light"] [style*="color:#7E8896" i],
+        :root[data-theme="light"] [style*="color: #7E8896" i],
+        :root[data-theme="light"] [style*="color:#888" i],
+        :root[data-theme="light"] [style*="color: #888" i] {
+            color: var(--text-muted) !important;
+        }
+        :root[data-theme="light"] [style*="color:#9AA3AF" i],
+        :root[data-theme="light"] [style*="color: #9AA3AF" i],
+        :root[data-theme="light"] [style*="color:#A8B2C0" i],
+        :root[data-theme="light"] [style*="color: #A8B2C0" i],
+        :root[data-theme="light"] [style*="color:#bcc6d2" i],
+        :root[data-theme="light"] [style*="color: #bcc6d2" i],
+        :root[data-theme="light"] [style*="color:#CCD3DC" i],
+        :root[data-theme="light"] [style*="color: #CCD3DC" i] {
+            color: var(--text-secondary) !important;
+        }
+        :root[data-theme="light"] [style*="color:#D4D9E0" i],
+        :root[data-theme="light"] [style*="color: #D4D9E0" i],
+        :root[data-theme="light"] [style*="color:#E3E6EB" i],
+        :root[data-theme="light"] [style*="color: #E3E6EB" i],
+        :root[data-theme="light"] [style*="color:#F1F5F9" i],
+        :root[data-theme="light"] [style*="color: #F1F5F9" i],
+        :root[data-theme="light"] [style*="color:#F7FBFF" i],
+        :root[data-theme="light"] [style*="color: #F7FBFF" i] {
+            color: var(--text-primary) !important;
+        }
+
+        :root[data-theme="light"] .activity-bar-icon,
+        :root[data-theme="light"] .right-rail-icon {
+            color: var(--text-secondary);
+            border-color: var(--border);
+            background: linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+        }
+        :root[data-theme="light"] .activity-bar-icon:hover,
+        :root[data-theme="light"] .right-rail-icon:hover {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+            border-color: var(--border-strong);
+        }
+        :root[data-theme="light"] .activity-bar-icon.active,
+        :root[data-theme="light"] .right-rail-icon.active {
+            color: var(--accent-strong);
+            background: linear-gradient(180deg, rgba(43,119,191,0.14), rgba(43,119,191,0.06));
+            border-color: rgba(43,119,191,0.28);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+        }
+        :root[data-theme="light"] .activity-bar-icon[data-panel="model"] svg > rect[width="96"][height="96"] {
+            fill: transparent;
+        }
+        :root[data-theme="light"] .activity-bar-icon[data-panel="model"] svg [stroke="#FFF"],
+        :root[data-theme="light"] .activity-bar-icon[data-panel="model"] svg [stroke="#FFFFFF"] {
+            stroke: var(--accent-strong);
+        }
+        :root[data-theme="light"] .activity-tooltip,
+        :root[data-theme="light"] .right-rail-tooltip,
+        :root[data-theme="light"] .agent-icon-tooltip {
+            background: var(--overlay-bg);
+            border: 1px solid var(--overlay-border);
+            color: var(--text-primary);
+            box-shadow: 0 8px 18px var(--shadow-color);
+        }
+
+        :root[data-theme="light"] .agent-icons-strip,
+        :root[data-theme="light"] .agent-panel-messages {
+            border-color: var(--border);
+            background: transparent;
+        }
+        :root[data-theme="light"] .agent-msg-name {
+            color: var(--text-primary);
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+        :root[data-theme="light"] .agent-msg-row.user .agent-msg-name {
+            color: var(--accent-strong);
+        }
+        :root[data-theme="light"] .agent-msg-avatar.user-avatar {
+            border: 2px solid rgba(43,119,191,0.70);
+            box-shadow:
+                0 0 0 3px rgba(43,119,191,0.10),
+                0 8px 18px rgba(38,52,66,0.12);
+        }
+        :root[data-theme="light"] .agent-msg-avatar.bot-avatar {
+            box-shadow:
+                0 0 0 3px rgba(255,255,255,0.82),
+                0 8px 18px rgba(38,52,66,0.14);
+        }
+        :root[data-theme="light"] .agent-panel-messages .agent-msg.assistant {
+            background: var(--chat-bubble-assistant);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            box-shadow: 0 8px 18px var(--shadow-color), inset 0 1px 0 rgba(255,255,255,0.65);
+        }
+        :root[data-theme="light"] .agent-panel-messages .agent-msg.user {
+            background:
+                linear-gradient(180deg, rgba(231,241,250,0.96) 0%, rgba(216,234,249,0.90) 100%),
+                var(--chat-bubble-user);
+            color: var(--accent-strong);
+            border: 1px solid rgba(43,119,191,0.26);
+            box-shadow:
+                0 8px 18px rgba(43,119,191,0.12),
+                inset 0 1px 0 rgba(255,255,255,0.82);
+            font-weight: 500;
+        }
+        :root[data-theme="light"] .agent-typing {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(247,249,251,0.62) 100%),
+                var(--chat-bubble-assistant);
+            border: 1px solid var(--border);
+            box-shadow:
+                0 8px 18px rgba(38,52,66,0.10),
+                inset 0 1px 0 rgba(255,255,255,0.78);
+        }
+        :root[data-theme="light"] .agent-typing-dot {
+            background: var(--text-muted);
+        }
+        :root[data-theme="light"] .inspection-progress-card,
+        :root[data-theme="light"] .inspection-progress-card.completed,
+        :root[data-theme="light"] .inspection-progress-card.failed {
+            background: var(--bg-elevated);
+            border-color: var(--border);
+            box-shadow: 0 8px 18px var(--shadow-color);
+        }
+
+        :root[data-theme="light"] .upload-zone {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.70) 0%, rgba(247,249,251,0.54) 100%),
+                var(--bg-panel);
+            border-color: rgba(43,119,191,0.22);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.80),
+                0 8px 18px rgba(38,52,66,0.08);
+        }
+        :root[data-theme="light"] .upload-zone:hover {
+            background:
+                linear-gradient(180deg, rgba(231,241,250,0.92) 0%, rgba(247,249,251,0.70) 100%),
+                var(--bg-hover);
+            border-color: rgba(43,119,191,0.42);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.88),
+                0 10px 22px rgba(43,119,191,0.12);
+        }
+        :root[data-theme="light"] .upload-zone.dragover {
+            background:
+                linear-gradient(180deg, rgba(210,230,247,0.96) 0%, rgba(231,241,250,0.78) 100%),
+                var(--bg-selected);
+            border-color: var(--accent);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.90),
+                0 0 0 2px rgba(43,119,191,0.12);
+        }
+        :root[data-theme="light"] .upload-zone-text {
+            color: var(--text-secondary);
+        }
+        :root[data-theme="light"] .upload-zone-icon {
+            color: var(--accent-strong);
+            filter: drop-shadow(0 2px 4px rgba(43,119,191,0.12));
+        }
+
+        :root[data-theme="light"] .viewport-empty .brand-watermark {
+            opacity: 1;
+            color: rgba(67, 83, 99, 0.22);
+        }
+        :root[data-theme="light"] .viewport-empty .brand-watermark .brand-name {
+            color: rgba(255, 255, 255, 0.92);
+            text-shadow:
+                0 1px 2px rgba(35, 49, 61, 0.18),
+                0 8px 22px rgba(255, 255, 255, 0.38);
+        }
+        :root[data-theme="light"] .viewport-empty .brand-watermark .brand-name span {
+            color: rgba(43, 119, 191, 0.42) !important;
+        }
+
+        :root[data-theme="light"] .dwg-diff-rev-bar,
+        :root[data-theme="light"] .dwg-diff-summary-bar {
+            background: linear-gradient(180deg, var(--bg-ribbon) 0%, var(--bg-panel) 100%);
+            border-color: var(--border);
+            color: var(--text-secondary);
+        }
+        :root[data-theme="light"] .dwg-diff-rev-bar select {
+            background: var(--bg-input);
+            color: var(--text-primary);
+            border-color: var(--border);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+        }
+        :root[data-theme="light"] .dwg-diff-vs {
+            color: var(--text-muted);
+        }
+        :root[data-theme="light"] .dwg-diff-status,
+        :root[data-theme="light"] .dwg-diff-nav-pill,
+        :root[data-theme="light"] .dwg-diff-summary-bar .stat,
+        :root[data-theme="light"] .dwg-diff-toggles label {
+            background: var(--bg-elevated);
+            border-color: var(--border);
+            color: var(--text-secondary);
+        }
+        :root[data-theme="light"] .dwg-diff-nav-pill:hover,
+        :root[data-theme="light"] .dwg-diff-toggles label:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-strong);
+            color: var(--text-primary);
+        }
+        :root[data-theme="light"] .dwg-diff-nav-pill.active {
+            background: var(--bg-selected);
+            border-color: rgba(43,119,191,0.34);
+        }
+        :root[data-theme="light"] .dwg-diff-navigator {
+            border-top-color: var(--border);
+        }
+
+        :root[data-theme="light"] .part-explorer-presets {
+            border-bottom-color: var(--border);
+        }
+        :root[data-theme="light"] .part-explorer-preset-pill {
+            background: var(--bg-elevated);
+            border-color: var(--border);
+            color: var(--text-secondary);
+        }
+        :root[data-theme="light"] .part-explorer-preset-pill:hover {
+            background: var(--bg-hover);
+            border-color: rgba(43,119,191,0.24);
+            color: var(--text-primary);
+        }
+        :root[data-theme="light"] .part-explorer-preset-pill.active {
+            background: var(--bg-selected);
+            border-color: rgba(43,119,191,0.36);
+            color: var(--accent-strong);
         }
     </style>
     <!-- Three.js for 3D Model Viewer -->
@@ -13115,7 +13531,7 @@
                 // Horizontal ruler
                 const rulerH = document.createElement('canvas');
                 rulerH.id = 'rulerH';
-                rulerH.style.cssText = 'width:100%;height:20px;background:var(--bg-toolbar);border-bottom:1px solid var(--border);display:block;flex-shrink:0;';
+                rulerH.style.cssText = 'width:100%;height:22px;background:var(--bg-ribbon);border-bottom:1px solid var(--border-strong);display:block;flex-shrink:0;';
                 rulersContainer.appendChild(rulerH);
 
                 // Inner viewport (clips overflow)
@@ -13226,9 +13642,25 @@
                     const ctx = canvasH.getContext('2d');
                     ctx.scale(dpr, dpr);
                     ctx.clearRect(0, 0, cw, ch);
+                    const lightRuler = document.documentElement.getAttribute('data-theme') === 'light';
+                    const rulerColors = lightRuler ? {
+                        topLine: 'rgba(38, 52, 66, 0.12)',
+                        bottomLine: 'rgba(43, 119, 191, 0.42)',
+                        majorTick: 'rgba(64, 83, 99, 0.68)',
+                        midTick: 'rgba(64, 83, 99, 0.42)',
+                        minorTick: 'rgba(64, 83, 99, 0.24)',
+                        label: 'rgba(31, 43, 53, 0.82)'
+                    } : {
+                        topLine: 'rgba(255, 255, 255, 0.15)',
+                        bottomLine: 'rgba(79, 195, 247, 0.3)',
+                        majorTick: 'rgba(255, 255, 255, 0.6)',
+                        midTick: 'rgba(255, 255, 255, 0.4)',
+                        minorTick: 'rgba(255, 255, 255, 0.18)',
+                        label: 'rgba(255, 255, 255, 0.7)'
+                    };
 
                     // Top line
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                    ctx.strokeStyle = rulerColors.topLine;
                     ctx.lineWidth = 0.5;
                     ctx.beginPath();
                     ctx.moveTo(0, 0.5);
@@ -13236,7 +13668,7 @@
                     ctx.stroke();
 
                     // Bottom line
-                    ctx.strokeStyle = 'rgba(79, 195, 247, 0.3)';
+                    ctx.strokeStyle = rulerColors.bottomLine;
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     ctx.moveTo(0, ch - 0.5);
@@ -13254,8 +13686,8 @@
                     for (let px = -offsetPx; px < cw + majorSpacePx; px += majorSpacePx) {
                         majorNum++;
 
-                        // Major tick â€” tall, white
-                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+                        // Major tick
+                        ctx.strokeStyle = rulerColors.majorTick;
                         ctx.lineWidth = 1;
                         ctx.beginPath();
                         ctx.moveTo(px, ch);
@@ -13266,8 +13698,8 @@
                         // Number sits in the upper portion, above the ticks
                         if (majorNum > 0) {
                             const labelX = px + majorSpacePx / 2;
-                            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-                            ctx.font = '9px -apple-system, sans-serif';
+                            ctx.fillStyle = rulerColors.label;
+                            ctx.font = '600 9.5px "Segoe UI", -apple-system, sans-serif';
                             ctx.textAlign = 'center';
                             ctx.textBaseline = 'middle';
                             ctx.fillText(String(majorNum), labelX, ch * 0.22);
@@ -13279,7 +13711,7 @@
                             if (mpx >= cw) break;
                             const isMid = (m === 5); // middle tick slightly taller
                             const tickTop = isMid ? ch * 0.45 : ch * 0.6;
-                            ctx.strokeStyle = isMid ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.18)';
+                            ctx.strokeStyle = isMid ? rulerColors.midTick : rulerColors.minorTick;
                             ctx.lineWidth = 0.5;
                             ctx.beginPath();
                             ctx.moveTo(mpx, ch);
@@ -24908,7 +25340,12 @@
                 const parts = [];
                 state.partExplorerSelectedParts.forEach(pn => {
                     const item = assemblyContext.part_color_legend.find(l => l.part_number === pn);
-                    if (item) parts.push({ part_number: item.part_number, description: item.description || '' });
+                    if (item) parts.push({
+                        part_number: item.part_number,
+                        description: item.description || '',
+                        color: item.color || '',
+                        color_name: item.color_name || '',
+                    });
                 });
                 return parts;
             }
@@ -24919,6 +25356,7 @@
                     part_number: item.part_number,
                     description: item.description || '',
                     color: item.color,
+                    color_name: item.color_name || '',
                     centroid_mm: item.centroid_mm || null,
                 }));
             }
@@ -28724,9 +29162,9 @@
 
             // Create restore strip for left panel
             const leftRestore = document.createElement('div');
-            leftRestore.style.cssText = 'display:none;width:6px;min-width:6px;background:#1a1a24;border-right:1px solid #1e1e2a;cursor:pointer;position:relative;';
+            leftRestore.className = 'left-restore-strip';
             leftRestore.title = 'Double-click to restore panel (Ctrl+B)';
-            leftRestore.innerHTML = '<div style="position:absolute;top:50%;left:1px;transform:translateY(-50%);color:#444;font-size:10px;">›</div>';
+            leftRestore.innerHTML = '<div class="restore-glyph">›</div>';
             if (leftPanel) leftPanel.parentNode.insertBefore(leftRestore, leftPanel);
 
             function collapseLeft() {

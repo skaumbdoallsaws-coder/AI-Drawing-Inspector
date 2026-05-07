@@ -127,6 +127,37 @@ assembly_part_lookup: Dict[str, List[str]] = {}   # part_number -> [assembly_num
 assembly_profiles: Dict[str, dict] = {}            # assembly_number -> loaded JSON dict
 
 
+def _part_root_dir(safe_pn: str) -> Path:
+    """Return the part asset root, accepting standard and doubled layouts."""
+    base = Path("400S_Sorted_Library/parts") / safe_pn
+    doubled = base / safe_pn
+    if doubled.exists() and doubled.is_dir():
+        return doubled
+    return base
+
+
+def _part_rev_dir(safe_pn: str, safe_rev: str) -> Path:
+    return _part_root_dir(safe_pn) / f"rev{safe_rev}"
+
+
+def _part_asset_candidates(safe_pn: str, *relative_parts: str) -> List[Path]:
+    """Candidate part asset paths, doubled layout first then standard layout."""
+    base = Path("400S_Sorted_Library/parts") / safe_pn
+    roots = []
+    doubled = base / safe_pn
+    if doubled.exists() and doubled.is_dir():
+        roots.append(doubled)
+    roots.append(base)
+    return [root.joinpath(*relative_parts) for root in roots]
+
+
+def _resolve_part_asset(safe_pn: str, *relative_parts: str) -> Optional[Path]:
+    for candidate in _part_asset_candidates(safe_pn, *relative_parts):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _find_highlight_boxes_path(part_number: str, library_dir: str | Path) -> Optional[Path]:
     """Locate ``{part}_highlight_boxes.json`` in the inspection library."""
     safe_part_number = sanitize_part_number(part_number)
@@ -717,10 +748,14 @@ async def get_profile_details(part_number: str):
 
     # Try to find the inspection profile JSON on disk
     library_dir = Path("400S_Sorted_Library")
-    profile_path = library_dir / f"{safe_pn}_inspection_profile.json"
-    if not profile_path.exists():
-        profile_path = library_dir / f"{safe_pn}.json"
-    if not profile_path.exists():
+    profile_candidates = [
+        library_dir / f"{safe_pn}_inspection_profile.json",
+        library_dir / f"{safe_pn}.json",
+        *_part_asset_candidates(safe_pn, "revA", f"{safe_pn}_inspection_profile.json"),
+        *_part_asset_candidates(safe_pn, "revA", f"{safe_pn}.json"),
+    ]
+    profile_path = next((p for p in profile_candidates if p.exists()), None)
+    if profile_path is None:
         assy_data = assembly_profiles.get(safe_pn)
         if assy_data:
             ident = assy_data.get("identity", {}) or {}
@@ -744,13 +779,19 @@ async def get_profile_details(part_number: str):
 
         # Return a curated subset focused on what the agent needs
         features = []
-        for feat in data.get("features", []):
-            features.append({
-                "name": feat.get("name", ""),
-                "type": feat.get("type", ""),
-                "count": feat.get("count", 1),
-                "spatial_description": feat.get("spatial_description", ""),
-            })
+        raw_features = data.get("features", [])
+        if isinstance(raw_features, dict):
+            raw_features = raw_features.get("items") or raw_features.get("features") or []
+        if isinstance(raw_features, list):
+            for feat in raw_features:
+                if not isinstance(feat, dict):
+                    continue
+                features.append({
+                    "name": feat.get("name", ""),
+                    "type": feat.get("type", ""),
+                    "count": feat.get("count", 1),
+                    "spatial_description": feat.get("spatial_description", ""),
+                })
 
         return {
             "part_number": data.get("part_number", safe_pn),
@@ -800,9 +841,9 @@ async def get_3d_model(part_number: str):
     stl_path = Path("400S_Sorted_Library") / f"{safe_pn}.stl"
     # Fallback: check parts/{pn}/revA/ for revision-stored STL
     if not stl_path.exists():
-        rev_stl = Path("400S_Sorted_Library/parts") / safe_pn / "revA" / f"{safe_pn}.stl"
-        logger.info(f"[3D Model] Root STL not found, checking revision path: {rev_stl} exists={rev_stl.exists()}")
-        if rev_stl.exists():
+        rev_stl = _resolve_part_asset(safe_pn, "revA", f"{safe_pn}.stl")
+        logger.info(f"[3D Model] Root STL not found, checking revision path: {rev_stl} exists={rev_stl is not None}")
+        if rev_stl is not None:
             stl_path = rev_stl
     if not stl_path.exists():
         logger.warning(f"[3D Model] No STL found for {safe_pn}")
@@ -823,9 +864,9 @@ async def get_part_glb(part_number: str):
         raise HTTPException(status_code=400, detail="Invalid part number")
 
     # For revisioned parts, prefer parts/{pn}/revA/ to avoid stale root-level assets
-    rev_path = Path("400S_Sorted_Library/parts") / safe_pn / "revA" / f"{safe_pn}_colored.glb"
+    rev_path = _resolve_part_asset(safe_pn, "revA", f"{safe_pn}_colored.glb")
     root_path = Path("400S_Sorted_Library") / f"{safe_pn}_colored.glb"
-    glb_path = rev_path if rev_path.exists() else root_path
+    glb_path = rev_path if rev_path is not None else root_path
     if not glb_path.exists():
         raise HTTPException(status_code=404, detail=f"No feature-colored GLB for part '{part_number}'")
 
@@ -844,9 +885,9 @@ async def get_part_features(part_number: str):
         raise HTTPException(status_code=400, detail="Invalid part number")
 
     # For revisioned parts, prefer parts/{pn}/revA/ to avoid stale root-level assets
-    rev_json = Path("400S_Sorted_Library/parts") / safe_pn / "revA" / f"{safe_pn}_feature_colors.json"
+    rev_json = _resolve_part_asset(safe_pn, "revA", f"{safe_pn}_feature_colors.json")
     root_json = Path("400S_Sorted_Library") / f"{safe_pn}_feature_colors.json"
-    json_path = rev_json if rev_json.exists() else root_json
+    json_path = rev_json if rev_json is not None else root_json
     if not json_path.exists():
         raise HTTPException(status_code=404, detail=f"No feature color data for part '{part_number}'")
 
@@ -862,7 +903,7 @@ async def get_part_revisions(part_number: str):
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
 
-    parts_dir = Path("400S_Sorted_Library/parts") / safe_pn
+    parts_dir = _part_root_dir(safe_pn)
     if not parts_dir.exists() or not parts_dir.is_dir():
         return {"revisions": [], "part_number": safe_pn}
 
@@ -882,11 +923,11 @@ async def get_part_glb_revision(part_number: str, revision: str = Query(...)):
     if not safe_pn or not safe_rev:
         raise HTTPException(status_code=400, detail="Invalid part number or revision")
 
-    glb_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / f"{safe_pn}_colored.glb"
-    if not glb_path.exists():
+    glb_path = _resolve_part_asset(safe_pn, f"rev{safe_rev}", f"{safe_pn}_colored.glb")
+    if glb_path is None:
         # Fallback: serve STL if GLB not available
-        stl_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / f"{safe_pn}.stl"
-        if stl_path.exists():
+        stl_path = _resolve_part_asset(safe_pn, f"rev{safe_rev}", f"{safe_pn}.stl")
+        if stl_path is not None:
             return FileResponse(stl_path, media_type="model/stl")
         raise HTTPException(status_code=404, detail=f"No GLB or STL for part '{part_number}' revision '{revision}'")
 
@@ -900,7 +941,7 @@ async def get_part_feature_diff(part_number: str, revA: str = Query(...), revB: 
     safe_a = re.sub(r'[^\w]', '', revA)
     safe_b = re.sub(r'[^\w]', '', revB)
 
-    base_dir = Path("400S_Sorted_Library/parts") / safe_pn
+    base_dir = _part_root_dir(safe_pn)
     json_a = base_dir / f"rev{safe_a}" / f"{safe_pn}_feature_colors.json"
     json_b = base_dir / f"rev{safe_b}" / f"{safe_pn}_feature_colors.json"
 
@@ -1565,6 +1606,172 @@ def _build_part_properties(part_color_legend: list) -> list:
     return result
 
 
+def _read_glb_material_color_map(glb_path: Path) -> Dict[str, str]:
+    """Return a best-effort material/mesh-name -> hex color map from a GLB.
+
+    Assembly sidecars can carry stale partColorMapping data after a colored
+    GLB is regenerated. The GLB is the visual source of truth for Part
+    Explorer swatches and narration color labels.
+    """
+    if not glb_path.exists():
+        return {}
+    try:
+        raw = glb_path.read_bytes()
+        if len(raw) < 20 or raw[:4] != b"glTF":
+            return {}
+        offset = 12
+        gltf_json = None
+        while offset + 8 <= len(raw):
+            chunk_len = int.from_bytes(raw[offset:offset + 4], "little")
+            chunk_type = int.from_bytes(raw[offset + 4:offset + 8], "little")
+            offset += 8
+            chunk = raw[offset:offset + chunk_len]
+            offset += chunk_len
+            if chunk_type == 0x4E4F534A:  # JSON
+                gltf_json = json.loads(chunk.decode("utf-8").rstrip("\x00 \t\r\n"))
+                break
+        if not gltf_json:
+            return {}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return {}
+
+    def norm(value: Any) -> str:
+        return str(value or "").strip().lower().replace("\\", "/").rsplit("/", 1)[-1]
+
+    def factor_to_hex(factor: Any) -> Optional[str]:
+        if not isinstance(factor, list) or len(factor) < 3:
+            return None
+        try:
+            rgb = [max(0, min(255, int(round(float(v) * 255)))) for v in factor[:3]]
+        except (TypeError, ValueError):
+            return None
+        return "#{:02X}{:02X}{:02X}".format(*rgb)
+
+    material_colors: Dict[int, str] = {}
+    result: Dict[str, str] = {}
+    for idx, material in enumerate(gltf_json.get("materials", []) or []):
+        pbr = material.get("pbrMetallicRoughness") or {}
+        hex_val = factor_to_hex(pbr.get("baseColorFactor"))
+        if not hex_val:
+            continue
+        material_colors[idx] = hex_val
+        name = norm(material.get("name"))
+        if name:
+            result[name] = hex_val
+
+    meshes = gltf_json.get("meshes", []) or []
+    for mesh in meshes:
+        mesh_name = norm(mesh.get("name"))
+        if not mesh_name:
+            continue
+        prim_colors = []
+        for prim in mesh.get("primitives", []) or []:
+            mat_idx = prim.get("material")
+            if isinstance(mat_idx, int) and mat_idx in material_colors:
+                prim_colors.append(material_colors[mat_idx])
+        unique = sorted(set(prim_colors))
+        if len(unique) == 1:
+            result[mesh_name] = unique[0]
+
+    for node in gltf_json.get("nodes", []) or []:
+        node_name = norm(node.get("name"))
+        mesh_idx = node.get("mesh")
+        if not node_name or not isinstance(mesh_idx, int) or mesh_idx >= len(meshes):
+            continue
+        mesh_name = norm((meshes[mesh_idx] or {}).get("name"))
+        if mesh_name in result:
+            result[node_name] = result[mesh_name]
+            result[node_name.rsplit("/", 1)[-1]] = result[mesh_name]
+
+    return result
+
+
+def _correct_assembly_color_map_from_glb(assy_number: str, assy_data: dict, color_map: dict) -> dict:
+    """Overlay assembly color metadata with the actual colored-GLB materials."""
+    corrected = dict(color_map or {})
+    part_data_cache = assy_data.get("partDataCache", {})
+    glb_color_map = _read_glb_material_color_map(
+        Path("400S_Sorted_Library/assemblies") / f"{assy_number}_colored.glb"
+    )
+    if not glb_color_map:
+        return corrected
+
+    for old_key in list(corrected.keys() or part_data_cache.keys()):
+        identity = (part_data_cache.get(old_key, {}).get("identity") or {})
+        pn = ((identity.get("customProperties") or {}).get("PartNo", "")).strip()
+        if not pn:
+            pn = (identity.get("partNumber") or "").strip()
+        candidates = [
+            old_key,
+            Path(old_key).name,
+            Path(old_key).stem,
+            f"{pn}.sldprt" if pn else "",
+            pn,
+        ]
+        for candidate in candidates:
+            normalized = str(candidate or "").strip().lower().replace("\\", "/").rsplit("/", 1)[-1]
+            if normalized in glb_color_map:
+                corrected[old_key] = glb_color_map[normalized]
+                break
+
+    return corrected
+
+
+_ASSEMBLY_HEX_TO_NAME = {
+    "#E6194B": "red", "#3CB44B": "green", "#FFE119": "yellow", "#0082C8": "blue",
+    "#F58230": "orange", "#911EB4": "purple", "#46F0F0": "cyan", "#F032E6": "magenta",
+    "#D2F53C": "lime", "#FABEBE": "pink", "#FABED4": "pink", "#008080": "teal",
+    "#E6BEFF": "lavender", "#DCBEFF": "lavender", "#AA6E28": "brown",
+    "#FFFAC8": "cream", "#800000": "maroon", "#AAFFC3": "mint", "#808000": "olive",
+    "#FFD8B1": "apricot", "#000080": "navy", "#808080": "gray", "#FFFFFF": "white",
+    "#000000": "black",
+}
+
+
+def _assembly_hex_to_name(hex_val: Any) -> str:
+    if not isinstance(hex_val, str):
+        return ""
+    return _ASSEMBLY_HEX_TO_NAME.get(hex_val.upper(), hex_val)
+
+
+def _rewrite_narrative_color_references(value: Any, color_by_pn: Dict[str, str]) -> Any:
+    """Replace stale color words that appear directly next to part numbers."""
+    color_words = (
+        "red|green|yellow|blue|orange|purple|cyan|magenta|lime|pink|teal|"
+        "lavender|brown|cream|maroon|mint|olive|apricot|navy|gray|grey|white|black"
+    )
+
+    def rewrite_text(text: str) -> str:
+        fixed = text
+        for pn, color_name in color_by_pn.items():
+            if not pn or not color_name:
+                continue
+            escaped_pn = re.escape(str(pn))
+            # Robot Base (1030018, green)
+            fixed = re.sub(
+                rf"(\(\s*{escaped_pn}\s*,\s*)({color_words})(\s*\))",
+                lambda m, c=color_name: f"{m.group(1)}{c}{m.group(3)}",
+                fixed,
+                flags=re.IGNORECASE,
+            )
+            # 1030018 ROBOT BASE (green) or 1030018 (green)
+            fixed = re.sub(
+                rf"({escaped_pn}[^()\n]{{0,80}}\(\s*)({color_words})(\s*\))",
+                lambda m, c=color_name: f"{m.group(1)}{c}{m.group(3)}",
+                fixed,
+                flags=re.IGNORECASE,
+            )
+        return fixed
+
+    if isinstance(value, str):
+        return rewrite_text(value)
+    if isinstance(value, list):
+        return [_rewrite_narrative_color_references(v, color_by_pn) for v in value]
+    if isinstance(value, dict):
+        return {k: _rewrite_narrative_color_references(v, color_by_pn) for k, v in value.items()}
+    return value
+
+
 @app.get("/api/assembly-context/{part_number}")
 async def get_assembly_context(part_number: str):
     """Return assembly context for a part number or direct assembly number."""
@@ -1640,6 +1847,7 @@ async def get_assembly_context(part_number: str):
         "#E6194B": "red", "#3CB44B": "green", "#FFE119": "yellow", "#0082C8": "blue",
         "#F58230": "orange", "#911EB4": "purple", "#46F0F0": "cyan", "#F032E6": "magenta",
         "#D2F53C": "lime", "#FABEBE": "pink", "#008080": "teal", "#E6BEFF": "lavender",
+        "#FABED4": "pink", "#DCBEFF": "lavender",
         "#AA6E28": "brown", "#FFFAC8": "cream", "#800000": "maroon", "#AAFFC3": "mint",
         "#808000": "olive", "#FFD8B1": "apricot", "#000080": "navy", "#808080": "gray",
         "#FFFFFF": "white", "#000000": "black",
@@ -1663,6 +1871,7 @@ async def get_assembly_context(part_number: str):
             old_key: palette[idx % len(palette)]
             for idx, old_key in enumerate(sorted(part_data_cache.keys()))
         }
+    color_map = _correct_assembly_color_map_from_glb(assy_number, assy_data, color_map)
     part_color_legend = []
     for old_key, color in color_map.items():
         identity = (part_data_cache.get(old_key, {}).get("identity") or {})
@@ -1697,6 +1906,16 @@ async def get_assembly_context(part_number: str):
         instances = centroid_lookup.get(item["old_key"].lower(), [])
         item["centroid_mm"] = instances if instances else None
 
+    color_by_pn = {
+        item["part_number"]: item.get("color_name", "")
+        for item in part_color_legend
+        if item.get("part_number")
+    }
+    functional_narrative = _rewrite_narrative_color_references(
+        assy_data.get("functionalNarrative", {}),
+        color_by_pn,
+    )
+
     # Build components list for Part Explorer mesh mapping + instance-level explode
     components = [
         {
@@ -1719,7 +1938,7 @@ async def get_assembly_context(part_number: str):
         "mates_for_part": mates_for_part,
         "mate_relationships_for_part": relationships_for_part,
         "all_mate_relationships": all_relationships,
-        "functional_narrative": assy_data.get("functionalNarrative", {}),
+        "functional_narrative": functional_narrative,
         "color_assignments": color_map,
         "part_color_legend": part_color_legend,
         "components": components,
@@ -2602,8 +2821,7 @@ async def get_drawing_diff(
 
     # Load geometry diff if available (for projected model delta)
     geometry_diff = None
-    geom_cache = (Path("400S_Sorted_Library/parts") / safe_pn
-                  / "geometry_diff" / f"{safe_a}_vs_{safe_b}" / "diff_result.json")
+    geom_cache = _part_root_dir(safe_pn) / "geometry_diff" / f"{safe_a}_vs_{safe_b}" / "diff_result.json"
     if geom_cache.exists():
         try:
             with open(geom_cache, encoding="utf-8-sig") as f:
@@ -2645,8 +2863,8 @@ def _load_part_json(part_number: str, revision: str) -> Optional[dict]:
     safe_rev = revision
 
     # Revision-specific
-    rev_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / f"{safe_pn}.json"
-    if rev_path.exists():
+    rev_path = _resolve_part_asset(safe_pn, f"rev{safe_rev}", f"{safe_pn}.json")
+    if rev_path is not None:
         try:
             with open(rev_path, encoding="utf-8-sig") as f:
                 return json.load(f)
@@ -2672,8 +2890,8 @@ def _load_highlight_boxes(part_number: str, revision: str) -> Optional[dict]:
     filename = f"{safe_pn}_highlight_boxes.json"
 
     # Revision-specific
-    rev_path = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}" / filename
-    if rev_path.exists():
+    rev_path = _resolve_part_asset(safe_pn, f"rev{safe_rev}", filename)
+    if rev_path is not None:
         try:
             with open(rev_path, encoding="utf-8-sig") as f:
                 return json.load(f)
@@ -2718,6 +2936,16 @@ def _load_drawing_compare_map_revision(part_number: str, revision: str) -> Optio
             normalized["revision"] = safe_rev
             return normalized
 
+    filename = f"{safe_pn}_drawing_map.json"
+    part_map = _resolve_part_asset(safe_pn, f"rev{safe_rev}", filename)
+    if part_map is not None:
+        with open(part_map, "r", encoding="utf-8-sig") as handle:
+            raw_data = json.load(handle)
+        normalized = normalize_drawing_map(raw_data, part_number=safe_pn)
+        normalized["sourcePath"] = str(part_map)
+        normalized["revision"] = safe_rev
+        return normalized
+
     return load_drawing_map_revision(safe_pn, safe_rev, "400S_Sorted_Library")
 
 
@@ -2728,6 +2956,15 @@ def _list_drawing_compare_revisions(part_number: str) -> List[str]:
         return []
 
     revisions = list_drawing_map_revisions(safe_pn, "400S_Sorted_Library")
+    filename = f"{safe_pn}_drawing_map.json"
+    part_root = _part_root_dir(safe_pn)
+    nested_found = []
+    if part_root.exists() and part_root.is_dir():
+        for d in sorted(part_root.iterdir()):
+            if d.is_dir() and d.name.lower().startswith("rev") and (d / filename).exists():
+                nested_found.append(d.name[3:])
+    if len(nested_found) >= 2:
+        return nested_found
     if len(revisions) >= 2:
         return revisions
 
@@ -2775,7 +3012,7 @@ async def get_drawing_render(part_number: str, revision: str = Query(...)):
                     pix = doc.load_page(0).get_pixmap(dpi=150, alpha=False)
                     return Response(content=pix.tobytes("png"), media_type="image/png")
 
-    base_dir = Path("400S_Sorted_Library/parts") / safe_pn / f"rev{safe_rev}"
+    base_dir = _part_rev_dir(safe_pn, safe_rev)
     # Raster only — PDF excluded (can't render in <img>)
     for ext, media in [("png", "image/png"), ("jpg", "image/jpeg")]:
         render_path = base_dir / f"{safe_pn}_drawing.{ext}"
@@ -3945,7 +4182,7 @@ def _compute_drawing_classification(
     if has_assembly_context:
         rev_root = Path("400S_Sorted_Library/assemblies") / safe_pn
     else:
-        rev_root = Path("400S_Sorted_Library/parts") / safe_pn
+        rev_root = _part_root_dir(safe_pn)
     has_drawing_revisions = False
     if rev_root.exists() and rev_root.is_dir():
         rev_dirs = [d for d in rev_root.iterdir() if d.is_dir() and d.name.lower().startswith("rev")]
@@ -3969,7 +4206,7 @@ def _compute_drawing_classification(
             rev_root_dir = Path("400S_Sorted_Library/assemblies") / safe_pn
             flat_fallback = Path("400S_Sorted_Library/assemblies") / f"{safe_pn}_drawing_map.json"
         else:
-            rev_root_dir = Path("400S_Sorted_Library/parts") / safe_pn
+            rev_root_dir = _part_root_dir(safe_pn)
             flat_fallback = Path("400S_Sorted_Library") / f"{safe_pn}_drawing_map.json"
 
         candidates: List[Path] = []
@@ -4344,9 +4581,12 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         for sp in selected_parts:
             pn = sp.get("part_number", "")
             desc = sp.get("description", "")
+            color_name = sp.get("color_name", "")
             label = pn
             if desc:
                 label += f" \u2014 {desc}"
+            if color_name:
+                label += f" [{color_name}]"
             sp_lines.append(f"- {label}")
         sp_lines.append("The user may ask about these parts. Reference them by part number and description.")
         parts.append("\n".join(sp_lines))
@@ -4959,7 +5199,22 @@ async def agent_chat(request: AgentChatRequest):
                         sc_parts.extend(mate_lines)
 
                     # Functional narrative — procurement-relevant sections only
-                    narrative = assy_data.get("functionalNarrative", {})
+                    color_by_pn = {}
+                    colors = _correct_assembly_color_map_from_glb(
+                        assy_num,
+                        assy_data,
+                        assy_data.get("partColorMapping", assy_data.get("colorAssignments", {})),
+                    )
+                    for old_key, color_val in colors.items():
+                        color_hex = color_val if isinstance(color_val, str) else color_val.get("color", "unknown")
+                        pd_identity = (pdc.get(old_key, {}).get("identity") or {})
+                        new_pn = pd_identity.get("partNumber", "")
+                        if new_pn:
+                            color_by_pn[new_pn] = _assembly_hex_to_name(color_hex)
+                    narrative = _rewrite_narrative_color_references(
+                        assy_data.get("functionalNarrative", {}),
+                        color_by_pn,
+                    )
                     if narrative:
                         sc_parts.append("\nFUNCTIONAL CONTEXT:")
                         for section_key in ["assemblyOverview", "criticalInterfaces"]:
@@ -5025,9 +5280,20 @@ async def agent_chat(request: AgentChatRequest):
                     da_parts.append("- (no direct mates found)")
 
                 # Color assignments — resolve old filenames to new part numbers
-                colors = assy_data.get("partColorMapping", assy_data.get("colorAssignments", {}))
+                colors = _correct_assembly_color_map_from_glb(
+                    assy_num,
+                    assy_data,
+                    assy_data.get("partColorMapping", assy_data.get("colorAssignments", {})),
+                )
+                visual_color_by_pn = {}
+                for old_key, color_val in colors.items():
+                    color_hex = color_val if isinstance(color_val, str) else color_val.get("color", "unknown")
+                    pd_identity = (pdc.get(old_key, {}).get("identity") or {})
+                    new_pn = pd_identity.get("partNumber", "")
+                    if new_pn:
+                        visual_color_by_pn[new_pn] = _assembly_hex_to_name(color_hex)
                 if colors:
-                    da_parts.append("\nCOLOR ASSIGNMENTS (reference views):")
+                    da_parts.append("\nCOLOR ASSIGNMENTS (current 3D visual source of truth):")
                     for old_key, color_val in colors.items():
                         color_hex = color_val if isinstance(color_val, str) else color_val.get("color", "unknown")
                         # Resolve to new part number + description
@@ -5039,7 +5305,10 @@ async def agent_chat(request: AgentChatRequest):
                         da_parts.append(f"- {label}: {color_hex}{is_current}")
 
                 # Select functional narrative sections based on question keywords
-                narrative = assy_data.get("functionalNarrative", {})
+                narrative = _rewrite_narrative_color_references(
+                    assy_data.get("functionalNarrative", {}),
+                    visual_color_by_pn,
+                )
                 if narrative:
                     msg_lower = request.message.lower()
                     sections_to_include = []

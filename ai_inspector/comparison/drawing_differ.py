@@ -1604,10 +1604,20 @@ def _compute_projected_model_delta(
     if not geometry_diff or geometry_diff.get("identical", True):
         return {"available": False, "reason": "no_geometry_diff", "perView": {}}
 
-    # Use sketch_dimension_matcher projection helpers
-    from ai_inspector.comparison.sketch_dimension_matcher import (
-        SW_VIEW_PROJECTIONS, _model_to_sheet,
-    )
+    # Use projection helpers when available. Some local/demo worktrees carry
+    # drawing compare data without the optional sketch-dimension matcher
+    # module; drawing compare should still load and simply mark projected
+    # model delta unavailable.
+    try:
+        from ai_inspector.comparison.sketch_dimension_matcher import (
+            SW_VIEW_PROJECTIONS, _model_to_sheet,
+        )
+    except ModuleNotFoundError:
+        return {
+            "available": False,
+            "reason": "projection_helpers_unavailable",
+            "perView": {},
+        }
 
     # Prefer explicit per-region bbox output from geometry diff. Fall back to the
     # older centroid-only contract if region boxes are unavailable.

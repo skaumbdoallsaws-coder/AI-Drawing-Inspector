@@ -525,8 +525,12 @@ class SpatialInspector:
         }
 
     def _build_profile_index(self) -> None:
-        for p in self._library.glob("*_inspection_profile.json"):
+        # Support both the original flat library layout and revisioned part
+        # folders such as parts/{pn}/{pn}/revA/{pn}_inspection_profile.json.
+        for p in sorted(self._library.rglob("*_inspection_profile.json")):
             pn = p.name.replace("_inspection_profile.json", "")
+            if pn in self._profile_index:
+                continue
             self._profile_index[pn] = (pn, p)
             norm = re.sub(r"[-_\s]", "", pn).lower()
             if norm not in self._profile_index:

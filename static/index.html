@@ -25390,6 +25390,49 @@
             // site uses optional-chain so a missing binding is non-fatal.
             window._fetchDrawingClassification = _fetchDrawingClassification;
 
+            // Resolve a human display name for the active user so Sage can
+            // address them by name in sales-coaching mode. Visible UI
+            // selectors win first (so the chat/profile chip the user can
+            // actually see is the canonical source) and only fall back to
+            // localStorage profile keys when no UI element is rendered.
+            function _getUserDisplayNameForAgent() {
+                // Prefer the visible chip — whatever appears in the chat
+                // header/account widget is what the user has accepted as
+                // their name in this session.
+                const visibleSelectors = [
+                    '[data-user-name]',
+                    '.account-name',
+                    '.profile-name',
+                    '.user-name',
+                    '#accountName',
+                    '#profileName',
+                ];
+                for (const sel of visibleSelectors) {
+                    const text = document.querySelector(sel)?.textContent?.trim();
+                    if (text && text.length > 1 && !/account|profile|user/i.test(text)) {
+                        return text;
+                    }
+                }
+                // Fallback: localStorage profile keys.
+                const candidates = [
+                    'inspectorpro.profile',
+                    'inspectorpro.userProfile',
+                    'inspectorpro.account',
+                    'userProfile',
+                ];
+                for (const key of candidates) {
+                    try {
+                        const raw = localStorage.getItem(key);
+                        if (!raw) continue;
+                        const parsed = JSON.parse(raw);
+                        const name = parsed.display_name || parsed.displayName
+                            || parsed.name || parsed.first_name || parsed.firstName;
+                        if (name && typeof name === 'string') return name.trim();
+                    } catch (_) { /* malformed entry — try next */ }
+                }
+                return '';
+            }
+
             function buildAgentAttachments(agentType) {
                 const att = { schema_version: 1 };
 
@@ -25397,6 +25440,12 @@
                 att.session = {
                     agent: agentType || currentAgent,
                     active_tab: state.activeTab || null,
+                };
+
+                // USER — display name only (used by sales-coaching mode for
+                // a personalised opener). Empty string if no name available.
+                att.user = {
+                    display_name: _getUserDisplayNameForAgent() || '',
                 };
 
                 // PART
@@ -26523,11 +26572,19 @@
                 }
                 _clearCurrentAudio();
                 _updateNarrationUI();
-                // Show all segments with full text so user can read them after stop
+                // After stop: walkthrough mode renders the full script for
+                // scrollback (existing behaviour). Sales-coaching mode keeps
+                // the last spoken segment visible only — we are coaching,
+                // not delivering a brochure script.
                 if (state.narrationSegments) {
-                    _renderAllSegmentsFinal(state.narrationSegments);
+                    if (state._narrationKind === 'sales_coaching') {
+                        _renderSalesCoachingClosingCard(state.narrationSegments);
+                    } else {
+                        _renderAllSegmentsFinal(state.narrationSegments);
+                    }
                     state.narrationSegments = null;
                 }
+                state._narrationKind = null;
                 _restorePartState();
                 // Reset explode when narration stops
                 if (state.assyExplodeLevel > 0) _animateExplode(0);
@@ -27011,8 +27068,16 @@
                     state.narrationSegmentIndex = -1;
                     state.narrationSegments = null;
                     _updateNarrationUI();
-                    // Render all segments with full text for scrollback
-                    _renderAllSegmentsFinal(segments);
+                    // Walkthrough mode dumps the full script for scrollback.
+                    // Sales-coaching mode renders a compact closing card so
+                    // the chat does not become a brochure transcript after
+                    // the voice walkthrough ends.
+                    if (state._narrationKind === 'sales_coaching') {
+                        _renderSalesCoachingClosingCard(segments);
+                    } else {
+                        _renderAllSegmentsFinal(segments);
+                    }
+                    state._narrationKind = null;
                     _restorePartState();
                     voiceStopBtn.style.display = 'none';
                     voiceOrb.classList.remove('speaking');
@@ -27182,8 +27247,43 @@
                     lastMsg.innerHTML = '';
                     return;
                 }
-                // Typed walkthrough: render all segments with full text
+                // Typed walkthrough: render all segments with full text.
+                // Sales-coaching skips the bulk dump even on typed playback —
+                // a coach does not paste their whole script at once.
+                if (state._narrationKind === 'sales_coaching') {
+                    _renderSalesCoachingClosingCard(segments);
+                    return;
+                }
                 _renderAllSegmentsFinal(segments);
+            }
+
+            // Sales-coaching closing card: shows just the LAST spoken
+            // segment plus a small "Sales coaching complete" footer with
+            // the count. Avoids dumping the full script into the chat
+            // pane after voice playback ends. Walkthrough mode keeps the
+            // existing scrollback behaviour.
+            function _renderSalesCoachingClosingCard(segments) {
+                const lastMsg = agentMessages.querySelector('.agent-msg-row.assistant:last-child .agent-msg');
+                if (!lastMsg || !Array.isArray(segments) || segments.length === 0) return;
+                lastMsg.innerHTML = '';
+                // Pick the last segment with non-empty text (closing line).
+                let closing = null;
+                for (let i = segments.length - 1; i >= 0; i--) {
+                    if (segments[i] && segments[i].text && segments[i].text.trim()) {
+                        closing = segments[i];
+                        break;
+                    }
+                }
+                if (closing) {
+                    const segEl = document.createElement('div');
+                    segEl.className = 'narration-segment narration-active';
+                    segEl.innerHTML = formatMessageText(closing.text);
+                    lastMsg.appendChild(segEl);
+                }
+                const footer = document.createElement('div');
+                footer.style.cssText = 'margin-top:8px;padding:6px 10px;font-size:11px;color:var(--text-secondary);font-style:italic;border-top:1px solid var(--border);text-align:right;';
+                footer.textContent = `Sales coaching complete · ${segments.length} segments`;
+                lastMsg.appendChild(footer);
             }
             // Expose narration helpers to outer scope (Part Explorer, presets)
             window._restoreIfSnapshotted = _restoreIfSnapshotted;
@@ -27967,6 +28067,12 @@
 
                     // Narration/voice rendering requires live DOM â€” skip if switched away
                     if (originVisible) {
+                        // Tag the narration kind so end-of-playback handlers
+                        // can branch: sales-coaching responses must NOT
+                        // dump the full script into the chat after the
+                        // voice walkthrough — only the active segment is
+                        // visible at any time.
+                        state._narrationKind = isSalesCoachingResponse ? 'sales_coaching' : 'walkthrough';
                         _enhanceWithNarrationSegments(data.narration_segments, isAutoPlay);
                         if (isAutoPlay) {
                             state.narrationTriggered = false;

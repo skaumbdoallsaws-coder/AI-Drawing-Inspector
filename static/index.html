@@ -27944,8 +27944,12 @@
                     const textResponse = data.response || '';
                     // Detect walkthrough keywords in typed message to trigger full narration
                     const walkthroughKeywords = /walk\s*(me\s+)?through|narrat|give\s*(me\s+)?a\s+tour|guided\s+tour|tour\s+of|explain\s+the\s+assembly|tell\s+me\s+about\s+(this|the)\s+assembly/i;
+                    const salesCoachingKeywords = /coach\s+me\s+to\s+sell|how\s+do\s+i\s+sell|sales\s+walkthrough|sales\s+coach|pitch\s+(this|the)|help\s+me\s+explain\s+this\s+(machine|robot)|sell\s+this\s+(robot|machine)/i;
                     const isTypedWalkthrough = !voiceTriggered && !state.narrationTriggered && walkthroughKeywords.test(displayText);
-                    const isAutoPlay = state.narrationTriggered || voiceTriggered || isTypedWalkthrough;
+                    const isSalesCoachingResponse = !!(data.sales_coaching && !data.sales_coaching.awaiting_application);
+                    const isTypedSalesCoaching = !voiceTriggered && !state.narrationTriggered
+                        && (isSalesCoachingResponse || salesCoachingKeywords.test(displayText));
+                    const isAutoPlay = state.narrationTriggered || voiceTriggered || isTypedWalkthrough || isTypedSalesCoaching;
                     // Always store the full text in the message (canonical data).
                     // For auto-play, the DOM is cleared by _enhanceWithNarrationSegments â€”
                     // but the session message retains the text for restore.

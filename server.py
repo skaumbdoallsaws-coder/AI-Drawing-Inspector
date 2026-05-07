@@ -5921,6 +5921,11 @@ async def agent_chat(request: AgentChatRequest):
             result["isolate_parts"] = isolate_parts
         if narration_segments:
             result["narration_segments"] = narration_segments
+        if is_sales_coaching:
+            result["sales_coaching"] = {
+                "application": sales_application,
+                "awaiting_application": False,
+            }
         if camera_view:
             result["camera_view"] = camera_view
         if explode_level is not None:

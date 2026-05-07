@@ -5054,6 +5054,112 @@ def _is_walkthrough_message(message: str) -> bool:
     return any(kw in msg_lower for kw in ["walk", "tour", "narrat", "walkthrough"])
 
 
+# ───────────────────────── Sales-coaching mode ─────────────────────────
+# Engineering-grounded sales coaching is a SEPARATE narration mode from the
+# part-by-part walkthrough. The intent detector and application extractor
+# below feed a dedicated SALES_COACHING_OUTPUT_OVERRIDE in the chat
+# endpoint. Walkthrough detection runs FIRST so the existing prompt
+# "Walk me through this assembly part by part" keeps using the legacy
+# walkthrough override unchanged.
+
+_SALES_COACHING_PATTERNS = (
+    "coach me to sell",
+    "how do i sell",
+    "sales walkthrough",
+    "sales coach",
+    "pitch this",
+    "pitch the",
+    "help me explain this machine",
+    "help me explain this robot",
+    "sell this robot",
+    "sell this machine",
+)
+
+_SALES_APPLICATIONS = {
+    "machine tending":     ["machine tending", "cnc tending", "load cnc", "unload cnc"],
+    "welding":             ["welding", "spot welding", "weld cell", "large frames"],
+    "press tending":       ["press tending", "press loading", "press unloading", "press automation"],
+    "material handling":   ["material handling", "heavy parts", "part transfer", "transfer parts"],
+    "palletizing":         ["palletizing", "end of line", "stacking"],
+    "deburring/grinding":  ["deburring", "grinding", "polishing", "finishing"],
+}
+
+
+def _is_sales_coaching_message(message: str) -> bool:
+    """True when the user is asking Sage to coach them on selling the
+    machine. Phrasing patterns from the spec; case-insensitive substring
+    match keeps the detector forgiving of natural-chat variations."""
+    msg = (message or "").lower()
+    return any(p in msg for p in _SALES_COACHING_PATTERNS)
+
+
+def _extract_sales_application(message: str) -> str:
+    """Return the canonical sales application name when the message
+    contains an alias for one. Returns '' when no application phrase
+    is present — caller uses that to trigger the clarification path
+    instead of generating a generic pitch."""
+    msg = (message or "").lower()
+    for app_name, aliases in _SALES_APPLICATIONS.items():
+        if any(alias in msg for alias in aliases):
+            return app_name
+    return ""
+
+
+_SALES_COACHING_CLARIFICATION = (
+    "What application are you selling it into: machine tending, welding, "
+    "press tending, material handling, palletizing, or deburring/grinding?"
+)
+
+
+def _sales_coaching_override(application: str) -> str:
+    """Return the system-prompt override appended to the agent prompt
+    when the chat handler decides the message is a sales-coaching
+    request with a known application. Mirrors the walkthrough override
+    pattern so the legacy narration parser produces segments with
+    HIGHLIGHT_PARTS + the new optional CAMERA_FOCUS marker."""
+    return (
+        "\n\n"
+        "SALES_COACHING OUTPUT OVERRIDE\n\n"
+        "You are generating an engineering-grounded sales coaching walkthrough.\n\n"
+        "Purpose:\n"
+        "- Help a salesperson or application engineer explain this machine for the\n"
+        f"  target application: {application}.\n"
+        "- Translate engineering facts into buyer value.\n"
+        "- Stay grounded in the provided CAD, assembly, mate, part, and inspection context.\n"
+        "- Do not invent exact commercial specs unless present in context.\n"
+        "- If a payload, reach, speed, tolerance, cycle-time, or supplier claim is not in\n"
+        "  context, say it must be verified against the released datasheet.\n\n"
+        "Output format:\n"
+        "- Voice-friendly narration chunks.\n"
+        "- Each chunk should be 1 to 3 short sentences.\n"
+        "- Each chunk must be followed by HIGHLIGHT_PARTS.\n"
+        "- Use CAMERA_FOCUS when useful.\n"
+        "- Use part numbers from AVAILABLE PARTS only.\n"
+        "- Do not output JSON.\n"
+        "- Do not output markdown tables.\n"
+        "- Do NOT emit <tool_calls> or any tool-syntax JSON for this response.\n\n"
+        "Required structure:\n"
+        "1. Opening value proposition for the target application.\n"
+        "2. Whole-machine positioning.\n"
+        "3. 4 to 6 highlighted engineering selling points.\n"
+        "4. Common buyer objections and engineering-backed responses.\n"
+        "5. Closing pitch.\n\n"
+        "Segment format:\n"
+        "[spoken narration]\n"
+        "HIGHLIGHT_PARTS: part_number1, part_number2\n"
+        "CAMERA_FOCUS: part_number1, part_number2\n\n"
+        "Rules:\n"
+        "- Talk like a technical sales coach, not a generic marketer.\n"
+        "- Explain why the customer should care.\n"
+        "- Tie each claim to a visible part or engineering fact.\n"
+        "- Prefer concrete terms: stiffness, load path, reach envelope, service access,\n"
+        "  tooling interface, repeatability, safety, uptime, inspection confidence.\n"
+        "- Avoid overclaiming.\n"
+        "- Use \"verify against the released datasheet\" when exact commercial values are\n"
+        "  not in context.\n"
+    )
+
+
 @app.post("/api/agent/chat")
 async def agent_chat(request: AgentChatRequest):
     """Chat with the InspectorPro Agent (ASME expert powered by Claude)."""
@@ -5070,11 +5176,34 @@ async def agent_chat(request: AgentChatRequest):
     if request.agent_type not in AGENT_PROMPTS:
         raise HTTPException(status_code=400, detail=f"Invalid agent_type: '{request.agent_type}'. Must be one of: inspector, deviation-analyst, parts-finder")
 
-    is_walkthrough = _is_walkthrough_message(request.message)
+    # Sales coaching is detected FIRST so phrases like "sales walkthrough"
+    # (which would otherwise trip the legacy walkthrough detector via the
+    # "walk" keyword) route to the dedicated coaching override. The
+    # original "walk me through this assembly part by part" prompt has
+    # no sales-coaching keywords so it still falls through to the
+    # walkthrough path unchanged.
+    is_sales_coaching = _is_sales_coaching_message(request.message)
+    sales_application = _extract_sales_application(request.message) if is_sales_coaching else ""
+    is_walkthrough = (not is_sales_coaching) and _is_walkthrough_message(request.message)
+
+    # Missing-application short-circuit. Per spec: do NOT call Claude for a
+    # generic pitch when the application is unknown — return a normal
+    # assistant response with the clarification question only. Returning
+    # before the Anthropic SDK is initialised also saves an API call.
+    if is_sales_coaching and not sales_application:
+        return {
+            "response": _SALES_COACHING_CLARIFICATION,
+            "tool_calls": [],
+            "tool_call_count": 0,
+            "tool_source": "sales_coaching_clarification",
+            "sales_coaching": {"awaiting_application": True},
+        }
 
     # Walkthrough mode still depends on legacy HIGHLIGHT_PARTS narration markers.
     # Do not append the tool appendix here, or the model will favor <tool_calls>
     # over the segmented format that the frontend narration player expects.
+    # Sales coaching uses the same narration pipeline (HIGHLIGHT_PARTS +
+    # the new optional CAMERA_FOCUS) so it skips the tool appendix too.
     system_prompt = AGENT_PROMPTS[request.agent_type]
     if is_walkthrough:
         system_prompt += (
@@ -5087,6 +5216,8 @@ async def agent_chat(request: AgentChatRequest):
             "- The walkthrough is invalid if it is returned as prose-only without "
             "multiple HIGHLIGHT_PARTS sections.\n"
         )
+    elif is_sales_coaching:
+        system_prompt += _sales_coaching_override(sales_application)
     else:
         system_prompt += build_tool_appendix(request.agent_type)
 
@@ -5661,16 +5792,22 @@ async def agent_chat(request: AgentChatRequest):
         # Parse EXPLODE_LEVEL markers (may be global or per-segment)
         explode_level = None
         explode_pattern = re.compile(r'^EXPLODE_LEVEL:\s*([\d.]+)\s*$', re.MULTILINE)
+        # Parse CAMERA_FOCUS markers — sales-coaching mode emits these
+        # per-segment to fly the camera to the focused part group. Honest:
+        # parsing only; the frontend decides whether to act on it via the
+        # existing _flyToPartGroup helper.
+        camera_focus_pattern = re.compile(r'^CAMERA_FOCUS:\s*(.+)$', re.MULTILINE)
 
         parts_pattern = re.compile(r'^HIGHLIGHT_PARTS:\s*(.+)$', re.MULTILINE)
         matches = list(parts_pattern.finditer(response_text))
 
         if len(matches) > 1:
-            # Multi-segment narration mode — extract per-segment EXPLODE_LEVEL
+            # Multi-segment narration mode — extract per-segment EXPLODE_LEVEL + CAMERA_FOCUS
             segments = []
             intro = response_text[:matches[0].start()].strip()
-            # Strip any EXPLODE_LEVEL from intro
+            # Strip any EXPLODE_LEVEL / CAMERA_FOCUS from intro
             intro = explode_pattern.sub('', intro).strip()
+            intro = camera_focus_pattern.sub('', intro).strip()
             if intro:
                 segments.append({"text": intro, "highlight_parts": []})
             for i, match in enumerate(matches):
@@ -5685,14 +5822,27 @@ async def agent_chat(request: AgentChatRequest):
                 if seg_explode_match:
                     seg_explode = max(0.0, min(1.0, float(seg_explode_match.group(1))))
                     seg_text = explode_pattern.sub('', seg_text).strip()
+                # Extract per-segment camera_focus (sales coaching). Validated
+                # against available_pns the same way HIGHLIGHT_PARTS is.
+                seg_camera_focus = None
+                seg_camera_match = camera_focus_pattern.search(seg_text)
+                if seg_camera_match:
+                    raw_focus = [p.strip() for p in seg_camera_match.group(1).split(",") if p.strip()]
+                    valid_focus = [p for p in raw_focus if p in available_pns] if available_pns else raw_focus
+                    if valid_focus:
+                        seg_camera_focus = valid_focus
+                    seg_text = camera_focus_pattern.sub('', seg_text).strip()
                 seg_data = {"text": seg_text, "highlight_parts": valid_parts}
                 if seg_explode is not None:
                     seg_data["explode_level"] = seg_explode
+                if seg_camera_focus:
+                    seg_data["camera_focus"] = seg_camera_focus
                 if seg_text or valid_parts:
                     segments.append(seg_data)
             narration_segments = segments
             response_text = parts_pattern.sub('', response_text).strip()
             response_text = explode_pattern.sub('', response_text).strip()
+            response_text = camera_focus_pattern.sub('', response_text).strip()
         elif len(matches) == 1:
             # Single-marker behavior (existing)
             raw_parts = [p.strip() for p in matches[0].group(1).split(",") if p.strip()]

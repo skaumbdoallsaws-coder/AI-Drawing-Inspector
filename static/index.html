@@ -26895,6 +26895,14 @@
                             }
                             _animateExplode(targetLevel, 600);
                         }
+                        // Sales-coaching CAMERA_FOCUS: fly the camera to
+                        // the focused part group when the segment carries
+                        // one. Reuses the existing _flyToPartGroup helper
+                        // so behaviour matches camera-fly elsewhere in the app.
+                        if (Array.isArray(seg.camera_focus) && seg.camera_focus.length > 0
+                            && typeof _flyToPartGroup === 'function') {
+                            try { _flyToPartGroup(seg.camera_focus); } catch (_) {}
+                        }
                     });
                     lastMsg.appendChild(segEl);
                 });
@@ -26928,6 +26936,13 @@
                             targetLevel = Math.round(seg.explode_level * n) / n;
                         }
                         _animateExplode(targetLevel, 600);
+                    }
+                    // Sales-coaching CAMERA_FOCUS — fly the camera to the
+                    // segment's focused part group so the user sees the
+                    // selling point on screen as the narration speaks it.
+                    if (Array.isArray(seg.camera_focus) && seg.camera_focus.length > 0
+                        && typeof _flyToPartGroup === 'function') {
+                        try { _flyToPartGroup(seg.camera_focus); } catch (_) {}
                     }
 
                     // 2. Show only this segment (one block at a time)

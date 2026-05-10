@@ -499,6 +499,22 @@
             width: 14px;
             height: 14px;
         }
+        /* Global top-toolbar icons — RGBA PNGs sourced from
+           static/assets/global-toolbar-icons/. They sit directly on
+           the toolbar (no black square, no white rectangle). The 24px
+           target matches the supplied asset's intrinsic size; the
+           28px .icon-tb-btn host gives 2px padding on each side. */
+        .global-toolbar-icon {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+            display: block;
+            background: transparent;
+            filter: none;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
         .icon-toolbar-sep {
             width: 1px;
             height: 16px;
@@ -7133,87 +7149,34 @@
                 <div class="toolbar-icons">
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Home" id="iconHome">
-                        <svg viewBox="0 0 96 96" aria-hidden="true">
-                            <polygon points="48,10 84,40 80,44 48,16 16,44 12,40" fill="#00A2E8" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round"/>
-                            <line x1="22" y1="39" x2="22" y2="78" stroke="#FFFFFF" stroke-width="1.5"/>
-                            <line x1="74" y1="39" x2="74" y2="78" stroke="#FFFFFF" stroke-width="1.5"/>
-                            <line x1="22" y1="78" x2="74" y2="78" stroke="#FFFFFF" stroke-width="1.5"/>
-                            <rect x="37" y="48" width="18" height="30" fill="none" stroke="#FFFFFF" stroke-width="1.4"/>
-                            <circle cx="51" cy="64" r="1.8" fill="#FFFFFF"/>
-                        </svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/home.png" alt="" draggable="false">
                     </button>
                     <button class="icon-tb-btn" title="Open Drawing" id="iconOpen">
-                        <svg viewBox="0 0 96 96" aria-hidden="true">
-                            <path d="M16,8 L64,8 L82,26 L82,82 Q82,88 76,88 L16,88 Q10,88 10,82 L10,14 Q10,8 16,8 Z"
-                                fill="#FFFFFF" stroke="#1565c0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
-                            <path d="M64,8 L64,20 Q64,26 70,26 L82,26"
-                                fill="none" stroke="#1565c0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
-                            <path d="M64,8 L64,20 Q64,26 70,26 L82,26 Z" fill="#1565c0" opacity="0.15"/>
-                        </svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/file.png" alt="" draggable="false">
                     </button>
                     <button class="icon-tb-btn" title="Save / Export" id="iconSave">
-                        <svg viewBox="0 0 96 96" aria-hidden="true">
-                            <defs>
-                                <linearGradient id="saveFloppyBody" x1="0" y1="0" x2="1" y2="0">
-                                    <stop offset="0%" stop-color="#2090CC"/>
-                                    <stop offset="100%" stop-color="#40AADD"/>
-                                </linearGradient>
-                            </defs>
-                            <rect width="96" height="96" rx="8" fill="#2A2A2A"/>
-                            <path d="M14,8 L68,8 L80,20 L80,82 Q80,88 74,88 L14,88 Q8,88 8,82 L8,14 Q8,8 14,8 Z"
-                                fill="#1A5A9A" stroke="#FFF" stroke-width="1.5" stroke-linejoin="round"/>
-                            <path d="M16,12 L66,12 L76,22 L76,78 Q76,84 70,84 L16,84 Q12,84 12,78 L12,18 Q12,12 16,12 Z"
-                                fill="url(#saveFloppyBody)" stroke="#FFF" stroke-width="1.5" stroke-linejoin="round"/>
-                            <rect x="20" y="14" width="44" height="34" rx="2" fill="#F0EDE8" stroke="#FFF" stroke-width="1.2"/>
-                            <line x1="26" y1="24" x2="58" y2="24" stroke="#8A8580" stroke-width="2" stroke-linecap="round"/>
-                            <line x1="26" y1="31" x2="58" y2="31" stroke="#8A8580" stroke-width="2" stroke-linecap="round"/>
-                            <line x1="26" y1="38" x2="58" y2="38" stroke="#8A8580" stroke-width="2" stroke-linecap="round"/>
-                            <rect x="28" y="54" width="30" height="28" rx="2" fill="#6A6A70" stroke="#FFF" stroke-width="1.2"/>
-                            <rect x="29" y="55" width="12" height="26" rx="1" fill="#555560"/>
-                            <rect x="43" y="55" width="14" height="26" rx="1" fill="#7A7A80"/>
-                            <rect x="33" y="60" width="12" height="12" rx="1" fill="#4A4A55" stroke="#FFF" stroke-width="0.8"/>
-                            <rect x="35" y="62" width="8" height="8" rx="0.5" fill="#3A3A45"/>
-                        </svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/save.png" alt="" draggable="false">
                     </button>
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Print FAI Report" id="iconPrint">
-                        <svg viewBox="0 0 96 96" aria-hidden="true">
-                            <defs>
-                                <linearGradient id="printPrinterBody" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stop-color="#50B0E0"/>
-                                    <stop offset="100%" stop-color="#2088C0"/>
-                                </linearGradient>
-                            </defs>
-                            <rect x="24" y="10" width="42" height="36" rx="2" fill="#F4F4F4" stroke="#2A2A2A" stroke-width="2" stroke-linejoin="round"/>
-                            <rect x="10" y="36" width="72" height="30" rx="4" fill="url(#printPrinterBody)" stroke="#2A2A2A" stroke-width="2" stroke-linejoin="round"/>
-                            <rect x="16" y="52" width="50" height="8" rx="3" fill="#1A4A6A" stroke="#2A2A2A" stroke-width="0.8"/>
-                            <circle cx="70" cy="46" r="2.5" fill="#E8F4FF" stroke="#2A2A2A" stroke-width="0.5"/>
-                            <circle cx="62" cy="46" r="2.5" fill="#E8F4FF" stroke="#2A2A2A" stroke-width="0.5"/>
-                            <path d="M6,66 L4,82 Q4,84 6,84 L86,84 Q88,84 88,82 L86,66 Z"
-                                fill="#F4F4F4" stroke="#2A2A2A" stroke-width="2" stroke-linejoin="round"/>
-                        </svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/printer.png" alt="" draggable="false">
                     </button>
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Undo (Ctrl+Z)" id="iconUndo">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/undo.png" alt="" draggable="false">
                     </button>
                     <button class="icon-tb-btn" title="Redo (Ctrl+Y)" id="iconRedo">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.13-9.36L23 10"/></svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/redo.png" alt="" draggable="false">
                     </button>
                     <div class="icon-toolbar-sep"></div>
                     <button class="icon-tb-btn" title="Select Tool (V)" id="iconSelect">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/cursor.png" alt="" draggable="false">
                     </button>
                     <button class="icon-tb-btn" title="News & Updates" id="iconNews">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="#00A2E8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/bell.png" alt="" draggable="false">
                     </button>
                     <button class="icon-tb-btn" title="Settings" id="iconSettings">
-                        <svg viewBox="0 0 96 96" aria-hidden="true">
-                            <rect width="96" height="96" rx="8" fill="#2A2A2A"/>
-                            <path d="M42,21 L41,11 L55,11 L54,21 A28,28 0 0,1 63,25 L70,17 L79,26 L72,33 A28,28 0 0,1 75,42 L85,41 L85,55 L75,54 A28,28 0 0,1 72,63 L79,70 L70,79 L63,72 A28,28 0 0,1 54,75 L55,85 L41,85 L42,75 A28,28 0 0,1 33,72 L26,79 L17,70 L25,63 A28,28 0 0,1 21,54 L11,55 L11,41 L21,42 A28,28 0 0,1 25,33 L17,26 L26,17 L33,25 A28,28 0 0,1 42,21 Z"
-                                fill="#00A2E8" stroke="#FFFFFF" stroke-width="2.5" stroke-linejoin="round"/>
-                            <circle cx="48" cy="48" r="13" fill="#00A2E8" stroke="#FFFFFF" stroke-width="3"/>
-                        </svg>
+                        <img class="global-toolbar-icon" src="/static/assets/global-toolbar-icons/gear.png" alt="" draggable="false">
                     </button>
                 </div>
             </div>

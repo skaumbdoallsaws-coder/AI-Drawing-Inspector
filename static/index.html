@@ -283,11 +283,19 @@
         :root[data-theme="light"] .tab.active {
             color: var(--text-primary);
             background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-panel) 48%, var(--bg-ribbon) 100%);
-            border-color: var(--border-strong);
+            border-color: rgba(43,119,191,0.28);
             box-shadow:
                 inset 0 1px rgba(255,255,255,0.7),
                 0 -1px 0 var(--shadow-color),
-                0 1px 0 rgba(255,255,255,0.4);
+                0 1px 0 rgba(255,255,255,0.4),
+                0 0 0 1px rgba(43,119,191,0.06);
+        }
+        :root[data-theme="light"] .tab.active::after {
+            left: 9px;
+            right: 9px;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+            box-shadow: 0 -1px 5px rgba(43,119,191,0.28);
         }
         :root[data-theme="light"] .tab.active .tab-shortcut {
             color: var(--text-secondary);
@@ -501,12 +509,12 @@
         }
         /* Global top-toolbar icons — RGBA PNGs sourced from
            static/assets/global-toolbar-icons/. They sit directly on
-           the toolbar (no black square, no white rectangle). The 24px
-           target matches the supplied asset's intrinsic size; the
-           28px .icon-tb-btn host gives 2px padding on each side. */
+           the toolbar (no black square, no white rectangle). The icon
+           is drawn one pixel under source size so the glossy set reads
+           as toolbar chrome rather than competing with the ribbon tabs. */
         .global-toolbar-icon {
-            width: 24px;
-            height: 24px;
+            width: 23px;
+            height: 23px;
             object-fit: contain;
             display: block;
             background: transparent;
@@ -1885,6 +1893,19 @@
             background: rgba(255,255,255,0.05);
             pointer-events: none;
         }
+        .tab::after {
+            content: '';
+            position: absolute;
+            left: 8px;
+            right: 8px;
+            bottom: 0;
+            height: 2px;
+            border-radius: 2px 2px 0 0;
+            background: var(--accent);
+            opacity: 0;
+            transition: opacity 0.14s ease, left 0.14s ease, right 0.14s ease;
+            pointer-events: none;
+        }
         .tab:hover {
             color: #E9EDF3;
             background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.015));
@@ -1900,6 +1921,9 @@
                 0 -1px 0 rgba(0,0,0,0.2),
                 0 1px 0 rgba(255,255,255,0.02);
             z-index: 1;
+        }
+        .tab.active::after {
+            opacity: 1;
         }
         .tab.active .tab-shortcut {
             color: #D8E0E9;
@@ -6456,6 +6480,15 @@
         :root[data-theme="light"] .icon-tb-btn {
             color: var(--text-secondary);
         }
+        :root[data-theme="light"] .app-menu-label {
+            color: #536273;
+            font-weight: 500;
+        }
+        :root[data-theme="light"] .app-menu-label:hover,
+        :root[data-theme="light"] .app-menu-item.open .app-menu-label {
+            color: var(--text-primary);
+            background: rgba(43,119,191,0.08);
+        }
         :root[data-theme="light"] .toolbar-control-btn:hover,
         :root[data-theme="light"] .icon-tb-btn:hover {
             background: var(--bg-hover);
@@ -6641,7 +6674,15 @@
             color: var(--accent-strong);
             background: linear-gradient(180deg, rgba(43,119,191,0.14), rgba(43,119,191,0.06));
             border-color: rgba(43,119,191,0.28);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.7),
+                0 0 0 1px rgba(43,119,191,0.08);
+        }
+        :root[data-theme="light"] .activity-bar-icon.active::before,
+        :root[data-theme="light"] .right-rail-icon.active::before {
+            width: 3px;
+            background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+            box-shadow: 0 0 6px rgba(43,119,191,0.35);
         }
         :root[data-theme="light"] .activity-bar-icon[data-panel="model"] svg > rect[width="96"][height="96"] {
             fill: transparent;

@@ -222,49 +222,76 @@ async def main():
         # Reviewer found that stopNarration() only special-cased
         # sales_coaching, so pressing Pause during training playback was
         # falling through to _renderAllSegmentsFinal and overwriting the
-        # latest assistant chat message with "Step 1...Step 6...". This
-        # check snapshots the chat HTML before Pause, presses Pause via
-        # the production stopNarration path, and asserts: chat unchanged,
-        # trainingState.isPlaying === false, no procedure dump in chat,
-        # state._narrationKind cleared.
+        # latest assistant chat message with "Step 1. Identify the
+        # service area..." through "Step 6. Restore energy and function-
+        # check...".
+        #
+        # The real chat container is #agentMessages (class
+        # .agent-panel-messages), NOT .agent-messages — an earlier draft
+        # of this test used the wrong selector and was a false positive.
+        # Production stopNarration() also only leaks if there is an
+        # existing assistant message to overwrite, so seed one here
+        # before pressing Pause and assert the seeded HTML survives.
+        seed_html = '__pause_regression_seed_marker__ assistant message'
+        await page.evaluate(
+            """(seedHtml) => {
+                const am = document.getElementById('agentMessages');
+                // Clean any prior content and inject a recognisable
+                // assistant message that the regressed bug would clobber.
+                am.innerHTML = '';
+                const row = document.createElement('div');
+                row.className = 'agent-msg-row assistant';
+                const msg = document.createElement('div');
+                msg.className = 'agent-msg';
+                msg.innerHTML = seedHtml;
+                row.appendChild(msg);
+                am.appendChild(row);
+            }""",
+            seed_html,
+        )
+
         chat_before = await page.evaluate(
             """() => {
-                const am = document.querySelector('.agent-messages');
-                return am ? am.innerHTML : '';
+                const am = document.getElementById('agentMessages');
+                return am ? am.innerHTML : null;
             }"""
         )
-        # Make sure isPlaying is true going in (set by _trainPlayCurrent)
+        assert chat_before and 'agent-msg-row assistant' in chat_before, \
+            f'seed failed — chat_before did not contain expected assistant row (got {chat_before!r})'
+
+        # Make sure isPlaying is true going in (set by _trainPlayCurrent
+        # earlier in this test), so the Pause we are about to test is the
+        # exact path the user would hit.
         playing_before = await page.evaluate("() => trainingState.isPlaying === true")
 
         # Press the same Pause path the user would: production stopNarration()
-        # WITHOUT the manual clears we used to do here.
+        # WITHOUT any manual state clears.
         await page.evaluate("() => { try { stopNarration(); } catch (_) {} }")
         await page.wait_for_timeout(400)
 
         chat_after = await page.evaluate(
             """() => {
-                const am = document.querySelector('.agent-messages');
-                return am ? am.innerHTML : '';
+                const am = document.getElementById('agentMessages');
+                return am ? am.innerHTML : null;
             }"""
         )
-        # If the bug regressed, the chat would now contain step text from
-        # the procedure (e.g. "Identify the service area", "Lock out and
-        # isolate energy", "Reassemble and torque"). Look for any step
-        # title to detect the leak — and a generic "Step N." prefix.
+        # If the bug regressed, the assistant message would now contain
+        # the full procedure: every step title plus "Step N." labels.
         leak_signals = await page.evaluate(
             """() => {
-                const am = document.querySelector('.agent-messages');
+                const am = document.getElementById('agentMessages');
                 const text = am ? am.innerText : '';
                 const proc = trainingState.procedure;
                 const titles = (proc && proc.steps) ? proc.steps.map(s => s.title) : [];
                 const titleHits = titles.filter(t => text.includes(t)).length;
                 const stepLabelHits = (text.match(/Step \\d+\\./g) || []).length;
-                return { titleHits, stepLabelHits, text_len: text.length };
+                return { titleHits, stepLabelHits, text_len: text.length, includes_seed: text.includes('__pause_regression_seed_marker__') };
             }"""
         )
         playing_after = await page.evaluate("() => trainingState.isPlaying")
         kind_after = await page.evaluate("() => state._narrationKind")
         chat_unchanged = (chat_before == chat_after)
+        seed_survived = leak_signals.get("includes_seed") is True
         no_leak = (leak_signals.get("titleHits", 0) == 0
                    and leak_signals.get("stepLabelHits", 0) == 0)
         check14 = (
@@ -272,11 +299,12 @@ async def main():
             and playing_after is False
             and kind_after in (None, "")
             and chat_unchanged
+            and seed_survived
             and no_leak
         )
         print(f" 14. Pause does not leak procedure into chat:        {check14}")
         print(f"     playing_before={playing_before} playing_after={playing_after} kind_after={kind_after!r}")
-        print(f"     chat_unchanged={chat_unchanged} leak_signals={leak_signals}")
+        print(f"     chat_unchanged={chat_unchanged} seed_survived={seed_survived} leak_signals={leak_signals}")
 
         # ensure narrationKind/playing fully cleared for the rest of the run
         await page.evaluate("() => { state._narrationKind = null; state.narrationPlaying = false; }")

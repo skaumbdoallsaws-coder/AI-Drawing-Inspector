@@ -15080,6 +15080,16 @@
             _trainApplyPanelVisibility();
             state._narrationKind = 'training';
             trainingState.isPlaying = true;
+            // playNarrationSequence only snapshots viewport state when
+            // resumeFromIndex === 0. If the user advanced via Next and
+            // then clicked Narrate (startFrom > 0), the natural snapshot
+            // is skipped — meaning highlights/explode would not restore
+            // cleanly when playback ends. Snapshot here to cover that
+            // path. _snapshotPartState is idempotent (no-op when nothing
+            // is currently highlighted) so calling it twice is safe.
+            if (startFrom > 0 && typeof _snapshotPartState === 'function') {
+                try { _snapshotPartState(); } catch (_) {}
+            }
             if (typeof playNarrationSequence === 'function') {
                 playNarrationSequence(segments, startFrom);
             } else {
@@ -27821,10 +27831,16 @@
                 // After stop: walkthrough mode renders the full script for
                 // scrollback (existing behaviour). Sales-coaching mode keeps
                 // the last spoken segment visible only — we are coaching,
-                // not delivering a brochure script.
+                // not delivering a brochure script. Training mode owns the
+                // right Procedure Playback panel and must NEVER write the
+                // step list into the chat agent panel.
                 if (state.narrationSegments) {
                     if (state._narrationKind === 'sales_coaching') {
                         _renderSalesCoachingClosingCard(state.narrationSegments);
+                    } else if (state._narrationKind === 'training') {
+                        if (typeof window._trainingOnPlaybackEnd === 'function') {
+                            try { window._trainingOnPlaybackEnd(); } catch (_) {}
+                        }
                     } else {
                         _renderAllSegmentsFinal(state.narrationSegments);
                     }

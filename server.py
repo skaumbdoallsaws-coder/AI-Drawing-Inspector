@@ -48,6 +48,90 @@ from ai_inspector.classification import classify_drawing_mode
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("inspectorpro")
 
+_DEFAULT_LIBRARY_NAME = "400S_Sorted_Library"
+
+
+def _limited_count(paths, limit: int = 80) -> int:
+    """Count path iterator items without walking an entire large library."""
+    count = 0
+    for _ in paths:
+        count += 1
+        if count >= limit:
+            break
+    return count
+
+
+def _library_score(path: Path) -> int:
+    """Rank candidate inspection libraries by useful CAD/profile content."""
+    if not path.exists() or not path.is_dir():
+        return -1
+    profile_count = _limited_count(path.rglob("*_inspection_profile.json"))
+    assembly_dir = path / "assemblies"
+    assembly_count = _limited_count(assembly_dir.glob("*_assembly.json")) if assembly_dir.is_dir() else 0
+    parts_dir = path / "parts"
+    part_dir_count = _limited_count((p for p in parts_dir.iterdir() if p.is_dir())) if parts_dir.is_dir() else 0
+    return profile_count * 10 + assembly_count * 5 + part_dir_count
+
+
+def _primary_workspace_library_from_worktree(repo_root: Path) -> Optional[Path]:
+    """Return the primary workspace library when running from .claude/worktrees."""
+    for parent in [repo_root, *repo_root.parents]:
+        if parent.name == ".claude":
+            return parent.parent / _DEFAULT_LIBRARY_NAME
+    return None
+
+
+def _resolve_library_dir() -> Path:
+    """Resolve the real inspection library.
+
+    Feature worktrees usually contain only a sparse tracked library stub.
+    When that happens, prefer the fuller primary workspace library so
+    profiles, assembly membership, GLBs, and revision sidecars still load.
+    """
+    env_dir = os.getenv("INSPECTORPRO_LIBRARY_DIR", "").strip()
+    if env_dir:
+        candidate = Path(env_dir).expanduser()
+        if candidate.exists() and candidate.is_dir():
+            resolved = candidate.resolve()
+            logger.info("Using inspection library from INSPECTORPRO_LIBRARY_DIR=%s", resolved)
+            return resolved
+        logger.warning("INSPECTORPRO_LIBRARY_DIR does not exist or is not a directory: %s", env_dir)
+
+    candidates: List[Path] = [
+        REPO_ROOT / _DEFAULT_LIBRARY_NAME,
+        Path.cwd() / _DEFAULT_LIBRARY_NAME,
+    ]
+    primary_library = _primary_workspace_library_from_worktree(REPO_ROOT)
+    if primary_library is not None:
+        candidates.append(primary_library)
+
+    unique_candidates = []
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate.resolve()) if candidate.exists() else str(candidate.absolute())
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append(candidate)
+
+    scored = [(candidate, _library_score(candidate)) for candidate in unique_candidates]
+    best, best_score = max(scored, key=lambda item: item[1])
+    resolved = best.resolve() if best.exists() else best.absolute()
+    logger.info(
+        "Resolved inspection library: %s (score=%s; candidates=%s)",
+        resolved,
+        best_score,
+        ", ".join(f"{c}={s}" for c, s in scored),
+    )
+    return resolved
+
+
+LIBRARY_DIR = _resolve_library_dir()
+
+
+def library_path(*parts: str) -> Path:
+    return LIBRARY_DIR.joinpath(*parts)
+
+
 # Global inspector instance
 inspector: SpatialInspector = None
 
@@ -129,7 +213,7 @@ assembly_profiles: Dict[str, dict] = {}            # assembly_number -> loaded J
 
 def _part_root_dir(safe_pn: str) -> Path:
     """Return the part asset root, accepting standard and doubled layouts."""
-    base = Path("400S_Sorted_Library/parts") / safe_pn
+    base = library_path("parts", safe_pn)
     doubled = base / safe_pn
     if doubled.exists() and doubled.is_dir():
         return doubled
@@ -142,7 +226,7 @@ def _part_rev_dir(safe_pn: str, safe_rev: str) -> Path:
 
 def _part_asset_candidates(safe_pn: str, *relative_parts: str) -> List[Path]:
     """Candidate part asset paths, doubled layout first then standard layout."""
-    base = Path("400S_Sorted_Library/parts") / safe_pn
+    base = library_path("parts", safe_pn)
     roots = []
     doubled = base / safe_pn
     if doubled.exists() and doubled.is_dir():
@@ -199,7 +283,7 @@ def _find_dimension_descriptions_path(part_number: str, library_dir: str | Path)
 
 def _ensure_assembly_files():
     """Copy assembly profile and view images into 400S_Sorted_Library/assemblies/ if not already there."""
-    assemblies_dir = Path("400S_Sorted_Library/assemblies")
+    assemblies_dir = library_path("assemblies")
     assemblies_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy assembly JSON files from project root into assemblies/ dir
@@ -235,7 +319,10 @@ def _load_assembly_profiles():
     """Scan assemblies/ dir for *_assembly.json, build reverse-lookup maps."""
     global assembly_part_lookup, assembly_profiles
 
-    assemblies_dir = Path("400S_Sorted_Library/assemblies")
+    assembly_part_lookup = {}
+    assembly_profiles = {}
+
+    assemblies_dir = library_path("assemblies")
     if not assemblies_dir.exists():
         logger.info("No assemblies/ directory found, skipping assembly profile loading.")
         return
@@ -366,8 +453,8 @@ def _compute_nearby_parts(available_parts: list, selected_pns: set, max_neighbor
 async def lifespan(app: FastAPI):
     """Initialize SpatialInspector and optional Playwright browser on startup."""
     global inspector, search_engine
-    logger.info("Initializing SpatialInspector with library_dir='400S_Sorted_Library'...")
-    inspector = SpatialInspector(library_dir="400S_Sorted_Library")
+    logger.info("Initializing SpatialInspector with library_dir=%r...", str(LIBRARY_DIR))
+    inspector = SpatialInspector(library_dir=str(LIBRARY_DIR))
     logger.info("SpatialInspector initialized successfully.")
 
     # Copy assembly files into library and build reverse-lookup maps
@@ -492,7 +579,7 @@ async def get_drawing_map(part_number: str):
         raise HTTPException(status_code=400, detail="Invalid part number")
 
     try:
-        drawing_map = load_drawing_map(safe_pn, "400S_Sorted_Library")
+        drawing_map = load_drawing_map(safe_pn, LIBRARY_DIR)
         if drawing_map is None:
             raise HTTPException(
                 status_code=404,
@@ -537,14 +624,14 @@ async def run_inspection(
         logger.info(f"Inspection complete for {part_number}: {result.get('gap_summary', {}).get('completeness', 'N/A')}")
 
         resolved_part_number = result.get("part_number") or part_number
-        drawing_map = load_drawing_map(resolved_part_number, "400S_Sorted_Library")
+        drawing_map = load_drawing_map(resolved_part_number, LIBRARY_DIR)
 
         # Load inspection profile for profile-aware annotation matching
         profile_data = None
         safe_rpn = sanitize_part_number(resolved_part_number)
         for _prof_candidate in [
-            Path("400S_Sorted_Library") / f"{safe_rpn}_inspection_profile.json",
-            Path("400S_Sorted_Library") / f"{safe_rpn}.json",
+            library_path() / f"{safe_rpn}_inspection_profile.json",
+            library_path() / f"{safe_rpn}.json",
         ]:
             if _prof_candidate.exists():
                 try:
@@ -610,7 +697,7 @@ async def run_inspection(
         result["drawing_map_metadata"] = drawing_map_metadata
 
         # Load VLM highlight boxes if cached
-        hl_path = _find_highlight_boxes_path(resolved_part_number, "400S_Sorted_Library")
+        hl_path = _find_highlight_boxes_path(resolved_part_number, LIBRARY_DIR)
         logger.info(
             "Highlight boxes lookup: part=%r sanitized=%r path=%s",
             resolved_part_number,
@@ -628,7 +715,7 @@ async def run_inspection(
             logger.info(f"No cached highlight boxes found for {resolved_part_number}")
 
         # Load dimension descriptions if available
-        dd_path = _find_dimension_descriptions_path(resolved_part_number, "400S_Sorted_Library")
+        dd_path = _find_dimension_descriptions_path(resolved_part_number, LIBRARY_DIR)
         if dd_path is not None:
             try:
                 with open(dd_path, "r", encoding="utf-8-sig") as df:
@@ -639,7 +726,7 @@ async def run_inspection(
 
         # ── Load part JSON once (shared by sketch + hybrid comparison) ──
         part_json = None
-        part_json_path = Path("400S_Sorted_Library") / f"{sanitize_part_number(resolved_part_number)}.json"
+        part_json_path = library_path() / f"{sanitize_part_number(resolved_part_number)}.json"
         if part_json_path.exists():
             try:
                 with open(part_json_path, "r", encoding="utf-8-sig") as pf:
@@ -724,7 +811,7 @@ async def run_inspection(
 async def validate_profiles():
     """Run the profile validator and return results as JSON."""
     try:
-        results = validate_all_profiles("400S_Sorted_Library")
+        results = validate_all_profiles(str(LIBRARY_DIR))
         return results
     except FileNotFoundError as e:
         logger.error(f"Library directory not found for validation: {e}")
@@ -747,7 +834,7 @@ async def get_profile_details(part_number: str):
         raise HTTPException(status_code=400, detail="Invalid part number")
 
     # Try to find the inspection profile JSON on disk
-    library_dir = Path("400S_Sorted_Library")
+    library_dir = library_path()
     profile_candidates = [
         library_dir / f"{safe_pn}_inspection_profile.json",
         library_dir / f"{safe_pn}.json",
@@ -815,7 +902,7 @@ async def get_part_properties(part_number: str):
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
 
-    library_dir = Path("400S_Sorted_Library")
+    library_dir = library_path()
     json_path = library_dir / f"{safe_pn}.json"
     if not json_path.exists():
         raise HTTPException(status_code=404, detail="Part data not found")
@@ -838,7 +925,7 @@ async def get_3d_model(part_number: str):
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
 
-    stl_path = Path("400S_Sorted_Library") / f"{safe_pn}.stl"
+    stl_path = library_path() / f"{safe_pn}.stl"
     # Fallback: check parts/{pn}/revA/ for revision-stored STL
     if not stl_path.exists():
         rev_stl = _resolve_part_asset(safe_pn, "revA", f"{safe_pn}.stl")
@@ -865,7 +952,7 @@ async def get_part_glb(part_number: str):
 
     # For revisioned parts, prefer parts/{pn}/revA/ to avoid stale root-level assets
     rev_path = _resolve_part_asset(safe_pn, "revA", f"{safe_pn}_colored.glb")
-    root_path = Path("400S_Sorted_Library") / f"{safe_pn}_colored.glb"
+    root_path = library_path() / f"{safe_pn}_colored.glb"
     glb_path = rev_path if rev_path is not None else root_path
     if not glb_path.exists():
         raise HTTPException(status_code=404, detail=f"No feature-colored GLB for part '{part_number}'")
@@ -886,7 +973,7 @@ async def get_part_features(part_number: str):
 
     # For revisioned parts, prefer parts/{pn}/revA/ to avoid stale root-level assets
     rev_json = _resolve_part_asset(safe_pn, "revA", f"{safe_pn}_feature_colors.json")
-    root_json = Path("400S_Sorted_Library") / f"{safe_pn}_feature_colors.json"
+    root_json = library_path() / f"{safe_pn}_feature_colors.json"
     json_path = rev_json if rev_json is not None else root_json
     if not json_path.exists():
         raise HTTPException(status_code=404, detail=f"No feature color data for part '{part_number}'")
@@ -1520,7 +1607,7 @@ def _build_part_properties(part_color_legend: list) -> list:
     Loads each part's profile JSON for richer data (holes, features) than partDataCache.
     Returns a compact list for agent semantic search (e.g. "find parts with 30mm holes").
     """
-    library_dir = Path("400S_Sorted_Library")
+    library_dir = library_path()
     result = []
 
     for item in part_color_legend:
@@ -1691,7 +1778,7 @@ def _correct_assembly_color_map_from_glb(assy_number: str, assy_data: dict, colo
     corrected = dict(color_map or {})
     part_data_cache = assy_data.get("partDataCache", {})
     glb_color_map = _read_glb_material_color_map(
-        Path("400S_Sorted_Library/assemblies") / f"{assy_number}_colored.glb"
+        library_path("assemblies") / f"{assy_number}_colored.glb"
     )
     if not glb_color_map:
         return corrected
@@ -1838,7 +1925,7 @@ async def get_assembly_context(part_number: str):
     stats = assy_data.get("statistics", {})
 
     # Check if views and 3D model exist
-    assemblies_dir = Path("400S_Sorted_Library/assemblies")
+    assemblies_dir = library_path("assemblies")
     has_views = (assemblies_dir / f"{assy_number}_view_front.png").exists()
     has_glb = (assemblies_dir / f"{assy_number}_colored.glb").exists()
 
@@ -1962,7 +2049,7 @@ async def get_assembly_views(assembly_number: str):
     if safe_num not in assembly_profiles:
         raise HTTPException(status_code=404, detail=f"No assembly profile for '{assembly_number}'")
 
-    assemblies_dir = Path("400S_Sorted_Library/assemblies")
+    assemblies_dir = library_path("assemblies")
     views = {}
     for view_name in ["front", "top", "right", "isometric"]:
         img_path = assemblies_dir / f"{safe_num}_view_{view_name}.png"
@@ -1983,7 +2070,7 @@ async def get_assembly_model(assembly_number: str, revision: Optional[str] = Non
     if not safe_num:
         raise HTTPException(status_code=400, detail="Invalid assembly number")
 
-    assemblies_dir = Path("400S_Sorted_Library/assemblies")
+    assemblies_dir = library_path("assemblies")
 
     if revision:
         safe_rev = re.sub(r'[^\w]', '', revision)
@@ -2008,7 +2095,7 @@ async def get_assembly_revisions(assembly_number: str):
     if not safe_num:
         raise HTTPException(status_code=400, detail="Invalid assembly number")
 
-    assy_dir = Path("400S_Sorted_Library/assemblies") / safe_num
+    assy_dir = library_path("assemblies") / safe_num
     if not assy_dir.exists() or not assy_dir.is_dir():
         return {"revisions": []}
 
@@ -2027,7 +2114,7 @@ async def get_assembly_diff(assembly_number: str, revA: str = Query(...), revB: 
     safe_a = re.sub(r'[^\w]', '', revA)
     safe_b = re.sub(r'[^\w]', '', revB)
 
-    base_dir = Path("400S_Sorted_Library/assemblies") / safe_num
+    base_dir = library_path("assemblies") / safe_num
     dir_a = base_dir / f"rev{safe_a}"
     dir_b = base_dir / f"rev{safe_b}"
 
@@ -2095,7 +2182,7 @@ def _normalize_revision_letter(revision: str) -> str:
 
 
 def _assembly_revision_dir(safe_num: str, safe_rev: str) -> Path:
-    return Path("400S_Sorted_Library/assemblies") / safe_num / f"rev{safe_rev}"
+    return library_path("assemblies") / safe_num / f"rev{safe_rev}"
 
 
 def _resolve_assembly_pdf_path(safe_num: str, safe_rev: str) -> Optional[Path]:
@@ -2151,7 +2238,7 @@ def _resolve_assembly_compare_assets(safe_num: str, safe_rev: str) -> Dict[str, 
 
 def _list_assembly_revisions(safe_num: str) -> List[str]:
     """Return sorted list of revision letters available on disk for an assembly."""
-    assy_dir = Path("400S_Sorted_Library/assemblies") / safe_num
+    assy_dir = library_path("assemblies") / safe_num
     if not assy_dir.exists() or not assy_dir.is_dir():
         return []
     return sorted([
@@ -2325,7 +2412,7 @@ def _supplier_spec_present(part_number: str, safe_rev: str) -> bool:
     if not part_number or not safe_rev:
         return False
     sidecar = (
-        Path("400S_Sorted_Library/parts")
+        library_path("parts")
         / part_number
         / f"rev{safe_rev}"
         / f"{part_number}_supplier_spec.json"
@@ -2437,7 +2524,7 @@ _SUPPLIER_SPEC_FIELDS = (
 
 def _supplier_spec_path(part_number: str, safe_rev: str) -> Path:
     return (
-        Path("400S_Sorted_Library/parts")
+        library_path("parts")
         / part_number
         / f"rev{safe_rev}"
         / f"{part_number}_supplier_spec.json"
@@ -2467,7 +2554,7 @@ def _resolve_supplier_doc_path(raw: dict) -> Path | None:
     located_in = doc.get("located_in")
     if not filename or not located_in:
         return None
-    candidate = Path("400S_Sorted_Library") / located_in / filename
+    candidate = library_path() / located_in / filename
     return candidate if candidate.exists() else None
 
 
@@ -2872,7 +2959,7 @@ def _load_part_json(part_number: str, revision: str) -> Optional[dict]:
             pass
 
     # Root fallback
-    root_path = Path("400S_Sorted_Library") / f"{safe_pn}.json"
+    root_path = library_path() / f"{safe_pn}.json"
     if root_path.exists():
         try:
             with open(root_path, encoding="utf-8-sig") as f:
@@ -2899,7 +2986,7 @@ def _load_highlight_boxes(part_number: str, revision: str) -> Optional[dict]:
             pass
 
     # Root fallback
-    root_path = Path("400S_Sorted_Library") / filename
+    root_path = library_path() / filename
     if root_path.exists():
         try:
             with open(root_path, encoding="utf-8-sig") as f:
@@ -2916,7 +3003,7 @@ def _is_assembly_drawing_number(part_number: str) -> bool:
 
 
 def _assembly_drawing_revision_dir(part_number: str, revision: str) -> Path:
-    return Path("400S_Sorted_Library/assemblies") / part_number / f"rev{revision}"
+    return library_path("assemblies") / part_number / f"rev{revision}"
 
 
 def _load_drawing_compare_map_revision(part_number: str, revision: str) -> Optional[dict]:
@@ -2946,7 +3033,7 @@ def _load_drawing_compare_map_revision(part_number: str, revision: str) -> Optio
         normalized["revision"] = safe_rev
         return normalized
 
-    return load_drawing_map_revision(safe_pn, safe_rev, "400S_Sorted_Library")
+    return load_drawing_map_revision(safe_pn, safe_rev, LIBRARY_DIR)
 
 
 def _list_drawing_compare_revisions(part_number: str) -> List[str]:
@@ -2955,7 +3042,7 @@ def _list_drawing_compare_revisions(part_number: str) -> List[str]:
     if not safe_pn:
         return []
 
-    revisions = list_drawing_map_revisions(safe_pn, "400S_Sorted_Library")
+    revisions = list_drawing_map_revisions(safe_pn, LIBRARY_DIR)
     filename = f"{safe_pn}_drawing_map.json"
     part_root = _part_root_dir(safe_pn)
     nested_found = []
@@ -2969,7 +3056,7 @@ def _list_drawing_compare_revisions(part_number: str) -> List[str]:
         return revisions
 
     if _is_assembly_drawing_number(safe_pn):
-        assy_dir = Path("400S_Sorted_Library/assemblies") / safe_pn
+        assy_dir = library_path("assemblies") / safe_pn
         found = []
         if assy_dir.exists() and assy_dir.is_dir():
             for d in sorted(assy_dir.iterdir()):
@@ -4180,7 +4267,7 @@ def _compute_drawing_classification(
     # ≥2 rev{X} subdirectories exist. For assemblies we look in assemblies/<n>/;
     # for parts in parts/<n>/. Single-revision parts don't qualify.
     if has_assembly_context:
-        rev_root = Path("400S_Sorted_Library/assemblies") / safe_pn
+        rev_root = library_path("assemblies") / safe_pn
     else:
         rev_root = _part_root_dir(safe_pn)
     has_drawing_revisions = False
@@ -4192,7 +4279,7 @@ def _compute_drawing_classification(
     # Standard naming: 400S_Sorted_Library/<pn>.json. We check the file system
     # rather than asking the SpatialInspector so this stays cheap and
     # side-effect-free.
-    has_inspection_profile = (Path("400S_Sorted_Library") / f"{safe_pn}.json").exists()
+    has_inspection_profile = (library_path() / f"{safe_pn}.json").exists()
 
     # ── drawing_map ──
     # If the caller didn't pass one, try to load it from disk for richer
@@ -4203,11 +4290,11 @@ def _compute_drawing_classification(
     # last because revisioned files are the source of truth when present.
     if drawing_map is None:
         if has_assembly_context:
-            rev_root_dir = Path("400S_Sorted_Library/assemblies") / safe_pn
-            flat_fallback = Path("400S_Sorted_Library/assemblies") / f"{safe_pn}_drawing_map.json"
+            rev_root_dir = library_path("assemblies") / safe_pn
+            flat_fallback = library_path("assemblies") / f"{safe_pn}_drawing_map.json"
         else:
             rev_root_dir = _part_root_dir(safe_pn)
-            flat_fallback = Path("400S_Sorted_Library") / f"{safe_pn}_drawing_map.json"
+            flat_fallback = library_path() / f"{safe_pn}_drawing_map.json"
 
         candidates: List[Path] = []
         if rev_root_dir.exists() and rev_root_dir.is_dir():
@@ -5321,9 +5408,9 @@ async def agent_chat(request: AgentChatRequest):
             pn = ctx.get("part_number", "")
             if pn:
                 safe_pn = re.sub(r'[^\w\-]', '', pn)
-                profile_path = Path("400S_Sorted_Library") / f"{safe_pn}.json"
+                profile_path = library_path() / f"{safe_pn}.json"
                 if not profile_path.exists():
-                    profile_path = Path("400S_Sorted_Library") / f"{safe_pn}_inspection_profile.json"
+                    profile_path = library_path() / f"{safe_pn}_inspection_profile.json"
                 if profile_path.exists():
                     try:
                         with open(profile_path, "r", encoding="utf-8-sig") as f:
@@ -5532,7 +5619,7 @@ async def agent_chat(request: AgentChatRequest):
                 context_text += "\n\n" + "\n".join(da_parts)
 
                 # Load assembly view images for vision context
-                assemblies_dir = Path("400S_Sorted_Library/assemblies")
+                assemblies_dir = library_path("assemblies")
                 assy_views = []
                 for view_name in ["front", "top", "right", "isometric"]:
                     img_path = assemblies_dir / f"{assy_num}_view_{view_name}.png"
@@ -6246,9 +6333,9 @@ async def agent_chat_stream(request: AgentChatRequest):
             pn = ctx.get("part_number", "")
             if pn:
                 safe_pn = re.sub(r'[^\w\-]', '', pn)
-                profile_path = Path("400S_Sorted_Library") / f"{safe_pn}.json"
+                profile_path = library_path() / f"{safe_pn}.json"
                 if not profile_path.exists():
-                    profile_path = Path("400S_Sorted_Library") / f"{safe_pn}_inspection_profile.json"
+                    profile_path = library_path() / f"{safe_pn}_inspection_profile.json"
                 if profile_path.exists():
                     try:
                         with open(profile_path, "r", encoding="utf-8-sig") as f:
@@ -6787,12 +6874,12 @@ async def geometry_diff(part_number: str, revA: str = Query(...), revB: str = Qu
     safe_revA = _sanitize_revision(revA)
     safe_revB = _sanitize_revision(revB)
 
-    step_a = Path(f"400S_Sorted_Library/parts/{safe_pn}/rev{safe_revA}/{safe_pn}.stp")
-    step_b = Path(f"400S_Sorted_Library/parts/{safe_pn}/rev{safe_revB}/{safe_pn}.stp")
+    step_a = library_path("parts", safe_pn, f"rev{safe_revA}", f"{safe_pn}.stp")
+    step_b = library_path("parts", safe_pn, f"rev{safe_revB}", f"{safe_pn}.stp")
     if not step_a.exists() or not step_b.exists():
         raise HTTPException(status_code=404, detail="STEP file(s) not found for requested revisions")
 
-    cache_dir = Path(f"400S_Sorted_Library/parts/{safe_pn}/geometry_diff/{safe_revA}_vs_{safe_revB}")
+    cache_dir = library_path("parts", safe_pn, "geometry_diff", f"{safe_revA}_vs_{safe_revB}")
     result_path = cache_dir / "diff_result.json"
 
     # Cache check with freshness validation (STEPs + sidecars)
@@ -6835,7 +6922,7 @@ async def serve_geometry_diff_artifact(part_number: str, rev_pair: str, filename
         raise HTTPException(status_code=400, detail="Invalid revision pair format")
     if filename not in ("removed.stl", "added.stl", "removed.glb", "added.glb", "diff_result.json"):
         raise HTTPException(status_code=400, detail="Invalid artifact name")
-    artifact = Path(f"400S_Sorted_Library/parts/{safe_pn}/geometry_diff/{rev_pair}/{filename}")
+    artifact = library_path("parts", safe_pn, "geometry_diff", rev_pair, filename)
     if not artifact.exists():
         raise HTTPException(status_code=404, detail="Artifact not found")
     media_types = {".stl": "model/stl", ".glb": "model/gltf-binary", ".json": "application/json"}

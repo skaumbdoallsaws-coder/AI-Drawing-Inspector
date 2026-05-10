@@ -3969,6 +3969,416 @@
             color: var(--text-secondary);
             margin-bottom: 4px;
         }
+        /* ─────────────────────────────────────────────────────────
+           Training tab — SolidWorks-style command surface.
+           Layout: ribbon (rendered by renderRibbon, lives above) +
+                   train-shell (full-bleed): left-rail | setup-panel |
+                   viewport | playback-panel | right-rail.
+           Setup + playback panels are docked PropertyManagers. The
+           viewport stays clear; only highlight rings, callouts, the
+           current-step badge, and 3D scene chrome are allowed there.
+           ───────────────────────────────────────────────────────── */
+        .train-shell {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 44px auto 1fr auto 44px;
+            grid-template-rows: 1fr;
+            min-height: 0;
+            background: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .train-rail {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 0;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+        }
+        .train-rail.right {
+            border-right: none;
+            border-left: 1px solid var(--border);
+        }
+        .train-rail-icon {
+            position: relative;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            background: transparent;
+            border: 1px solid transparent;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .train-rail-icon:hover {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+            border-color: var(--border-strong);
+        }
+        .train-rail-icon.active {
+            color: var(--accent-strong, #4fc3f7);
+            background: rgba(43,119,191,0.12);
+            border-color: rgba(43,119,191,0.32);
+        }
+        .train-rail-icon svg {
+            width: 18px;
+            height: 18px;
+            display: block;
+        }
+        .train-rail-tooltip {
+            position: absolute;
+            left: calc(100% + 8px);
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--overlay-bg, #2b323d);
+            color: var(--text-primary);
+            border: 1px solid var(--overlay-border, var(--border));
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.12s;
+            z-index: 60;
+        }
+        .train-rail.right .train-rail-tooltip {
+            left: auto;
+            right: calc(100% + 8px);
+        }
+        .train-rail-icon:hover .train-rail-tooltip { opacity: 1; }
+
+        .train-panel {
+            width: 280px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .train-panel.right {
+            border-right: none;
+            border-left: 1px solid var(--border);
+        }
+        .train-panel.collapsed {
+            width: 0;
+            border: none;
+        }
+        .train-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-elevated);
+        }
+        .train-panel-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+        .train-panel-close {
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-secondary);
+            padding: 0 4px;
+            line-height: 1;
+            background: none;
+            border: none;
+        }
+        .train-panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 12px 16px;
+        }
+        .train-field {
+            margin-bottom: 12px;
+        }
+        .train-field-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        .train-field select,
+        .train-field input[type="text"],
+        .train-field textarea {
+            width: 100%;
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 5px 8px;
+            font-size: 12px;
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+        .train-field textarea {
+            resize: vertical;
+            min-height: 50px;
+        }
+        .train-evidence-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-primary);
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+        .train-evidence-toggle input { margin: 0; }
+        .train-section-divider {
+            margin: 14px -12px 10px;
+            border-top: 1px solid var(--border);
+        }
+        .train-generate-btn {
+            width: 100%;
+            background: var(--accent-strong, #2b77bf);
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 4px;
+        }
+        .train-generate-btn:hover { filter: brightness(1.08); }
+        .train-generate-btn:disabled { background: #555; cursor: not-allowed; }
+        .train-secondary-btn {
+            width: 100%;
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border-strong, var(--border));
+            border-radius: 3px;
+            padding: 6px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            margin-top: 6px;
+        }
+        .train-secondary-btn:hover { background: var(--bg-hover); }
+        .train-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        .train-chip {
+            display: inline-block;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            background: rgba(79,195,247,0.10);
+            color: var(--accent-strong, #4fc3f7);
+            border: 1px solid rgba(79,195,247,0.22);
+            cursor: pointer;
+        }
+        .train-chip:hover { background: rgba(79,195,247,0.18); }
+
+        .train-viewport {
+            position: relative;
+            min-width: 0;
+            min-height: 0;
+            background: var(--bg-main);
+            display: flex;
+            flex-direction: column;
+        }
+        .train-viewport-host {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .train-viewport-empty {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 13px;
+            text-align: center;
+            padding: 24px;
+        }
+        .train-step-badge {
+            position: absolute;
+            left: 12px;
+            bottom: 12px;
+            background: rgba(0,0,0,0.62);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.16);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            line-height: 1.4;
+            max-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.32);
+            display: none;
+            z-index: 5;
+        }
+        .train-step-badge.visible { display: block; }
+        .train-step-badge .train-step-badge-num {
+            font-weight: 700;
+            color: var(--accent-strong, #4fc3f7);
+            margin-right: 6px;
+        }
+
+        /* Right playback panel content */
+        .train-step-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+        }
+        .train-step-title {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+        }
+        .train-step-instruction {
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-primary);
+        }
+        .train-evidence-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .train-evidence-badge.cad-known {
+            background: rgba(129,199,132,0.16);
+            color: #81c784;
+            border: 1px solid rgba(129,199,132,0.32);
+        }
+        .train-evidence-badge.inferred {
+            background: rgba(255,183,77,0.14);
+            color: #FFB74D;
+            border: 1px solid rgba(255,183,77,0.30);
+        }
+        .train-evidence-badge.needs-manual {
+            background: rgba(255,123,123,0.14);
+            color: #ff9b9b;
+            border: 1px solid rgba(255,123,123,0.30);
+        }
+        .train-mini-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 7px 9px;
+            margin-bottom: 6px;
+        }
+        .train-mini-card .train-mini-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-secondary);
+            margin-bottom: 3px;
+        }
+        .train-mini-card .train-mini-value {
+            font-size: 12px;
+            color: var(--text-primary);
+        }
+        .train-mini-card.caution {
+            border-color: rgba(255,183,77,0.40);
+            background: rgba(255,183,77,0.08);
+        }
+        .train-mini-card.caution .train-mini-label { color: #FFB74D; }
+        .train-mini-card.verify {
+            border-color: rgba(129,199,132,0.36);
+            background: rgba(129,199,132,0.06);
+        }
+        .train-mini-card.verify .train-mini-label { color: #81c784; }
+
+        .train-collapse {
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            margin-bottom: 6px;
+            overflow: hidden;
+        }
+        .train-collapse-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 10px;
+            background: var(--bg-elevated);
+            font-size: 11px;
+            color: var(--text-primary);
+            cursor: pointer;
+            user-select: none;
+        }
+        .train-collapse-head .chev {
+            font-size: 10px;
+            color: var(--text-secondary);
+            transition: transform 0.15s;
+        }
+        .train-collapse.open .chev { transform: rotate(90deg); }
+        .train-collapse-body {
+            display: none;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: var(--text-primary);
+            line-height: 1.45;
+            border-top: 1px solid var(--border);
+            background: var(--bg-panel);
+            white-space: pre-wrap;
+        }
+        .train-collapse.open .train-collapse-body { display: block; }
+        .train-progress-bar {
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 6px 0 4px;
+        }
+        .train-progress-bar .fill {
+            height: 100%;
+            background: var(--accent-strong, #4fc3f7);
+            transition: width 0.25s;
+        }
+        .train-progress-text {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        .train-followup {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .train-followup input {
+            flex: 1;
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 5px 8px;
+            font-size: 12px;
+        }
+        .train-followup button {
+            background: var(--accent-strong, #2b77bf);
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 10px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        /* Old training-wrapper kept for the unsupported "no assembly" empty state */
         .training-wrapper {
             flex: 1;
             overflow-y: auto;
@@ -7515,6 +7925,53 @@
             motionSetupDone: false,
             assyInstanceMeshMap: null,
             _lastMotionTime: null,
+        };
+
+        // Training tab state — SolidWorks-style command surface for
+        // CAD-grounded training procedures. Independent of the chat /
+        // narration / sales-coaching flows so existing behavior is
+        // preserved. See _renderTrainingTab and the 'training' branch
+        // in playNarrationSequence for the wiring points.
+        const TRAINING_TYPES = [
+            { value: 'assembly',       label: 'Assembly Training' },
+            { value: 'service',        label: 'Service Training' },
+            { value: 'maintenance',    label: 'Maintenance Training' },
+            { value: 'troubleshooting',label: 'Troubleshooting' },
+            { value: 'operator',       label: 'Operator Training' },
+        ];
+        const TRAINING_ROLES = [
+            { value: 'technician',             label: 'Technician' },
+            { value: 'operator',               label: 'Operator' },
+            { value: 'manufacturing_engineer', label: 'Manufacturing Engineer' },
+            { value: 'maintenance_lead',       label: 'Maintenance Lead' },
+        ];
+        const TRAINING_PROMPT_CHIPS = {
+            assembly:        ['First-time install', 'Subassembly buildup', 'Final torque sequence'],
+            service:         ['Routine service interval', 'Replace wear part', 'Clean and reset'],
+            maintenance:     ['Scheduled inspection', 'Lubrication points', 'Filter / fluid change'],
+            troubleshooting: ['Will not start', 'Unusual noise', 'Leak isolation'],
+            operator:        ['Daily startup checklist', 'Normal operation', 'Safe shutdown'],
+        };
+        const trainingState = {
+            type: 'service',
+            targetRole: 'technician',
+            targetComponent: null,
+            goal: '',
+            evidenceRules: {
+                useCadVisible: true,
+                markInferred: true,
+                requireManualForSafety: true,
+                showFullTranscript: false,
+            },
+            procedure: null,
+            currentStepIndex: 0,
+            isPlaying: false,
+            panels: {
+                setupOpen: true,
+                playbackOpen: false,
+            },
+            // Internal: latest mock generation seed for stable rerolls
+            _generationSeed: 0,
         };
 
         function normalizeFindingsOverlayMode(mode) {
@@ -13326,36 +13783,109 @@
                     ribbon.appendChild(g2);
                 }
             } else if (state.activeTab === 'training') {
-                const g1 = _ribbonGroup('Mode');
-                const chip = document.createElement('span');
-                chip.className = 'ribbon-chip accent';
-                chip.textContent = 'Guided Assembly Training';
-                g1.appendChild(chip);
-                ribbon.appendChild(g1);
+                // Training ribbon (SolidWorks-style command row).
+                // No big mode buttons — just a compact type selector +
+                // command groups: Session | Playback | Steppers | Viewport.
+                // Sales/Application coaching is intentionally NOT here.
 
-                ribbon.appendChild(_ribbonSep());
-                const g2 = _ribbonGroup('Session');
-                const startBtn = _ribbonIconBtn('compare', 'Start Guided Tour');
-                startBtn.title = 'Start guided walkthrough';
-                startBtn.addEventListener('click', () => {
-                    const inp = document.getElementById('agentInput');
-                    const btn = document.getElementById('agentSendBtn');
-                    if (inp && btn) {
-                        inp.value = 'Give me a guided walkthrough of this assembly';
-                        btn.disabled = false;
-                        btn.click();
-                    }
+                // Type group: compact dropdown
+                const gType = _ribbonGroup('Type');
+                const typeSel = document.createElement('select');
+                typeSel.id = 'trainingTypeRibbonSelect';
+                typeSel.className = 'ribbon-select';
+                typeSel.style.cssText = 'background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:3px 8px;font-size:11px;min-width:170px;';
+                TRAINING_TYPES.forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t.value; opt.textContent = t.label;
+                    if (t.value === trainingState.type) opt.selected = true;
+                    typeSel.appendChild(opt);
                 });
-                g2.appendChild(startBtn);
-                ribbon.appendChild(g2);
+                typeSel.addEventListener('change', () => {
+                    trainingState.type = typeSel.value;
+                    if (window._refreshTrainingSetupPanel) window._refreshTrainingSetupPanel();
+                });
+                gType.appendChild(typeSel);
+                ribbon.appendChild(gType);
 
+                // Session: Start Guided Training | Open Procedure
                 ribbon.appendChild(_ribbonSep());
-                const g3 = _ribbonGroup('Workspace');
-                const openAssemblyBtn = _ribbonIconBtn('3dmodel', 'Open Assembly');
-                openAssemblyBtn.title = 'Switch to Assembly tab';
-                openAssemblyBtn.addEventListener('click', () => switchTab('assembly'));
-                g3.appendChild(openAssemblyBtn);
-                ribbon.appendChild(g3);
+                const gSess = _ribbonGroup('Session');
+                const startBtn = _ribbonIconBtn('compare', 'Start');
+                startBtn.title = 'Start guided training (generate + play)';
+                startBtn.addEventListener('click', () => {
+                    if (window._trainingStartGuided) window._trainingStartGuided();
+                });
+                gSess.appendChild(startBtn);
+                const openBtn = _ribbonIconBtn('bom', 'Open Procedure');
+                openBtn.title = 'Open the right Procedure Playback panel';
+                openBtn.addEventListener('click', () => {
+                    if (window._trainingTogglePanel) window._trainingTogglePanel('playback', true);
+                });
+                gSess.appendChild(openBtn);
+                ribbon.appendChild(gSess);
+
+                // Playback: Narrate | Pause
+                ribbon.appendChild(_ribbonSep());
+                const gPlay = _ribbonGroup('Playback');
+                const narrBtn = _ribbonIconBtn('compare', 'Narrate');
+                narrBtn.title = 'Speak the current step';
+                narrBtn.addEventListener('click', () => {
+                    if (window._trainingPlayCurrent) window._trainingPlayCurrent();
+                });
+                gPlay.appendChild(narrBtn);
+                const pauseBtn = _ribbonIconBtn('bom', 'Pause');
+                pauseBtn.title = 'Pause / stop playback';
+                pauseBtn.addEventListener('click', () => {
+                    if (typeof stopNarration === 'function') stopNarration();
+                });
+                gPlay.appendChild(pauseBtn);
+                ribbon.appendChild(gPlay);
+
+                // Steppers: Previous | Next
+                ribbon.appendChild(_ribbonSep());
+                const gStep = _ribbonGroup('Steps');
+                const prevBtn = _ribbonIconBtn('bom', 'Previous');
+                prevBtn.title = 'Previous step';
+                prevBtn.addEventListener('click', () => {
+                    if (window._trainingStepPrev) window._trainingStepPrev();
+                });
+                gStep.appendChild(prevBtn);
+                const nextBtn = _ribbonIconBtn('compare', 'Next');
+                nextBtn.title = 'Next step';
+                nextBtn.addEventListener('click', () => {
+                    if (window._trainingStepNext) window._trainingStepNext();
+                });
+                gStep.appendChild(nextBtn);
+                ribbon.appendChild(gStep);
+
+                // Viewport: Highlight | Isolate | Explode Step | Reset View
+                ribbon.appendChild(_ribbonSep());
+                const gView = _ribbonGroup('Viewport');
+                const hlBtn = _ribbonIconBtn('bom', 'Highlight');
+                hlBtn.title = 'Re-apply current step highlights';
+                hlBtn.addEventListener('click', () => {
+                    if (window._trainingApplyStepView) window._trainingApplyStepView();
+                });
+                gView.appendChild(hlBtn);
+                const isoBtn = _ribbonIconBtn('bom', 'Isolate');
+                isoBtn.title = 'Isolate parts of current step';
+                isoBtn.addEventListener('click', () => {
+                    if (window._trainingIsolateCurrent) window._trainingIsolateCurrent();
+                });
+                gView.appendChild(isoBtn);
+                const expBtn = _ribbonIconBtn('bom', 'Explode');
+                expBtn.title = 'Apply current step explode level';
+                expBtn.addEventListener('click', () => {
+                    if (window._trainingExplodeCurrent) window._trainingExplodeCurrent();
+                });
+                gView.appendChild(expBtn);
+                const resetBtn = _ribbonIconBtn('bom', 'Reset');
+                resetBtn.title = 'Reset 3D view (clears highlight + explode)';
+                resetBtn.addEventListener('click', () => {
+                    if (window._trainingResetView) window._trainingResetView();
+                });
+                gView.appendChild(resetBtn);
+                ribbon.appendChild(gView);
             }
         }
 
@@ -13791,183 +14321,899 @@
 
         }
 
+        // ─────────────────────────────────────────────────────────
+        // Training tab — SolidWorks-style command surface.
+        // Ribbon (rendered by renderRibbon) holds command actions.
+        // train-shell hosts: left rail icon | left setup PropertyManager
+        // | clear viewport (re-uses _initAssembly3DScene) | right
+        // playback panel | right rail icon. Setup panel default-opens.
+        // Playback panel opens on Generate or Start.
+        // ─────────────────────────────────────────────────────────
         function _renderTrainingTab() {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'training-wrapper';
+            const viewportContent = document.getElementById('viewportContent');
+            if (!viewportContent) return;
 
-            const assemblyLabel = assemblyContext?.assembly_name || assemblyContext?.assembly_number || 'current assembly';
-            const componentCount = assemblyContext?.component_count;
-            const mateCount = assemblyContext?.mate_count;
-
-            const partNum = state.partNumber || '';
-            const partName = state.partName || '';
-            const assyNum = assemblyContext?.assembly_number || '';
-
-            wrapper.innerHTML = `
-                <div class="training-shell">
-                    <div class="training-hero">
-                        <section class="training-panel training-hero-main">
-                            <div class="training-eyebrow">Training Workspace</div>
-                            <h1>Assembly and disassembly guidance from the actual machine context.</h1>
-                            <p>
-                                This tab is the dedicated surface for guided machine training. It is intended to go beyond the current assembly walkthrough by giving the operator a structured sequence, view handoff, and part-by-part context for putting the machine together or taking it apart.
-                            </p>
-                            <div class="training-hero-actions">
-                                <button class="training-btn primary" id="trainingStartTourBtn">Start Guided Tour</button>
-                                <button class="training-btn" id="trainingOpenAssemblyBtn">Open Assembly Workspace</button>
-                            </div>
-                        </section>
-                        <aside class="training-panel training-side">
-                            <h2>Current Context</h2>
-                            <ul>
-                                <li>Assembly source: ${assemblyLabel}</li>
-                                <li>${componentCount ? `${componentCount} components available for training context` : 'Component context will appear when an assembly is available'}</li>
-                                <li>${mateCount ? `${mateCount} mate relationships available for sequencing and orientation checks` : 'Mate relationships can be used later for step validation'}</li>
-                            </ul>
-                        </aside>
-                    </div>
-                    <div class="training-blender-section">
-                        <div class="blender-preview-card" id="blenderPreviewCard">
-                            <div class="blender-card-header">
-                                <h3>3D Training Preview</h3>
-                                <span class="blender-badge optional" id="blenderBadge">Optional</span>
-                            </div>
-                            <div class="blender-status" id="blenderStatus">
-                                ${partNum
-                                    ? `Generate an exploded assembly render for <strong>${partName || partNum}</strong> using the Blender pipeline. The preview uses ${assyNum ? 'the active assembly context and ' : ''}any available STL geometry for this part.`
-                                    : 'Load a part or assembly to generate a 3D training preview. The Blender pipeline produces an exploded assembly render from the current part context and available geometry.'}
-                            </div>
-                            <div class="blender-preview-frame" id="blenderPreviewFrame">
-                                <img class="blender-preview-image" id="blenderPreviewImg" alt="Blender training preview" />
-                                <div class="blender-preview-caption" id="blenderCaption"></div>
-                            </div>
-                            <div class="blender-actions">
-                                <button class="training-btn primary" id="blenderGenerateBtn"
-                                    ${partNum ? '' : 'disabled'}>
-                                    Generate Preview
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="training-grid">
-                        <section class="training-panel training-card">
-                            <h3>Planned Workflow</h3>
-                            <p>Guide the user through ordered assembly or disassembly steps with the correct parts isolated, the camera staged, and the current operation explained in plain language.</p>
-                            <div class="training-chip-row">
-                                <span class="training-chip">Step-by-step</span>
-                                <span class="training-chip">Camera handoff</span>
-                                <span class="training-chip">Part isolate</span>
-                            </div>
-                        </section>
-                        <section class="training-panel training-card">
-                            <h3>Why This Gets Its Own Tab</h3>
-                            <p>Training is a different user job than revision review or assembly compare. It needs its own session model, progress state, and instruction surface instead of being hidden behind the general assembly tools.</p>
-                            <div class="training-chip-row">
-                                <span class="training-chip">Dedicated flow</span>
-                                <span class="training-chip">Operator-facing</span>
-                                <span class="training-chip">Progress tracking</span>
-                            </div>
-                        </section>
-                        <section class="training-panel training-card">
-                            <h3>Next Layer</h3>
-                            <p>Build this into a real training runtime with saved procedures, tool lists, warnings, and checkpoints that confirm the user is on the right step before advancing.</p>
-                            <div class="training-chip-row">
-                                <span class="training-chip">Tooling notes</span>
-                                <span class="training-chip">Warnings</span>
-                                <span class="training-chip">Checkpoint validation</span>
-                            </div>
-                        </section>
-                    </div>
-                </div>
-            `;
-
-            wrapper.querySelector('#trainingOpenAssemblyBtn')?.addEventListener('click', () => switchTab('assembly'));
-            wrapper.querySelector('#trainingStartTourBtn')?.addEventListener('click', () => {
-                const inp = document.getElementById('agentInput');
-                const btn = document.getElementById('agentSendBtn');
-                if (inp && btn) {
-                    inp.value = 'Give me a guided walkthrough of this assembly';
-                    btn.disabled = false;
-                    btn.click();
-                }
-            });
-
-            // Blender Training Preview button handler
-            const genBtn = wrapper.querySelector('#blenderGenerateBtn');
-            const badgeEl = wrapper.querySelector('#blenderBadge');
-            const statusEl = wrapper.querySelector('#blenderStatus');
-            const frameEl = wrapper.querySelector('#blenderPreviewFrame');
-            const imgEl = wrapper.querySelector('#blenderPreviewImg');
-            const captionEl = wrapper.querySelector('#blenderCaption');
-
-            if (genBtn) {
-                genBtn.addEventListener('click', async () => {
-                    // â”€â”€ Generating state â”€â”€
-                    genBtn.disabled = true;
-                    genBtn.innerHTML = '<span class="blender-spinner"></span> Generating...';
-                    badgeEl.className = 'blender-badge generating';
-                    badgeEl.textContent = 'Generating';
-                    statusEl.className = 'blender-status';
-                    statusEl.textContent = `Building exploded assembly scene for ${partName || partNum}...`;
-                    frameEl.classList.remove('visible');
-
-                    try {
-                        const resp = await fetch('/api/training/blender/generate-preview', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                part_number: partNum,
-                                part_name: partName || undefined,
-                                assembly_number: assyNum || undefined,
-                            }),
-                        });
-                        const data = await resp.json();
-
-                        if (data.ok) {
-                            // â”€â”€ Success state â”€â”€
-                            badgeEl.className = 'blender-badge ready';
-                            badgeEl.textContent = 'Ready';
-                            statusEl.className = 'blender-status blender-success';
-                            statusEl.innerHTML = `Exploded assembly preview for <strong>${partName || partNum}</strong>`;
-                            if (data.previewImageUrl) {
-                                imgEl.src = data.previewImageUrl;
-                                frameEl.classList.add('visible');
-                            }
-                            // Caption: part + timestamp
-                            const ts = data.metadata?.generated_at;
-                            const timeFmt = ts ? new Date(ts).toLocaleString() : 'just now';
-                            captionEl.innerHTML = `<span>${data.contextKey || partNum}</span><span>Generated ${timeFmt}</span>`;
-                            genBtn.textContent = 'Regenerate Preview';
-                        } else if (data.available === false) {
-                            // â”€â”€ Unavailable state (Blender not configured) â”€â”€
-                            badgeEl.className = 'blender-badge unavailable';
-                            badgeEl.textContent = 'Unavailable';
-                            statusEl.className = 'blender-status blender-unavailable';
-                            statusEl.textContent = 'The Blender rendering service is not running. This is an optional feature \u2014 the rest of the app is unaffected. Start the Blender MCP server and try again.';
-                            genBtn.textContent = 'Retry';
-                        } else {
-                            // â”€â”€ Error state (Blender running but failed) â”€â”€
-                            badgeEl.className = 'blender-badge error';
-                            badgeEl.textContent = 'Error';
-                            statusEl.className = 'blender-status blender-error';
-                            statusEl.textContent = data.error || 'Preview generation failed. Check the Blender pipeline logs for details.';
-                            genBtn.textContent = 'Retry';
-                        }
-                    } catch (err) {
-                        // â”€â”€ Network / server error â”€â”€
-                        badgeEl.className = 'blender-badge error';
-                        badgeEl.textContent = 'Error';
-                        statusEl.className = 'blender-status blender-error';
-                        statusEl.textContent = `Could not reach the server: ${err.message}`;
-                        genBtn.textContent = 'Retry';
-                    }
-
-                    genBtn.disabled = false;
-                });
+            // Auto-default Target Component to current selection or assembly root.
+            if (!trainingState.targetComponent) {
+                trainingState.targetComponent =
+                    state.partNumber
+                    || (assemblyContext && (assemblyContext.assembly_name || assemblyContext.assembly_number))
+                    || '';
             }
 
-            viewportContent.appendChild(wrapper);
+            const shell = document.createElement('div');
+            shell.className = 'train-shell';
+            shell.id = 'trainShell';
+
+            // ── Left rail icon (Training Setup) ──
+            shell.appendChild(_trainBuildLeftRail());
+
+            // ── Left setup panel (PropertyManager) ──
+            shell.appendChild(_trainBuildSetupPanel());
+
+            // ── Center viewport ──
+            shell.appendChild(_trainBuildViewport());
+
+            // ── Right playback panel ──
+            shell.appendChild(_trainBuildPlaybackPanel());
+
+            // ── Right rail icon (Procedure Playback) ──
+            shell.appendChild(_trainBuildRightRail());
+
+            viewportContent.appendChild(shell);
+
+            // Initial panel open state per spec defaults
+            _trainApplyPanelVisibility();
+            // Default-open the Setup panel when entering Training tab
+            if (!trainingState.panels.setupOpen) {
+                trainingState.panels.setupOpen = true;
+                _trainApplyPanelVisibility();
+            }
+
+            // Mount the 3D viewer if assembly is available
+            _trainMountViewer();
+            // Render the current step into the playback panel (if any)
+            _trainRenderPlaybackPanel();
         }
+
+        // ── Train tab: rail builders ──
+        function _trainBuildLeftRail() {
+            const rail = document.createElement('div');
+            rail.className = 'train-rail';
+            rail.id = 'trainLeftRail';
+            const setupIcon = document.createElement('div');
+            setupIcon.className = 'train-rail-icon' + (trainingState.panels.setupOpen ? ' active' : '');
+            setupIcon.id = 'trainLeftRailSetup';
+            setupIcon.title = 'Training Setup';
+            setupIcon.setAttribute('data-rail', 'setup');
+            // Checklist + small gear icon
+            setupIcon.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 5h11M3 10h11M3 15h7"/>
+                    <path d="M5.5 5l1 1 1.5-2"/>
+                    <path d="M5.5 10l1 1 1.5-2"/>
+                    <path d="M5.5 15l1 1 1.5-2"/>
+                    <circle cx="18.5" cy="17.5" r="2.4"/>
+                    <path d="M18.5 13.5v1M18.5 20.5v1M22.5 17.5h-1M14.5 17.5h-1"/>
+                </svg>
+                <span class="train-rail-tooltip">Training Setup</span>
+            `;
+            setupIcon.addEventListener('click', () => _trainTogglePanel('setup'));
+            rail.appendChild(setupIcon);
+            return rail;
+        }
+
+        function _trainBuildRightRail() {
+            const rail = document.createElement('div');
+            rail.className = 'train-rail right';
+            rail.id = 'trainRightRail';
+            const playIcon = document.createElement('div');
+            playIcon.className = 'train-rail-icon' + (trainingState.panels.playbackOpen ? ' active' : '');
+            playIcon.id = 'trainRightRailPlayback';
+            playIcon.title = 'Procedure Playback';
+            playIcon.setAttribute('data-rail', 'playback');
+            // Step list + play triangle icon
+            playIcon.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 6h9M3 11h9M3 16h6"/>
+                    <polygon points="15.5,12 22,16 15.5,20" fill="currentColor" stroke="none"/>
+                </svg>
+                <span class="train-rail-tooltip">Procedure Playback</span>
+            `;
+            playIcon.addEventListener('click', () => _trainTogglePanel('playback'));
+            rail.appendChild(playIcon);
+            return rail;
+        }
+
+        // ── Train tab: docked panels ──
+        function _trainBuildSetupPanel() {
+            const p = document.createElement('div');
+            p.className = 'train-panel left';
+            p.id = 'trainSetupPanel';
+
+            const head = document.createElement('div');
+            head.className = 'train-panel-header';
+            head.innerHTML = `<span class="train-panel-title">Training PropertyManager</span>`;
+            const close = document.createElement('button');
+            close.className = 'train-panel-close';
+            close.type = 'button';
+            close.title = 'Collapse';
+            close.textContent = '×';
+            close.addEventListener('click', () => _trainTogglePanel('setup', false));
+            head.appendChild(close);
+            p.appendChild(head);
+
+            const body = document.createElement('div');
+            body.className = 'train-panel-body';
+            body.id = 'trainSetupBody';
+            p.appendChild(body);
+
+            _trainRenderSetupBody(body);
+            return p;
+        }
+
+        function _trainRenderSetupBody(body) {
+            body.innerHTML = '';
+
+            // Session Setup section
+            const sectionLabel = document.createElement('div');
+            sectionLabel.style.cssText = 'font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.6px;font-weight:700;margin:2px 0 8px;';
+            sectionLabel.textContent = 'Session Setup';
+            body.appendChild(sectionLabel);
+
+            // Training Type
+            const typeField = document.createElement('div'); typeField.className = 'train-field';
+            typeField.innerHTML = `<div class="train-field-label">Training Type</div>`;
+            const typeSel = document.createElement('select');
+            TRAINING_TYPES.forEach(t => {
+                const o = document.createElement('option');
+                o.value = t.value; o.textContent = t.label;
+                if (t.value === trainingState.type) o.selected = true;
+                typeSel.appendChild(o);
+            });
+            typeSel.addEventListener('change', () => {
+                trainingState.type = typeSel.value;
+                _trainRenderSetupBody(body);   // re-render so chips refresh
+                renderRibbon();                // ribbon dropdown reflects state
+            });
+            typeField.appendChild(typeSel);
+            body.appendChild(typeField);
+
+            // Target Role
+            const roleField = document.createElement('div'); roleField.className = 'train-field';
+            roleField.innerHTML = `<div class="train-field-label">Target Role</div>`;
+            const roleSel = document.createElement('select');
+            TRAINING_ROLES.forEach(r => {
+                const o = document.createElement('option');
+                o.value = r.value; o.textContent = r.label;
+                if (r.value === trainingState.targetRole) o.selected = true;
+                roleSel.appendChild(o);
+            });
+            roleSel.addEventListener('change', () => { trainingState.targetRole = roleSel.value; });
+            roleField.appendChild(roleSel);
+            body.appendChild(roleField);
+
+            // Target Component
+            const compField = document.createElement('div'); compField.className = 'train-field';
+            compField.innerHTML = `<div class="train-field-label">Target Component</div>`;
+            const compInput = document.createElement('input');
+            compInput.type = 'text';
+            compInput.placeholder = 'Subassembly or part';
+            compInput.value = trainingState.targetComponent || '';
+            compInput.addEventListener('input', () => { trainingState.targetComponent = compInput.value; });
+            compField.appendChild(compInput);
+            body.appendChild(compField);
+
+            // Training Goal
+            const goalField = document.createElement('div'); goalField.className = 'train-field';
+            goalField.innerHTML = `<div class="train-field-label">Training Goal</div>`;
+            const goalInput = document.createElement('textarea');
+            goalInput.placeholder = 'What should the trainee be able to do after this?';
+            goalInput.value = trainingState.goal;
+            goalInput.addEventListener('input', () => { trainingState.goal = goalInput.value; });
+            goalField.appendChild(goalInput);
+            body.appendChild(goalField);
+
+            // Suggested prompt chips
+            const chips = TRAINING_PROMPT_CHIPS[trainingState.type] || [];
+            if (chips.length) {
+                const chipsField = document.createElement('div'); chipsField.className = 'train-field';
+                chipsField.innerHTML = `<div class="train-field-label">Suggested Prompts</div>`;
+                const chipRow = document.createElement('div');
+                chipRow.className = 'train-chip-row';
+                chips.forEach(c => {
+                    const chip = document.createElement('span');
+                    chip.className = 'train-chip';
+                    chip.textContent = c;
+                    chip.addEventListener('click', () => {
+                        trainingState.goal = c;
+                        goalInput.value = c;
+                    });
+                    chipRow.appendChild(chip);
+                });
+                chipsField.appendChild(chipRow);
+                body.appendChild(chipsField);
+            }
+
+            // Divider
+            const div1 = document.createElement('div'); div1.className = 'train-section-divider'; body.appendChild(div1);
+
+            // Evidence Rules
+            const evLabel = document.createElement('div');
+            evLabel.style.cssText = 'font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.6px;font-weight:700;margin:2px 0 8px;';
+            evLabel.textContent = 'Evidence Rules';
+            body.appendChild(evLabel);
+            const evRules = [
+                { key: 'useCadVisible',          label: 'Use CAD-visible structure' },
+                { key: 'markInferred',           label: 'Mark inferred steps clearly' },
+                { key: 'requireManualForSafety', label: 'Require manual for safety, torque, lockout' },
+                { key: 'showFullTranscript',     label: 'Show full transcript during playback' },
+            ];
+            evRules.forEach(r => {
+                const lbl = document.createElement('label');
+                lbl.className = 'train-evidence-toggle';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = !!trainingState.evidenceRules[r.key];
+                cb.addEventListener('change', () => {
+                    trainingState.evidenceRules[r.key] = cb.checked;
+                    if (r.key === 'showFullTranscript') {
+                        _trainRenderPlaybackPanel();
+                    }
+                });
+                lbl.appendChild(cb);
+                lbl.appendChild(document.createTextNode(r.label));
+                body.appendChild(lbl);
+            });
+
+            // Generate Training button
+            const div2 = document.createElement('div'); div2.className = 'train-section-divider'; body.appendChild(div2);
+            const genBtn = document.createElement('button');
+            genBtn.className = 'train-generate-btn';
+            genBtn.id = 'trainGenerateBtn';
+            genBtn.textContent = 'Generate Training';
+            genBtn.addEventListener('click', () => _trainGenerateProcedure());
+            body.appendChild(genBtn);
+
+            // Blender Generate Preview (preserved feature, tucked in setup panel)
+            if (state.partNumber) {
+                const blenderBtn = document.createElement('button');
+                blenderBtn.className = 'train-secondary-btn';
+                blenderBtn.id = 'trainBlenderBtn';
+                blenderBtn.textContent = 'Generate Blender Preview';
+                blenderBtn.title = 'Render an exploded assembly preview using the Blender pipeline';
+                blenderBtn.addEventListener('click', () => _trainGenerateBlenderPreview(blenderBtn));
+                body.appendChild(blenderBtn);
+            }
+        }
+
+        // Allow the ribbon dropdown to refresh the setup panel
+        window._refreshTrainingSetupPanel = () => {
+            const body = document.getElementById('trainSetupBody');
+            if (body) _trainRenderSetupBody(body);
+        };
+
+        function _trainBuildPlaybackPanel() {
+            const p = document.createElement('div');
+            p.className = 'train-panel right';
+            p.id = 'trainPlaybackPanel';
+
+            const head = document.createElement('div');
+            head.className = 'train-panel-header';
+            head.innerHTML = `<span class="train-panel-title">Procedure Playback</span>`;
+            const close = document.createElement('button');
+            close.className = 'train-panel-close';
+            close.type = 'button';
+            close.title = 'Collapse';
+            close.textContent = '×';
+            close.addEventListener('click', () => _trainTogglePanel('playback', false));
+            head.appendChild(close);
+            p.appendChild(head);
+
+            const body = document.createElement('div');
+            body.className = 'train-panel-body';
+            body.id = 'trainPlaybackBody';
+            p.appendChild(body);
+            return p;
+        }
+
+        function _trainRenderPlaybackPanel() {
+            const body = document.getElementById('trainPlaybackBody');
+            if (!body) return;
+            body.innerHTML = '';
+
+            const proc = trainingState.procedure;
+            if (!proc || !proc.steps || !proc.steps.length) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'color:var(--text-secondary);font-size:12px;padding:8px 0;';
+                empty.textContent = 'Generate a procedure to see step-by-step playback here.';
+                body.appendChild(empty);
+                return;
+            }
+
+            const i = Math.max(0, Math.min(trainingState.currentStepIndex, proc.steps.length - 1));
+            const step = proc.steps[i];
+
+            // Procedure title
+            const procTitle = document.createElement('div');
+            procTitle.style.cssText = 'font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;';
+            procTitle.textContent = proc.title;
+            body.appendChild(procTitle);
+
+            // Current step card
+            const card = document.createElement('div');
+            card.className = 'train-step-card';
+
+            // Evidence badge
+            const evBadge = document.createElement('span');
+            const evClass = ({
+                cad_known:    'cad-known',
+                inferred:     'inferred',
+                needs_manual: 'needs-manual',
+            })[step.evidenceLevel || 'inferred'] || 'inferred';
+            const evLabel = ({
+                cad_known:    'CAD Known',
+                inferred:     'Inferred',
+                needs_manual: 'Needs Manual',
+            })[step.evidenceLevel || 'inferred'] || 'Inferred';
+            evBadge.className = 'train-evidence-badge ' + evClass;
+            evBadge.textContent = evLabel;
+            card.appendChild(evBadge);
+
+            const t = document.createElement('div');
+            t.className = 'train-step-title';
+            t.textContent = `${i + 1}. ${step.title}`;
+            card.appendChild(t);
+
+            const inst = document.createElement('div');
+            inst.className = 'train-step-instruction';
+            inst.textContent = step.instruction || '';
+            card.appendChild(inst);
+            body.appendChild(card);
+
+            // Mini cards (highlight, camera, caution, verify)
+            const hpList = (step.highlightParts || []).join(', ');
+            if (hpList) body.appendChild(_trainMiniCard('Highlight', hpList));
+            const cfList = (step.cameraFocus || []).join(', ');
+            if (cfList) body.appendChild(_trainMiniCard('Camera Focus', cfList));
+            if (step.caution) body.appendChild(_trainMiniCard('Caution', step.caution, 'caution'));
+            if (step.verificationCheck) body.appendChild(_trainMiniCard('Verification Check', step.verificationCheck, 'verify'));
+
+            // Collapsible sections
+            if (step.toolsAndDocsRequired) body.appendChild(_trainCollapse('Tools and docs required', step.toolsAndDocsRequired));
+            if (step.whatCanGoWrong) body.appendChild(_trainCollapse('What can go wrong', step.whatCanGoWrong));
+
+            // Full transcript collapse — open when evidenceRules.showFullTranscript
+            if (step.transcript || (proc.steps && proc.steps.length)) {
+                const lines = (proc.steps || []).map((s, idx) => `${idx + 1}. ${s.title}\n   ${s.instruction}`).join('\n\n');
+                const open = !!trainingState.evidenceRules.showFullTranscript;
+                body.appendChild(_trainCollapse('Full transcript', lines, open));
+            }
+
+            // Progress
+            const progressWrap = document.createElement('div');
+            progressWrap.style.marginTop = '10px';
+            const bar = document.createElement('div'); bar.className = 'train-progress-bar';
+            const fill = document.createElement('div'); fill.className = 'fill';
+            fill.style.width = `${((i + 1) / proc.steps.length) * 100}%`;
+            bar.appendChild(fill);
+            progressWrap.appendChild(bar);
+            const txt = document.createElement('div'); txt.className = 'train-progress-text';
+            txt.textContent = `Step ${i + 1} of ${proc.steps.length}`;
+            progressWrap.appendChild(txt);
+            body.appendChild(progressWrap);
+
+            // Follow-up input scoped to current step
+            const followup = document.createElement('div');
+            followup.className = 'train-followup';
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.placeholder = 'Ask about this step…';
+            const askBtn = document.createElement('button');
+            askBtn.type = 'button';
+            askBtn.textContent = 'Ask';
+            const fire = () => {
+                const q = (inp.value || '').trim();
+                if (!q) return;
+                _trainAskAboutStep(q, i);
+                inp.value = '';
+            };
+            askBtn.addEventListener('click', fire);
+            inp.addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
+            followup.appendChild(inp);
+            followup.appendChild(askBtn);
+            body.appendChild(followup);
+
+            // Update viewport step badge
+            _trainUpdateStepBadge(i, step);
+        }
+
+        function _trainMiniCard(label, value, variant) {
+            const c = document.createElement('div');
+            c.className = 'train-mini-card' + (variant ? ' ' + variant : '');
+            const l = document.createElement('div'); l.className = 'train-mini-label'; l.textContent = label;
+            const v = document.createElement('div'); v.className = 'train-mini-value'; v.textContent = value;
+            c.appendChild(l); c.appendChild(v);
+            return c;
+        }
+
+        function _trainCollapse(label, body, open) {
+            const c = document.createElement('div');
+            c.className = 'train-collapse' + (open ? ' open' : '');
+            const head = document.createElement('div');
+            head.className = 'train-collapse-head';
+            const lbl = document.createElement('span'); lbl.textContent = label;
+            const chev = document.createElement('span'); chev.className = 'chev'; chev.textContent = '›';
+            head.appendChild(lbl); head.appendChild(chev);
+            const bodyEl = document.createElement('div');
+            bodyEl.className = 'train-collapse-body';
+            bodyEl.textContent = body;
+            head.addEventListener('click', () => { c.classList.toggle('open'); });
+            c.appendChild(head); c.appendChild(bodyEl);
+            return c;
+        }
+
+        // ── Train tab: viewport ──
+        function _trainBuildViewport() {
+            const v = document.createElement('div');
+            v.className = 'train-viewport';
+            v.id = 'trainViewport';
+            const host = document.createElement('div');
+            host.className = 'train-viewport-host';
+            host.id = 'trainViewportHost';
+            v.appendChild(host);
+            // Step badge overlay
+            const badge = document.createElement('div');
+            badge.className = 'train-step-badge';
+            badge.id = 'trainStepBadge';
+            v.appendChild(badge);
+            return v;
+        }
+
+        function _trainMountViewer() {
+            const host = document.getElementById('trainViewportHost');
+            if (!host) return;
+
+            if (!assemblyContextAvailable || !assemblyContext) {
+                host.innerHTML = '';
+                const empty = document.createElement('div');
+                empty.className = 'train-viewport-empty';
+                empty.innerHTML = `Load a part with assembly context to enable training.<br><span style="opacity:0.6;font-size:11px;">The 3D viewer mounts here once an assembly is detected.</span>`;
+                host.appendChild(empty);
+                return;
+            }
+
+            host.innerHTML = '';
+            const inner = document.createElement('div');
+            inner.id = 'assy-3d-container';   // re-use the assembly viewer init
+            inner.style.cssText = 'position:absolute;inset:0;background:var(--bg-main);';
+            host.appendChild(inner);
+
+            if (assemblyContext.has_glb && typeof _initAssembly3DScene === 'function') {
+                try {
+                    _initAssembly3DScene(inner, assemblyContext.assembly_number);
+                } catch (e) { console.warn('Training viewer init failed:', e); }
+            } else {
+                inner.innerHTML = '<div class="train-viewport-empty">No 3D assembly model available</div>';
+            }
+        }
+
+        function _trainUpdateStepBadge(i, step) {
+            const b = document.getElementById('trainStepBadge');
+            if (!b) return;
+            if (!step) { b.classList.remove('visible'); b.innerHTML = ''; return; }
+            b.classList.add('visible');
+            b.innerHTML = `<span class="train-step-badge-num">Step ${i + 1}</span>${(step.title || '').replace(/[<>]/g,'')}`;
+        }
+
+        // ── Train tab: panel toggling ──
+        function _trainTogglePanel(which, force) {
+            const cur = !!trainingState.panels[which === 'setup' ? 'setupOpen' : 'playbackOpen'];
+            const next = (typeof force === 'boolean') ? force : !cur;
+            if (which === 'setup') trainingState.panels.setupOpen = next;
+            else                   trainingState.panels.playbackOpen = next;
+            _trainApplyPanelVisibility();
+        }
+        window._trainingTogglePanel = (which, force) => _trainTogglePanel(which, force);
+
+        function _trainApplyPanelVisibility() {
+            const setup = document.getElementById('trainSetupPanel');
+            const play  = document.getElementById('trainPlaybackPanel');
+            const lIcon = document.getElementById('trainLeftRailSetup');
+            const rIcon = document.getElementById('trainRightRailPlayback');
+            if (setup) setup.classList.toggle('collapsed', !trainingState.panels.setupOpen);
+            if (play)  play.classList.toggle('collapsed',  !trainingState.panels.playbackOpen);
+            if (lIcon) lIcon.classList.toggle('active', !!trainingState.panels.setupOpen);
+            if (rIcon) rIcon.classList.toggle('active', !!trainingState.panels.playbackOpen);
+        }
+
+        // ── Train tab: mock procedure generation ──
+        function _trainGenerateProcedure() {
+            const proc = _trainBuildMockProcedure();
+            trainingState.procedure = proc;
+            trainingState.currentStepIndex = 0;
+            // Open playback panel on generate; auto-collapse setup to preserve viewport width
+            trainingState.panels.playbackOpen = true;
+            if (proc && proc.steps && proc.steps.length > 1) {
+                trainingState.panels.setupOpen = false;
+            }
+            _trainApplyPanelVisibility();
+            _trainRenderPlaybackPanel();
+            _trainApplyStepView();
+        }
+
+        function _trainBuildMockProcedure() {
+            const t = trainingState.type || 'service';
+            const role = trainingState.targetRole || 'technician';
+            const target = trainingState.targetComponent || (assemblyContext?.assembly_name) || 'this assembly';
+            const parts = (assemblyContext?.part_color_legend || [])
+                .map(p => p && (p.part_number || p.partNumber)).filter(Boolean);
+            const pickParts = (n) => parts.slice(0, n).filter(Boolean);
+
+            const titleByType = {
+                assembly:        `Assembly procedure — ${target}`,
+                service:         `Service procedure — ${target}`,
+                maintenance:     `Maintenance procedure — ${target}`,
+                troubleshooting: `Troubleshooting procedure — ${target}`,
+                operator:        `Operator procedure — ${target}`,
+            };
+            const title = titleByType[t] || `Training procedure — ${target}`;
+
+            // Step templates per type. evidenceLevel reflects the spec's
+            // strict CAD-grounded rule: structure facts are CAD Known;
+            // safety, torque, lockout, intervals are Needs Manual.
+            const stepBank = {
+                service: [
+                    { title: 'Identify the service area',
+                      instruction: `Locate the ${target} on the machine. Confirm visual orientation against the 3D reference before touching any fastener.`,
+                      evidenceLevel: 'cad_known',
+                      highlightParts: pickParts(2),
+                      cameraFocus: pickParts(1),
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'You can see all fastener heads and the seam line.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Lock out and isolate energy',
+                      instruction: 'Apply lockout/tagout per facility procedure before continuing. Do not rely on machine state alone.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: [], cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: 'Stored energy may remain in springs, cylinders, or accumulators after main power is off.',
+                      verificationCheck: 'Confirm zero energy state per the equipment manual.',
+                      toolsAndDocsRequired: 'Equipment lockout procedure, lockout devices, voltmeter or pressure gauge as required.',
+                      whatCanGoWrong: 'Skipping lockout has caused crush and laceration injuries on similar service tasks.',
+                      transcript: '' },
+                    { title: 'Remove access fasteners',
+                      instruction: 'Remove the visible fasteners around the access perimeter. Track loose hardware so nothing is left in the machine.',
+                      evidenceLevel: 'inferred',
+                      highlightParts: pickParts(2),
+                      cameraFocus: pickParts(2),
+                      isolateParts: [], explodeLevel: 0.25,
+                      caution: '', verificationCheck: 'All perimeter fasteners are accounted for.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Service the target component',
+                      instruction: `Perform the planned service action on the ${target}. Note original orientation before disturbing it.`,
+                      evidenceLevel: 'inferred',
+                      highlightParts: pickParts(1),
+                      cameraFocus: pickParts(1),
+                      isolateParts: pickParts(1), explodeLevel: 0.5,
+                      caution: '', verificationCheck: 'Component is serviced and ready for reinstall.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Reassemble and torque',
+                      instruction: 'Reinstall the component in original orientation. Hand-thread all fasteners before final tightening.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: pickParts(2),
+                      cameraFocus: [], isolateParts: [], explodeLevel: 0.25,
+                      caution: 'Final torque values are critical — confirm them in the equipment manual.',
+                      verificationCheck: 'Each fastener at manual-specified torque, witnessed if required.',
+                      toolsAndDocsRequired: 'Calibrated torque wrench, equipment manual torque table.',
+                      whatCanGoWrong: '', transcript: '' },
+                    { title: 'Restore energy and function-check',
+                      instruction: 'Remove lockout, restore power, and run the post-service function check.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: [], cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: 'Stand clear during first motion test.',
+                      verificationCheck: 'No leaks, no abnormal noise, normal cycle completes.',
+                      toolsAndDocsRequired: 'Post-service checklist from equipment manual.',
+                      whatCanGoWrong: '', transcript: '' },
+                ],
+                assembly: [
+                    { title: 'Stage parts and verify count',
+                      instruction: `Lay out parts for ${target} on a clean bench. Check each against the BOM before mating.`,
+                      evidenceLevel: 'cad_known',
+                      highlightParts: pickParts(3), cameraFocus: pickParts(1),
+                      isolateParts: [], explodeLevel: 1.0,
+                      caution: '', verificationCheck: 'Part count matches BOM.', toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Mate primary subassembly',
+                      instruction: 'Bring the primary subassembly together in CAD-shown orientation.',
+                      evidenceLevel: 'cad_known',
+                      highlightParts: pickParts(2), cameraFocus: pickParts(2),
+                      isolateParts: pickParts(2), explodeLevel: 0.5,
+                      caution: '', verificationCheck: 'Mating faces seat fully.', toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Install fasteners in pattern',
+                      instruction: 'Hand-thread fasteners in the CAD-shown pattern. Do not final-tighten yet.',
+                      evidenceLevel: 'inferred',
+                      highlightParts: pickParts(2), cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0.25,
+                      caution: '', verificationCheck: 'All fasteners hand-tight.', toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Apply final torque sequence',
+                      instruction: 'Final-torque per the manual sequence and value.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: [], cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: 'Skipping the cross-pattern can warp mating surfaces.',
+                      verificationCheck: 'Torque witnessed and recorded if required.',
+                      toolsAndDocsRequired: 'Calibrated torque wrench, manual torque table.',
+                      whatCanGoWrong: '', transcript: '' },
+                ],
+                maintenance: [
+                    { title: 'Visual inspection',
+                      instruction: `Walk around ${target}. Note leaks, missing hardware, or worn surfaces.`,
+                      evidenceLevel: 'cad_known',
+                      highlightParts: pickParts(2), cameraFocus: pickParts(1),
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'No visible defects logged.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Check service points',
+                      instruction: 'Inspect lubrication, filter, and fluid points called out on the machine schedule.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: pickParts(1), cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'Each scheduled point checked off.',
+                      toolsAndDocsRequired: 'Maintenance schedule from equipment manual.',
+                      whatCanGoWrong: '', transcript: '' },
+                    { title: 'Document and close',
+                      instruction: 'Record findings, log next service interval, and close the work order.',
+                      evidenceLevel: 'inferred',
+                      highlightParts: [], cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'Work order closed.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                ],
+                troubleshooting: [
+                    { title: 'Replicate the symptom',
+                      instruction: `Confirm the reported symptom on ${target} before changing anything.`,
+                      evidenceLevel: 'inferred',
+                      highlightParts: pickParts(1), cameraFocus: pickParts(1),
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'Symptom is reproducible.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Isolate to subsystem',
+                      instruction: 'Use the system architecture to narrow the failure to a single subsystem.',
+                      evidenceLevel: 'cad_known',
+                      highlightParts: pickParts(2), cameraFocus: pickParts(2),
+                      isolateParts: pickParts(2), explodeLevel: 0.25,
+                      caution: '', verificationCheck: 'Failing subsystem identified.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Confirm root cause',
+                      instruction: 'Validate the candidate root cause with a measurement or controlled test.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: pickParts(1), cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: 'Live testing carries safety risk — follow the troubleshooting manual.',
+                      verificationCheck: 'Root cause confirmed.',
+                      toolsAndDocsRequired: 'Troubleshooting manual, multimeter or pressure gauge as required.',
+                      whatCanGoWrong: '', transcript: '' },
+                ],
+                operator: [
+                    { title: 'Pre-start inspection',
+                      instruction: `Walk the perimeter of ${target}. Confirm no people or tools in motion paths.`,
+                      evidenceLevel: 'inferred',
+                      highlightParts: pickParts(1), cameraFocus: pickParts(1),
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'Area clear.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Power on and home',
+                      instruction: 'Apply power and run the homing or startup routine.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: [], cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: 'First motion may include reach into safe zones — keep clear.',
+                      verificationCheck: 'Machine reaches home or ready state without faults.',
+                      toolsAndDocsRequired: 'Operator manual.',
+                      whatCanGoWrong: '', transcript: '' },
+                    { title: 'Run a routine cycle',
+                      instruction: 'Run one normal cycle while watching for unusual noise, vibration, or motion.',
+                      evidenceLevel: 'inferred',
+                      highlightParts: pickParts(2), cameraFocus: pickParts(2),
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'Cycle completes normally.',
+                      toolsAndDocsRequired: '', whatCanGoWrong: '', transcript: '' },
+                    { title: 'Safe shutdown',
+                      instruction: 'Bring the machine to a safe stop using the documented shutdown sequence.',
+                      evidenceLevel: 'needs_manual',
+                      highlightParts: [], cameraFocus: [],
+                      isolateParts: [], explodeLevel: 0,
+                      caution: '', verificationCheck: 'Machine in safe state, controls released.',
+                      toolsAndDocsRequired: 'Operator manual.',
+                      whatCanGoWrong: '', transcript: '' },
+                ],
+            };
+            const steps = (stepBank[t] || stepBank.service).map(s => ({
+                ...s,
+                transcript: s.transcript || `${s.title}. ${s.instruction}`
+            }));
+
+            return {
+                title,
+                trainingType: t,
+                targetRole: role,
+                targetComponent: target,
+                steps,
+            };
+        }
+
+        // ── Train tab: playback wiring ──
+        // Reuses playNarrationSequence by mapping each procedure step to
+        // a narration segment with text + highlight_parts + camera_focus +
+        // explode_level. Sets state._narrationKind = 'training' so the
+        // narration loop fires _trainingOnSegmentStart per step instead
+        // of writing into the chat panel.
+        function _trainStepsToSegments(proc) {
+            return (proc.steps || []).map((s, idx) => ({
+                text: `Step ${idx + 1}. ${s.title}. ${s.instruction}`,
+                highlight_parts: s.highlightParts || [],
+                camera_focus:    s.cameraFocus || [],
+                explode_level:   typeof s.explodeLevel === 'number' ? s.explodeLevel : null,
+                _trainStepIndex: idx,
+            }));
+        }
+
+        function _trainStartGuided() {
+            // If no procedure yet, generate first
+            if (!trainingState.procedure || !trainingState.procedure.steps?.length) {
+                _trainGenerateProcedure();
+            }
+            _trainPlayCurrent();
+        }
+        window._trainingStartGuided = () => _trainStartGuided();
+
+        function _trainPlayCurrent() {
+            const proc = trainingState.procedure;
+            if (!proc || !proc.steps?.length) { _trainGenerateProcedure(); return; }
+            const segments = _trainStepsToSegments(proc);
+            const startFrom = Math.max(0, Math.min(trainingState.currentStepIndex, segments.length - 1));
+            // Open playback panel; mark training kind so the narration
+            // loop knows to update the playback panel instead of the
+            // chat agent panel.
+            trainingState.panels.playbackOpen = true;
+            _trainApplyPanelVisibility();
+            state._narrationKind = 'training';
+            trainingState.isPlaying = true;
+            if (typeof playNarrationSequence === 'function') {
+                playNarrationSequence(segments, startFrom);
+            } else {
+                // Fallback: just walk steps without audio
+                _trainStepGoto(startFrom);
+            }
+        }
+        window._trainingPlayCurrent = () => _trainPlayCurrent();
+
+        function _trainStepGoto(i) {
+            const proc = trainingState.procedure;
+            if (!proc || !proc.steps?.length) return;
+            trainingState.currentStepIndex = Math.max(0, Math.min(i, proc.steps.length - 1));
+            _trainRenderPlaybackPanel();
+            _trainApplyStepView();
+        }
+        function _trainStepNext() { _trainStepGoto((trainingState.currentStepIndex || 0) + 1); }
+        function _trainStepPrev() { _trainStepGoto((trainingState.currentStepIndex || 0) - 1); }
+        window._trainingStepNext = () => _trainStepNext();
+        window._trainingStepPrev = () => _trainStepPrev();
+
+        function _trainApplyStepView() {
+            const proc = trainingState.procedure;
+            if (!proc || !proc.steps?.length) return;
+            const i = trainingState.currentStepIndex || 0;
+            const step = proc.steps[i];
+            if (!step) return;
+            // Highlight parts
+            if (typeof _applyNarrationHighlight === 'function') {
+                try { _applyNarrationHighlight(step.highlightParts || []); } catch (_) {}
+            }
+            // Camera focus
+            if (Array.isArray(step.cameraFocus) && step.cameraFocus.length && typeof _flyToPartGroup === 'function') {
+                try { _flyToPartGroup(step.cameraFocus); } catch (_) {}
+            }
+            // Explode
+            if (typeof step.explodeLevel === 'number' && typeof _animateExplode === 'function') {
+                try { _animateExplode(step.explodeLevel, 600); } catch (_) {}
+            }
+            _trainUpdateStepBadge(i, step);
+        }
+        window._trainingApplyStepView = () => _trainApplyStepView();
+
+        function _trainIsolateCurrent() {
+            const proc = trainingState.procedure;
+            if (!proc || !proc.steps?.length) return;
+            const step = proc.steps[trainingState.currentStepIndex || 0];
+            if (!step) return;
+            const targets = (step.isolateParts && step.isolateParts.length) ? step.isolateParts : (step.highlightParts || []);
+            if (!targets.length) return;
+            // Simplest reliable isolation in the existing viewer: re-apply
+            // highlight on the targets, which dims everything else.
+            if (typeof _applyNarrationHighlight === 'function') {
+                try { _applyNarrationHighlight(targets); } catch (_) {}
+            }
+            if (typeof _flyToPartGroup === 'function') {
+                try { _flyToPartGroup(targets); } catch (_) {}
+            }
+        }
+        window._trainingIsolateCurrent = () => _trainIsolateCurrent();
+
+        function _trainExplodeCurrent() {
+            const proc = trainingState.procedure;
+            if (!proc || !proc.steps?.length) return;
+            const step = proc.steps[trainingState.currentStepIndex || 0];
+            if (!step) return;
+            if (typeof step.explodeLevel === 'number' && typeof _animateExplode === 'function') {
+                try { _animateExplode(step.explodeLevel, 600); } catch (_) {}
+            }
+        }
+        window._trainingExplodeCurrent = () => _trainExplodeCurrent();
+
+        function _trainResetView() {
+            // Use the existing restorers — same as Reset pill on Part Explorer.
+            if (typeof _restorePartState === 'function') { try { _restorePartState(); } catch (_) {} }
+            if (typeof _animateExplode === 'function')   { try { _animateExplode(0, 400);   } catch (_) {} }
+            const b = document.getElementById('trainStepBadge');
+            if (b) { b.classList.remove('visible'); b.innerHTML = ''; }
+        }
+        window._trainingResetView = () => _trainResetView();
+
+        // Hook fired by playNarrationSequence when running in 'training' kind.
+        // Lets the right Procedure Playback panel and the viewport step badge
+        // sync to whichever segment is currently being spoken.
+        window._trainingOnSegmentStart = function(segIndex, segment) {
+            if (state._narrationKind !== 'training') return;
+            if (segment && typeof segment._trainStepIndex === 'number') {
+                trainingState.currentStepIndex = segment._trainStepIndex;
+            } else {
+                trainingState.currentStepIndex = segIndex;
+            }
+            _trainRenderPlaybackPanel();
+        };
+        window._trainingOnPlaybackEnd = function() {
+            if (state._narrationKind !== 'training' && state._narrationKind !== null) return;
+            trainingState.isPlaying = false;
+        };
+
+        function _trainAskAboutStep(question, stepIndex) {
+            // Prefill the chat with a step-scoped question.
+            const inp = document.getElementById('agentInput');
+            const btn = document.getElementById('agentSendBtn');
+            if (!inp || !btn) return;
+            const proc = trainingState.procedure;
+            const stepCtx = proc && proc.steps && proc.steps[stepIndex]
+                ? `${proc.steps[stepIndex].title}: ${proc.steps[stepIndex].instruction}`
+                : '';
+            inp.value = stepCtx ? `Re step "${proc.steps[stepIndex].title}": ${question}` : question;
+            btn.disabled = false;
+            btn.click();
+        }
+
+        // Reuse the existing Blender pipeline behind a setup-panel button
+        // so that feature is preserved without cluttering the new viewport.
+        async function _trainGenerateBlenderPreview(btn) {
+            const partNum = state.partNumber;
+            if (!partNum) return;
+            const original = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Generating preview…';
+            try {
+                const fd = new FormData();
+                fd.append('part_number', partNum);
+                const r = await fetch('/api/blender-preview', { method: 'POST', body: fd });
+                const data = r.ok ? await r.json() : null;
+                if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+                btn.textContent = 'Preview ready ✓';
+                setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2400);
+            } catch (e) {
+                btn.textContent = 'Preview failed';
+                setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2400);
+            }
+        }
+
 
         // ---- Feature #120: 3D Model Viewer ----
 
@@ -26975,13 +28221,23 @@
                 const sessionId = state.narrationSessionId;
                 _updateNarrationUI();
 
-                const lastMsg = agentMessages.querySelector('.agent-msg-row.assistant:last-child .agent-msg');
+                // Training kind skips chat-panel rendering (the right
+                // Procedure Playback panel handles per-step display).
+                const trainingKind = state._narrationKind === 'training';
+                const lastMsg = trainingKind
+                    ? null
+                    : agentMessages.querySelector('.agent-msg-row.assistant:last-child .agent-msg');
                 let nextAudioPromise = null;
 
                 for (let i = resumeFromIndex; i < segments.length; i++) {
                     if (!state.narrationPlaying || sessionId !== state.narrationSessionId) break;
                     state.narrationSegmentIndex = i;
                     const seg = segments[i];
+
+                    // Training: notify the right panel that this step is now active
+                    if (trainingKind && typeof window._trainingOnSegmentStart === 'function') {
+                        try { window._trainingOnSegmentStart(i, seg); } catch (_) {}
+                    }
 
                     // 1. Apply 3D part highlights + per-segment explode level
                     _applyNarrationHighlight(seg.highlight_parts || []);
@@ -27072,8 +28328,14 @@
                     // Sales-coaching mode renders a compact closing card so
                     // the chat does not become a brochure transcript after
                     // the voice walkthrough ends.
+                    // Training mode never writes to the chat panel — the
+                    // right Procedure Playback panel owns the surface.
                     if (state._narrationKind === 'sales_coaching') {
                         _renderSalesCoachingClosingCard(segments);
+                    } else if (state._narrationKind === 'training') {
+                        if (typeof window._trainingOnPlaybackEnd === 'function') {
+                            try { window._trainingOnPlaybackEnd(); } catch (_) {}
+                        }
                     } else {
                         _renderAllSegmentsFinal(segments);
                     }

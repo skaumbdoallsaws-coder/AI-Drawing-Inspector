@@ -31,7 +31,7 @@ try: sys.stdout.reconfigure(encoding="utf-8")
 except Exception: pass
 from playwright.async_api import async_playwright
 
-APP_URL = "http://127.0.0.1:8012/index.html"
+APP_URL = "http://127.0.0.1:8012/static/index.html"
 WORKTREE = Path(r"C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\Projects\AI-tool\.claude\worktrees\training-solidworks-layout-2026-05-10")
 SHOTS = WORKTREE / "_train_browser_shots"
 SHOTS.mkdir(exist_ok=True)
@@ -355,6 +355,60 @@ async def main():
             for e in new_switch_errors[:5]:
                 print(f"      - {e[:200]}")
 
+        # ── Check 15: Training ribbon shows 10 PNG icons that all loaded ──
+        # Make sure we are back on the Training tab so the ribbon renders.
+        await page.evaluate("() => switchTab('training')")
+        await page.wait_for_timeout(300)
+        await page.wait_for_function(
+            "() => document.querySelectorAll('#contextRibbon .ribbon-training-icon').length === 10",
+            timeout=4000,
+        )
+        # Wait for natural sizes to populate (images are small PNGs, fast)
+        await page.wait_for_function(
+            """() => {
+                const imgs = document.querySelectorAll('#contextRibbon .ribbon-training-icon');
+                if (imgs.length !== 10) return false;
+                return Array.from(imgs).every(i => i.complete && i.naturalWidth > 0);
+            }""",
+            timeout=5000,
+        )
+        ribbon_inspect = await page.evaluate(
+            """() => {
+                const imgs = document.querySelectorAll('#contextRibbon .ribbon-training-icon');
+                return {
+                    count: imgs.length,
+                    sources: Array.from(imgs).map(i => i.getAttribute('src')),
+                    natural: Array.from(imgs).map(i => [i.naturalWidth, i.naturalHeight]),
+                    all_loaded: Array.from(imgs).every(i => i.complete && i.naturalWidth > 0),
+                    unique_sources: (new Set(Array.from(imgs).map(i => i.getAttribute('src')))).size,
+                };
+            }"""
+        )
+        check15 = (
+            ribbon_inspect.get("count") == 10
+            and ribbon_inspect.get("all_loaded") is True
+            and ribbon_inspect.get("unique_sources") == 10
+            and all(w == 128 and h == 128 for w, h in ribbon_inspect.get("natural", []))
+        )
+        print(f" 15. Ribbon shows 10 unique PNG icons all loaded:    {check15}")
+        print(f"     count={ribbon_inspect.get('count')} unique={ribbon_inspect.get('unique_sources')} all_loaded={ribbon_inspect.get('all_loaded')} natural={ribbon_inspect.get('natural')}")
+
+        # Close-up ribbon screenshot for visual proof
+        ribbon_box = await page.evaluate(
+            """() => {
+                const r = document.getElementById('contextRibbon');
+                if (!r) return null;
+                const b = r.getBoundingClientRect();
+                return { x: b.x, y: b.y, w: b.width, h: b.height };
+            }"""
+        )
+        if ribbon_box:
+            await page.screenshot(
+                path=str(SHOTS / "training_ribbon_after.png"),
+                clip={"x": ribbon_box["x"], "y": ribbon_box["y"], "width": ribbon_box["w"], "height": ribbon_box["h"]},
+            )
+            print(f"     ribbon screenshot saved: {SHOTS / 'training_ribbon_after.png'}")
+
         await page.screenshot(path=str(SHOTS / "03_final_training.png"))
         await browser.close()
 
@@ -377,6 +431,7 @@ async def main():
             ("12. Full transcript hidden by default",    check12),
             ("13. Tab switching does not throw",         check13),
             ("14. Pause does not leak procedure to chat",check14),
+            ("15. Training ribbon: 10 unique PNG icons", check15),
         ]
         for label, ok in results:
             print(f"  {label:<48s} {'PASS' if ok else 'FAIL'}")

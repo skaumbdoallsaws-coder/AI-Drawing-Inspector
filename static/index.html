@@ -984,6 +984,22 @@
             height: 18px;
             flex: 0 0 18px;
         }
+        /* Training ribbon icons — PNGs sourced from
+           static/assets/training-ribbon-icons/. Sized to match the
+           existing iconic SVG slot (36x36 of the 46x40 button area)
+           but capped to the asset's intrinsic 32px feel for parity
+           with the SolidWorks-style command row. */
+        .ribbon-training-icon {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+            display: block;
+            background: transparent;
+            filter: none;
+            -webkit-user-drag: none;
+            user-select: none;
+            pointer-events: none;
+        }
         .ribbon-btn.primary:hover {
             background: #39b0e6;
         }
@@ -12564,6 +12580,20 @@
             features: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.4" fill="#D78C37" stroke="#EDB25A"/><path d="M12 7.4v3.1" stroke="#EDB25A" stroke-width="0.65" fill="none"/><rect x="9.6" y="10.5" width="4.8" height="2.8" rx="0.55" fill="#EDB25A" stroke="#BD8A2C"/><path d="M10 13.3V16" stroke="#79B7E3" stroke-width="0.65" fill="none"/><path d="M14 13.3V16" stroke="#79B7E3" stroke-width="0.65" fill="none"/><path d="M7.1 16l-2.3 1.15v2.5l2.3 1.15 2.3-1.15v-2.5L7.1 16Z" fill="#3C6F95" stroke="#6FA9D4" stroke-width="0.55"/><path d="M16.9 16l-2.3 1.15v2.5l2.3 1.15 2.3-1.15v-2.5L16.9 16Z" fill="#3C6F95" stroke="#6FA9D4" stroke-width="0.55"/><path d="M10 16h-2.9M14 16h2.9" stroke="#79B7E3" stroke-width="0.45"/></g></svg>',
             bom: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.85" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1.1" fill="#294764" stroke="#79B7E3"/><rect x="3" y="3" width="18" height="4.3" rx="1.1" fill="#3C6F95" stroke="#79B7E3"/><path d="M9.3 7.3v13.7M15.3 7.3v13.7M3 12h18M3 16.4h18" stroke="#6FA9D4" stroke-width="0.5"/><rect x="4.5" y="8.8" width="2.8" height="1.9" rx="0.35" fill="#EDB25A" stroke="none"/><rect x="10.8" y="13.2" width="2.8" height="1.9" rx="0.35" fill="#5B9BC7" stroke="none"/><rect x="16.9" y="8.8" width="1.8" height="1.9" rx="0.35" fill="#9CC6E4" stroke="none"/></g></svg>',
             relationships: '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g stroke-width="0.8" stroke-linecap="round"><path d="M19 6.3l-2.2 1.3v2.2l2.2 1.3 2.2-1.3V7.6L19 6.3Z" fill="#486F90" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M19 6.3l-2.2 1.3L19 8.9l2.2-1.3L19 6.3Z" fill="#A8CAE2" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M13 16l-2.7 1.6v3.1l2.7 1.6 2.7-1.6v-3.1L13 16Z" fill="#587FA1" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M13 16l-2.7 1.6 2.7 1.6 2.7-1.6L13 16Z" fill="#B5D4EA" stroke="#79B7E3" stroke-width="0.55" stroke-linejoin="round"/><path d="M11 10.8V16M11.4 9.8 17 8M18.8 11.1 15.1 16" stroke="#79B7E3" stroke-width="0.55" fill="none"/></g></svg>',
+            // Training ribbon icons — sourced from /static/assets/training-ribbon-icons/*.png
+            // (RGBA, 128×128, real alpha — verified before wiring). The
+            // ribbon button helper injects this string via innerHTML, so
+            // <img> markup is supported with no helper change.
+            trainingStart:     '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-start.png"     alt="" draggable="false">',
+            trainingProcedure: '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-procedure.png" alt="" draggable="false">',
+            trainingNarrate:   '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-narrate.png"   alt="" draggable="false">',
+            trainingPause:     '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-pause.png"     alt="" draggable="false">',
+            trainingPrevious:  '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-previous.png"  alt="" draggable="false">',
+            trainingNext:      '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-next.png"      alt="" draggable="false">',
+            trainingHighlight: '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-highlight.png" alt="" draggable="false">',
+            trainingIsolate:   '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-isolate.png"   alt="" draggable="false">',
+            trainingExplode:   '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-explode.png"   alt="" draggable="false">',
+            trainingReset:     '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-reset.png"     alt="" draggable="false">',
         };
 
         function _ribbonIconBtn(iconKey, label, className) {
@@ -13810,13 +13840,13 @@
                 // Session: Start Guided Training | Open Procedure
                 ribbon.appendChild(_ribbonSep());
                 const gSess = _ribbonGroup('Session');
-                const startBtn = _ribbonIconBtn('compare', 'Start');
+                const startBtn = _ribbonIconBtn('trainingStart', 'Start');
                 startBtn.title = 'Start guided training (generate + play)';
                 startBtn.addEventListener('click', () => {
                     if (window._trainingStartGuided) window._trainingStartGuided();
                 });
                 gSess.appendChild(startBtn);
-                const openBtn = _ribbonIconBtn('bom', 'Open Procedure');
+                const openBtn = _ribbonIconBtn('trainingProcedure', 'Open Procedure');
                 openBtn.title = 'Open the right Procedure Playback panel';
                 openBtn.addEventListener('click', () => {
                     if (window._trainingTogglePanel) window._trainingTogglePanel('playback', true);
@@ -13827,13 +13857,13 @@
                 // Playback: Narrate | Pause
                 ribbon.appendChild(_ribbonSep());
                 const gPlay = _ribbonGroup('Playback');
-                const narrBtn = _ribbonIconBtn('compare', 'Narrate');
+                const narrBtn = _ribbonIconBtn('trainingNarrate', 'Narrate');
                 narrBtn.title = 'Speak the current step';
                 narrBtn.addEventListener('click', () => {
                     if (window._trainingPlayCurrent) window._trainingPlayCurrent();
                 });
                 gPlay.appendChild(narrBtn);
-                const pauseBtn = _ribbonIconBtn('bom', 'Pause');
+                const pauseBtn = _ribbonIconBtn('trainingPause', 'Pause');
                 pauseBtn.title = 'Pause / stop playback';
                 pauseBtn.addEventListener('click', () => {
                     if (typeof stopNarration === 'function') stopNarration();
@@ -13844,13 +13874,13 @@
                 // Steppers: Previous | Next
                 ribbon.appendChild(_ribbonSep());
                 const gStep = _ribbonGroup('Steps');
-                const prevBtn = _ribbonIconBtn('bom', 'Previous');
+                const prevBtn = _ribbonIconBtn('trainingPrevious', 'Previous');
                 prevBtn.title = 'Previous step';
                 prevBtn.addEventListener('click', () => {
                     if (window._trainingStepPrev) window._trainingStepPrev();
                 });
                 gStep.appendChild(prevBtn);
-                const nextBtn = _ribbonIconBtn('compare', 'Next');
+                const nextBtn = _ribbonIconBtn('trainingNext', 'Next');
                 nextBtn.title = 'Next step';
                 nextBtn.addEventListener('click', () => {
                     if (window._trainingStepNext) window._trainingStepNext();
@@ -13861,25 +13891,25 @@
                 // Viewport: Highlight | Isolate | Explode Step | Reset View
                 ribbon.appendChild(_ribbonSep());
                 const gView = _ribbonGroup('Viewport');
-                const hlBtn = _ribbonIconBtn('bom', 'Highlight');
+                const hlBtn = _ribbonIconBtn('trainingHighlight', 'Highlight');
                 hlBtn.title = 'Re-apply current step highlights';
                 hlBtn.addEventListener('click', () => {
                     if (window._trainingApplyStepView) window._trainingApplyStepView();
                 });
                 gView.appendChild(hlBtn);
-                const isoBtn = _ribbonIconBtn('bom', 'Isolate');
+                const isoBtn = _ribbonIconBtn('trainingIsolate', 'Isolate');
                 isoBtn.title = 'Isolate parts of current step';
                 isoBtn.addEventListener('click', () => {
                     if (window._trainingIsolateCurrent) window._trainingIsolateCurrent();
                 });
                 gView.appendChild(isoBtn);
-                const expBtn = _ribbonIconBtn('bom', 'Explode');
+                const expBtn = _ribbonIconBtn('trainingExplode', 'Explode');
                 expBtn.title = 'Apply current step explode level';
                 expBtn.addEventListener('click', () => {
                     if (window._trainingExplodeCurrent) window._trainingExplodeCurrent();
                 });
                 gView.appendChild(expBtn);
-                const resetBtn = _ribbonIconBtn('bom', 'Reset');
+                const resetBtn = _ribbonIconBtn('trainingReset', 'Reset');
                 resetBtn.title = 'Reset 3D view (clears highlight + explode)';
                 resetBtn.addEventListener('click', () => {
                     if (window._trainingResetView) window._trainingResetView();

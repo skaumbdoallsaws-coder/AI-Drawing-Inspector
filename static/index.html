@@ -1976,10 +1976,12 @@
             top: 28px;
             left: 12px;
             z-index: 12;
-            background: rgba(18, 18, 30, 0.92);
-            border: 1px solid var(--border);
+            background: var(--overlay-bg);
+            border: 1px solid var(--overlay-border);
             border-radius: 8px;
-            backdrop-filter: blur(8px);
+            color: var(--text-primary);
+            box-shadow: var(--overlay-shadow);
+            backdrop-filter: blur(12px);
             width: 300px;
             max-height: 400px;
             pointer-events: auto;
@@ -1993,8 +1995,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background: rgba(255,255,255,0.03);
-            border-bottom: 1px solid rgba(255,255,255,0.04);
+            background: var(--bg-hover);
+            border-bottom: 1px solid var(--overlay-border);
             user-select: none;
         }
         .dim-explorer-drag-handle:active { cursor: grabbing; }
@@ -2027,13 +2029,16 @@
             letter-spacing: 0.3px;
             user-select: none;
         }
-        .dim-explorer-toggle:hover { color: var(--text-primary); }
+        .dim-explorer-toggle:hover {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
         .dim-explorer-arrow {
             font-size: 9px;
             transition: transform 0.2s;
         }
         .dim-explorer-panel:not(.collapsed) .dim-explorer-toggle {
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--overlay-border);
         }
         .dim-explorer-panel:not(.collapsed) .dim-explorer-arrow {
             transform: rotate(90deg);
@@ -2062,7 +2067,7 @@
             font-weight: 600;
             user-select: none;
         }
-        .dim-explorer-view-header:hover { background: rgba(79, 195, 247, 0.06); }
+        .dim-explorer-view-header:hover { background: var(--bg-hover); }
         .dim-view-arrow {
             font-size: 8px;
             transition: transform 0.15s;
@@ -2085,9 +2090,9 @@
             border-left: 2px solid transparent;
             transition: background 0.1s, border-color 0.1s;
         }
-        .dim-explorer-item:hover { background: rgba(79, 195, 247, 0.08); }
+        .dim-explorer-item:hover { background: var(--bg-hover); }
         .dim-explorer-item.active {
-            background: rgba(79, 195, 247, 0.12);
+            background: var(--bg-selected);
             border-left-color: var(--accent);
         }
         .dim-explorer-item-name {
@@ -2095,6 +2100,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            color: var(--text-primary);
         }
         .dim-explorer-item-callout {
             color: var(--text-secondary);
@@ -3919,7 +3925,7 @@
             flex-direction: column;
             padding: 16px;
             animation: fadeIn 0.5s ease-in;
-            background: linear-gradient(180deg, rgba(255,255,255,0.016) 0%, rgba(255,255,255,0.004) 100%);
+            background: linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.006) 100%);
         }
         .results-state.active {
             display: flex;
@@ -3931,13 +3937,21 @@
 
         .results-surface {
             border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.07);
+            border: 1px solid var(--border);
             background:
-                linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.014) 100%),
-                rgba(20, 25, 33, 0.9);
+                linear-gradient(180deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0.018) 100%),
+                var(--bg-elevated);
             box-shadow:
-                inset 0 1px 0 rgba(255,255,255,0.035),
-                0 10px 22px rgba(0,0,0,0.14);
+                inset 0 1px 0 rgba(255,255,255,0.045),
+                0 10px 22px rgba(0,0,0,0.12);
+        }
+        :root[data-theme="light"] .results-surface {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.38) 100%),
+                var(--bg-elevated);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.86),
+                0 8px 18px rgba(64,83,99,0.13);
         }
 
         /* Completeness Gauge */
@@ -3967,9 +3981,9 @@
             padding: 10px 12px;
             gap: 8px;
             border-radius: 8px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.012) 100%);
-            border: 1px solid rgba(255,255,255,0.05);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
         }
         .metric-row + .metric-row { margin-top: 8px; }
         .metric-dot {
@@ -3980,6 +3994,7 @@
         .metric-label {
             flex: 1;
             font-size: 13px;
+            color: var(--text-secondary);
         }
         .metric-count {
             font-size: 14px;
@@ -4015,6 +4030,10 @@
             margin-bottom: 8px;
             background: linear-gradient(180deg, rgba(255,23,68,0.07) 0%, rgba(255,23,68,0.025) 100%);
             border-radius: 0 8px 8px 0;
+        }
+        :root[data-theme="light"] .critical-item {
+            color: var(--text-primary);
+            background: linear-gradient(180deg, rgba(217,54,62,0.08) 0%, rgba(217,54,62,0.035) 100%);
         }
 
         /* View Assessment Tags */
@@ -4786,27 +4805,37 @@
         .fai-row-ref { opacity:0.78; }
         .fai-content { flex:1; overflow-y:auto; padding-bottom:16px; }
         .fai-table { width:100%; border-collapse:collapse; font-size:13px; margin:0; }
-        .fai-table thead th { background:var(--bg-toolbar); color:#b6c0cc; font-weight:500; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; border-bottom:1px solid var(--border); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
-        .fai-table tbody td { padding:7px 8px; border-bottom:1px solid #1e2430; color:#e3e8ef; line-height:1.35; font-weight:400; }
+        .fai-table thead th { background:var(--bg-toolbar); color:var(--text-secondary); font-weight:600; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; border-bottom:1px solid var(--border); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+        .fai-table tbody td { padding:7px 8px; border-bottom:1px solid var(--border); color:var(--text-primary); line-height:1.35; font-weight:500; }
         .fai-row { transition:background 0.15s; }
-        .fai-row:hover { background:rgba(21,101,192,0.08); }
+        .fai-row:hover { background:var(--bg-hover); }
         .fai-row-flash { animation:faiFlash 1.5s ease; }
         @keyframes faiFlash { 0%,100%{background:transparent} 25%{background:rgba(21,101,192,0.25)} 75%{background:rgba(21,101,192,0.1)} }
-        .fai-sheet-header td { background:#1a237e33; color:var(--accent); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; padding:5px 8px; }
+        .fai-sheet-header td { background:var(--bg-selected); color:var(--accent); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; padding:5px 8px; }
         .fai-meta-badges { display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap; margin-right:8px; vertical-align:middle; }
-        .fai-meta-badge { display:inline-flex; align-items:center; min-height:17px; padding:0 6px; border-radius:999px; background:rgba(79,195,247,0.12); border:1px solid rgba(79,195,247,0.18); color:#b7e6ff; font-size:10px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; }
-        .fai-meta-badge.ref { background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.12); color:#d4dbe4; }
-        .fai-desc { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:#cfd7e1; }
-        .fai-num { text-align:right; font-family:'Roboto Mono',monospace; font-size:12px; color:#e8edf3; }
+        .fai-meta-badge { display:inline-flex; align-items:center; min-height:17px; padding:0 6px; border-radius:999px; background:var(--bg-selected); border:1px solid var(--border); color:var(--accent); font-size:10px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; }
+        .fai-meta-badge.ref { background:var(--bg-hover); border-color:var(--border); color:var(--text-secondary); }
+        .fai-desc { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--text-secondary); }
+        .fai-num { text-align:right; font-family:'Cascadia Mono','Roboto Mono',monospace; font-size:12px; color:var(--text-primary); }
         .fai-char-num { text-align:center; width:36px; font-size:12px; }
-        .fai-measured-input { width:72px; background:var(--bg-tab); border:1px solid rgba(255,255,255,0.07); border-radius:4px; color:#eef3f9; padding:4px 6px; font-size:12px; font-family:'Roboto Mono',monospace; text-align:right; }
+        .fai-measured-input { width:72px; background:var(--bg-input); border:1px solid var(--border); border-radius:4px; color:var(--text-primary); padding:4px 6px; font-size:12px; font-family:'Cascadia Mono','Roboto Mono',monospace; text-align:right; }
         .fai-measured-input:focus { border-color:var(--accent); outline:none; }
-        .fai-summary { padding:10px 12px; font-size:12px; color:#b8c2ce; display:flex; gap:12px; align-items:center; border-top:1px solid var(--border); }
+        .fai-muted-text { color:var(--text-muted); }
+        .fai-summary { padding:10px 12px; font-size:12px; color:var(--text-secondary); display:flex; gap:12px; align-items:center; border-top:1px solid var(--border); }
         .fai-verdict-btn, .fai-print-btn { margin:8px 12px; padding:6px 16px; border:1px solid var(--accent); background:transparent; color:var(--accent); border-radius:6px; cursor:pointer; font-size:12px; transition:all 0.15s; }
         .fai-verdict-btn:hover, .fai-print-btn:hover { background:var(--accent); color:#fff; }
         .fai-status-cell { font-size:12px; font-weight:700; white-space:nowrap; }
-        .fai-verdict-cell { font-size:12px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#dbe2ea; }
+        .fai-verdict-cell { font-size:12px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary); }
         .fai-balloon-flash { animation:faiFlash 1.5s ease; }
+        .fai-map-select {
+            background: var(--bg-input);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 3px 22px 3px 7px;
+            font-size: 12px;
+            font-weight: 600;
+        }
 
         /* FAI Split Workspace */
         .fai-split-workspace {
@@ -7940,6 +7969,15 @@
             findingsOverlayMode: 'notes',  // 'highlights', 'notes', or 'fai'
             dimsOverlayVisible: false,
             faiCharacteristics: [],       // built from drawing_map annotations
+            faiCharacteristicsSourceKey: '',
+            faiDrawingMap: null,           // lightweight /api/drawing-map preview for the selected part
+            faiDrawingMapPn: null,
+            faiDrawingMapRevision: null,
+            faiDrawingMapAvailableRevisions: [],
+            faiDrawingMapRequestId: 0,
+            faiMapLoading: false,
+            faiMapLoadError: null,
+            faiDimensionDescriptions: null,
             faiMeasurements: {},          // key -> measured value string
             faiVerdicts: {},              // key -> {disposition, reasoning}
             faiTolOverrides: {},          // key -> {plus, minus} tolerance overrides
@@ -8257,7 +8295,7 @@
             if (state.results) {
                 state.results = null;
                 state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
-                state.faiCharacteristics = []; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
+                state.faiCharacteristics = []; state.faiCharacteristicsSourceKey = ''; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
                 resultsState.classList.remove('active');
                 rightPanelEmpty.style.display = 'flex';
                 exportBtn.style.display = 'none';
@@ -8483,10 +8521,15 @@
                     if (!data || state.partNumber !== pn) return;
                     drawingDiffState.revisions = data.revisions || [];
                     drawingDiffState.available = drawingDiffState.revisions.length >= 2;
+                    state.faiDrawingMapAvailableRevisions = drawingDiffState.revisions.slice();
                     const revOptions = _drawingCompareRevisionOptions();
                     if (revOptions.length >= 2) {
                         drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
                         drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
+                        state.faiDrawingMapRevision = state.faiDrawingMapRevision || drawingDiffState.activeRevB;
+                        if (state.activeTab === 'report') {
+                            _loadFaiDrawingMapForPart(pn, state.faiDrawingMapRevision);
+                        }
                     }
                     // Only re-render when the dataset actually arrived; if it
                     // didn't, the Compare pane already rendered preview state
@@ -8624,6 +8667,94 @@
             if (el) el.style.display = 'none';
         }
 
+        function _clearFaiPreviewState(clearMeasurements = true) {
+            state.faiDrawingMap = null;
+            state.faiDrawingMapPn = null;
+            state.faiDrawingMapRevision = null;
+            state.faiDrawingMapAvailableRevisions = [];
+            state.faiDimensionDescriptions = null;
+            state.faiMapLoading = false;
+            state.faiMapLoadError = null;
+            state.faiCharacteristics = [];
+            state.faiCharacteristicsSourceKey = '';
+            state.faiHighlightedRow = null;
+            if (clearMeasurements) {
+                state.faiMeasurements = {};
+                state.faiVerdicts = {};
+                state.faiTolOverrides = {};
+            }
+        }
+
+        function _getFaiRevisionOptions() {
+            const revs = Array.isArray(state.faiDrawingMapAvailableRevisions) && state.faiDrawingMapAvailableRevisions.length
+                ? state.faiDrawingMapAvailableRevisions
+                : (Array.isArray(drawingDiffState.revisions) ? drawingDiffState.revisions : []);
+            return revs.filter(Boolean);
+        }
+
+        function _getPreferredFaiDrawingMapRevision() {
+            const revOptions = _getFaiRevisionOptions();
+            return state.faiDrawingMapRevision
+                || drawingDiffState.activeRevB
+                || (revOptions.length ? revOptions[revOptions.length - 1] : null);
+        }
+
+        async function _loadFaiDrawingMapForPart(pn, revision = null) {
+            const safePn = String(pn || '').trim();
+            const safeRev = String(revision || _getPreferredFaiDrawingMapRevision() || '').trim();
+            const requestId = ++state.faiDrawingMapRequestId;
+            const availableRevisions = state.faiDrawingMapAvailableRevisions;
+            _clearFaiPreviewState(false);
+            state.faiDrawingMapAvailableRevisions = availableRevisions;
+            if (!safePn) return;
+
+            state.faiMapLoading = true;
+            state.faiMapLoadError = null;
+            if (state.activeTab === 'report') renderViewport();
+
+            try {
+                const revQuery = safeRev ? `?revision=${encodeURIComponent(safeRev)}` : '';
+                const res = await fetch(`/api/drawing-map/${encodeURIComponent(safePn)}${revQuery}`);
+                if (requestId !== state.faiDrawingMapRequestId || state.partNumber !== safePn) return;
+
+                if (res.ok) {
+                    state.faiDrawingMap = await res.json();
+                    state.faiDrawingMapPn = safePn;
+                    state.faiDrawingMapRevision = state.faiDrawingMap?.revision || safeRev || null;
+                    state.faiMapLoadError = null;
+                    state.faiCharacteristics = [];
+                    state.faiCharacteristicsSourceKey = '';
+                } else if (res.status === 404) {
+                    state.faiDrawingMap = null;
+                    state.faiDrawingMapPn = safePn;
+                    state.faiDrawingMapRevision = safeRev || null;
+                    state.faiMapLoadError = 'not_found';
+                } else {
+                    const message = await res.text().catch(() => '');
+                    throw new Error(message || `HTTP ${res.status}`);
+                }
+            } catch (err) {
+                if (requestId !== state.faiDrawingMapRequestId || state.partNumber !== safePn) return;
+                console.warn('FAI drawing map preview failed:', err);
+                state.faiDrawingMap = null;
+                state.faiDrawingMapPn = safePn;
+                state.faiMapLoadError = err?.message || 'load_failed';
+            } finally {
+                if (requestId === state.faiDrawingMapRequestId && state.partNumber === safePn) {
+                    state.faiMapLoading = false;
+                    if (state.activeTab === 'report') renderViewport();
+                }
+            }
+        }
+
+        function _ensureFaiDrawingMapForCurrentPart() {
+            const pn = String(state.partNumber || '').trim();
+            if (!pn || state.faiMapLoading) return;
+            const preferredRev = _getPreferredFaiDrawingMapRevision();
+            if (state.faiDrawingMapPn === pn && (state.faiDrawingMapRevision || null) === (preferredRev || null)) return;
+            _loadFaiDrawingMapForPart(pn, preferredRev);
+        }
+
         async function selectPartNumber(pn, isAuto) {
             let profile = state.profiles.find(p => p.part_number === pn);
             if (!profile) {
@@ -8656,6 +8787,8 @@
             state.partName = profile.part_name;
             state.featureCount = profile.feature_count;
             state.autoDetected = isAuto;
+            _clearFaiPreviewState(true);
+            _loadFaiDrawingMapForPart(pn);
 
             // Drawing classification (Phase 3): fetch the contract for this
             // part so the agent context picks it up on the next send. The
@@ -8772,10 +8905,13 @@
                     if (data && state.partNumber === pn) {
                         drawingDiffState.revisions = data.revisions || [];
                         drawingDiffState.available = drawingDiffState.revisions.length >= 2;
+                        state.faiDrawingMapAvailableRevisions = drawingDiffState.revisions.slice();
                         const revOptions = _drawingCompareRevisionOptions();
                         if (revOptions.length >= 2) {
                             drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
                             drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
+                            state.faiDrawingMapRevision = state.faiDrawingMapRevision || drawingDiffState.activeRevB;
+                            _loadFaiDrawingMapForPart(pn, state.faiDrawingMapRevision);
                         }
                         // Mark the PN as fetched so a Compare-subtab render
                         // that fires after this completes does not re-issue
@@ -8797,6 +8933,7 @@
                     if (revOptions.length >= 2) {
                         drawingDiffState.activeRevA = drawingDiffState.activeRevA || revOptions[0];
                         drawingDiffState.activeRevB = drawingDiffState.activeRevB || revOptions[revOptions.length - 1];
+                        state.faiDrawingMapRevision = state.faiDrawingMapRevision || drawingDiffState.activeRevB;
                     }
                     // Don't re-render on the failure path; preview state is
                     // already on screen and another switchTab would just
@@ -11337,11 +11474,11 @@
         /* â”€â”€ FAI Characteristics â”€â”€ */
         function _faiStatusColor(status) {
             switch ((status || '').toUpperCase()) {
-                case 'PASS': return '#00E676';
-                case 'WARN': return '#FFD600';
-                case 'FAIL': return '#FF1744';
-                case 'INFO': return '#4fc3f7';
-                case 'PENDING': default: return '#777';
+                case 'PASS': return 'var(--present)';
+                case 'WARN': return 'var(--partial)';
+                case 'FAIL': return 'var(--missing)';
+                case 'INFO': return 'var(--accent)';
+                case 'PENDING': default: return 'var(--text-secondary)';
             }
         }
 
@@ -11422,9 +11559,77 @@
             };
         }
 
+        function _getFaiResultContext() {
+            const selectedPn = String(state.partNumber || '').trim();
+            const inspectedPn = String(state.results?.part_number || state.results?.partNumber || '').trim();
+            const hasPreviewMap = !!(selectedPn && state.faiDrawingMapPn === selectedPn && state.faiDrawingMap?.sheets?.length);
+            const selectedRev = state.faiDrawingMapRevision || '';
+            const inspectedRev = state.results?.drawing_map?.revision || '';
+            if (hasPreviewMap && selectedRev && selectedRev !== inspectedRev) {
+                return {
+                    part_number: selectedPn,
+                    part_name: state.partName || '',
+                    features: [],
+                    drawing_map: state.faiDrawingMap,
+                    dimension_descriptions: state.faiDimensionDescriptions || null,
+                    inspection_context: {},
+                    _faiPreviewOnly: true,
+                };
+            }
+
+            if (state.results?.drawing_map?.sheets?.length && (!selectedPn || !inspectedPn || inspectedPn === selectedPn)) {
+                return state.results;
+            }
+
+            if (hasPreviewMap) {
+                return {
+                    part_number: selectedPn,
+                    part_name: state.partName || '',
+                    features: [],
+                    drawing_map: state.faiDrawingMap,
+                    dimension_descriptions: state.faiDimensionDescriptions || null,
+                    inspection_context: {},
+                    _faiPreviewOnly: true,
+                };
+            }
+
+            return null;
+        }
+
+        function _getFaiDrawingMap() {
+            return _getFaiResultContext()?.drawing_map || null;
+        }
+
+        function _getFaiContextKey(ctx = _getFaiResultContext()) {
+            const dm = ctx?.drawing_map;
+            if (!dm) return '';
+            const sheetCount = Array.isArray(dm.sheets) ? dm.sheets.length : 0;
+            const annCount = Array.isArray(dm.sheets)
+                ? dm.sheets.reduce((sum, sheet) => sum + (sheet.views || []).reduce((viewSum, view) => viewSum + (view.annotations || []).length, 0), 0)
+                : 0;
+            const partNumber = ctx.part_number || state.partNumber || '';
+            const revKey = dm.revision || state.faiDrawingMapRevision || '';
+            const pathKey = dm.sourcePath || '';
+            return `${ctx._faiPreviewOnly ? 'map' : 'inspection'}|${partNumber}|${revKey}|${sheetCount}|${annCount}|${pathKey}`;
+        }
+
+        function _ensureFaiCharacteristicsForContext() {
+            const ctx = _getFaiResultContext();
+            const key = _getFaiContextKey(ctx);
+            if (!ctx || !key) return;
+            if (!state.faiCharacteristics.length || state.faiCharacteristicsSourceKey !== key) {
+                buildFaiCharacteristics();
+            }
+        }
+
         function buildFaiCharacteristics() {
-            const dm = state.results?.drawing_map;
-            if (!dm || !Array.isArray(dm.sheets)) { state.faiCharacteristics = []; return; }
+            const ctx = _getFaiResultContext();
+            const dm = ctx?.drawing_map;
+            if (!dm || !Array.isArray(dm.sheets)) {
+                state.faiCharacteristics = [];
+                state.faiCharacteristicsSourceKey = '';
+                return;
+            }
             const viewTypePriority = { 'Named': 0, 'Section': 1, 'Detail': 2 };
             const raw = [];
             dm.sheets.forEach((sheet, sheetIndex) => {
@@ -11474,13 +11679,14 @@
             });
             raw.forEach((c, i) => { c.charNumber = i + 1; });
             state.faiCharacteristics = raw;
+            state.faiCharacteristicsSourceKey = _getFaiContextKey(ctx);
             const totalAnns = dm.sheets.reduce((sum, s) => sum + (s.views || []).reduce((vs, v) => vs + (v.annotations || []).length, 0), 0);
             const refCount = raw.filter(c => c.isReference).length;
             console.log(`FAI: ${raw.length} characteristics (${raw.length - refCount} controlled, ${refCount} reference) from ${totalAnns} total annotations (${totalAnns - raw.length} filtered out: dangling/invisible/non-dimension)`);
         }
 
         function _lookupFaiDescription(sheetIndex, viewName, annotationName) {
-            const descs = state.results?.dimension_descriptions?.descriptions || {};
+            const descs = _getFaiResultContext()?.dimension_descriptions?.descriptions || {};
             const sheetKey = `${sheetIndex}|${viewName}/${annotationName}`;
             if (descs[sheetKey]) return descs[sheetKey];
             return descs[`${viewName}/${annotationName}`] || '';
@@ -11495,7 +11701,14 @@
             // â”€â”€ Global tolerance bar â”€â”€
             const tolBar = document.createElement('div');
             tolBar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;margin:4px 12px;background:var(--bg-toolbar);border-radius:6px;font-size:12px;color:var(--text-secondary);';
+            const revOptions = _getFaiRevisionOptions();
+            const activeMapRev = _getFaiResultContext()?.drawing_map?.revision || state.faiDrawingMapRevision || '';
+            const revControlHtml = revOptions.length
+                ? `<span>Drawing Map:</span><select id="faiMapRevisionSelect" class="fai-map-select">${revOptions.map(rev => `<option value="${escapeHtml(rev)}"${rev === activeMapRev ? ' selected' : ''}>Rev ${escapeHtml(rev)}</option>`).join('')}</select>`
+                : (activeMapRev ? `<span>Drawing Map: Rev ${escapeHtml(activeMapRev)}</span>` : '');
             tolBar.innerHTML = `
+                ${revControlHtml}
+                ${revControlHtml ? '<span style="height:18px;width:1px;background:var(--border);margin:0 4px;"></span>' : ''}
                 <span>Global Tolerance:</span>
                 <span>±</span><input id="faiGlobalTol" type="text" value="0.050" style="width:60px;background:var(--bg-panel);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font-size:12px;text-align:center;">
                 <span>mm</span>
@@ -11503,6 +11716,13 @@
                 <button id="faiClearTol" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;">Reset Tolerances</button>
             `;
             container.appendChild(tolBar);
+            const revSelect = tolBar.querySelector('#faiMapRevisionSelect');
+            if (revSelect) {
+                revSelect.addEventListener('change', () => {
+                    state.faiDrawingMapRevision = revSelect.value;
+                    _loadFaiDrawingMapForPart(state.partNumber, revSelect.value);
+                });
+            }
             tolBar.querySelector('#faiApplyTolAll').addEventListener('click', () => {
                 const val = parseFloat(tolBar.querySelector('#faiGlobalTol').value) || 0;
                 chars.forEach(c => {
@@ -11541,8 +11761,9 @@
 
             const tbody = document.createElement('tbody');
             let lastSheet = -1;
+            const faiSheetCount = _getFaiDrawingMap()?.sheets?.length || 0;
             chars.forEach(c => {
-                if (c.sheetIndex !== lastSheet && state.results?.drawing_map?.sheets?.length > 1) {
+                if (c.sheetIndex !== lastSheet && faiSheetCount > 1) {
                     lastSheet = c.sheetIndex;
                     const sheetRow = document.createElement('tr');
                     sheetRow.className = 'fai-sheet-header';
@@ -11572,7 +11793,7 @@
                         ${c.isReference ? '<span class="fai-meta-badge ref">REF</span>' : ''}
                     </span>
                 `;
-                const descriptionHtml = `${metaBadges}${c.description || '<span style="color:#555">—</span>'}`;
+                const descriptionHtml = `${metaBadges}${c.description || '<span class="fai-muted-text">—</span>'}`;
                 const descriptionTitle = [c.annotationName, c.viewName, c.description || c.dimensionText || ''].filter(Boolean).join(' — ');
 
                 tr.innerHTML = `
@@ -11710,7 +11931,7 @@
         // â”€â”€ FAI Split Workspace: right-pane drawing surface â”€â”€
 
         function _renderFaiDrawingPane(container) {
-            const dm = state.results?.drawing_map;
+            const dm = _getFaiDrawingMap();
             const sheetCount = dm?.sheets?.length || 1;
 
             // Header bar with label + page nav + zoom tools
@@ -11863,7 +12084,7 @@
 
             // Update page label
             const pageLabel = document.getElementById('faiPageLabel');
-            const sheetCount = state.results?.drawing_map?.sheets?.length || 1;
+            const sheetCount = _getFaiDrawingMap()?.sheets?.length || 1;
             if (pageLabel) pageLabel.textContent = `Sheet ${currentPage} / ${sheetCount}`;
 
             const setPlaceholder = (message) => {
@@ -11964,7 +12185,7 @@
 
             const imageWidth = img.naturalWidth;
             const imageHeight = img.naturalHeight;
-            const dm = state.results?.drawing_map;
+            const dm = _getFaiDrawingMap();
             if (!dm) return;
 
             const faiSheetW = _coerceNumber(dm.sheetWidth);
@@ -12150,6 +12371,7 @@
         }
 
         async function _requestFaiVerdicts() {
+            const faiContext = _getFaiResultContext() || {};
             const chars = state.faiCharacteristics;
             const measured = chars.filter(c => {
                 if (c.isReference) return false; // skip reference dims
@@ -12178,9 +12400,9 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        part_number: state.results?.part_number || '',
+                        part_number: faiContext.part_number || state.partNumber || '',
                         characteristics: measured,
-                        inspection_context: state.results?.inspection_context || {},
+                        inspection_context: faiContext.inspection_context || {},
                     }),
                 });
                 if (res.ok) {
@@ -12229,7 +12451,7 @@
                     body: JSON.stringify({
                         instruction,
                         characteristics: tableContext,
-                        part_number: state.results?.part_number || '',
+                        part_number: _getFaiResultContext()?.part_number || state.partNumber || '',
                     }),
                 });
                 if (res.ok) {
@@ -12271,7 +12493,7 @@
                     .filter(p => Number.isFinite(p) && p > 0)
             )).sort((a, b) => a - b);
             if (pages.length) return pages;
-            const totalPages = state.results?.drawing_map?.sheets?.length || state.drawingPages || 1;
+            const totalPages = _getFaiDrawingMap()?.sheets?.length || state.drawingPages || 1;
             return Array.from({ length: Math.max(1, totalPages) }, (_, i) => i + 1);
         }
 
@@ -12303,7 +12525,7 @@
 
             const imageWidth = img.naturalWidth;
             const imageHeight = img.naturalHeight;
-            const dm = state.results?.drawing_map;
+            const dm = _getFaiDrawingMap();
             if (!dm) return null;
 
             const faiSheetW = _coerceNumber(dm.sheetWidth);
@@ -12487,14 +12709,15 @@
             printContainer.innerHTML = '';
 
             const faiSummary = _computeFaiSummary();
+            const faiContext = _getFaiResultContext() || {};
             const fmtNum = (v) => v !== null && v !== undefined ? Number(v).toFixed(3) : '—';
 
             const header = document.createElement('div');
             header.className = 'fai-print-header';
             header.innerHTML = `
                 <h2 style="margin:0 0 8px;font-size:18px;">First Article Inspection Report</h2>
-                <p style="margin:2px 0;font-size:13px;"><strong>Part Number:</strong> ${state.results?.part_number || '—'}</p>
-                <p style="margin:2px 0;font-size:13px;"><strong>Part Name:</strong> ${state.results?.part_name || '—'}</p>
+                <p style="margin:2px 0;font-size:13px;"><strong>Part Number:</strong> ${faiContext.part_number || state.partNumber || '—'}</p>
+                <p style="margin:2px 0;font-size:13px;"><strong>Part Name:</strong> ${faiContext.part_name || state.partName || '—'}</p>
                 <p style="margin:2px 0;font-size:13px;"><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
                 <p style="margin:2px 0;font-size:13px;"><strong>Inspector:</strong> ________________________________</p>
             `;
@@ -14061,8 +14284,10 @@
                 return;
             }
 
-            if (state.activeTab === 'report' && state.results) {
-                const hasDm = !!(state.results?.drawing_map?.sheets?.length);
+            if (state.activeTab === 'report') {
+                _ensureFaiDrawingMapForCurrentPart();
+                const faiContext = _getFaiResultContext();
+                const hasDm = !!(faiContext?.drawing_map?.sheets?.length);
 
                 if (hasDm) {
                     // Auto-switch overlay to FAI mode
@@ -14075,7 +14300,7 @@
                     if (modeSelect) modeSelect.value = 'fai';
                     const toggle = document.getElementById('annoFindingsToggle');
                     if (toggle) toggle.checked = true;
-                    if (!state.faiCharacteristics.length) buildFaiCharacteristics();
+                    _ensureFaiCharacteristicsForContext();
 
                     // â”€â”€ FAI Split Workspace â”€â”€
                     const splitWs = document.createElement('div');
@@ -14105,7 +14330,15 @@
                     reportWrapper.className = 'report-wrapper';
                     const reportDiv = document.createElement('div');
                     reportDiv.className = 'report-content';
-                    reportDiv.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary);">Drawing map data required for FAI Report. Run an inspection on a part with a drawing map.</div>';
+                    let message = 'Select or load a part with a drawing map to build the FAI table.';
+                    if (state.partNumber && state.faiMapLoading) {
+                        message = `Loading FAI drawing map for ${state.partNumber}...`;
+                    } else if (state.partNumber && state.faiMapLoadError === 'not_found') {
+                        message = `No drawing map found for ${state.partNumber}. Run inspection on a mapped drawing or select a part with a saved drawing map.`;
+                    } else if (state.partNumber && state.faiMapLoadError) {
+                        message = `FAI drawing map could not be loaded for ${state.partNumber}: ${state.faiMapLoadError}`;
+                    }
+                    reportDiv.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-secondary);">${message}</div>`;
                     reportWrapper.appendChild(reportDiv);
                     viewportContent.appendChild(reportWrapper);
                 }
@@ -24528,7 +24761,7 @@
             state.results = null;
             state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
             renderDimExplorerHighlight();
-            state.faiCharacteristics = []; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
+            state.faiCharacteristics = []; state.faiCharacteristicsSourceKey = ''; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
             runBtn.disabled = true;
             runBtn.textContent = 'Analyzing...';
 
@@ -24558,6 +24791,8 @@
                 formData.append('file', state.file);
                 formData.append('part_number', state.partNumber);
                 formData.append('send_reference_views', $('cadToggle').checked);
+                const mapRevision = _getPreferredFaiDrawingMapRevision();
+                if (mapRevision) formData.append('drawing_map_revision', mapRevision);
 
                 const res = await fetch('/api/inspect', {
                     method: 'POST',
@@ -24578,6 +24813,7 @@
                 if (state.results?.hybridDimComparison) console.log('[HYBRID DEBUG] hybrid:', JSON.stringify({matched: state.results.hybridDimComparison.matched, missing: state.results.hybridDimComparison.missing, total_expected: state.results.hybridDimComparison.total_expected}));
                 // Build FAI characteristics from drawing map
                 state.faiCharacteristics = [];
+                state.faiCharacteristicsSourceKey = '';
                 state.faiMeasurements = {};
                 state.faiVerdicts = {};
                 state.faiTolOverrides = {};
@@ -24673,7 +24909,8 @@
             if (typeof _destroyPartDiffViewers === 'function') _destroyPartDiffViewers();
             state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
             renderDimExplorerHighlight();
-            state.faiCharacteristics = []; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
+            state.faiDrawingMapRequestId++;
+            _clearFaiPreviewState(true);
             state.drawingZoom = 1;
             state.drawingPanX = 0;
             state.drawingPanY = 0;
@@ -24801,6 +25038,7 @@
                 state.dimExplorerSelectedKeys = new Set();
                 state.dimExplorerAgentKeys = new Set();
                 state.faiCharacteristics = [];
+                state.faiCharacteristicsSourceKey = '';
                 state.faiMeasurements = {};
                 state.faiVerdicts = {};
                 state.faiTolOverrides = {};

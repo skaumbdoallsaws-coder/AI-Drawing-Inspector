@@ -572,18 +572,24 @@ async def get_reference_views(part_number: str):
 
 
 @app.get("/api/drawing-map/{part_number}")
-async def get_drawing_map(part_number: str):
-    """Return a normalized drawing map for a part number."""
+async def get_drawing_map(part_number: str, revision: Optional[str] = Query(None)):
+    """Return a normalized drawing map for a part number, optionally revision-specific."""
     safe_pn = sanitize_part_number(part_number)
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
 
     try:
-        drawing_map = load_drawing_map(safe_pn, LIBRARY_DIR)
+        safe_rev = re.sub(r"[^\w]", "", revision or "")
+        drawing_map = (
+            load_drawing_map_revision(safe_pn, safe_rev, LIBRARY_DIR)
+            if safe_rev
+            else load_drawing_map(safe_pn, LIBRARY_DIR)
+        )
         if drawing_map is None:
+            rev_msg = f" revision '{safe_rev}'" if safe_rev else ""
             raise HTTPException(
                 status_code=404,
-                detail=f"No drawing map found for part number '{safe_pn}'",
+                detail=f"No drawing map found for part number '{safe_pn}'{rev_msg}",
             )
         return drawing_map
     except HTTPException:
@@ -598,6 +604,7 @@ async def run_inspection(
     file: UploadFile = File(...),
     part_number: str = Form(...),
     send_reference_views: bool = Form(True),
+    drawing_map_revision: Optional[str] = Form(None),
 ):
     """Run a full inspection on an uploaded drawing."""
     # Validate part_number is not empty or whitespace
@@ -624,7 +631,12 @@ async def run_inspection(
         logger.info(f"Inspection complete for {part_number}: {result.get('gap_summary', {}).get('completeness', 'N/A')}")
 
         resolved_part_number = result.get("part_number") or part_number
-        drawing_map = load_drawing_map(resolved_part_number, LIBRARY_DIR)
+        safe_map_rev = re.sub(r"[^\w]", "", drawing_map_revision or "")
+        drawing_map = (
+            load_drawing_map_revision(resolved_part_number, safe_map_rev, LIBRARY_DIR)
+            if safe_map_rev
+            else load_drawing_map(resolved_part_number, LIBRARY_DIR)
+        )
 
         # Load inspection profile for profile-aware annotation matching
         profile_data = None

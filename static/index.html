@@ -3237,6 +3237,28 @@
             height: 22px;
             display: block;
         }
+        .three-toolbar-icon img,
+        .view-toolbar-icon {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+            display: block;
+            background: transparent;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        .three-toolbar-btn.view-palette-trigger {
+            min-width: 42px;
+            padding: 4px 6px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.022));
+            border-color: rgba(255,255,255,0.07);
+        }
+        .three-toolbar-btn.view-palette-trigger.active {
+            background: linear-gradient(180deg, rgba(79,195,247,0.22), rgba(79,195,247,0.08));
+            border-color: rgba(79,195,247,0.3);
+        }
         .three-toolbar-caret {
             color: #8ea0b6;
             font-size: 9px;
@@ -3270,6 +3292,40 @@
             justify-content: flex-start;
             width: 100%;
             padding: 7px 10px;
+        }
+        .three-toolbar-popup.view-palette-popup {
+            min-width: 0;
+            width: 178px;
+            padding: 8px;
+            gap: 8px;
+        }
+        .three-toolbar-popup.view-palette-popup.open {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+        }
+        .three-toolbar-popup .view-palette-item {
+            display: flex;
+            width: 100%;
+            height: 64px;
+            padding: 7px 6px 6px;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            border-color: rgba(255,255,255,0.06);
+            background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012));
+        }
+        .three-toolbar-popup .view-palette-item img {
+            width: 31px;
+            height: 31px;
+            object-fit: contain;
+            display: block;
+            pointer-events: none;
+        }
+        .three-toolbar-popup .view-palette-item span {
+            font-size: 10px;
+            line-height: 1;
+            color: inherit;
         }
 
         /* Assembly 3D Settings Panel */
@@ -6541,6 +6597,29 @@
         }
         :root[data-theme="light"] .three-toolbar-popup .three-toolbar-menu-item:active {
             background: var(--bg-selected);
+            color: var(--accent-strong);
+        }
+        :root[data-theme="light"] .three-toolbar-btn.view-palette-trigger {
+            background: linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
+            border-color: var(--border);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+        }
+        :root[data-theme="light"] .three-toolbar-btn.view-palette-trigger.active {
+            background: linear-gradient(180deg, rgba(43,119,191,0.16), rgba(43,119,191,0.06));
+            border-color: rgba(43,119,191,0.3);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.75),
+                0 0 0 1px rgba(43,119,191,0.08);
+        }
+        :root[data-theme="light"] .three-toolbar-popup .view-palette-item {
+            background: linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
+            border-color: var(--border);
+            color: var(--text-secondary);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.65);
+        }
+        :root[data-theme="light"] .three-toolbar-popup .view-palette-item:hover {
+            background: var(--bg-hover);
+            border-color: rgba(43,119,191,0.26);
             color: var(--accent-strong);
         }
         :root[data-theme="light"] .three-toolbar-caret {
@@ -23902,7 +23981,21 @@
             return `${prefix}_${_viewerToolbarIconSeq}`;
         }
 
+        function _viewToolbarIconSrc(viewName) {
+            const map = {
+                front: '/static/assets/view-toolbar-icons/view-front.png',
+                top:   '/static/assets/view-toolbar-icons/view-top.png',
+                right: '/static/assets/view-toolbar-icons/view-right.png',
+                iso:   '/static/assets/view-toolbar-icons/view-iso.png',
+            };
+            return map[viewName] || map.iso;
+        }
+
         function _viewerToolbarIconMarkup(kind) {
+            if (kind && kind.startsWith('view-')) {
+                const viewName = kind.slice(5);
+                return `<img class="view-toolbar-icon" src="${_viewToolbarIconSrc(viewName)}" alt="" draggable="false">`;
+            }
             if (kind === 'display') {
                 const gloss = _nextViewerToolbarId('ballGloss');
                 const spec = _nextViewerToolbarId('ballSpec');
@@ -24007,14 +24100,15 @@
             wrap.className = 'three-toolbar-menu';
 
             const btn = _createThreeToolbarButton({
-                title: 'Standard views',
-                ariaLabel: 'Standard views',
-                icon: 'views',
+                title: 'View orientation',
+                ariaLabel: 'View orientation',
+                icon: 'view-iso',
                 caret: true,
                 iconOnly: true,
             });
+            btn.classList.add('view-palette-trigger');
             const menu = document.createElement('div');
-            menu.className = 'three-toolbar-popup';
+            menu.className = 'three-toolbar-popup view-palette-popup';
 
             [
                 { label: 'Front', action: 'front' },
@@ -24024,11 +24118,18 @@
             ].forEach(opt => {
                 const item = document.createElement('button');
                 item.type = 'button';
-                item.className = 'three-toolbar-menu-item';
-                item.textContent = opt.label;
+                item.className = 'three-toolbar-menu-item view-palette-item';
+                item.innerHTML =
+                    `<img src="${_viewToolbarIconSrc(opt.action)}" alt="" draggable="false">` +
+                    `<span>${opt.label}</span>`;
                 item.addEventListener('click', (e) => {
                     e.stopPropagation();
                     menu.classList.remove('open');
+                    btn.classList.remove('active');
+                    const triggerIcon = btn.querySelector('.view-toolbar-icon');
+                    if (triggerIcon) triggerIcon.src = _viewToolbarIconSrc(opt.action);
+                    btn.title = `${opt.label} view`;
+                    btn.setAttribute('aria-label', `${opt.label} view`);
                     onSelect(opt.action);
                 });
                 menu.appendChild(item);
@@ -24037,9 +24138,13 @@
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 menu.classList.toggle('open');
+                btn.classList.toggle('active', menu.classList.contains('open'));
             });
             document.addEventListener('click', (e) => {
-                if (!wrap.contains(e.target)) menu.classList.remove('open');
+                if (!wrap.contains(e.target)) {
+                    menu.classList.remove('open');
+                    btn.classList.remove('active');
+                }
             });
 
             wrap.appendChild(btn);

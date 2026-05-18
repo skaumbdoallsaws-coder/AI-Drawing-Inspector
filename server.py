@@ -14,10 +14,12 @@ import json
 import logging
 import math
 import shutil
+import sqlite3
 import threading
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Tuple
@@ -62,7 +64,9 @@ from ai_inspector.bridge import (
 # Phase 2 + 3 telemetry instrumentation. All helpers are soft-fail
 # (telemetry exceptions never affect responses).
 from ai_inspector.telemetry import (
+    TelemetryStore,
     classify_exception_status,
+    default_db_path,
     record_anthropic_call,
     record_endpoint_event,
     record_openai_transcription,
@@ -552,8 +556,9 @@ app.add_middleware(
 @app.middleware("http")
 async def _telemetry_endpoint_timing(request, call_next):
     path = request.url.path
-    if not path.startswith("/api/"):
-        # Skip /, /static/*, /favicon.ico, etc.
+    if not path.startswith("/api/") or path.startswith("/api/metrics/"):
+        # Skip /, /static/*, /favicon.ico, and the dashboard's own
+        # metrics API so usage tracking does not count itself.
         return await call_next(request)
     import time as _time
     _start = _time.perf_counter()
@@ -589,6 +594,214 @@ async def _telemetry_endpoint_timing(request, call_next):
 
 
 # ---------- API Endpoints ----------
+
+
+_METRICS_RANGE_LABELS = {
+    "24h": ("Last 24 hours", timedelta(hours=24)),
+    "7d": ("Last 7 days", timedelta(days=7)),
+    "30d": ("Last 30 days", timedelta(days=30)),
+}
+_PROVIDER_NAMES = {"anthropic", "openai"}
+
+
+def _metrics_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        num = float(value)
+        if math.isfinite(num):
+            return num
+    except (TypeError, ValueError):
+        pass
+    return default
+
+
+def _metrics_int(value, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _metrics_percentile(values: List[float], pct: float) -> float:
+    clean = sorted(v for v in values if isinstance(v, (int, float)) and math.isfinite(float(v)))
+    if not clean:
+        return 0.0
+    idx = int(math.ceil((pct / 100.0) * len(clean))) - 1
+    return float(clean[max(0, min(idx, len(clean) - 1))])
+
+
+def _metrics_confidence(rows: List[Dict[str, Any]]) -> str:
+    confidences = {str(r.get("pricingConfidence") or "unknown") for r in rows if r.get("provider") in _PROVIDER_NAMES}
+    if not confidences:
+        return "unknown"
+    if "unknown" in confidences:
+        return "unknown"
+    if "estimated" in confidences:
+        return "estimated"
+    return "verified"
+
+
+def _metrics_group(rows: List[Dict[str, Any]], key_fields: Tuple[str, ...]) -> List[Dict[str, Any]]:
+    grouped: Dict[Tuple[str, ...], List[Dict[str, Any]]] = {}
+    for row in rows:
+        key = tuple(str(row.get(field) or "") for field in key_fields)
+        grouped.setdefault(key, []).append(row)
+
+    result = []
+    for key, group_rows in grouped.items():
+        latencies = [_metrics_float(r.get("latencyMs")) for r in group_rows]
+        failures = [
+            r for r in group_rows
+            if str(r.get("status") or "").lower() != "success"
+            or (_metrics_int(r.get("httpStatus")) >= 400 if r.get("httpStatus") is not None else False)
+        ]
+        item = {field: key[i] for i, field in enumerate(key_fields)}
+        item.update({
+            "events": len(group_rows),
+            "errors": len(failures),
+            "errorRate": (len(failures) / len(group_rows)) if group_rows else 0.0,
+            "inputTokens": sum(_metrics_int(r.get("inputTokens")) for r in group_rows),
+            "outputTokens": sum(_metrics_int(r.get("outputTokens")) for r in group_rows),
+            "totalTokens": sum(_metrics_int(r.get("totalTokens")) for r in group_rows),
+            "estimatedCostUsd": sum(_metrics_float(r.get("estimatedCostUsd")) for r in group_rows),
+            "pricingConfidence": _metrics_confidence(group_rows),
+            "avgLatencyMs": (sum(latencies) / len(latencies)) if latencies else 0.0,
+            "p95LatencyMs": _metrics_percentile(latencies, 95),
+        })
+        result.append(item)
+    result.sort(key=lambda x: (x.get("estimatedCostUsd", 0.0), x.get("events", 0)), reverse=True)
+    return result
+
+
+def _load_telemetry_rows(range_key: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Path]:
+    label, delta = _METRICS_RANGE_LABELS.get(range_key, _METRICS_RANGE_LABELS["24h"])
+    now = datetime.now(timezone.utc)
+    cutoff = now - delta
+    db_path = default_db_path()
+
+    # Initialize/migrate the store before direct dashboard reads. This keeps
+    # the dashboard compatible with a v1 database from before Phase 3.
+    store = TelemetryStore(db_path)
+    store.query_recent(1)
+    store.close()
+
+    if not db_path.exists():
+        return (
+            {
+                "key": range_key if range_key in _METRICS_RANGE_LABELS else "24h",
+                "label": label,
+                "cutoffUtc": cutoff.isoformat(),
+                "generatedAtUtc": now.isoformat(),
+            },
+            [],
+            db_path,
+        )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM telemetry_events WHERE timestampUtc >= ? ORDER BY timestampUtc DESC",
+            (cutoff.isoformat(),),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+
+    return (
+        {
+            "key": range_key if range_key in _METRICS_RANGE_LABELS else "24h",
+            "label": label,
+            "cutoffUtc": cutoff.isoformat(),
+            "generatedAtUtc": now.isoformat(),
+        },
+        rows,
+        db_path,
+    )
+
+
+def _build_usage_metrics(range_key: str, limit: int) -> Dict[str, Any]:
+    range_info, rows, db_path = _load_telemetry_rows(range_key)
+    provider_rows = [r for r in rows if str(r.get("provider") or "").lower() in _PROVIDER_NAMES]
+    endpoint_rows = [r for r in rows if r.get("httpStatus") is not None]
+    workflow_stage_rows = [r for r in rows if r.get("stage")]
+    bridge_rows = [r for r in workflow_stage_rows if r.get("workflow") == "bridge_extract"]
+
+    provider_latencies = [_metrics_float(r.get("latencyMs")) for r in provider_rows]
+    endpoint_latencies = [_metrics_float(r.get("latencyMs")) for r in endpoint_rows]
+    failure_rows = [
+        r for r in rows
+        if str(r.get("status") or "").lower() != "success"
+        or (_metrics_int(r.get("httpStatus")) >= 400 if r.get("httpStatus") is not None else False)
+    ]
+    total_cost = sum(_metrics_float(r.get("estimatedCostUsd")) for r in provider_rows)
+    provider_calls = len(provider_rows)
+
+    def public_event(row: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "timestampUtc": row.get("timestampUtc"),
+            "route": row.get("route"),
+            "workflow": row.get("workflow"),
+            "stage": row.get("stage"),
+            "agentType": row.get("agentType"),
+            "provider": row.get("provider"),
+            "model": row.get("model"),
+            "status": row.get("status"),
+            "errorType": row.get("errorType"),
+            "httpStatus": row.get("httpStatus"),
+            "latencyMs": _metrics_float(row.get("latencyMs")),
+            "totalTokens": _metrics_int(row.get("totalTokens")),
+            "estimatedCostUsd": _metrics_float(row.get("estimatedCostUsd")),
+            "pricingConfidence": row.get("pricingConfidence"),
+            "partNumber": row.get("partNumber"),
+            "documentKind": row.get("documentKind"),
+        }
+
+    return {
+        "range": range_info,
+        "dbPath": str(db_path),
+        "summary": {
+            "totalEvents": len(rows),
+            "providerCalls": provider_calls,
+            "endpointEvents": len(endpoint_rows),
+            "workflowStageEvents": len(workflow_stage_rows),
+            "errorCount": len(failure_rows),
+            "errorRate": (len(failure_rows) / len(rows)) if rows else 0.0,
+            "inputTokens": sum(_metrics_int(r.get("inputTokens")) for r in provider_rows),
+            "outputTokens": sum(_metrics_int(r.get("outputTokens")) for r in provider_rows),
+            "totalTokens": sum(_metrics_int(r.get("totalTokens")) for r in provider_rows),
+            "estimatedCostUsd": total_cost,
+            "pricingConfidence": _metrics_confidence(provider_rows),
+            "avgCostPerProviderCallUsd": (total_cost / provider_calls) if provider_calls else 0.0,
+            "avgProviderLatencyMs": (sum(provider_latencies) / len(provider_latencies)) if provider_latencies else 0.0,
+            "p95ProviderLatencyMs": _metrics_percentile(provider_latencies, 95),
+            "avgEndpointLatencyMs": (sum(endpoint_latencies) / len(endpoint_latencies)) if endpoint_latencies else 0.0,
+            "p95EndpointLatencyMs": _metrics_percentile(endpoint_latencies, 95),
+        },
+        "byProviderModel": _metrics_group(provider_rows, ("provider", "model"))[:20],
+        "byWorkflow": _metrics_group(workflow_stage_rows, ("workflow",))[:20],
+        "bridgeStages": _metrics_group(bridge_rows, ("stage",))[:20],
+        "endpointRoutes": _metrics_group(endpoint_rows, ("route",))[:20],
+        "recentEvents": [public_event(r) for r in rows[:max(1, min(int(limit), 200))]],
+    }
+
+
+@app.get("/api/metrics/usage")
+async def get_usage_metrics(
+    range_key: str = Query("24h", alias="range", description="Metrics range: 24h, 7d, or 30d"),
+    limit: int = Query(25, ge=1, le=200, description="Recent event row limit"),
+):
+    """Return token, cost, latency, and workflow telemetry for the Usage dashboard.
+
+    The response contains only counters and short identifiers already present in
+    TelemetryEvent. Raw prompts, responses, API keys, drawings, and CAD payloads
+    are not stored in telemetry and are not exposed here.
+    """
+    try:
+        return _build_usage_metrics(range_key, limit)
+    except Exception as e:
+        logger.error("Error building usage metrics dashboard payload: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Usage metrics unavailable")
 
 
 @app.get("/api/profiles")

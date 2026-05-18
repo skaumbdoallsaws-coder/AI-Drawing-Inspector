@@ -6955,6 +6955,231 @@
             border-top-color: var(--border);
         }
 
+        /* Usage Tracking dashboard */
+        .usage-shell {
+            flex: 1;
+            min-width: 0;
+            overflow: auto;
+            padding: 18px;
+            color: var(--text-primary);
+            background:
+                radial-gradient(circle at 14% 12%, rgba(79,195,247,0.10), transparent 28%),
+                radial-gradient(circle at 86% 0%, rgba(0,230,118,0.07), transparent 24%),
+                var(--viewport-bg);
+        }
+        .usage-dashboard {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+        .usage-hero {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            padding: 16px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background:
+                linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02)),
+                var(--bg-panel);
+            box-shadow: 0 16px 34px var(--shadow-color);
+        }
+        .usage-kicker {
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .usage-title {
+            margin-top: 4px;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        .usage-subtitle {
+            margin-top: 6px;
+            max-width: 740px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        .usage-range {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .usage-range-pill {
+            border: 1px solid var(--border);
+            background: var(--bg-elevated);
+            color: var(--text-secondary);
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .usage-range-pill.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--bg-selected);
+        }
+        .usage-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .usage-card {
+            min-height: 104px;
+            padding: 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)),
+                var(--bg-panel);
+            box-shadow: 0 12px 24px var(--shadow-color);
+        }
+        .usage-card-label {
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .usage-card-value {
+            margin-top: 10px;
+            font-size: 26px;
+            font-weight: 760;
+            letter-spacing: -0.03em;
+        }
+        .usage-card-note {
+            margin-top: 7px;
+            color: var(--text-muted);
+            font-size: 11px;
+            line-height: 1.35;
+        }
+        .usage-card.good .usage-card-value { color: var(--present); }
+        .usage-card.warn .usage-card-value { color: var(--partial); }
+        .usage-card.bad .usage-card-value { color: var(--missing); }
+        .usage-sections {
+            display: grid;
+            grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+            gap: 12px;
+        }
+        .usage-panel {
+            min-width: 0;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            background: var(--bg-panel);
+            box-shadow: 0 12px 24px var(--shadow-color);
+        }
+        .usage-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 11px 13px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-ribbon);
+        }
+        .usage-panel-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .usage-panel-meta {
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+        .usage-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .usage-table th,
+        .usage-table td {
+            padding: 9px 10px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            vertical-align: top;
+        }
+        .usage-table th {
+            color: var(--text-secondary);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: rgba(255,255,255,0.02);
+        }
+        .usage-table td.numeric,
+        .usage-table th.numeric {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .usage-muted {
+            color: var(--text-muted);
+        }
+        .usage-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 2px 7px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--text-secondary);
+            background: var(--bg-elevated);
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        .usage-bar-row {
+            display: grid;
+            grid-template-columns: 118px minmax(80px, 1fr) 64px;
+            gap: 10px;
+            align-items: center;
+            padding: 9px 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .usage-bar-track {
+            height: 8px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.07);
+            overflow: hidden;
+        }
+        .usage-bar-fill {
+            height: 100%;
+            width: var(--usage-width, 0%);
+            border-radius: inherit;
+            background: linear-gradient(90deg, var(--accent), var(--present));
+        }
+        .usage-empty,
+        .usage-error,
+        .usage-loading {
+            padding: 34px 18px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+        .usage-error {
+            color: var(--missing);
+        }
+        @media (max-width: 1180px) {
+            .usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .usage-sections { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 720px) {
+            .usage-hero { flex-direction: column; }
+            .usage-range { justify-content: flex-start; }
+            .usage-grid { grid-template-columns: 1fr; }
+            .usage-bar-row { grid-template-columns: 92px minmax(70px, 1fr) 58px; }
+        }
+
         :root[data-theme="light"] .part-explorer-presets {
             border-bottom-color: var(--border);
         }
@@ -7523,6 +7748,7 @@
                     <div class="tab" data-tab="assembly" tabindex="0" role="tab" aria-selected="false" id="assemblyTab">Assembly<span class="tab-shortcut" aria-hidden="true">Ctrl+3</span></div>
                     <div class="tab" data-tab="training" tabindex="0" role="tab" aria-selected="false">Training<span class="tab-shortcut" aria-hidden="true">Ctrl+4</span></div>
                     <div class="tab" data-tab="report" tabindex="0" role="tab" aria-selected="false">Report<span class="tab-shortcut" aria-hidden="true">Ctrl+5</span></div>
+                    <div class="tab" data-tab="usage" tabindex="0" role="tab" aria-selected="false">Usage<span class="tab-shortcut" aria-hidden="true">Ctrl+6</span></div>
                 </div>
                 <!-- Breadcrumb Bar -->
                 <div class="breadcrumb-bar" id="breadcrumbBar"></div>
@@ -8148,6 +8374,13 @@
             },
             // Internal: latest mock generation seed for stable rerolls
             _generationSeed: 0,
+        };
+
+        const usageDashboardState = {
+            range: '24h',
+            loading: false,
+            data: null,
+            error: null,
         };
 
         function normalizeFindingsOverlayMode(mode) {
@@ -14261,6 +14494,36 @@
                 });
                 gView.appendChild(resetBtn);
                 ribbon.appendChild(gView);
+            } else if (state.activeTab === 'usage') {
+                const g1 = _ribbonGroup('Usage');
+                [
+                    { key: '24h', label: '24h' },
+                    { key: '7d', label: '7 days' },
+                    { key: '30d', label: '30 days' },
+                ].forEach(item => {
+                    const btn = document.createElement('button');
+                    btn.className = 'ribbon-btn' + (usageDashboardState.range === item.key ? ' active' : '');
+                    btn.textContent = item.label;
+                    btn.addEventListener('click', () => {
+                        if (usageDashboardState.range === item.key) return;
+                        usageDashboardState.range = item.key;
+                        usageDashboardState.data = null;
+                        _loadUsageMetrics(true);
+                        renderViewport();
+                    });
+                    g1.appendChild(btn);
+                });
+                ribbon.appendChild(g1);
+
+                ribbon.appendChild(_ribbonSep());
+                const g2 = _ribbonGroup('Refresh');
+                const refreshBtn = document.createElement('button');
+                refreshBtn.className = 'ribbon-btn primary';
+                refreshBtn.textContent = usageDashboardState.loading ? 'Loading...' : 'Refresh';
+                refreshBtn.disabled = usageDashboardState.loading;
+                refreshBtn.addEventListener('click', () => _loadUsageMetrics(true));
+                g2.appendChild(refreshBtn);
+                ribbon.appendChild(g2);
             }
         }
 
@@ -14320,6 +14583,11 @@
 
             if (state.activeTab === 'training') {
                 _renderTrainingTab();
+                return;
+            }
+
+            if (state.activeTab === 'usage') {
+                _renderUsageDashboard();
                 return;
             }
 
@@ -14697,13 +14965,283 @@
 
             // cadviews tab removed â€” CAD reference views accessible via left panel
 
-            if (!showDrawing && state.activeTab !== '3dmodel' && state.activeTab !== 'assembly' && state.activeTab !== 'training' && state.activeTab !== 'report') {
+            if (!showDrawing && state.activeTab !== '3dmodel' && state.activeTab !== 'assembly' && state.activeTab !== 'training' && state.activeTab !== 'report' && state.activeTab !== 'usage') {
                 const empty = document.createElement('div');
                 empty.className = 'viewport-empty';
                 empty.textContent = 'No content to display';
                 viewportContent.appendChild(empty);
             }
 
+        }
+
+        function _usageEscape(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;',
+            }[ch]));
+        }
+
+        function _usageMoney(value) {
+            const num = Number(value || 0);
+            if (!Number.isFinite(num) || num <= 0) return '$0.00';
+            return '$' + num.toFixed(num < 0.01 ? 4 : 2);
+        }
+
+        function _usageTokens(value) {
+            const num = Number(value || 0);
+            if (!Number.isFinite(num) || num <= 0) return '0';
+            if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+            return String(Math.round(num));
+        }
+
+        function _usageLatency(value) {
+            const num = Number(value || 0);
+            if (!Number.isFinite(num) || num <= 0) return '0 ms';
+            if (num >= 1000) return (num / 1000).toFixed(2).replace(/\.00$/, '') + ' s';
+            return Math.round(num) + ' ms';
+        }
+
+        function _usagePercent(value) {
+            const num = Number(value || 0);
+            if (!Number.isFinite(num) || num <= 0) return '0%';
+            return (num * 100).toFixed(num < 0.01 ? 2 : 1) + '%';
+        }
+
+        function _usageGeneratedLabel(iso) {
+            if (!iso) return 'Not loaded';
+            const dt = new Date(iso);
+            if (Number.isNaN(dt.getTime())) return 'Not loaded';
+            return dt.toLocaleString();
+        }
+
+        async function _loadUsageMetrics(force) {
+            if (usageDashboardState.loading) return;
+            if (!force && usageDashboardState.data && usageDashboardState.data.range?.key === usageDashboardState.range) return;
+
+            usageDashboardState.loading = true;
+            usageDashboardState.error = null;
+            if (state.activeTab === 'usage') renderRibbon();
+            try {
+                const url = `/api/metrics/usage?range=${encodeURIComponent(usageDashboardState.range)}&limit=40`;
+                const res = await fetch(url);
+                const data = await res.json().catch(() => null);
+                if (!res.ok) {
+                    throw new Error((data && data.detail) || `HTTP ${res.status}`);
+                }
+                usageDashboardState.data = data;
+            } catch (err) {
+                usageDashboardState.error = err && err.message ? err.message : 'Usage metrics unavailable';
+            } finally {
+                usageDashboardState.loading = false;
+                if (state.activeTab === 'usage') {
+                    renderRibbon();
+                    renderViewport();
+                }
+            }
+        }
+
+        function _usageMetricCard(label, value, note, tone) {
+            return `
+                <div class="usage-card ${tone || ''}">
+                    <div class="usage-card-label">${_usageEscape(label)}</div>
+                    <div class="usage-card-value">${_usageEscape(value)}</div>
+                    <div class="usage-card-note">${_usageEscape(note || '')}</div>
+                </div>`;
+        }
+
+        function _usageProviderRows(rows) {
+            if (!rows || !rows.length) {
+                return '<tr><td colspan="6" class="usage-muted">No provider calls recorded in this range.</td></tr>';
+            }
+            return rows.map(row => `
+                <tr>
+                    <td><span class="usage-chip">${_usageEscape(row.provider || 'unknown')}</span></td>
+                    <td>${_usageEscape(row.model || 'unknown')}</td>
+                    <td class="numeric">${_usageEscape(row.events || 0)}</td>
+                    <td class="numeric">${_usageTokens(row.totalTokens)}</td>
+                    <td class="numeric">${_usageMoney(row.estimatedCostUsd)}</td>
+                    <td class="numeric">${_usageLatency(row.p95LatencyMs)}</td>
+                </tr>`).join('');
+        }
+
+        function _usageEndpointRows(rows) {
+            if (!rows || !rows.length) {
+                return '<tr><td colspan="5" class="usage-muted">No endpoint traffic recorded in this range.</td></tr>';
+            }
+            return rows.slice(0, 10).map(row => `
+                <tr>
+                    <td>${_usageEscape(row.route || 'unknown')}</td>
+                    <td class="numeric">${_usageEscape(row.events || 0)}</td>
+                    <td class="numeric">${_usageLatency(row.avgLatencyMs)}</td>
+                    <td class="numeric">${_usageLatency(row.p95LatencyMs)}</td>
+                    <td class="numeric">${_usagePercent(row.errorRate)}</td>
+                </tr>`).join('');
+        }
+
+        function _usageBridgeStageRows(rows) {
+            if (!rows || !rows.length) {
+                return '<div class="usage-empty">No bridge extraction stages recorded in this range.</div>';
+            }
+            const maxLatency = Math.max(...rows.map(r => Number(r.avgLatencyMs || 0)), 1);
+            return rows.map(row => {
+                const width = Math.max(2, Math.min(100, (Number(row.avgLatencyMs || 0) / maxLatency) * 100));
+                return `
+                    <div class="usage-bar-row">
+                        <div>${_usageEscape(row.stage || 'stage')}</div>
+                        <div class="usage-bar-track"><div class="usage-bar-fill" style="--usage-width:${width.toFixed(1)}%;"></div></div>
+                        <div class="numeric">${_usageLatency(row.avgLatencyMs)}</div>
+                    </div>`;
+            }).join('');
+        }
+
+        function _usageRecentRows(rows) {
+            if (!rows || !rows.length) {
+                return '<tr><td colspan="6" class="usage-muted">No recent events recorded.</td></tr>';
+            }
+            return rows.slice(0, 12).map(row => {
+                const when = row.timestampUtc ? new Date(row.timestampUtc).toLocaleTimeString() : '';
+                const context = row.stage || row.workflow || row.route || 'event';
+                return `
+                    <tr>
+                        <td>${_usageEscape(when)}</td>
+                        <td>${_usageEscape(context)}</td>
+                        <td>${_usageEscape(row.provider || 'none')}</td>
+                        <td>${_usageEscape(row.status || 'success')}</td>
+                        <td class="numeric">${_usageLatency(row.latencyMs)}</td>
+                        <td class="numeric">${_usageMoney(row.estimatedCostUsd)}</td>
+                    </tr>`;
+            }).join('');
+        }
+
+        function _renderUsageDashboard() {
+            if (!usageDashboardState.data && !usageDashboardState.loading && !usageDashboardState.error) {
+                _loadUsageMetrics(false);
+            }
+
+            const shell = document.createElement('div');
+            shell.className = 'usage-shell';
+
+            if (usageDashboardState.error) {
+                shell.innerHTML = `
+                    <div class="usage-dashboard">
+                        <div class="usage-hero">
+                            <div>
+                                <div class="usage-kicker">Usage Tracking</div>
+                                <div class="usage-title">Metrics unavailable</div>
+                                <div class="usage-subtitle">The telemetry store could not be read. This does not affect inspection, bridge extraction, or AI workflows.</div>
+                            </div>
+                        </div>
+                        <div class="usage-error">${_usageEscape(usageDashboardState.error)}</div>
+                    </div>`;
+                viewportContent.appendChild(shell);
+                return;
+            }
+
+            if (usageDashboardState.loading && !usageDashboardState.data) {
+                shell.innerHTML = '<div class="usage-loading">Loading usage metrics...</div>';
+                viewportContent.appendChild(shell);
+                return;
+            }
+
+            const data = usageDashboardState.data || {};
+            const summary = data.summary || {};
+            const confidence = summary.pricingConfidence || 'unknown';
+            const costNote = confidence === 'verified'
+                ? 'Pricing table marked verified.'
+                : `Pricing confidence: ${confidence}. Treat dollars as directional until rates are verified.`;
+
+            shell.innerHTML = `
+                <div class="usage-dashboard">
+                    <div class="usage-hero">
+                        <div>
+                            <div class="usage-kicker">Usage Tracking</div>
+                            <div class="usage-title">Cost, Tokens, and Latency</div>
+                            <div class="usage-subtitle">
+                                Tracks provider calls, workflow timings, bridge approval waits, endpoint latency, and estimated cost from the local telemetry store. No prompts, responses, API keys, drawings, or CAD payloads are stored.
+                            </div>
+                        </div>
+                        <div class="usage-range">
+                            ${['24h','7d','30d'].map(key => `<button class="usage-range-pill ${usageDashboardState.range === key ? 'active' : ''}" data-usage-range="${key}">${key === '24h' ? '24h' : key === '7d' ? '7 days' : '30 days'}</button>`).join('')}
+                        </div>
+                    </div>
+
+                    <div class="usage-grid">
+                        ${_usageMetricCard('Estimated Cost', _usageMoney(summary.estimatedCostUsd), costNote, 'warn')}
+                        ${_usageMetricCard('Provider Calls', summary.providerCalls || 0, `${_usageTokens(summary.totalTokens)} tokens recorded`, '')}
+                        ${_usageMetricCard('Avg Cost / Query', _usageMoney(summary.avgCostPerProviderCallUsd), 'Provider calls only, not local compute.', '')}
+                        ${_usageMetricCard('P95 Provider Latency', _usageLatency(summary.p95ProviderLatencyMs), `Endpoint p95 ${_usageLatency(summary.p95EndpointLatencyMs)}`, '')}
+                        ${_usageMetricCard('Endpoint Events', summary.endpointEvents || 0, `${_usagePercent(summary.errorRate)} error rate across all telemetry`, summary.errorCount ? 'bad' : 'good')}
+                        ${_usageMetricCard('Workflow Stages', summary.workflowStageEvents || 0, 'Inspection and bridge stage timers.', '')}
+                        ${_usageMetricCard('Input Tokens', _usageTokens(summary.inputTokens), 'Prompt-side provider accounting.', '')}
+                        ${_usageMetricCard('Output Tokens', _usageTokens(summary.outputTokens), 'Completion-side provider accounting.', '')}
+                    </div>
+
+                    <div class="usage-sections">
+                        <div class="usage-panel">
+                            <div class="usage-panel-header">
+                                <div class="usage-panel-title">Provider Cost by Model</div>
+                                <div class="usage-panel-meta">${_usageEscape(data.range?.label || '')}</div>
+                            </div>
+                            <table class="usage-table">
+                                <thead><tr><th>Provider</th><th>Model</th><th class="numeric">Calls</th><th class="numeric">Tokens</th><th class="numeric">Cost</th><th class="numeric">P95</th></tr></thead>
+                                <tbody>${_usageProviderRows(data.byProviderModel)}</tbody>
+                            </table>
+                        </div>
+
+                        <div class="usage-panel">
+                            <div class="usage-panel-header">
+                                <div class="usage-panel-title">Bridge Stage Latency</div>
+                                <div class="usage-panel-meta">approval wait separated</div>
+                            </div>
+                            ${_usageBridgeStageRows(data.bridgeStages)}
+                        </div>
+                    </div>
+
+                    <div class="usage-sections">
+                        <div class="usage-panel">
+                            <div class="usage-panel-header">
+                                <div class="usage-panel-title">Endpoint Latency</div>
+                                <div class="usage-panel-meta">top routes</div>
+                            </div>
+                            <table class="usage-table">
+                                <thead><tr><th>Route</th><th class="numeric">Events</th><th class="numeric">Avg</th><th class="numeric">P95</th><th class="numeric">Errors</th></tr></thead>
+                                <tbody>${_usageEndpointRows(data.endpointRoutes)}</tbody>
+                            </table>
+                        </div>
+
+                        <div class="usage-panel">
+                            <div class="usage-panel-header">
+                                <div class="usage-panel-title">Recent Telemetry</div>
+                                <div class="usage-panel-meta">updated ${_usageEscape(_usageGeneratedLabel(data.range?.generatedAtUtc))}</div>
+                            </div>
+                            <table class="usage-table">
+                                <thead><tr><th>Time</th><th>Context</th><th>Provider</th><th>Status</th><th class="numeric">Latency</th><th class="numeric">Cost</th></tr></thead>
+                                <tbody>${_usageRecentRows(data.recentEvents)}</tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="usage-muted" style="font-size:11px;">
+                        Store: ${_usageEscape(data.dbPath || 'runtime_metrics/inspectorpro_metrics.sqlite')}
+                    </div>
+                </div>`;
+
+            shell.querySelectorAll('[data-usage-range]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const next = btn.getAttribute('data-usage-range');
+                    if (!next || next === usageDashboardState.range) return;
+                    usageDashboardState.range = next;
+                    usageDashboardState.data = null;
+                    _loadUsageMetrics(true);
+                    renderViewport();
+                });
+            });
+
+            viewportContent.appendChild(shell);
         }
 
         // ─────────────────────────────────────────────────────────
@@ -30854,7 +31392,7 @@
                 });
             }
             document.getElementById('helpBtn')?.addEventListener('click', () => {
-                alert('InspectorPro v1.0\n\nShortcuts:\nCtrl+Shift+P: Command Palette\nCtrl+1/2/3/4/5: Switch Tabs\nCtrl+B: Toggle Left Panel\nCtrl+J: Toggle Agent Panel\n\ninspectorpro.io');
+                alert('InspectorPro v1.0\n\nShortcuts:\nCtrl+Shift+P: Command Palette\nCtrl+1/2/3/4/5/6: Switch Tabs\nCtrl+B: Toggle Left Panel\nCtrl+J: Toggle Agent Panel\n\ninspectorpro.io');
             });
             document.getElementById('accountBtn')?.addEventListener('click', () => {
                 if (window._toast) window._toast('Account settings coming soon', 'info');
@@ -31054,6 +31592,7 @@
                 { label: 'Switch to Assembly Tab', category: 'View', shortcut: 'Ctrl+3', action: () => document.querySelector('.tab[data-tab="assembly"]')?.click() },
                 { label: 'Switch to Training Tab', category: 'View', shortcut: 'Ctrl+4', action: () => document.querySelector('.tab[data-tab="training"]')?.click() },
                 { label: 'Switch to Report Tab', category: 'View', shortcut: 'Ctrl+5', action: () => document.querySelector('.tab[data-tab="report"]')?.click() },
+                { label: 'Switch to Usage Tab', category: 'View', shortcut: 'Ctrl+6', action: () => document.querySelector('.tab[data-tab="usage"]')?.click() },
                 { label: 'Toggle Left Panel', category: 'View', shortcut: 'Ctrl+B', action: () => { if (window._toggleLeftPanel) window._toggleLeftPanel(); } },
                 { label: 'Toggle Agent Panel', category: 'View', shortcut: 'Ctrl+J', action: () => document.getElementById('agentToggleBtn')?.click() },
                 { label: 'Fit to Viewport', category: 'View', shortcut: '', action: () => { if (window._fitDrawingToViewport) window._fitDrawingToViewport(); } },
@@ -31155,13 +31694,14 @@
                 // Skip all other shortcuts if user is typing in an input
                 if (inInput) return;
 
-                // Ctrl+1/2/3/4/5 for tab switching
+                // Ctrl+1/2/3/4/5/6 for tab switching
                 if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
                     if (e.key === '1') { document.querySelector('.tab[data-tab="drawing"]')?.click(); e.preventDefault(); }
                     if (e.key === '2') { document.querySelector('.tab[data-tab="3dmodel"]')?.click(); e.preventDefault(); }
                     if (e.key === '3') { document.querySelector('.tab[data-tab="assembly"]')?.click(); e.preventDefault(); }
                     if (e.key === '4') { document.querySelector('.tab[data-tab="training"]')?.click(); e.preventDefault(); }
                     if (e.key === '5') { document.querySelector('.tab[data-tab="report"]')?.click(); e.preventDefault(); }
+                    if (e.key === '6') { document.querySelector('.tab[data-tab="usage"]')?.click(); e.preventDefault(); }
                 }
                 // Ctrl+B toggle left panel
                 if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'b') {
@@ -31683,10 +32223,3 @@
     </script>
 </body>
 </html>
-
-
-
-
-
-
-

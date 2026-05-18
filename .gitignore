@@ -53,3 +53,11 @@ sw_json_library/
 # Dataset configs (allow callouts.yaml placeholder)
 datasets/*.yaml
 !datasets/callouts.yaml
+
+# Generated runtime artifacts -- never check these in
+# Local SQLite telemetry store (created at runtime by ai_inspector.telemetry)
+runtime_metrics/
+# Pilot-bundle archives produced by scripts/collect-pilot-bundle.ps1
+pilot_diagnostics/
+# Raw packages copied in from the SOLIDWORKS bridge before sidecar install
+400S_Sorted_Library/_bridge_imports/

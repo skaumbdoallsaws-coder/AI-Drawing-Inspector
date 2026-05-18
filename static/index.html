@@ -6973,6 +6973,35 @@
             border-color: rgba(43,119,191,0.36);
             color: var(--accent-strong);
         }
+
+        /* Phase 10E + C: SOLIDWORKS bridge re-extract row.
+           Colours pulled from main's existing status token set so the
+           pill stays readable in both light and dark themes — these
+           tokens are intentionally shared across themes (see :root
+           theme blocks at the top of this file). */
+        .bridge-reextract-row {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 6px;
+        }
+        .bridge-pill {
+            display: inline-block;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            user-select: none;
+            text-align: center;
+        }
+        .bridge-pill-available    { color: var(--present); border-color: var(--present); }
+        .bridge-pill-unavailable  { color: var(--text-muted); border-color: var(--border); }
+        .bridge-pill-unknown      { color: var(--text-muted); border-color: var(--border); }
+        .bridge-pill-busy         { color: var(--partial); border-color: var(--partial); }
+        .bridge-pill-unauthorized { color: var(--missing); border-color: var(--missing); }
+        .bridge-reextract-btn     { font-size: 11px; padding: 4px 10px; }
     </style>
     <!-- Three.js for 3D Model Viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -7459,6 +7488,16 @@
                         <div class="search-dropdown-list" id="dropdownList"></div>
                     </div>
                     <div class="part-info" id="partInfo" style="margin-top:10px;"></div>
+                    <!-- Phase 10E + Phase C: SOLIDWORKS bridge auto-relabel control.
+                         The button text is rewritten on every status poll based on
+                         the bridge's reported activeDoc.type — Drawing/Part/Assembly
+                         each have their own label and dispatch endpoint. The neutral
+                         "Extract from SOLIDWORKS" text below is just the placeholder
+                         shown for the brief window before the first poll completes. -->
+                    <div class="bridge-reextract-row" id="bridgeReextractRow">
+                        <span class="bridge-pill bridge-pill-unknown" id="bridgeStatusPill" title="SOLIDWORKS bridge status (polled every 5s)">Bridge: checking…</span>
+                        <button class="btn btn-secondary bridge-reextract-btn" id="bridgeReextractBtn" type="button" disabled>Extract from SOLIDWORKS</button>
+                    </div>
                 </div>
 
                 <!-- CAD Views Toggle -->
@@ -31255,6 +31294,391 @@
                     }
                 });
             });
+        })();
+
+        /*
+         * ─── Phase 10E + Phase C: SOLIDWORKS bridge UI controls ────────────
+         * Polls /api/bridge/status every 5s; the button auto-relabels based
+         * on the bridge's reported activeDoc.type and dispatches to the
+         * matching kind-specific endpoint:
+         *
+         *   Drawing  → "Re-extract Drawing from SOLIDWORKS" → /api/request-extraction
+         *   Part     → "Extract Part from SOLIDWORKS"      → /api/request-part-extraction
+         *   Assembly → "Extract Assembly from SOLIDWORKS"  → /api/request-assembly-extraction
+         *   anything else / no doc → button disabled
+         *
+         * Drawing flow stays byte-equivalent (same endpoint, same confirm
+         * text spirit, same success toast wording, same in-memory drawing-map
+         * refresh on success). Part/assembly success is sidecar-only — no
+         * in-memory state mutation, just a kind-aware toast.
+         */
+        (function () {
+            const pill = document.getElementById('bridgeStatusPill');
+            const btn  = document.getElementById('bridgeReextractBtn');
+            if (!pill || !btn) return;
+
+            let inFlight = false;
+            let bridgeReady = false;            // bridge available + authenticated
+            let currentActiveDocKind = null;    // "Drawing" | "Part" | "Assembly" | other | null
+            // Phase C fix: full activeDoc {type,title,path} needed by the assembly
+            // path so the click handler can infer an assembly identifier from the
+            // active document path when no part profile is selected (assemblies
+            // under 400S_Sorted_Library/assemblies/{id}/ are not in /api/profiles).
+            let currentActiveDoc = null;        // { type, title, path } | null
+
+            /**
+             * Infer an assembly identifier from the bridge's activeDoc.
+             *
+             * Priority:
+             *   1. Path-based: ".../400S_Sorted_Library/assemblies/{id}/..."
+             *      → returns {id}. Case-insensitive, accepts both \\ and /.
+             *   2. Filename stem (e.g. "Crossbrace.SLDASM" → "Crossbrace").
+             *   3. Title stem if the path is empty.
+             *   4. Empty string when nothing usable is available — caller
+             *      treats that as "cannot extract, no identifier to attach
+             *      the sidecar to".
+             */
+            function inferAssemblyIdentifier(activeDoc) {
+                if (!activeDoc) return '';
+                const path = (activeDoc.path || '').trim();
+                if (path) {
+                    const re = /400S_Sorted_Library[\\/]+assemblies[\\/]+([^\\/]+)/i;
+                    const m = path.match(re);
+                    if (m && m[1]) return m[1];
+                    const segments = path.split(/[\\/]+/);
+                    const filename = segments[segments.length - 1] || '';
+                    const dot = filename.lastIndexOf('.');
+                    const stem = dot > 0 ? filename.substring(0, dot) : filename;
+                    if (stem) return stem;
+                }
+                const title = (activeDoc.title || '').trim();
+                if (title) {
+                    const dot = title.lastIndexOf('.');
+                    return dot > 0 ? title.substring(0, dot) : title;
+                }
+                return '';
+            }
+
+            // Per-kind dispatch table. The bridge reports activeDoc.type as
+            // Title-Case ("Drawing" / "Part" / "Assembly") via /api/bridge/status;
+            // the keys here mirror that exactly so a status-poll lookup is direct.
+            const KIND_CONFIG = {
+                Drawing: {
+                    endpoint:    '/api/request-extraction',
+                    buttonText:  'Re-extract Drawing from SOLIDWORKS',
+                    pillText:    'Bridge: drawing active',
+                    confirmText: function (pn) {
+                        return 'This will ask SOLIDWORKS to extract the currently active drawing.\n\n' +
+                               'Part: ' + pn + '\n\n' +
+                               'A confirmation window will appear in SOLIDWORKS. The extraction may take 10-30 seconds after you Approve.';
+                    },
+                    successToast: function (pn, data) {
+                        // Wording preserved byte-equivalent with the pre-Phase-C
+                        // drawing flow so any operator muscle memory keeps working.
+                        const sheets = data && data.sheetCount;
+                        const views  = data && data.viewCount;
+                        let summary  = 'Drawing map refreshed for ' + pn;
+                        if (typeof sheets === 'number' && typeof views === 'number') {
+                            summary += ' (' + sheets + ' sheet' + (sheets === 1 ? '' : 's') +
+                                       ', ' + views + ' view' + (views === 1 ? '' : 's') + ')';
+                        }
+                        return summary;
+                    },
+                    postSuccess: async function (pn) {
+                        // Refresh in-memory drawing-map for the current part — same
+                        // hook that existed pre-Phase-C. Sidecar kinds skip this
+                        // because the app does not yet consume part/assembly data.
+                        try {
+                            const mapRes = await fetch('/api/drawing-map/' + encodeURIComponent(pn));
+                            if (mapRes.ok) {
+                                const newMap = await mapRes.json();
+                                if (typeof state !== 'undefined' && state && state.partNumber === pn) {
+                                    if (state.results && typeof state.results === 'object') {
+                                        state.results.drawing_map = newMap;
+                                    }
+                                }
+                            }
+                        } catch (_) { /* swallow — toast already shown */ }
+                    },
+                    conflictHint: 'Another extraction is in progress, or the active SOLIDWORKS document is not a drawing.',
+                },
+                Part: {
+                    endpoint:    '/api/request-part-extraction',
+                    buttonText:  'Extract Part from SOLIDWORKS',
+                    pillText:    'Bridge: part active',
+                    confirmText: function (pn) {
+                        return 'This will ask SOLIDWORKS to extract the currently active part as a sidecar.\n\n' +
+                               'Part: ' + pn + '\n\n' +
+                               'The package will be installed under 400S_Sorted_Library/_bridge_imports/part/' + pn + '/.\n' +
+                               'Existing manual library files will not be modified.\n\n' +
+                               'A confirmation window will appear in SOLIDWORKS. The extraction may take 10-30 seconds after you Approve.';
+                    },
+                    successToast: function (pn, data) {
+                        const fc  = data && data.featureCount;
+                        const cfg = data && data.activeConfiguration;
+                        let summary = 'Part extracted for ' + pn;
+                        const bits = [];
+                        if (typeof fc === 'number') bits.push(fc + ' feature' + (fc === 1 ? '' : 's'));
+                        if (cfg) bits.push("config '" + cfg + "'");
+                        if (bits.length) summary += ' (' + bits.join(', ') + ')';
+                        return summary;
+                    },
+                    postSuccess: async function () { /* sidecar only — no in-memory refresh */ },
+                    conflictHint: 'Another extraction is in progress, or the active SOLIDWORKS document is not a part.',
+                },
+                Assembly: {
+                    endpoint:    '/api/request-assembly-extraction',
+                    buttonText:  'Extract Assembly from SOLIDWORKS',
+                    pillText:    'Bridge: assembly active',
+                    // The Assembly confirm dialog surfaces the inferred identifier
+                    // explicitly because assemblies under
+                    // 400S_Sorted_Library/assemblies/{id}/ are NOT in /api/profiles
+                    // and cannot be selected from the part picker — the user needs
+                    // to see what id the sidecar will land under before approving.
+                    confirmText: function (pn, activeDoc) {
+                        const title = (activeDoc && activeDoc.title) || '(unknown)';
+                        const path  = (activeDoc && activeDoc.path)  || '(unknown)';
+                        return 'This will ask SOLIDWORKS to extract the currently active assembly as a sidecar.\n\n' +
+                               'Active document: ' + title + '\n' +
+                               'Path: ' + path + '\n' +
+                               'Assembly identifier: ' + pn + '\n' +
+                               'Sidecar destination: 400S_Sorted_Library/_bridge_imports/assembly/' + pn + '/\n\n' +
+                               'Existing manual library files will not be modified.\n\n' +
+                               'A confirmation window will appear in SOLIDWORKS. The extraction may take 10-30 seconds after you Approve.';
+                    },
+                    successToast: function (pn, data) {
+                        const cc  = data && data.componentCount;
+                        const mc  = data && data.mateCount;
+                        const cfg = data && data.activeConfiguration;
+                        let summary = 'Assembly extracted for ' + pn;
+                        const bits = [];
+                        if (typeof cc === 'number') bits.push(cc + ' component' + (cc === 1 ? '' : 's'));
+                        if (typeof mc === 'number') bits.push(mc + ' mate' + (mc === 1 ? '' : 's'));
+                        if (cfg) bits.push("config '" + cfg + "'");
+                        if (bits.length) summary += ' (' + bits.join(', ') + ')';
+                        return summary;
+                    },
+                    postSuccess: async function () { /* sidecar only — no in-memory refresh */ },
+                    conflictHint: 'Another extraction is in progress, or the active SOLIDWORKS document is not an assembly.',
+                },
+            };
+
+            function setPill(stateName, text) {
+                pill.className = 'bridge-pill bridge-pill-' + stateName;
+                pill.textContent = text;
+            }
+
+            // Single source of truth for the button's label / disabled / title
+            // based on the composite state (bridge ready × active doc kind ×
+            // part number selected × in-flight). Called from poll updates AND
+            // from the in-flight transition; never called during a request
+            // since the click handler manages text directly while extracting.
+            function renderButton() {
+                if (inFlight) return; // click handler owns the button during extract
+                const cfg   = currentActiveDocKind ? KIND_CONFIG[currentActiveDocKind] : null;
+                const hasPn = !!(typeof state !== 'undefined' && state && state.partNumber);
+
+                if (!bridgeReady) {
+                    btn.textContent = 'Extract from SOLIDWORKS';
+                    btn.disabled = true;
+                    return;
+                }
+                if (!cfg) {
+                    btn.textContent = 'Extract from SOLIDWORKS';
+                    btn.disabled = true;
+                    btn.title = currentActiveDocKind
+                        ? ('Active SOLIDWORKS document type "' + currentActiveDocKind + '" is not supported.')
+                        : 'Open a drawing, part, or assembly in SOLIDWORKS.';
+                    return;
+                }
+                btn.textContent = cfg.buttonText;
+                // Phase C fix: Assembly does NOT require a selected part
+                // profile — the id is inferred from the active doc path on
+                // click. Drawing/Part still gate on a selected profile
+                // because their library layout assumes a curated part_number
+                // matches a known profile.
+                if (currentActiveDocKind === 'Assembly') {
+                    btn.disabled = false;
+                    btn.title = cfg.buttonText +
+                        ' (identifier auto-detected from the active document path).';
+                } else {
+                    btn.disabled = !hasPn;
+                    btn.title = hasPn
+                        ? cfg.buttonText + ' for the active part number.'
+                        : 'Select a part number first.';
+                }
+            }
+
+            async function pollBridgeStatus() {
+                if (inFlight) return; // freeze pill during an active request
+                try {
+                    const res = await fetch('/api/bridge/status');
+                    const data = await res.json();
+                    if (data && data.available) {
+                        // Week 11: distinguish "reachable but unauthorized"
+                        // from the happy path so the user can fix the
+                        // local token without restarting troubleshooting.
+                        if (data.authRequired && data.authenticated === false) {
+                            setPill('unauthorized', 'Bridge: auth missing');
+                            bridgeReady = false;
+                            currentActiveDocKind = null;
+                            currentActiveDoc = null;
+                            btn.title = (data && data.message)
+                                ? data.message
+                                : 'SOLIDWORKS bridge is running but the local token does not match. '
+                                  + 'Restart SOLIDWORKS to refresh bridge_token.';
+                            renderButton();
+                            return;
+                        }
+                        bridgeReady = true;
+                        currentActiveDoc = data.activeDoc || null;
+                        currentActiveDocKind = (currentActiveDoc && currentActiveDoc.type) || null;
+
+                        // Pill text reflects the active doc kind so the user
+                        // can see at a glance what the button will do.
+                        if (currentActiveDocKind && KIND_CONFIG[currentActiveDocKind]) {
+                            setPill('available', KIND_CONFIG[currentActiveDocKind].pillText);
+                        } else if (currentActiveDocKind) {
+                            setPill('available', 'Bridge: ' + currentActiveDocKind + ' (unsupported)');
+                        } else {
+                            setPill('available', 'Bridge: no document');
+                        }
+                        renderButton();
+                    } else {
+                        setPill('unavailable', 'Bridge: unavailable');
+                        bridgeReady = false;
+                        currentActiveDocKind = null;
+                        currentActiveDoc = null;
+                        btn.title = (data && data.message)
+                            ? data.message
+                            : 'SOLIDWORKS bridge not available. Open SOLIDWORKS with the InspectorPro add-in enabled.';
+                        renderButton();
+                    }
+                } catch (_) {
+                    setPill('unavailable', 'Bridge: unavailable');
+                    bridgeReady = false;
+                    currentActiveDocKind = null;
+                    currentActiveDoc = null;
+                    btn.title = 'SOLIDWORKS bridge not reachable.';
+                    renderButton();
+                }
+            }
+
+            async function onReextractClick() {
+                if (inFlight) return;
+                const cfg = currentActiveDocKind ? KIND_CONFIG[currentActiveDocKind] : null;
+                if (!cfg) {
+                    if (window._toast) window._toast(
+                        currentActiveDocKind
+                            ? ('Active SOLIDWORKS document type "' + currentActiveDocKind + '" is not supported.')
+                            : 'No supported active document in SOLIDWORKS.',
+                        'warning');
+                    return;
+                }
+                let pn = (typeof state !== 'undefined' && state) ? state.partNumber : null;
+                // Phase C fix: assemblies do not require a selected part
+                // profile. Infer the id from activeDoc.path so a Crossbrace
+                // assembly under 400S_Sorted_Library/assemblies/6000302/ can
+                // be extracted without first creating a profile for it.
+                // Explicit profile selection always wins when present.
+                if (!pn && currentActiveDocKind === 'Assembly') {
+                    pn = inferAssemblyIdentifier(currentActiveDoc);
+                }
+                if (!pn) {
+                    if (window._toast) window._toast(
+                        currentActiveDocKind === 'Assembly'
+                            ? 'Could not infer an assembly identifier from the active SOLIDWORKS document path.'
+                            : 'Select a part number first',
+                        'warning');
+                    return;
+                }
+                const ok = window.confirm(cfg.confirmText(pn, currentActiveDoc));
+                if (!ok) return;
+
+                inFlight = true;
+                btn.disabled = true;
+                btn.textContent = 'Extracting…';
+                setPill('busy', 'Bridge: extracting…');
+
+                try {
+                    const res = await fetch(cfg.endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ partNumber: pn }),
+                    });
+
+                    if (res.status === 503) {
+                        const data = await res.json().catch(() => ({}));
+                        if (window._toast) window._toast(
+                            data.detail || 'SOLIDWORKS bridge not available. Open SOLIDWORKS with the InspectorPro add-in enabled.',
+                            'error');
+                        return;
+                    }
+                    if (res.status === 401) {
+                        // Week 11: token missing or mismatched.
+                        const data = await res.json().catch(() => ({}));
+                        if (window._toast) window._toast(
+                            data.detail || 'SOLIDWORKS bridge rejected the token. Restart SOLIDWORKS to refresh bridge_token.',
+                            'error');
+                        return;
+                    }
+                    if (res.status === 409) {
+                        const data = await res.json().catch(() => ({}));
+                        if (window._toast) window._toast(
+                            data.detail || cfg.conflictHint,
+                            'warning');
+                        return;
+                    }
+                    if (res.status === 410) {
+                        // Bridge package TTL elapsed before the app finished downloading.
+                        const data = await res.json().catch(() => ({}));
+                        if (window._toast) window._toast(
+                            data.detail || 'Package expired before download (5-minute TTL elapsed).',
+                            'error');
+                        return;
+                    }
+                    if (res.status === 504) {
+                        if (window._toast) window._toast(
+                            'Extraction timed out waiting for SOLIDWORKS.',
+                            'error');
+                        return;
+                    }
+                    if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        if (window._toast) window._toast(
+                            'Extraction failed: ' + (data.detail || res.statusText),
+                            'error');
+                        return;
+                    }
+
+                    const data = await res.json();
+                    if (data && data.success === false) {
+                        const isDeny = data.jobState === 'denied';
+                        if (window._toast) window._toast(
+                            data.message || (isDeny ? 'Extraction denied in SOLIDWORKS.' : 'Extraction did not complete.'),
+                            isDeny ? 'warning' : 'error');
+                        return;
+                    }
+
+                    // Success path: kind-aware toast + per-kind post-success hook.
+                    if (window._toast) window._toast(cfg.successToast(pn, data), 'success');
+                    await cfg.postSuccess(pn);
+                } catch (e) {
+                    if (window._toast) window._toast(
+                        'Extraction request failed: ' + (e && e.message ? e.message : String(e)),
+                        'error');
+                } finally {
+                    inFlight = false;
+                    renderButton();         // immediate sync update so the label is right
+                    pollBridgeStatus();     // also refreshes pill + activeDoc kind
+                }
+            }
+
+            btn.addEventListener('click', onReextractClick);
+
+            // Initial probe + 5-second cadence per Phase 10E spec.
+            pollBridgeStatus();
+            setInterval(pollBridgeStatus, 5000);
         })();
     </script>
 </body>

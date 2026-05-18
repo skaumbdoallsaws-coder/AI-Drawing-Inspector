@@ -317,12 +317,23 @@ class SpatialInspector:
                 data = json.load(f)
 
             has_views = (self._library / f"{orig_pn}_view_front.png").exists()
-            profiles.append({
+            entry = {
                 "part_number": data.get("part_number", orig_pn),
                 "part_name": data.get("part_name", ""),
                 "feature_count": len(data.get("features", [])),
                 "has_views": has_views,
-            })
+            }
+            # Library Intake Wizard stub-awareness (Step 1): expose `source`
+            # ONLY when the underlying file declares it. Real profiles do
+            # not have this key, so the picker payload stays byte-equivalent
+            # for the existing fleet. Stub profiles surface
+            # source == "library_intake_stub" so the picker can render an
+            # [INTAKE] badge without making a /api/profile-details call
+            # per row.
+            src = data.get("source")
+            if src:
+                entry["source"] = src
+            profiles.append(entry)
 
         profiles.sort(key=lambda p: p["part_number"])
         self._profiles_cache = profiles

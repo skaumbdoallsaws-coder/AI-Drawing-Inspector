@@ -7227,6 +7227,39 @@
         .bridge-pill-busy         { color: var(--partial); border-color: var(--partial); }
         .bridge-pill-unauthorized { color: var(--missing); border-color: var(--missing); }
         .bridge-reextract-btn     { font-size: 11px; padding: 4px 10px; }
+
+        /* Library Intake Wizard — stub-profile surface (Step 1).
+           Per docs/library-intake-wizard-plan.md §8.7: the [INTAKE]
+           badge in the picker is muted (greyish), not alarming red —
+           this is "incomplete", not "broken". The selected-part
+           banner uses the --partial token (yellow) for the left
+           accent stripe so it visually matches other "warning"
+           affordances in the app without claiming a hard error. */
+        .intake-badge {
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            margin-left: 4px;
+        }
+        .part-info-stub-banner {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-strong);
+            border-left: 3px solid var(--partial);
+            padding: 8px 10px;
+            margin: 0 0 10px 0;
+            font-size: 11px;
+            line-height: 1.4;
+            color: var(--text-primary);
+        }
+        .part-info-stub-banner strong {
+            color: var(--partial);
+        }
+        button.btn[disabled],
+        button.btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
     </style>
     <!-- Three.js for 3D Model Viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -8596,12 +8629,49 @@
         }
 
         // ---- Part Number Selection ----
+        // Library Intake Wizard \u00a78.7: any profile entry whose `source`
+        // marks it as an intake stub renders with a small text [INTAKE]
+        // badge next to the part number \u2014 muted greyish, accessible to
+        // screen readers (real DOM text, not icon-only).
+        function _isIntakeStubProfile(p) {
+            return p && p.source === 'library_intake_stub';
+        }
+        // \u00a78.7-C: disable the Inspect button when the currently-loaded
+        // part is an intake stub. Tooltip carries the same wording the
+        // backend /api/inspect 422 message uses, so the operator sees
+        // the same explanation whether the button is hovered or the
+        // backend gates a request. The disabled attribute prevents the
+        // dead-end click entirely; the backend gate at \u00a79.6 is the
+        // belt-and-suspenders fallback.
+        function _updateInspectButtonStubGate() {
+            const btn = document.getElementById('runBtn');
+            if (!btn) return;
+            if (state.profileSource === 'library_intake_stub') {
+                btn.disabled = true;
+                btn.setAttribute('aria-disabled', 'true');
+                const pn = state.partNumber || 'part';
+                btn.title = 'This part has been added to the library, but no inspection ' +
+                    'profile has been authored yet. Add a real ' + pn +
+                    '_inspection_profile.json (replacing the stub at library root) to enable inspection.';
+            } else {
+                btn.disabled = false;
+                btn.removeAttribute('aria-disabled');
+                btn.removeAttribute('title');
+            }
+        }
         function populateDropdown(profiles) {
             dropdownList.innerHTML = '';
             profiles.forEach(p => {
                 const item = document.createElement('div');
                 item.className = 'search-dropdown-item';
                 item.textContent = `${p.part_number} \u2014 ${p.part_name}`;
+                if (_isIntakeStubProfile(p)) {
+                    const badge = document.createElement('span');
+                    badge.className = 'intake-badge';
+                    badge.title = 'Profile incomplete \u2014 added via Library Intake Wizard';
+                    badge.textContent = '[INTAKE]';
+                    item.appendChild(badge);
+                }
                 item.addEventListener('click', () => {
                     selectPartNumber(p.part_number, false);
                     dropdownList.classList.remove('open');
@@ -9042,7 +9112,11 @@
                         part_number: pn,
                         part_name: details.part_name || '',
                         feature_count: Array.isArray(details.features) ? details.features.length : 0,
-                        has_views: false
+                        has_views: false,
+                        // Library Intake Wizard §8.7: propagate `source` when
+                        // the details endpoint reports a stub, so the picker
+                        // badge renders correctly after the dropdown refresh.
+                        source: details.source || undefined,
                     };
                     state.profiles.push(profile);
                     state.profiles.sort((a, b) => String(a.part_number).localeCompare(String(b.part_number)));
@@ -9072,11 +9146,27 @@
             state.drawingClassification = null;
             window._fetchDrawingClassification?.(pn);
 
+            // Library Intake Wizard \u00a78.7-B: render a "Profile incomplete"
+            // banner above the part-info rows when the selected profile is
+            // an intake stub. Plain text \u2014 the phrase "Profile incomplete"
+            // is present as DOM text so screen readers pick it up.
+            // \u00a78.7-C: also flip the Inspect button gating state.
+            const _isStub = _isIntakeStubProfile(profile);
+            state.profileSource    = profile.source || null;
+            state.inspectionReady  = !_isStub;
+            const stubBannerHtml = _isStub ? (
+                '<div class="part-info-stub-banner" role="status" aria-live="polite">' +
+                '<strong>\u26a0 Profile incomplete</strong> \u2014 this part was added via the ' +
+                'Library Intake Wizard, but no inspection profile has been authored ' +
+                'yet. Inspection will be unavailable until a profile is added.' +
+                '</div>'
+            ) : '';
+
             // Update part info display
-            partInfo.innerHTML = `
+            partInfo.innerHTML = stubBannerHtml + `
                 <div class="part-info-row">
                     <span class="part-info-label">Part #</span>
-                    <span>${pn} ${isAuto ? '<span class="auto-badge">AUTO</span>' : ''}</span>
+                    <span>${pn} ${isAuto ? '<span class="auto-badge">AUTO</span>' : ''}${_isStub ? ' <span class="intake-badge" title="Profile incomplete \u2014 added via Library Intake Wizard">[INTAKE]</span>' : ''}</span>
                 </div>
                 <div class="part-info-row">
                     <span class="part-info-label">Name</span>
@@ -9087,6 +9177,7 @@
                     <span>${profile.feature_count}</span>
                 </div>
             `;
+            _updateInspectButtonStubGate();
 
             // Update toolbar
             toolbarPartInfo.textContent = `${pn} \u2014 ${profile.part_name}`;
@@ -25382,7 +25473,13 @@
 
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({ detail: 'Inspection failed' }));
-                    throw new Error(err.detail || 'Inspection failed');
+                    // Library Intake Wizard §9.6 fail-fast: the stub gate
+                    // returns { error: "profile_incomplete", message: "...",
+                    // part_number: "..." }. Surface `message` first so the
+                    // operator sees the same wording as the §8.7 disabled-
+                    // button tooltip. Fall back to err.detail for legacy
+                    // HTTPException-shaped errors.
+                    throw new Error(err.message || err.detail || 'Inspection failed');
                 }
 
                 state.results = await res.json();
@@ -25564,6 +25661,11 @@
             partInfo.innerHTML = '';
             partSearch.value = '';
             toolbarPartInfo.textContent = '';
+            // Library Intake Wizard §8.7-C: clear stub state so the Inspect
+            // button re-enables when the user starts over.
+            state.profileSource = null;
+            state.inspectionReady = true;
+            if (typeof _updateInspectButtonStubGate === 'function') _updateInspectButtonStubGate();
             if (window._updateBreadcrumb) setTimeout(window._updateBreadcrumb, 50);
             featureTree.innerHTML = '';
             statusDot.className = 'status-dot';

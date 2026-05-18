@@ -290,6 +290,69 @@ def _resolve_part_asset(safe_pn: str, *relative_parts: str) -> Optional[Path]:
     return None
 
 
+# ── Library Intake Wizard — stub-profile awareness (Step 1) ───────────
+#
+# Per docs/library-intake-wizard-plan.md §5.7, a profile written by the
+# wizard's intake flow is marked with `source: "library_intake_stub"`.
+# Downstream consumers (get_profile_details, run_inspection, the
+# /api/profiles picker via SpatialInspector.list_profiles) must detect
+# this and gate inspection actions so the operator never sees an
+# incomplete-profile part presented as inspection-ready.
+#
+# This file owns the canonical detection rule + path-resolution helpers
+# so the gates in /api/profile-details (§9.5) and /api/inspect (§9.6)
+# stay consistent. Both gates use the same predicate so the UI and
+# backend never disagree about which parts are stubs.
+
+INTAKE_STUB_SOURCE = "library_intake_stub"
+INTAKE_STUB_INSPECT_MESSAGE = (
+    "This part has been added to the library, but no inspection profile "
+    "has been authored yet."
+)
+
+
+def _is_intake_stub_profile(profile_data: Any) -> bool:
+    """Single source of truth for the intake-stub detection rule (§5.7).
+
+    Returns True iff the parsed profile JSON has top-level
+    `source == "library_intake_stub"`. Defensive: non-dict input returns
+    False so a malformed/unreadable file does NOT silently get treated
+    as a stub.
+    """
+    return isinstance(profile_data, dict) and profile_data.get("source") == INTAKE_STUB_SOURCE
+
+
+def _resolve_profile_path(safe_pn: str) -> Optional[Path]:
+    """Resolve the root-level profile JSON path for a part. Same candidate
+    order get_profile_details uses, factored out so the run_inspection
+    fail-fast gate can do the same lookup without re-reading the file."""
+    library_dir = library_path()
+    candidates = [
+        library_dir / f"{safe_pn}_inspection_profile.json",
+        library_dir / f"{safe_pn}.json",
+        *_part_asset_candidates(safe_pn, "revA", f"{safe_pn}_inspection_profile.json"),
+        *_part_asset_candidates(safe_pn, "revA", f"{safe_pn}.json"),
+    ]
+    return next((p for p in candidates if p.exists()), None)
+
+
+def _load_profile_if_present(part_number: str) -> Optional[dict]:
+    """Read the raw profile JSON for a part, or None if missing or
+    unreadable. Used by the stub-awareness gates -- never raises
+    (callers fall through to existing handler behaviour on None)."""
+    safe_pn = re.sub(r"[^\w\-]", "", part_number or "")
+    if not safe_pn:
+        return None
+    path = _resolve_profile_path(safe_pn)
+    if path is None:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def _find_highlight_boxes_path(part_number: str, library_dir: str | Path) -> Optional[Path]:
     """Locate ``{part}_highlight_boxes.json`` in the inspection library."""
     safe_part_number = sanitize_part_number(part_number)
@@ -1954,6 +2017,34 @@ async def run_inspection(
         )
         raise HTTPException(status_code=422, detail="part_number is required and cannot be empty")
 
+    # Library Intake Wizard Step 1: stub-profile fail-fast gate (§9.6).
+    # Resolve the profile file the same way get_profile_details does and
+    # refuse the request with HTTP 422 BEFORE any file read, LLM call,
+    # or temp write. Telemetry total event still fires so the dashboard
+    # can chart these gated requests as a distinct error class.
+    _stub_check_data = _load_profile_if_present(part_number)
+    if _is_intake_stub_profile(_stub_check_data):
+        _val_ms = (_t_inspect.perf_counter() - _wf_start) * 1000.0
+        record_workflow_stage(
+            workflow="inspection", stage="validate_input",
+            latency_ms=_val_ms, status="error", errorType="profile_incomplete",
+            route="/api/inspect", partNumber=part_number,
+        )
+        record_workflow_stage(
+            workflow="inspection", stage="total",
+            latency_ms=_val_ms, status="error", errorType="profile_incomplete",
+            route="/api/inspect", partNumber=part_number,
+        )
+        logger.info("inspect.fail_fast.profile_incomplete pn=%s", part_number)
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error":       "profile_incomplete",
+                "message":     INTAKE_STUB_INSPECT_MESSAGE,
+                "part_number": part_number,
+            },
+        )
+
     try:
         drawing_bytes = await file.read()
         filename = file.filename or "unknown"
@@ -2236,14 +2327,7 @@ async def get_profile_details(part_number: str):
         raise HTTPException(status_code=400, detail="Invalid part number")
 
     # Try to find the inspection profile JSON on disk
-    library_dir = library_path()
-    profile_candidates = [
-        library_dir / f"{safe_pn}_inspection_profile.json",
-        library_dir / f"{safe_pn}.json",
-        *_part_asset_candidates(safe_pn, "revA", f"{safe_pn}_inspection_profile.json"),
-        *_part_asset_candidates(safe_pn, "revA", f"{safe_pn}.json"),
-    ]
-    profile_path = next((p for p in profile_candidates if p.exists()), None)
+    profile_path = _resolve_profile_path(safe_pn)
     if profile_path is None:
         assy_data = assembly_profiles.get(safe_pn)
         if assy_data:
@@ -2266,7 +2350,26 @@ async def get_profile_details(part_number: str):
         with open(profile_path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
 
-        # Return a curated subset focused on what the agent needs
+        # Library Intake Wizard Step 1: stub-aware response per §9.5.
+        # When the underlying file is an intake stub, expose
+        # source/status/inspectionReady/links verbatim so the frontend
+        # can gate Inspect actions. Real profiles fall through to the
+        # existing composition unchanged (backward compat — no `source`
+        # field added when not in the file, see §9.5 paragraph
+        # "Backward compat for real profiles").
+        if _is_intake_stub_profile(data):
+            return {
+                "part_number":      data.get("part_number", safe_pn),
+                "part_name":        data.get("name") or data.get("part_name", ""),
+                "part_description": data.get("description") or data.get("part_description", ""),
+                "features":         [],
+                "source":           data.get("source"),
+                "status":           data.get("status"),
+                "inspectionReady":  data.get("inspectionReady"),
+                "links":            data.get("links", {}),
+            }
+
+        # Real profile -- return a curated subset focused on what the agent needs
         features = []
         raw_features = data.get("features", [])
         if isinstance(raw_features, dict):

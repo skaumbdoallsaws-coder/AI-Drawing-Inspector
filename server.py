@@ -1984,6 +1984,677 @@ def _run_subprocess(argv: list) -> int:
     return proc.returncode
 
 
+# ── Library Intake Wizard — preview + promote (Step 2) ─────────────────
+#
+# Per docs/library-intake-wizard-plan.md §4 (user flow steps 10-11),
+# §5 (canonical storage shape), §6 (safety rules), §7 (validation),
+# §9.2 (endpoints), §9.4 (single-flight gate), and §10.7 (consumer
+# behaviour against stubs — Step 1 of this wizard already ships that
+# half).
+#
+# MVP scope: part + drawing only. Assembly intake is explicitly out
+# of scope (§3.2, §10.3) and the endpoints below only ever read/write
+# under parts/ — assembly_profiles globals are not touched.
+#
+# Data sources at promote time:
+#   - drawing map  -- library_dir / "{pn}_drawing_map.json"
+#                     (already installed by /api/request-extraction's
+#                     atomic install pattern in _drive_extraction; the
+#                     wizard treats this as the canonical post-extraction
+#                     content for the just-extracted revision)
+#   - drawing pdf  -- library_dir / "{pn}_drawing.pdf"  (optional)
+#   - part data    -- library_dir / "_bridge_imports/part/{pn}/{packageId}/part/part.json"
+#                     (sidecar from /api/request-part-extraction; the
+#                     wizard reads but never modifies _bridge_imports/
+#                     per §6.6)
+#
+# Targets:
+#   - parts/{pn}/rev{X}/{pn}_drawing_map.json            (per-rev archive)
+#   - parts/{pn}/rev{X}/{pn}.json                        (per-rev part metadata)
+#   - parts/{pn}/rev{X}/{pn}_drawing.pdf                 (per-rev, optional)
+#   - parts/{pn}/rev{X}/intake_manifest.json             (per-rev, synthesized)
+#   - parts/{pn}/rev{X}/{pn}_inspection_profile.json     (per-rev stub copy, §5.7
+#                                                         row 1+2; skipped if a
+#                                                         real profile exists at
+#                                                         root per §5.7 row 3)
+#   - library_dir / "{pn}_drawing_map.json"              (root "current pointer")
+#   - library_dir / "{pn}_drawing.pdf"                   (root, optional)
+#   - library_dir / "{pn}_inspection_profile.json"       (root stub, same skip rule)
+
+INTAKE_MANIFEST_SCHEMA_VERSION = "1.0.0"
+INTAKE_STUB_SCHEMA_VERSION     = "intake-stub-1.0.0"
+INTAKE_PROMOTED_BY_AGENT       = "library-intake-wizard@1.0.0"
+INTAKE_BRIDGE_BASELINE         = {"addinCommit": "c043fbe", "appCommit": "c2de55d"}
+INTAKE_VALID_MODES             = {"new-revision-of-existing-part", "brand-new-part"}
+INTAKE_REV_RE                  = re.compile(r"^rev[A-Za-z0-9]+$")
+
+# §9.4 single-flight gate. Separate lock from bridge so an in-flight
+# extraction does not block a preview / promote.
+_library_intake_lock = asyncio.Lock()
+
+
+def _intake_sanitize_revision(rev: str) -> str:
+    """Project convention: revA, revB, ... — `rev` prefix + alphanumeric.
+    Returns the input verbatim if it matches; empty string otherwise.
+    Empty return signals 'invalid revision' to callers (handled as a
+    400 by the endpoint).
+
+    Distinct from the pre-existing module-level `_sanitize_revision`
+    (used by /api/geometry-diff) which has different stripper-style
+    semantics. The intake wizard needs a strict validator, not a
+    stripper, because the revision name lands in filesystem paths
+    and the wizard's overwrite-confirmation contract requires exact
+    string equality."""
+    if not isinstance(rev, str):
+        return ""
+    rev = rev.strip()
+    return rev if INTAKE_REV_RE.match(rev) else ""
+
+
+def _intake_part_sidecar_partjson_path(library_dir: Path, pn: str, package_id: str) -> Path:
+    """parts/.../part/part.json INSIDE the bridge sidecar package."""
+    return library_dir / "_bridge_imports" / "part" / pn / package_id / "part" / "part.json"
+
+
+def _intake_part_sidecar_manifest_path(library_dir: Path, pn: str, package_id: str) -> Path:
+    """manifest.json at the package root inside the sidecar."""
+    return library_dir / "_bridge_imports" / "part" / pn / package_id / "manifest.json"
+
+
+def _intake_real_profile_present(library_dir: Path, pn: str) -> bool:
+    """§5.7 row 3 protection: true iff library root has a
+    {pn}_inspection_profile.json that is NOT an intake stub. When true,
+    the wizard MUST NOT write a stub at root or in the per-rev archive
+    (a real profile is authoritative; the wizard never shadows it)."""
+    p = library_dir / f"{pn}_inspection_profile.json"
+    if not p.exists():
+        return False
+    try:
+        with open(p, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except Exception:
+        # Unreadable file -- be conservative and treat as "present"
+        # so the wizard does not silently overwrite something we can't
+        # parse. Operator can repair manually.
+        return True
+    return not _is_intake_stub_profile(data)
+
+
+def _synthesize_intake_manifest(
+    *,
+    part_number: str,
+    revision: str,
+    intake_mode: str,
+    drawing_package_id: str,
+    drawing_source_doc_path: Optional[str],
+    drawing_sheet_count: Optional[int],
+    drawing_view_count: Optional[int],
+    part_package_id: str,
+    part_source_doc_path: Optional[str],
+    part_feature_count: Optional[int],
+    part_active_configuration: Optional[str],
+    files: List[Dict[str, Any]],
+    promoted_by: str,
+) -> dict:
+    """§5.4 intake_manifest.json shape. `files` is a list of
+    { "path": "<relative>", "bytes": <int> } entries for everything
+    the wizard wrote into this revision directory."""
+    return {
+        "schemaVersion":   INTAKE_MANIFEST_SCHEMA_VERSION,
+        "partNumber":      part_number,
+        "revision":        revision,
+        "promotedAtUtc":   datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z",
+        "promotedBy":      promoted_by,
+        "intakeMode":      intake_mode,
+        "sourceDrawing": {
+            "packageId":     drawing_package_id or "",
+            "sourceDocPath": drawing_source_doc_path or "",
+            "sheetCount":    drawing_sheet_count if drawing_sheet_count is not None else None,
+            "viewCount":     drawing_view_count if drawing_view_count is not None else None,
+        },
+        "sourcePart": {
+            "packageId":           part_package_id,
+            "sourceDocPath":       part_source_doc_path or "",
+            "featureCount":        part_feature_count if part_feature_count is not None else None,
+            "activeConfiguration": part_active_configuration or "",
+        },
+        "files":           files,
+        "bridgeBaseline":  dict(INTAKE_BRIDGE_BASELINE),
+    }
+
+
+def _synthesize_intake_stub(
+    *,
+    part_number: str,
+    revision: str,
+    part_name: str = "",
+    part_description: str = "",
+) -> dict:
+    """§5.7 schema for the intake stub profile JSON."""
+    return {
+        "$schemaVersion":  INTAKE_STUB_SCHEMA_VERSION,
+        "source":          INTAKE_STUB_SOURCE,
+        "status":          "incomplete",
+        "inspectionReady": False,
+        "part_number":     part_number,
+        "revision":        revision,
+        "name":            part_name or "",
+        "description":     part_description or "",
+        "createdAtUtc":    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z",
+        "createdBy":       INTAKE_PROMOTED_BY_AGENT,
+        "links": {
+            "intakeManifest": f"parts/{part_number}/{revision}/intake_manifest.json",
+            "drawingMap":     f"{part_number}_drawing_map.json",
+            "partMetadata":   f"parts/{part_number}/{revision}/{part_number}.json",
+        },
+        "notes": (
+            "Stub profile created automatically by the Library Intake Wizard. "
+            "The wizard produced the underlying drawing-map and part-metadata "
+            "files but cannot infer inspection criteria (which features matter, "
+            "which dimensions to inspect, what tolerance bands trigger findings). "
+            f"Author a real {part_number}_inspection_profile.json (or use a future "
+            "Profile Builder tool) before relying on this part's inspection workflow."
+        ),
+    }
+
+
+def _intake_relpath(library_dir: Path, path: Path) -> str:
+    """Library-relative POSIX-style path for display in the preview table."""
+    try:
+        return path.relative_to(library_dir).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
+    """Returns the §9.2 preview response shape: planValid, actions,
+    warnings, errors. Pure computation -- no file writes."""
+    library_dir = library_path()
+    errors: List[Dict[str, str]] = []
+    warnings: List[Dict[str, str]] = []
+    actions: List[Dict[str, Any]] = []
+
+    # ── Pre-flight validation (§6.5 fail-closed: any failure here
+    # blocks promotion). ──
+    safe_pn = sanitize_part_number(body.partNumber)
+    if not safe_pn:
+        errors.append({"code": "invalid_part_number", "message": "partNumber is empty or contains invalid characters."})
+    safe_rev = _intake_sanitize_revision(body.revision)
+    if not safe_rev:
+        errors.append({"code": "invalid_revision", "message": "revision must match the pattern 'rev<alnum>' (e.g. revA, revB, revC1)."})
+    if body.intakeMode not in INTAKE_VALID_MODES:
+        errors.append({"code": "invalid_intake_mode",
+                       "message": f"intakeMode must be one of {sorted(INTAKE_VALID_MODES)}."})
+    if not (body.partPackageId or "").strip():
+        errors.append({"code": "missing_part_package_id",
+                       "message": "partPackageId is required (returned by /api/request-part-extraction)."})
+
+    if errors:
+        return {"planValid": False, "partNumber": body.partNumber, "revision": body.revision,
+                "intakeMode": body.intakeMode, "targetRevisionPath": "",
+                "actions": [], "warnings": warnings, "errors": errors}
+
+    rev_dir = library_dir / "parts" / safe_pn / safe_rev
+    target_rel = _intake_relpath(library_dir, rev_dir)
+
+    # ── Source artifact checks (§7.5 / §7.3 / §7.4) ──
+    drawing_map_src = library_dir / f"{safe_pn}_drawing_map.json"
+    drawing_pdf_src = library_dir / f"{safe_pn}_drawing.pdf"
+    part_json_src   = _intake_part_sidecar_partjson_path(library_dir, safe_pn, body.partPackageId)
+
+    if not drawing_map_src.exists():
+        errors.append({
+            "code": "missing_drawing_map",
+            "message": f"Drawing map not found at {_intake_relpath(library_dir, drawing_map_src)}. "
+                       "Run drawing extraction first (Re-extract Drawing from SOLIDWORKS) so the "
+                       "root-level drawing map is in place before promoting.",
+        })
+    if not part_json_src.exists():
+        errors.append({
+            "code": "missing_part_sidecar",
+            "message": f"Part sidecar not found at {_intake_relpath(library_dir, part_json_src)}. "
+                       "Re-run part extraction; the bridge sidecar must exist before promote.",
+        })
+
+    if errors:
+        return {"planValid": False, "partNumber": safe_pn, "revision": safe_rev,
+                "intakeMode": body.intakeMode, "targetRevisionPath": target_rel,
+                "actions": [], "warnings": warnings, "errors": errors}
+
+    # ── Overwrite gate (§6.1 case 1). The user-confirmed retype string
+    # MUST equal the revision name exactly. ──
+    rev_dir_exists = rev_dir.exists()
+    overwrite_confirmed = (body.overwriteConfirmed or "").strip() == safe_rev
+    if rev_dir_exists and not overwrite_confirmed:
+        errors.append({
+            "code": "revision_exists",
+            "message": (
+                f"{target_rel} already exists. Re-post with "
+                f'overwriteConfirmed: "{safe_rev}" to overwrite, or pick a new revision name.'
+            ),
+        })
+        return {"planValid": False, "partNumber": safe_pn, "revision": safe_rev,
+                "intakeMode": body.intakeMode, "targetRevisionPath": target_rel,
+                "actions": [], "warnings": warnings, "errors": errors}
+
+    # ── Real-profile-at-root protection (§5.7 row 3). When a real
+    # profile exists at root, the wizard does NOT write a stub anywhere
+    # (root or per-rev archive). ──
+    skip_stub = _intake_real_profile_present(library_dir, safe_pn)
+    if skip_stub:
+        warnings.append({
+            "code": "real_profile_protected",
+            "message": (
+                f"A real (non-stub) inspection profile exists at "
+                f"{safe_pn}_inspection_profile.json. The wizard will NOT write "
+                "a stub profile anywhere (root or per-revision archive)."
+            ),
+        })
+
+    # ── Build the action list. Order matters only for human readability
+    # in the preview table; promote executes them in the order most
+    # likely to leave a consistent intermediate state on a failure. ──
+    overwrite_kind = "OVERWRITE" if rev_dir_exists else "CREATE"
+
+    drawing_map_bytes = drawing_map_src.stat().st_size
+    part_json_bytes   = part_json_src.stat().st_size
+
+    actions.append({
+        "kind":   overwrite_kind,
+        "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}_drawing_map.json"),
+        "bytes":  drawing_map_bytes,
+        "source": _intake_relpath(library_dir, drawing_map_src),
+    })
+    actions.append({
+        "kind":   overwrite_kind,
+        "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}.json"),
+        "bytes":  part_json_bytes,
+        "source": _intake_relpath(library_dir, part_json_src),
+    })
+    pdf_will_copy = drawing_pdf_src.exists()
+    if pdf_will_copy:
+        actions.append({
+            "kind":   overwrite_kind,
+            "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}_drawing.pdf"),
+            "bytes":  drawing_pdf_src.stat().st_size,
+            "source": _intake_relpath(library_dir, drawing_pdf_src),
+        })
+
+    # Synthesized files. Generate the content now so we can report exact
+    # bytes (the preview's contract: "exact files that would be written").
+    # The promote step regenerates these with fresh timestamps; the byte
+    # count in preview will differ by <50 bytes from final and that's
+    # acceptable for a UI preview.
+    manifest_preview = _synthesize_intake_manifest(
+        part_number=safe_pn, revision=safe_rev, intake_mode=body.intakeMode,
+        drawing_package_id=body.drawingPackageId or "",
+        drawing_source_doc_path=body.drawingSourceDocPath,
+        drawing_sheet_count=body.drawingSheetCount,
+        drawing_view_count=body.drawingViewCount,
+        part_package_id=body.partPackageId,
+        part_source_doc_path=body.partSourceDocPath,
+        part_feature_count=body.partFeatureCount,
+        part_active_configuration=body.partActiveConfiguration,
+        files=[
+            {"path": f"{safe_pn}_drawing_map.json", "bytes": drawing_map_bytes},
+            {"path": f"{safe_pn}.json",             "bytes": part_json_bytes},
+        ] + ([{"path": f"{safe_pn}_drawing.pdf", "bytes": drawing_pdf_src.stat().st_size}] if pdf_will_copy else []),
+        promoted_by=INTAKE_PROMOTED_BY_AGENT,
+    )
+    actions.append({
+        "kind":   overwrite_kind,
+        "path":   _intake_relpath(library_dir, rev_dir / "intake_manifest.json"),
+        "bytes":  len(json.dumps(manifest_preview, indent=2).encode("utf-8")),
+        "source": "synthesized by wizard",
+    })
+
+    if not skip_stub:
+        stub_preview = _synthesize_intake_stub(part_number=safe_pn, revision=safe_rev)
+        stub_bytes   = len(json.dumps(stub_preview, indent=2).encode("utf-8"))
+        actions.append({
+            "kind":   overwrite_kind,
+            "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}_inspection_profile.json"),
+            "bytes":  stub_bytes,
+            "source": "synthesized stub (§5.7)",
+        })
+        root_stub_path = library_dir / f"{safe_pn}_inspection_profile.json"
+        actions.append({
+            "kind":   "UPDATE" if root_stub_path.exists() else "CREATE",
+            "path":   _intake_relpath(library_dir, root_stub_path),
+            "bytes":  stub_bytes,
+            "source": "synthesized stub (§5.7)",
+        })
+    else:
+        actions.append({
+            "kind":   "SKIP",
+            "path":   _intake_relpath(library_dir, library_dir / f"{safe_pn}_inspection_profile.json"),
+            "bytes":  0,
+            "source": "real profile protected (§5.7 row 3)",
+        })
+
+    # Root drawing map (and pdf). Always UPDATE on subsequent runs; the
+    # .bak rollback mirrors the existing drawing-extraction install
+    # pattern (§10.1).
+    root_map_path = library_dir / f"{safe_pn}_drawing_map.json"
+    actions.append({
+        "kind":   "UPDATE" if root_map_path.exists() else "CREATE",
+        "path":   _intake_relpath(library_dir, root_map_path),
+        "bytes":  drawing_map_bytes,
+        "source": _intake_relpath(library_dir, drawing_map_src),
+        "backup": _intake_relpath(library_dir, root_map_path.with_suffix(root_map_path.suffix + ".bak")),
+    })
+    if pdf_will_copy:
+        root_pdf_path = library_dir / f"{safe_pn}_drawing.pdf"
+        actions.append({
+            "kind":   "UPDATE" if root_pdf_path.exists() else "CREATE",
+            "path":   _intake_relpath(library_dir, root_pdf_path),
+            "bytes":  drawing_pdf_src.stat().st_size,
+            "source": _intake_relpath(library_dir, drawing_pdf_src),
+            "backup": _intake_relpath(library_dir, root_pdf_path.with_suffix(root_pdf_path.suffix + ".bak")),
+        })
+
+    return {
+        "planValid":          True,
+        "partNumber":         safe_pn,
+        "revision":           safe_rev,
+        "intakeMode":         body.intakeMode,
+        "targetRevisionPath": target_rel,
+        "actions":            actions,
+        "warnings":           warnings,
+        "errors":             [],
+    }
+
+
+def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
+    """Performs the §5 install. Mirrors the partial-then-rename safety
+    design from §6.2 for NEW targets; per-file tmp+replace for confirmed
+    OVERWRITE targets so curated files (.STL, .glb, view PNGs) survive
+    per §6.4.
+
+    Returns a dict matching the preview response shape with each action
+    additively annotated `committed: true|false` and a final
+    `success: true` flag at the top level.
+
+    On any failure: NEW target -> the .partial dir is rmtree'd, no
+    library state changes. OVERWRITE target -> any per-file write that
+    succeeded before the failure has already replaced its previous
+    content; the response reports which actions committed. Root file
+    updates use the .bak rollback pattern (mirrors server.py drawing-
+    extraction install)."""
+    library_dir = library_path()
+    plan = _compute_intake_plan(body)
+    if not plan["planValid"]:
+        return {**plan, "success": False, "executed": []}
+
+    safe_pn  = plan["partNumber"]
+    safe_rev = plan["revision"]
+    rev_dir  = library_dir / "parts" / safe_pn / safe_rev
+    rev_dir_exists = rev_dir.exists()
+    skip_stub = _intake_real_profile_present(library_dir, safe_pn)
+
+    drawing_map_src = library_dir / f"{safe_pn}_drawing_map.json"
+    drawing_pdf_src = library_dir / f"{safe_pn}_drawing.pdf"
+    part_json_src   = _intake_part_sidecar_partjson_path(library_dir, safe_pn, body.partPackageId)
+
+    # Pre-read sources INTO MEMORY before any write -- §6.5 fail-closed.
+    # If any source is unreadable, we abort before touching disk.
+    try:
+        drawing_map_bytes = drawing_map_src.read_bytes()
+        part_json_bytes   = part_json_src.read_bytes()
+        drawing_pdf_bytes = drawing_pdf_src.read_bytes() if drawing_pdf_src.exists() else None
+        # Validate that the sources are at least parseable JSON (§7.3, §7.4)
+        json.loads(drawing_map_bytes.decode("utf-8-sig"))
+        json.loads(part_json_bytes.decode("utf-8-sig"))
+    except Exception as ex:
+        return {**plan, "success": False, "executed": [],
+                "errors": [{"code": "source_read_failed", "message": f"failed to read source files: {ex}"}]}
+
+    # Read optional package manifest for richer intake_manifest fields.
+    sidecar_manifest_path = _intake_part_sidecar_manifest_path(library_dir, safe_pn, body.partPackageId)
+    sidecar_manifest = None
+    if sidecar_manifest_path.exists():
+        try:
+            sidecar_manifest = json.loads(sidecar_manifest_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            sidecar_manifest = None
+
+    # Try to enrich feature count / config from the sidecar if the wizard
+    # did not pass them in the request body.
+    part_feature_count = body.partFeatureCount
+    part_active_cfg    = body.partActiveConfiguration
+    if (part_feature_count is None or not part_active_cfg) and isinstance(sidecar_manifest, dict):
+        if part_feature_count is None and isinstance(sidecar_manifest.get("featureCount"), int):
+            part_feature_count = sidecar_manifest.get("featureCount")
+        if not part_active_cfg and isinstance(sidecar_manifest.get("activeConfiguration"), str):
+            part_active_cfg = sidecar_manifest.get("activeConfiguration")
+    # Same enrichment for source doc paths
+    part_src_doc_path = body.partSourceDocPath
+    if not part_src_doc_path and isinstance(sidecar_manifest, dict):
+        sdp = sidecar_manifest.get("sourceDocPath")
+        if isinstance(sdp, str):
+            part_src_doc_path = sdp
+
+    # Build the manifest content using the same files list the plan
+    # reported. Doing this AFTER we know the source bytes are real.
+    manifest_files: List[Dict[str, Any]] = [
+        {"path": f"{safe_pn}_drawing_map.json", "bytes": len(drawing_map_bytes)},
+        {"path": f"{safe_pn}.json",             "bytes": len(part_json_bytes)},
+    ]
+    if drawing_pdf_bytes is not None:
+        manifest_files.append({"path": f"{safe_pn}_drawing.pdf", "bytes": len(drawing_pdf_bytes)})
+
+    try:
+        import getpass
+        promoted_by = f"{getpass.getuser()}@{os.environ.get('COMPUTERNAME', 'unknown')}"
+    except Exception:
+        promoted_by = INTAKE_PROMOTED_BY_AGENT
+
+    manifest = _synthesize_intake_manifest(
+        part_number=safe_pn, revision=safe_rev, intake_mode=body.intakeMode,
+        drawing_package_id=body.drawingPackageId or "",
+        drawing_source_doc_path=body.drawingSourceDocPath,
+        drawing_sheet_count=body.drawingSheetCount,
+        drawing_view_count=body.drawingViewCount,
+        part_package_id=body.partPackageId,
+        part_source_doc_path=part_src_doc_path,
+        part_feature_count=part_feature_count,
+        part_active_configuration=part_active_cfg,
+        files=manifest_files,
+        promoted_by=promoted_by,
+    )
+    manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+
+    # Read part name + description from the part.json so the stub picker
+    # shows something more useful than the bare number.
+    try:
+        part_doc = json.loads(part_json_bytes.decode("utf-8-sig"))
+        stub_name = (part_doc.get("name") or part_doc.get("title") or "") if isinstance(part_doc, dict) else ""
+        stub_desc = (part_doc.get("description") or "") if isinstance(part_doc, dict) else ""
+    except Exception:
+        stub_name = ""
+        stub_desc = ""
+
+    stub = _synthesize_intake_stub(
+        part_number=safe_pn, revision=safe_rev,
+        part_name=stub_name, part_description=stub_desc,
+    )
+    stub_bytes = json.dumps(stub, indent=2).encode("utf-8")
+
+    executed: List[Dict[str, Any]] = []
+    rollback_paths: List[Path] = []  # for NEW path -- track .partial to rmtree on failure
+
+    def _record(kind: str, path: Path, ok: bool, detail: str = ""):
+        executed.append({
+            "kind":      kind,
+            "path":      _intake_relpath(library_dir, path),
+            "committed": ok,
+            "detail":    detail,
+        })
+
+    # ── Per-revision directory writes. ──
+    # NEW path: build under .partial then atomic rename. Mirrors §6.2.
+    # OVERWRITE path: write each file via tmp+replace into existing dir,
+    # leaves untouched files (.STL, .glb, etc.) alone per §6.4.
+    parts_root = library_dir / "parts" / safe_pn
+    parts_root.mkdir(parents=True, exist_ok=True)
+
+    if not rev_dir_exists:
+        partial = library_dir / "parts" / safe_pn / f"{safe_rev}.partial"
+        if partial.exists():
+            shutil.rmtree(partial, ignore_errors=True)
+        rollback_paths.append(partial)
+        try:
+            partial.mkdir(parents=True, exist_ok=False)
+            (partial / f"{safe_pn}_drawing_map.json").write_bytes(drawing_map_bytes)
+            (partial / f"{safe_pn}.json").write_bytes(part_json_bytes)
+            if drawing_pdf_bytes is not None:
+                (partial / f"{safe_pn}_drawing.pdf").write_bytes(drawing_pdf_bytes)
+            (partial / "intake_manifest.json").write_bytes(manifest_bytes)
+            if not skip_stub:
+                (partial / f"{safe_pn}_inspection_profile.json").write_bytes(stub_bytes)
+            # Atomic flip (§6.2 step 4)
+            os.rename(partial, rev_dir)
+        except Exception as ex:
+            for rp in rollback_paths:
+                shutil.rmtree(rp, ignore_errors=True)
+            return {**plan, "success": False, "executed": executed,
+                    "errors": [{"code": "per_rev_write_failed", "message": str(ex)}]}
+        rollback_paths.clear()  # rename succeeded -- nothing to clean
+        _record("CREATE", rev_dir / f"{safe_pn}_drawing_map.json", True)
+        _record("CREATE", rev_dir / f"{safe_pn}.json", True)
+        if drawing_pdf_bytes is not None:
+            _record("CREATE", rev_dir / f"{safe_pn}_drawing.pdf", True)
+        _record("CREATE", rev_dir / "intake_manifest.json", True)
+        if not skip_stub:
+            _record("CREATE", rev_dir / f"{safe_pn}_inspection_profile.json", True)
+    else:
+        # Confirmed OVERWRITE -- per-file tmp + os.replace. Preserves
+        # any curated files in the same dir per §6.4.
+        for fname, payload in [
+            (f"{safe_pn}_drawing_map.json",          drawing_map_bytes),
+            (f"{safe_pn}.json",                      part_json_bytes),
+            *( [(f"{safe_pn}_drawing.pdf", drawing_pdf_bytes)] if drawing_pdf_bytes is not None else [] ),
+            ("intake_manifest.json",                 manifest_bytes),
+            *( [(f"{safe_pn}_inspection_profile.json", stub_bytes)] if not skip_stub else [] ),
+        ]:
+            tgt = rev_dir / fname
+            tmp = tgt.with_suffix(tgt.suffix + ".tmp")
+            try:
+                tmp.write_bytes(payload)
+                os.replace(tmp, tgt)
+                _record("OVERWRITE", tgt, True)
+            except Exception as ex:
+                try: tmp.unlink(missing_ok=True)
+                except Exception: pass
+                _record("OVERWRITE", tgt, False, detail=str(ex))
+                return {**plan, "success": False, "executed": executed,
+                        "errors": [{"code": "per_rev_overwrite_failed", "message": str(ex)}]}
+
+    # ── Root file updates (.bak rollback per §10.1 / mirror of
+    # _drive_extraction's pattern). The per-rev archive is already
+    # committed at this point; root failure is reported as partial
+    # success (the canonical archive is intact). ──
+    root_failures: List[str] = []
+
+    def _install_root_file(src_bytes: bytes, dest: Path) -> bool:
+        bak = dest.with_suffix(dest.suffix + ".bak")
+        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        try:
+            tmp.write_bytes(src_bytes)
+            if dest.exists():
+                if bak.exists():
+                    bak.unlink()
+                os.replace(dest, bak)
+            os.replace(tmp, dest)
+            return True
+        except Exception as ex:
+            try: tmp.unlink(missing_ok=True)
+            except Exception: pass
+            root_failures.append(f"{_intake_relpath(library_dir, dest)}: {ex}")
+            return False
+
+    root_map = library_dir / f"{safe_pn}_drawing_map.json"
+    ok = _install_root_file(drawing_map_bytes, root_map)
+    _record("UPDATE" if ok else "FAILED", root_map, ok)
+
+    if drawing_pdf_bytes is not None:
+        root_pdf = library_dir / f"{safe_pn}_drawing.pdf"
+        ok = _install_root_file(drawing_pdf_bytes, root_pdf)
+        _record("UPDATE" if ok else "FAILED", root_pdf, ok)
+
+    if not skip_stub:
+        root_stub = library_dir / f"{safe_pn}_inspection_profile.json"
+        ok = _install_root_file(stub_bytes, root_stub)
+        _record("UPDATE" if ok else "FAILED", root_stub, ok)
+    else:
+        _record("SKIP", library_dir / f"{safe_pn}_inspection_profile.json",
+                True, detail="real profile protected (§5.7 row 3)")
+
+    # ── Refresh inspector profile-index so the new stub appears in
+    # /api/profiles within the same session (§9.2 internal step). ──
+    if inspector is not None and hasattr(inspector, "refresh_profile_index"):
+        try:
+            inspector.refresh_profile_index()
+        except Exception as ex:
+            logger.warning("intake.refresh_profile_index failed pn=%s: %s", safe_pn, ex)
+
+    success = len(root_failures) == 0
+    out = {**plan, "success": success, "executed": executed}
+    if root_failures:
+        out["errors"] = [{"code": "root_install_failed", "message": f}
+                         for f in root_failures]
+    return out
+
+
+class IntakeRequestBody(BaseModel):
+    """POST body for /api/library/intake/preview and /promote (§9.2)."""
+    partNumber:                str
+    revision:                  str
+    intakeMode:                str = "new-revision-of-existing-part"
+    drawingPackageId:          str = ""                       # from /api/request-extraction response
+    partPackageId:             str                            # from /api/request-part-extraction response
+    drawingSourceDocPath:      Optional[str] = None
+    partSourceDocPath:         Optional[str] = None
+    drawingSheetCount:         Optional[int] = None
+    drawingViewCount:          Optional[int] = None
+    partFeatureCount:          Optional[int] = None
+    partActiveConfiguration:   Optional[str] = None
+    overwriteConfirmed:        Optional[str] = None           # must equal revision to allow overwrite
+
+
+@app.post("/api/library/intake/preview")
+async def library_intake_preview(body: IntakeRequestBody):
+    """Dry-run: compute the §9.2 preview plan without writing anything.
+
+    Returns 200 with planValid=true + actions list when the plan is
+    acceptable, or planValid=false + errors when validation fails or
+    the per-rev directory already exists without an overwriteConfirmed
+    match. Either way the response shape is the same so the wizard UI
+    has a single code path."""
+    return _compute_intake_plan(body)
+
+
+@app.post("/api/library/intake/promote")
+async def library_intake_promote(body: IntakeRequestBody):
+    """The commit. Same body shape as preview plus overwriteConfirmed
+    when overwriting. Single-flight via _library_intake_lock so two
+    concurrent promotes cannot race the same revision target."""
+    if _library_intake_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="Another library intake promote is in progress; one at a time.",
+        )
+    async with _library_intake_lock:
+        result = _execute_intake_plan(body)
+    # Map planValid=false / success=false to a non-200 so the wizard's
+    # error path fires; success cases stay 200.
+    if not result.get("planValid", False):
+        return JSONResponse(status_code=409, content=result)
+    if not result.get("success", False):
+        return JSONResponse(status_code=500, content=result)
+    return result
+
+
 @app.post("/api/inspect")
 async def run_inspection(
     file: UploadFile = File(...),

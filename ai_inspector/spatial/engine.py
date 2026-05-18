@@ -301,6 +301,17 @@ class SpatialInspector:
     # Public API
     # ------------------------------------------------------------------
 
+    def refresh_profile_index(self) -> None:
+        """Drop the in-memory profile index + list cache and rebuild from
+        disk. Used by the Library Intake Wizard's promote step so a
+        newly-written intake stub (§5.7 of the wizard plan) appears in
+        /api/profiles within the same session, without requiring a
+        process restart. Safe to call repeatedly; rebuild walks the
+        library exactly once."""
+        self._profile_index.clear()
+        self._profiles_cache = None
+        self._build_profile_index()
+
     def list_profiles(self) -> list[dict]:
         """Return all available inspection profiles."""
         if self._profiles_cache is not None:

@@ -50,6 +50,7 @@ from ai_inspector.bridge import (
     BridgeUnauthorizedError,
     BridgeJobConflictError,
     BridgeBadResponseError,
+    JOB_STATE_AWAITING_APPROVAL,
     JOB_STATE_DONE,
     JOB_STATE_DENIED,
     JOB_STATE_FAILED,
@@ -57,6 +58,12 @@ from ai_inspector.bridge import (
     KIND_DRAWING,
     KIND_PART,
     KIND_ASSEMBLY,
+)
+# Phase 3 telemetry: endpoint timing middleware + workflow stage events.
+# All helpers are soft-fail (telemetry exceptions never affect responses).
+from ai_inspector.telemetry import (
+    record_endpoint_event,
+    record_workflow_stage,
 )
 
 # Configure logging
@@ -515,6 +522,50 @@ app.add_middleware(
 )
 
 
+# Phase 3 telemetry: endpoint timing middleware. Records one telemetry
+# event per /api/* request (route, method, http status, latency). Skips
+# static assets and the root index so we don't bury the dashboard in
+# noise. The helper is soft-fail; an exception inside it never affects
+# the response — that contract is enforced inside record_endpoint_event.
+@app.middleware("http")
+async def _telemetry_endpoint_timing(request, call_next):
+    path = request.url.path
+    if not path.startswith("/api/"):
+        # Skip /, /static/*, /favicon.ico, etc.
+        return await call_next(request)
+    import time as _time
+    _start = _time.perf_counter()
+    response = None
+    raised: Optional[BaseException] = None
+    try:
+        response = await call_next(request)
+        return response
+    except BaseException as ex:
+        raised = ex
+        raise
+    finally:
+        try:
+            elapsed_ms = (_time.perf_counter() - _start) * 1000.0
+            if response is not None:
+                http_status = int(response.status_code)
+            elif isinstance(raised, HTTPException):
+                http_status = int(getattr(raised, "status_code", 500))
+            else:
+                http_status = 500
+            record_endpoint_event(
+                route=path,
+                method=request.method,
+                httpStatus=http_status,
+                latency_ms=elapsed_ms,
+                errorType=(type(raised).__name__ if raised is not None and not isinstance(raised, HTTPException) else None),
+            )
+        except Exception:  # noqa: BLE001 — last-ditch belt-and-suspenders
+            # record_endpoint_event itself is soft-fail; this outer
+            # except is the FastAPI-middleware contract — we MUST NOT
+            # raise out of the finally clause.
+            pass
+
+
 # ---------- API Endpoints ----------
 
 
@@ -911,6 +962,23 @@ async def _bridge_extract_and_unpack(
     log.info("%s.start pn=%s expectedDocPath=%s", log_prefix, part_number, expected_doc_path)
     client = BridgeClient()
 
+    # Phase 3 telemetry: workflow="bridge_extract" stage timers. The
+    # approval_wait vs extract_wait split is the most-important piece —
+    # waiting for the user to click Approve in SOLIDWORKS should never
+    # be blamed on software latency.
+    import time as _t_bridge
+    _wf_route = f"/api/request-{kind}-extraction" if kind != KIND_DRAWING else "/api/request-extraction"
+    _stage_start = _t_bridge.perf_counter()
+
+    def _emit_stage(stage_name, *, status="success", errorType=None, latency_ms=None):
+        if latency_ms is None:
+            latency_ms = (_t_bridge.perf_counter() - _stage_start) * 1000.0
+        record_workflow_stage(
+            workflow="bridge_extract", stage=stage_name,
+            latency_ms=latency_ms, status=status, errorType=errorType,
+            route=_wf_route, partNumber=part_number, documentKind=kind,
+        )
+
     # ── Precheck: bridge available + authenticated + active doc matches kind ──
     status = await client.status()
     if status is None:
@@ -951,8 +1019,11 @@ async def _bridge_extract_and_unpack(
         )
     log.info("%s.precheck pn=%s active_doc_path=%s",
              log_prefix, part_number, status.active_doc.path)
+    _precheck_done = _t_bridge.perf_counter()
+    _emit_stage("precheck", latency_ms=(_precheck_done - _stage_start) * 1000.0)
 
     # ── Create job (triggers SW approval window) ───────────────────
+    _create_start = _t_bridge.perf_counter()
     try:
         # Drawing flow stays byte-equivalent on the wire: omit `kind`
         # entirely. Bridge defaults missing kind to "drawing" via
@@ -988,10 +1059,27 @@ async def _bridge_extract_and_unpack(
     job_id = create.job_id
     log.info("%s.job.created pn=%s jobId=%s state=%s",
              log_prefix, part_number, job_id, create.state)
+    _create_done = _t_bridge.perf_counter()
+    _emit_stage("job_create", latency_ms=(_create_done - _create_start) * 1000.0)
 
     # ── Poll until terminal (10-min hard cap) ──────────────────────
+    # Track approval-wait split: the moment the bridge job leaves the
+    # "awaiting-approval" state is when the SOLIDWORKS user clicked
+    # Approve (or Deny). Everything before that is operator wait time;
+    # everything after is bridge extraction work. The on_state_change
+    # callback fires once per state transition during polling.
+    _poll_start = _t_bridge.perf_counter()
+    _approval_done_marker = [None]  # mutable holder so the nested cb can write
+
+    def _on_state(old_state, new_state):
+        if _approval_done_marker[0] is None and new_state != JOB_STATE_AWAITING_APPROVAL:
+            _approval_done_marker[0] = _t_bridge.perf_counter()
+
     try:
-        snap = await client.wait_for_terminal(job_id, poll_interval_s=1.0, timeout_s=600.0)
+        snap = await client.wait_for_terminal(
+            job_id, poll_interval_s=1.0, timeout_s=600.0,
+            on_state_change=_on_state,
+        )
     except asyncio.TimeoutError:
         log.error("%s.failed.job_timeout pn=%s jobId=%s", log_prefix, part_number, job_id)
         raise HTTPException(
@@ -1026,6 +1114,16 @@ async def _bridge_extract_and_unpack(
                   log_prefix, part_number, job_id, snap.state)
         raise HTTPException(status_code=500, detail=f"unexpected terminal state {snap.state!r}")
 
+    # Emit approval_wait + extract_wait stage events. If the user denied
+    # immediately, _approval_done_marker may still be None — treat the
+    # whole polling duration as approval_wait and extract_wait as 0.
+    _poll_end = _t_bridge.perf_counter()
+    _approval_done = _approval_done_marker[0] if _approval_done_marker[0] is not None else _poll_end
+    _emit_stage("approval_wait",
+                latency_ms=(_approval_done - _poll_start) * 1000.0)
+    _emit_stage("extract_wait",
+                latency_ms=(_poll_end - _approval_done) * 1000.0)
+
     # bridge.done log line — drawing keeps the original sheets/views
     # tail for byte-equivalent grep recipes; part/assembly use a
     # kind-aware line that reports the relevant counts.
@@ -1050,6 +1148,7 @@ async def _bridge_extract_and_unpack(
         raise HTTPException(status_code=500, detail="bridge returned no packageId on done")
     zip_path = staging_dir / f"{snap.package_id}.inspectorpkg.zip"
 
+    _download_start = _t_bridge.perf_counter()
     try:
         bytes_written = await client.download_package(job_id, zip_path)
     except BridgeUnauthorizedError as ex:
@@ -1073,8 +1172,11 @@ async def _bridge_extract_and_unpack(
         raise HTTPException(status_code=503, detail=f"package download failed: {ex}")
     log.info("%s.package.downloaded pn=%s jobId=%s bytes=%d path=%s",
              log_prefix, part_number, job_id, bytes_written, zip_path)
+    _download_done = _t_bridge.perf_counter()
+    _emit_stage("download", latency_ms=(_download_done - _download_start) * 1000.0)
 
     # ── Validate via inspectorpkg CLI ──────────────────────────────
+    _validate_start = _t_bridge.perf_counter()
     cli = _inspectorpkg_cli_path()
     if cli is None:
         log.error("%s.failed.cli_missing INSPECTORPKG_CLI=%s default=%s",
@@ -1098,6 +1200,8 @@ async def _bridge_extract_and_unpack(
             except Exception: pass
             raise HTTPException(status_code=500, detail=f"validate-package failed (rc={rc})")
         log.info("%s.package.validated pn=%s", log_prefix, part_number)
+        _emit_stage("validate",
+                    latency_ms=(_t_bridge.perf_counter() - _validate_start) * 1000.0)
     except FileNotFoundError as ex:
         log.error("%s.failed.cli_run pn=%s msg=%s", log_prefix, part_number, ex)
         try: zip_path.unlink(missing_ok=True)
@@ -1107,6 +1211,7 @@ async def _bridge_extract_and_unpack(
     # ── Unzip into staging ─────────────────────────────────────────
     # Zip's top-level entry is the {packageId}.inspectorpkg folder.
     import zipfile
+    _unzip_start = _t_bridge.perf_counter()
     pkg_folder = staging_dir / f"{snap.package_id}.inspectorpkg"
     if pkg_folder.exists():
         shutil.rmtree(pkg_folder, ignore_errors=True)
@@ -1124,6 +1229,9 @@ async def _bridge_extract_and_unpack(
         try: zip_path.unlink(missing_ok=True)
         except Exception: pass
         raise HTTPException(status_code=500, detail="zip did not contain expected package folder")
+
+    _emit_stage("unzip",
+                latency_ms=(_t_bridge.perf_counter() - _unzip_start) * 1000.0)
 
     return _BridgeFetchOk(
         snap=snap,
@@ -1235,6 +1343,47 @@ def _denial_response(kind: str, snap: JobSnapshot, *, include_kind_field: bool) 
     return body
 
 
+def _bridge_workflow_total_timer(*, kind: str, route: str):
+    """Decorator that emits a workflow="bridge_extract" stage="total"
+    event in finally for each per-kind bridge orchestrator. Captures
+    latency for success, denial, and error paths uniformly without
+    requiring the wrapped function body to be re-indented.
+    """
+    def deco(fn):
+        async def wrapper(part_number, expected_doc_path):
+            import time as _t
+            _start = _t.perf_counter()
+            _status = "success"
+            _err: Optional[str] = None
+            try:
+                result = await fn(part_number, expected_doc_path)
+                # _BridgeNotDone is converted to a dict response inside
+                # the orchestrator — detect denial via the response shape
+                # so the total event labels it accurately.
+                if isinstance(result, dict) and result.get("success") is False:
+                    js = result.get("jobState")
+                    _status = "denied" if js == JOB_STATE_DENIED else "error"
+                return result
+            except HTTPException as ex:
+                _status = "error"
+                _err = f"HTTP_{int(getattr(ex, 'status_code', 500))}"
+                raise
+            except Exception as ex:  # noqa: BLE001
+                _status = "error"
+                _err = type(ex).__name__
+                raise
+            finally:
+                record_workflow_stage(
+                    workflow="bridge_extract", stage="total",
+                    latency_ms=(_t.perf_counter() - _start) * 1000.0,
+                    status=_status, errorType=_err,
+                    route=route, partNumber=part_number, documentKind=kind,
+                )
+        return wrapper
+    return deco
+
+
+@_bridge_workflow_total_timer(kind=KIND_DRAWING, route="/api/request-extraction")
 async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
     """Drawing-specific orchestrator (Phase B refactor).
 
@@ -1255,6 +1404,11 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
         )
     except _BridgeNotDone as nd:
         return _denial_response(KIND_DRAWING, nd.snap, include_kind_field=False)
+
+    # Phase 3: import stage timer (compat-export + atomic-replace +
+    # load_drawing_map verify + cleanup). Emitted just before the return.
+    import time as _t_de_import
+    _de_import_start = _t_de_import.perf_counter()
 
     snap          = ok.snap
     pkg_folder    = ok.pkg_folder
@@ -1384,6 +1538,12 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
     log.info("request_extraction.imported pn=%s packageId=%s map=%s pdf=%s",
              part_number, snap.package_id, dest_map, dest_pdf if dest_pdf.exists() else "(none)")
 
+    record_workflow_stage(
+        workflow="bridge_extract", stage="import",
+        latency_ms=(_t_de_import.perf_counter() - _de_import_start) * 1000.0,
+        route="/api/request-extraction", partNumber=part_number, documentKind=KIND_DRAWING,
+    )
+
     return {
         "success": True,
         "packageId": snap.package_id,
@@ -1394,6 +1554,7 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
     }
 
 
+@_bridge_workflow_total_timer(kind=KIND_PART, route="/api/request-part-extraction")
 async def _drive_part_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
     """Part-specific orchestrator. After the shared pipeline produces
     an unzipped pkg_folder, install it as a sidecar and return the
@@ -1415,6 +1576,9 @@ async def _drive_part_extraction(part_number: str, expected_doc_path: Optional[s
     except _BridgeNotDone as nd:
         return _denial_response(KIND_PART, nd.snap, include_kind_field=True)
 
+    import time as _t_dp_import
+    _dp_import_start = _t_dp_import.perf_counter()
+
     snap = ok.snap
     target, latest = _install_sidecar(
         kind=KIND_PART,
@@ -1435,6 +1599,12 @@ async def _drive_part_extraction(part_number: str, expected_doc_path: Optional[s
     log.info("request_part_extraction.imported pn=%s packageId=%s target=%s",
              part_number, snap.package_id, target)
 
+    record_workflow_stage(
+        workflow="bridge_extract", stage="import",
+        latency_ms=(_t_dp_import.perf_counter() - _dp_import_start) * 1000.0,
+        route="/api/request-part-extraction", partNumber=part_number, documentKind=KIND_PART,
+    )
+
     return {
         "success":             True,
         "kind":                KIND_PART,
@@ -1446,6 +1616,7 @@ async def _drive_part_extraction(part_number: str, expected_doc_path: Optional[s
     }
 
 
+@_bridge_workflow_total_timer(kind=KIND_ASSEMBLY, route="/api/request-assembly-extraction")
 async def _drive_assembly_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
     """Assembly-specific orchestrator. Mirrors _drive_part_extraction
     with assembly-specific response fields (componentCount, mateCount,
@@ -1460,6 +1631,9 @@ async def _drive_assembly_extraction(part_number: str, expected_doc_path: Option
         )
     except _BridgeNotDone as nd:
         return _denial_response(KIND_ASSEMBLY, nd.snap, include_kind_field=True)
+
+    import time as _t_da_import
+    _da_import_start = _t_da_import.perf_counter()
 
     snap = ok.snap
     target, latest = _install_sidecar(
@@ -1479,6 +1653,12 @@ async def _drive_assembly_extraction(part_number: str, expected_doc_path: Option
 
     log.info("request_assembly_extraction.imported pn=%s packageId=%s target=%s",
              part_number, snap.package_id, target)
+
+    record_workflow_stage(
+        workflow="bridge_extract", stage="import",
+        latency_ms=(_t_da_import.perf_counter() - _da_import_start) * 1000.0,
+        route="/api/request-assembly-extraction", partNumber=part_number, documentKind=KIND_ASSEMBLY,
+    )
 
     return {
         "success":             True,
@@ -1514,8 +1694,29 @@ async def run_inspection(
     drawing_map_revision: Optional[str] = Form(None),
 ):
     """Run a full inspection on an uploaded drawing."""
+    # Phase 3 telemetry: workflow="inspection" with per-stage events.
+    # The four stages mirror the spec at usage-cost-dashboard-plan.md
+    # plus a "total" event emitted in finally so latency is always
+    # recorded — even on HTTP-error paths.
+    import time as _t_inspect
+    _wf_start = _t_inspect.perf_counter()
+    _wf_status = "success"
+    _wf_error: Optional[str] = None
+
     # Validate part_number is not empty or whitespace
     if not part_number or not part_number.strip():
+        # Total event covers even the early-validation reject.
+        _val_ms = (_t_inspect.perf_counter() - _wf_start) * 1000.0
+        record_workflow_stage(
+            workflow="inspection", stage="validate_input",
+            latency_ms=_val_ms, status="error", errorType="HTTPException_422",
+            route="/api/inspect",
+        )
+        record_workflow_stage(
+            workflow="inspection", stage="total",
+            latency_ms=_val_ms, status="error", errorType="HTTPException_422",
+            route="/api/inspect",
+        )
         raise HTTPException(status_code=422, detail="part_number is required and cannot be empty")
 
     try:
@@ -1526,13 +1727,27 @@ async def run_inspection(
         if len(drawing_bytes) == 0:
             raise HTTPException(status_code=422, detail="Uploaded file is empty")
 
+        _validate_done = _t_inspect.perf_counter()
+        record_workflow_stage(
+            workflow="inspection", stage="validate_input",
+            latency_ms=(_validate_done - _wf_start) * 1000.0,
+            route="/api/inspect", partNumber=part_number,
+        )
+
         logger.info(f"Running inspection: part={part_number}, file={filename}, ref_views={send_reference_views}")
 
+        _inspect_start = _t_inspect.perf_counter()
         result = inspector.inspect(
             drawing_bytes=drawing_bytes,
             filename=filename,
             part_number=part_number,
             send_reference_views=send_reference_views,
+        )
+        _inspect_done = _t_inspect.perf_counter()
+        record_workflow_stage(
+            workflow="inspection", stage="inspect",
+            latency_ms=(_inspect_done - _inspect_start) * 1000.0,
+            route="/api/inspect", partNumber=part_number,
         )
 
         logger.info(f"Inspection complete for {part_number}: {result.get('gap_summary', {}).get('completeness', 'N/A')}")
@@ -1712,18 +1927,51 @@ async def run_inspection(
         if asme_findings:
             result["asme_checklist_findings"] = asme_findings
 
+        # Stage events: everything between inspect-done and now is
+        # enrichment. response_assembly is a near-zero step (build the
+        # dict + return); we record it for symmetry with the spec but
+        # expect it to be in the sub-millisecond range.
+        _enrichment_done = _t_inspect.perf_counter()
+        record_workflow_stage(
+            workflow="inspection", stage="enrichment",
+            latency_ms=(_enrichment_done - _inspect_done) * 1000.0,
+            route="/api/inspect", partNumber=part_number,
+        )
+        record_workflow_stage(
+            workflow="inspection", stage="response_assembly",
+            latency_ms=0.0,  # negligible; placeholder for shape consistency
+            route="/api/inspect", partNumber=part_number,
+        )
         return result
-    except HTTPException:
+    except HTTPException as _http_ex:
+        _wf_status = "error"
+        _wf_error = f"HTTPException_{int(getattr(_http_ex, 'status_code', 500))}"
         raise  # Re-raise HTTPExceptions as-is
     except FileNotFoundError as e:
+        _wf_status = "error"
+        _wf_error = "FileNotFoundError"
         logger.warning(f"Profile not found for part '{part_number}': {e}")
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
+        _wf_status = "error"
+        _wf_error = "ValueError"
         logger.warning(f"Invalid input for inspection: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        _wf_status = "error"
+        _wf_error = type(e).__name__
         logger.error(f"Error during inspection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Total event always fires — success or failure. Lets the
+        # dashboard compute "total /api/inspect latency p95" without
+        # discriminating against error paths.
+        record_workflow_stage(
+            workflow="inspection", stage="total",
+            latency_ms=(_t_inspect.perf_counter() - _wf_start) * 1000.0,
+            status=_wf_status, errorType=_wf_error,
+            route="/api/inspect", partNumber=part_number,
+        )
 
 
 @app.get("/api/validate-profiles")

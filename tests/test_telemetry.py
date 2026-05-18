@@ -787,6 +787,60 @@ def test_record_endpoint_event_accepts_workflow_tag(tmp_path: Path):
     assert e.partNumber == "1020001"
 
 
+def test_record_endpoint_event_errorType_in_tags_does_not_collide(tmp_path: Path):
+    """Regression: the FastAPI endpoint-timing middleware passes
+    errorType as a kwarg on every call (None on success, exception
+    class name on non-HTTPException failures). errorType is NOT a
+    named parameter of record_endpoint_event, so it lands in **tags.
+    Forwarding to record_provider_call used to pass errorType BOTH
+    explicitly AND via **tags spread, triggering:
+        TypeError: got multiple values for keyword argument 'errorType'
+    Soft-fail caught the TypeError so user-facing responses kept
+    working, but every endpoint event was silently dropped — the
+    dashboard telemetry foundation was effectively broken.
+
+    Three call shapes must all succeed and round-trip correctly:
+      1. caller passes errorType=None on success → errorType stays None
+      2. caller passes errorType="MyError" on failure → caller wins
+      3. caller passes errorType=None on a 4xx/5xx → helper's
+         "HTTP_<code>" fallback is used"""
+    store = TelemetryStore(db_path=tmp_path / "m.sqlite")
+    try:
+        # Case 1: success path, caller's errorType=None tag
+        e1 = record_endpoint_event(
+            route="/api/bridge/status", method="GET",
+            httpStatus=200, latency_ms=5.0, store=store,
+            errorType=None,
+        )
+        assert e1 is not None, "soft-fail swallowed the call — collision regressed"
+        assert e1.status == "success"
+        assert e1.errorType is None
+        assert e1.httpStatus == 200
+
+        # Case 2: caller-provided errorType beats helper-derived HTTP_x
+        e2 = record_endpoint_event(
+            route="/api/x", method="POST",
+            httpStatus=500, latency_ms=10.0, store=store,
+            errorType="ZeroDivisionError",
+        )
+        assert e2 is not None
+        assert e2.status == "error"
+        assert e2.errorType == "ZeroDivisionError"
+        assert e2.httpStatus == 500
+
+        # Case 3: caller-provided None + error status → fall back to HTTP_x
+        e3 = record_endpoint_event(
+            route="/api/y", method="GET",
+            httpStatus=404, latency_ms=2.0, store=store,
+            errorType=None,
+        )
+        assert e3 is not None
+        assert e3.status == "error"
+        assert e3.errorType == "HTTP_404"
+    finally:
+        store.close()
+
+
 # record_workflow_stage
 
 def test_record_workflow_stage_basic(tmp_path: Path):

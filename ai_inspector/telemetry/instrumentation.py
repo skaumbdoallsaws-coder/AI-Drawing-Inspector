@@ -340,11 +340,19 @@ def record_endpoint_event(
         # method goes into a route-style suffix so the (route, method)
         # pair stays queryable from one column. e.g. "GET /api/profiles".
         route_label = f"{method} {route}" if method else route
+        # errorType is not a named parameter on this helper, so a caller
+        # that passes errorType=... ends up with it inside **tags. The
+        # forwarding call to record_provider_call would then pass errorType
+        # both explicitly AND via **tags spread — Python rejects that with
+        # "got multiple values for keyword argument 'errorType'". Pull it
+        # out of tags first and prefer the caller's value when truthy,
+        # else fall back to the http-derived default.
+        caller_error_type = tags.pop("errorType", None)
         return record_provider_call(
             provider="none",
             model=None,
             status=status,
-            errorType=error_type,
+            errorType=(caller_error_type or error_type),
             latencyMs=latency_ms,
             route=route_label,
             workflow=workflow,

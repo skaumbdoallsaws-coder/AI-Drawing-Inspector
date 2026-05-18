@@ -2622,6 +2622,80 @@ class IntakeRequestBody(BaseModel):
     overwriteConfirmed:        Optional[str] = None           # must equal revision to allow overwrite
 
 
+@app.get("/api/library/revisions/{partNumber}")
+async def library_revisions(partNumber: str):
+    """Existing-revision listing + wizard auto-fill (§9.2).
+
+    Powers the wizard frontend (Step 3 of the Library Intake Wizard):
+      - lists existing parts/{pn}/rev*/ directories with optional
+        intake_manifest excerpts so the operator sees prior promotes
+      - pre-fills `partPackageId` from the most recently bridge-installed
+        sidecar at _bridge_imports/part/{pn}/_latest.txt so the operator
+        does not have to paste a 64-char hex hash
+      - reports whether the root {pn}_drawing_map.json is present so the
+        wizard can render an actionable "extract first" hint when the
+        operator opens the wizard before running drawing extraction
+
+    Additive to the plan §9.2 response shape (rootDrawingMapPresent +
+    lastBridgePartPackageId are wizard-quality-of-life fields, not part
+    of the original spec). Returns the empty-revisions shape (not 404)
+    when parts/{pn}/ does not yet exist, so the wizard can treat
+    'brand-new-part' as a normal flow without a 404 round-trip."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    library_dir = library_path()
+    revisions: List[Dict[str, Any]] = []
+
+    parts_dir = library_dir / "parts" / safe_pn
+    if parts_dir.exists() and parts_dir.is_dir():
+        for rev_dir in sorted(parts_dir.iterdir()):
+            if not rev_dir.is_dir() or not rev_dir.name.startswith("rev"):
+                continue
+            try:
+                file_count = sum(1 for _ in rev_dir.iterdir())
+            except Exception:
+                file_count = 0
+            manifest_excerpt: Optional[Dict[str, Any]] = None
+            mpath = rev_dir / "intake_manifest.json"
+            if mpath.exists():
+                try:
+                    mdata = json.loads(mpath.read_text(encoding="utf-8-sig"))
+                    if isinstance(mdata, dict):
+                        manifest_excerpt = {
+                            "promotedAtUtc":  mdata.get("promotedAtUtc"),
+                            "promotedBy":     mdata.get("promotedBy"),
+                            "intakeMode":     mdata.get("intakeMode"),
+                            "sourceDrawing":  mdata.get("sourceDrawing"),
+                            "sourcePart":     mdata.get("sourcePart"),
+                        }
+                except Exception:
+                    pass
+            revisions.append({
+                "name":           rev_dir.name,
+                "path":           _intake_relpath(library_dir, rev_dir),
+                "intakeManifest": manifest_excerpt,
+                "fileCount":      file_count,
+            })
+
+    last_bridge_pkg: Optional[str] = None
+    bridge_latest = library_dir / "_bridge_imports" / "part" / safe_pn / "_latest.txt"
+    if bridge_latest.exists():
+        try:
+            txt = bridge_latest.read_text(encoding="utf-8").strip()
+            last_bridge_pkg = txt or None
+        except Exception:
+            last_bridge_pkg = None
+
+    return {
+        "partNumber":              safe_pn,
+        "revisions":               revisions,
+        "lastBridgePartPackageId": last_bridge_pkg,
+        "rootDrawingMapPresent":   (library_dir / f"{safe_pn}_drawing_map.json").exists(),
+    }
+
+
 @app.post("/api/library/intake/preview")
 async def library_intake_preview(body: IntakeRequestBody):
     """Dry-run: compute the §9.2 preview plan without writing anything.

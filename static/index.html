@@ -7260,6 +7260,234 @@
             opacity: 0.55;
             cursor: not-allowed;
         }
+
+        /* ── Library Intake Wizard panel (Step 3 of the wizard).
+              Right-side slide-out per docs/library-intake-wizard-plan.md
+              §8.1 — overlays a portion of the viewport but leaves the
+              left panel + part picker visible so the operator can read
+              context while moving through the steps. Theme-token based
+              so it reads cleanly in both light and dark mode. ── */
+        .intake-wizard-open-btn {
+            margin-top: 6px;
+            font-size: 11px;
+            padding: 4px 10px;
+            width: 100%;
+        }
+        .intake-wizard-panel {
+            position: fixed;
+            top: 96px;
+            right: 0;
+            width: 520px;
+            max-width: 95vw;
+            height: calc(100vh - 96px);
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            border-left: 1px solid var(--border-strong);
+            box-shadow: -4px 0 16px var(--shadow-color);
+            z-index: 150;
+            display: flex;
+            flex-direction: column;
+            font-size: 12px;
+        }
+        .intake-wizard-panel[hidden] { display: none; }
+        .intake-wizard-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-elevated);
+        }
+        .intake-wizard-header .iw-title { font-size: 13px; font-weight: 700; }
+        .intake-wizard-header .iw-subtitle { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .intake-wizard-close-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .intake-wizard-close-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .intake-wizard-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 14px;
+        }
+        .intake-wizard-footer {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 14px;
+            border-top: 1px solid var(--border);
+            background: var(--bg-elevated);
+        }
+        .intake-wizard-footer .iw-footer-right { display: flex; gap: 8px; }
+        .intake-banner {
+            margin: 0 0 12px 0;
+            padding: 8px 10px;
+            border: 1px solid var(--border-strong);
+            border-left: 3px solid var(--missing);
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            font-size: 11px;
+            line-height: 1.4;
+        }
+        .intake-banner.info     { border-left-color: var(--accent); }
+        .intake-banner.warn     { border-left-color: var(--partial); }
+        .intake-banner.success  { border-left-color: var(--present); }
+        .intake-field-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+        .intake-field-row label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .intake-field-row input[type="text"] {
+            background: var(--bg-input);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: var(--text-primary);
+            font-size: 12px;
+            font-family: inherit;
+        }
+        .intake-field-row input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--focus-ring);
+        }
+        .intake-field-row .iw-hint { font-size: 10px; color: var(--text-muted); }
+        .intake-mode-radios { display: flex; flex-direction: column; gap: 6px; }
+        .intake-mode-radios label { display: flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; color: var(--text-primary); }
+        .intake-existing-rev-list {
+            margin: 6px 0 0 0;
+            padding: 0;
+            list-style: none;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .intake-existing-rev-list li { padding: 2px 0; }
+        .intake-existing-rev-list li.rev-conflict { color: var(--missing); font-weight: 600; }
+        .intake-source-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            margin: 4px 0 12px 0;
+        }
+        .intake-source-table td {
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+        .intake-source-table td.iw-label { color: var(--text-muted); width: 38%; }
+        .intake-source-table td.iw-value { word-break: break-all; font-family: ui-monospace, monospace; }
+        .intake-source-table td.iw-value.iw-missing { color: var(--missing); }
+        .intake-action-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            margin: 4px 0;
+        }
+        .intake-action-table th {
+            text-align: left;
+            padding: 4px 6px;
+            border-bottom: 1px solid var(--border-strong);
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .intake-action-table td {
+            padding: 4px 6px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+        .intake-action-table td.iw-path {
+            font-family: ui-monospace, monospace;
+            word-break: break-all;
+        }
+        .intake-action-table td.iw-bytes { text-align: right; color: var(--text-muted); white-space: nowrap; }
+        .intake-action-kind {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            border: 1px solid var(--border-strong);
+        }
+        .intake-action-kind.iw-create     { color: var(--present);    border-color: var(--present); }
+        .intake-action-kind.iw-update     { color: var(--partial);    border-color: var(--partial); }
+        .intake-action-kind.iw-overwrite  { color: var(--missing);    border-color: var(--missing); }
+        .intake-action-kind.iw-skip       { color: var(--text-muted); border-color: var(--border); }
+        .intake-action-kind.iw-failed     { color: var(--missing);    border-color: var(--missing); }
+        .intake-error-list, .intake-warning-list {
+            margin: 0 0 12px 0;
+            padding: 0;
+            list-style: none;
+        }
+        .intake-error-list   li { color: var(--missing); padding: 2px 0; font-size: 11px; }
+        .intake-warning-list li { color: var(--partial); padding: 2px 0; font-size: 11px; }
+        .intake-confirm-box {
+            margin: 12px 0;
+            padding: 10px 12px;
+            border: 1px solid var(--missing);
+            border-left-width: 3px;
+            background: var(--bg-elevated);
+        }
+        .intake-confirm-box .iw-confirm-prompt { font-size: 11px; margin-bottom: 6px; }
+        .intake-confirm-box input[type="text"] {
+            background: var(--bg-input);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: var(--text-primary);
+            font-family: ui-monospace, monospace;
+            width: 100%;
+            font-size: 12px;
+        }
+        .intake-promote-spinner { display: flex; gap: 8px; align-items: center; padding: 12px 0; font-size: 12px; color: var(--text-secondary); }
+        .intake-promote-spinner::before {
+            content: '';
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border-strong);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: iw-spin 0.7s linear infinite;
+        }
+        @keyframes iw-spin { to { transform: rotate(360deg); } }
+        .intake-summary-section { margin-bottom: 12px; }
+        .intake-summary-section h4 { margin: 0 0 4px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600; }
+        .intake-summary-paths {
+            margin: 0;
+            padding: 0 0 0 14px;
+            font-size: 11px;
+            font-family: ui-monospace, monospace;
+        }
+        .intake-summary-paths li { padding: 2px 0; }
+        .intake-step-bar {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .intake-step-bar .iw-step-dot {
+            flex: 1;
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+        }
+        .intake-step-bar .iw-step-dot.active { background: var(--accent); }
+        .intake-step-bar .iw-step-dot.done   { background: var(--present); }
     </style>
     <!-- Three.js for 3D Model Viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -7756,6 +7984,13 @@
                         <span class="bridge-pill bridge-pill-unknown" id="bridgeStatusPill" title="SOLIDWORKS bridge status (polled every 5s)">Bridge: checking…</span>
                         <button class="btn btn-secondary bridge-reextract-btn" id="bridgeReextractBtn" type="button" disabled>Extract from SOLIDWORKS</button>
                     </div>
+                    <!-- Library Intake Wizard entry point (§8.1). Opens the
+                         right-side wizard panel that runs the part+drawing
+                         intake flow (commit a part already extracted via the
+                         bridge controls above into the canonical per-revision
+                         library shape). -->
+                    <button class="btn btn-secondary intake-wizard-open-btn"
+                            id="openIntakeWizardBtn" type="button">+ Add to Library</button>
                 </div>
 
                 <!-- CAD Views Toggle -->
@@ -32322,6 +32557,512 @@
             pollBridgeStatus();
             setInterval(pollBridgeStatus, 5000);
         })();
+
+        /*
+         * ─── Library Intake Wizard — frontend (Step 3) ─────────────────────
+         * Right-side slide-out panel that walks the operator through a
+         * 6-step intake flow per the user's MVP scope (a simplification
+         * of the plan's 11-step §4):
+         *   1. part number + revision + intake mode
+         *   2. source confirmation (auto-detected from
+         *      /api/library/revisions/{pn}; operator can override)
+         *   3. preview (POST /api/library/intake/preview, render actions/
+         *      warnings/errors; promote disabled when errors present)
+         *   4. overwrite retype-to-confirm (only when preview returned
+         *      `revision_exists`)
+         *   5. promote (POST /api/library/intake/promote)
+         *   6. success/failure summary
+         *
+         * Assembly intake, Profile Builder, and the in-wizard bridge
+         * extraction flow (plan §4 steps 5-8) are explicitly out of MVP
+         * scope. The wizard assumes the operator has already run drawing
+         * extraction (Re-extract Drawing from SOLIDWORKS) and part
+         * extraction (the bridge's auto-relabel kind dispatch).
+         */
+        (function () {
+            const panel    = document.getElementById('intakeWizardPanel');
+            const openBtn  = document.getElementById('openIntakeWizardBtn');
+            if (!panel || !openBtn) return;
+            const closeBtn = document.getElementById('intakeWizardCloseBtn');
+            const stepDots = document.getElementById('intakeWizardStepBar');
+            const body     = document.getElementById('intakeWizardBody');
+            const footer   = document.getElementById('intakeWizardFooter');
+            const stepNum  = document.getElementById('intakeWizardStepNum');
+
+            const STEPS = ['Identity', 'Source', 'Preview', 'Confirm', 'Promote', 'Done'];
+
+            // ── State machine. Reset on every open() so cancelling +
+            // reopening starts clean. ──
+            let s = _emptyState();
+            function _emptyState() {
+                return {
+                    step: 1,
+                    partNumber:           '',
+                    revision:             '',
+                    intakeMode:           'brand-new-part',
+                    sourceLoading:        false,
+                    sourceData:           null,
+                    drawingPackageId:     '',
+                    partPackageId:        '',
+                    drawingSourceDocPath: '',
+                    partSourceDocPath:    '',
+                    previewLoading:       false,
+                    previewResult:        null,
+                    overwriteInput:       '',
+                    promoteLoading:       false,
+                    promoteResult:        null,
+                    bannerKind:           '',  // 'info' | 'warn' | 'success' | '' (no banner)
+                    bannerText:           '',
+                };
+            }
+
+            function open() {
+                s = _emptyState();
+                panel.removeAttribute('hidden');
+                render();
+            }
+            function close() { panel.setAttribute('hidden', ''); }
+
+            function setBanner(kind, text) { s.bannerKind = kind; s.bannerText = text; }
+            function clearBanner() { setBanner('', ''); }
+            function go(step) { s.step = step; render(); }
+
+            // ── Rendering ──
+            function _bannerHtml() {
+                if (!s.bannerText) return '';
+                const cls = s.bannerKind ? ` ${s.bannerKind}` : '';
+                return `<div class="intake-banner${cls}" role="status">${_esc(s.bannerText)}</div>`;
+            }
+            function _stepDotsHtml() {
+                return STEPS.map((_label, idx) => {
+                    const n = idx + 1;
+                    let cls = 'iw-step-dot';
+                    if (n < s.step) cls += ' done';
+                    else if (n === s.step) cls += ' active';
+                    return `<div class="${cls}" title="Step ${n}: ${STEPS[idx]}"></div>`;
+                }).join('');
+            }
+            function render() {
+                stepNum.textContent = String(s.step);
+                stepDots.innerHTML = _stepDotsHtml();
+                body.innerHTML  = _bannerHtml();
+                footer.innerHTML = '';
+                switch (s.step) {
+                    case 1: renderStep1(); break;
+                    case 2: renderStep2(); break;
+                    case 3: renderStep3(); break;
+                    case 4: renderStep4(); break;
+                    case 5: renderStep5(); break;
+                    case 6: renderStep6(); break;
+                }
+            }
+
+            // Step 1 — pn + rev + mode -------------------------------------
+            function renderStep1() {
+                body.insertAdjacentHTML('beforeend', `
+                    <div class="intake-field-row">
+                        <label for="iwPnInput">Part number</label>
+                        <input type="text" id="iwPnInput" autocomplete="off"
+                               value="${_esc(s.partNumber)}"
+                               placeholder="e.g. 1099999">
+                        <span class="iw-hint">Numeric or alphanumeric token; must match what was extracted.</span>
+                    </div>
+                    <div class="intake-field-row">
+                        <label for="iwRevInput">Revision</label>
+                        <input type="text" id="iwRevInput" autocomplete="off"
+                               value="${_esc(s.revision)}"
+                               placeholder="revA, revB, revC1">
+                        <span class="iw-hint">Must match pattern <code>rev&lt;alnum&gt;</code>. Cannot contain underscores or dashes.</span>
+                    </div>
+                    <div class="intake-field-row">
+                        <label>Intake mode</label>
+                        <div class="intake-mode-radios">
+                            <label><input type="radio" name="iwMode" value="brand-new-part"               ${s.intakeMode === 'brand-new-part' ? 'checked' : ''}> Brand-new part (first revision)</label>
+                            <label><input type="radio" name="iwMode" value="new-revision-of-existing-part" ${s.intakeMode === 'new-revision-of-existing-part' ? 'checked' : ''}> New revision of an existing part</label>
+                        </div>
+                    </div>
+                `);
+                footer.innerHTML = `
+                    <button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel</button>
+                    <div class="iw-footer-right">
+                        <button class="btn btn-primary" id="iwNextBtn" type="button">Next →</button>
+                    </div>
+                `;
+                document.getElementById('iwCancelBtn').addEventListener('click', close);
+                document.getElementById('iwNextBtn').addEventListener('click', () => {
+                    const pn = document.getElementById('iwPnInput').value.trim();
+                    const rev = document.getElementById('iwRevInput').value.trim();
+                    const mode = document.querySelector('input[name="iwMode"]:checked')?.value || 'brand-new-part';
+                    if (!pn) { setBanner('warn', 'Part number is required.'); render(); return; }
+                    if (!/^rev[A-Za-z0-9]+$/.test(rev)) {
+                        setBanner('warn', 'Revision must match the pattern rev<alnum>, e.g. revA / revB / revC1. No underscores or dashes.');
+                        render(); return;
+                    }
+                    s.partNumber  = pn;
+                    s.revision    = rev;
+                    s.intakeMode  = mode;
+                    clearBanner();
+                    s.sourceLoading = true; s.sourceData = null;
+                    go(2);
+                    _loadSourceData();
+                });
+            }
+
+            // Step 2 — source confirmation ---------------------------------
+            async function _loadSourceData() {
+                try {
+                    const r = await fetch(`/api/library/revisions/${encodeURIComponent(s.partNumber)}`);
+                    if (!r.ok) {
+                        s.sourceLoading = false;
+                        setBanner('warn', `Could not look up source data: HTTP ${r.status}`);
+                        render(); return;
+                    }
+                    const data = await r.json();
+                    s.sourceData = data;
+                    s.sourceLoading = false;
+                    // Auto-fill from the response. Operator can override on
+                    // the same panel before clicking Next.
+                    if (!s.partPackageId && data.lastBridgePartPackageId) {
+                        s.partPackageId = data.lastBridgePartPackageId;
+                    }
+                    render();
+                } catch (e) {
+                    s.sourceLoading = false;
+                    setBanner('warn', `Source lookup failed: ${e.message}`);
+                    render();
+                }
+            }
+            function renderStep2() {
+                if (s.sourceLoading) {
+                    body.insertAdjacentHTML('beforeend',
+                        `<div class="intake-promote-spinner">Looking up source data…</div>`);
+                    footer.innerHTML = `<button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel</button>
+                                        <div class="iw-footer-right"><button class="btn btn-primary" disabled>Next →</button></div>`;
+                    document.getElementById('iwCancelBtn').addEventListener('click', close);
+                    return;
+                }
+                const sd = s.sourceData || {};
+                const rows = [];
+                rows.push(['Part number',           _esc(s.partNumber),                       false]);
+                rows.push(['Revision',              _esc(s.revision),                         false]);
+                rows.push(['Intake mode',           _esc(s.intakeMode),                       false]);
+                rows.push(['Root drawing map',      sd.rootDrawingMapPresent ? 'Present (just extracted)' : 'MISSING — run Re-extract Drawing first', !sd.rootDrawingMapPresent]);
+                rows.push(['Bridge part package',   _esc(s.partPackageId || sd.lastBridgePartPackageId || 'MISSING — run Re-extract Part first'), !(s.partPackageId || sd.lastBridgePartPackageId)]);
+                const existingRevs = (sd.revisions || []).map(r => r.name);
+                if (existingRevs.length) {
+                    const conflict = existingRevs.includes(s.revision);
+                    rows.push(['Existing revisions', existingRevs.join(', ') + (conflict ? '  ⚠ your revision exists' : ''), conflict]);
+                }
+                let tableHtml = '<table class="intake-source-table"><tbody>';
+                for (const [k, v, missing] of rows) {
+                    tableHtml += `<tr><td class="iw-label">${k}</td><td class="iw-value${missing ? ' iw-missing' : ''}">${v}</td></tr>`;
+                }
+                tableHtml += '</tbody></table>';
+                body.insertAdjacentHTML('beforeend', tableHtml);
+                body.insertAdjacentHTML('beforeend', `
+                    <div class="intake-field-row">
+                        <label for="iwPartPkgInput">Part package ID (override)</label>
+                        <input type="text" id="iwPartPkgInput" value="${_esc(s.partPackageId)}" placeholder="64-char sha256 from the bridge part-extraction response">
+                        <span class="iw-hint">Auto-filled from <code>_bridge_imports/part/${_esc(s.partNumber)}/_latest.txt</code> when available.</span>
+                    </div>
+                    <div class="intake-field-row">
+                        <label for="iwDrawingPkgInput">Drawing package ID (optional)</label>
+                        <input type="text" id="iwDrawingPkgInput" value="${_esc(s.drawingPackageId)}" placeholder="paste from the drawing-extraction success toast if you captured it">
+                        <span class="iw-hint">Not auto-detectable — drawing extraction installs to root and discards the staging zip. Leave blank if not captured; the intake_manifest will record an empty drawingPackageId.</span>
+                    </div>
+                `);
+                footer.innerHTML = `
+                    <button class="btn btn-secondary" id="iwBackBtn" type="button">← Back</button>
+                    <div class="iw-footer-right">
+                        <button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel</button>
+                        <button class="btn btn-primary"   id="iwNextBtn"   type="button">Preview →</button>
+                    </div>
+                `;
+                document.getElementById('iwBackBtn').addEventListener('click', () => go(1));
+                document.getElementById('iwCancelBtn').addEventListener('click', close);
+                document.getElementById('iwNextBtn').addEventListener('click', () => {
+                    s.partPackageId    = document.getElementById('iwPartPkgInput').value.trim();
+                    s.drawingPackageId = document.getElementById('iwDrawingPkgInput').value.trim();
+                    if (!s.partPackageId) {
+                        setBanner('warn', 'Part package ID is required (run Re-extract Part from SOLIDWORKS first).');
+                        render(); return;
+                    }
+                    clearBanner();
+                    s.previewLoading = true; s.previewResult = null;
+                    go(3);
+                    _loadPreview();
+                });
+            }
+
+            // Step 3 — preview ---------------------------------------------
+            async function _loadPreview() {
+                try {
+                    const r = await fetch('/api/library/intake/preview', {
+                        method:  'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body:    JSON.stringify(_intakeBody()),
+                    });
+                    s.previewResult = await r.json().catch(() => null);
+                    s.previewLoading = false;
+                    // If preview blocked by revision_exists AND operator hasn't
+                    // confirmed yet, jump straight to the confirm step rather
+                    // than rendering a frozen error table.
+                    if (!s.previewResult?.planValid) {
+                        const codes = (s.previewResult?.errors || []).map(e => e.code);
+                        if (codes.includes('revision_exists') && !s.overwriteInput) {
+                            go(4); return;
+                        }
+                    }
+                    render();
+                } catch (e) {
+                    s.previewLoading = false;
+                    setBanner('warn', `Preview request failed: ${e.message}`);
+                    render();
+                }
+            }
+            function _renderActionsTable(actions) {
+                if (!actions?.length) return '<p style="font-size:11px;color:var(--text-muted);">(no actions)</p>';
+                let html = '<table class="intake-action-table"><thead><tr><th>Kind</th><th>Path</th><th>Size</th></tr></thead><tbody>';
+                for (const a of actions) {
+                    const kindCls = `iw-${(a.kind || '').toLowerCase()}`;
+                    const sizeStr = a.bytes ? _fmtBytes(a.bytes) : (a.kind === 'SKIP' ? '—' : '');
+                    html += `<tr><td><span class="intake-action-kind ${kindCls}">${_esc(a.kind)}</span></td>` +
+                            `<td class="iw-path">${_esc(a.path)}<div style="color:var(--text-muted);font-size:10px;">${_esc(a.source || '')}</div></td>` +
+                            `<td class="iw-bytes">${sizeStr}</td></tr>`;
+                }
+                html += '</tbody></table>';
+                return html;
+            }
+            function renderStep3() {
+                if (s.previewLoading) {
+                    body.insertAdjacentHTML('beforeend', `<div class="intake-promote-spinner">Computing preview…</div>`);
+                    footer.innerHTML = `<button class="btn btn-secondary" id="iwBackBtn" type="button">← Back</button><div class="iw-footer-right"><button class="btn btn-primary" disabled>Promote →</button></div>`;
+                    document.getElementById('iwBackBtn').addEventListener('click', () => go(2));
+                    return;
+                }
+                const pr = s.previewResult || {};
+                if (pr.errors?.length) {
+                    body.insertAdjacentHTML('beforeend', `<ul class="intake-error-list">${pr.errors.map(e => `<li><strong>${_esc(e.code)}:</strong> ${_esc(e.message)}</li>`).join('')}</ul>`);
+                }
+                if (pr.warnings?.length) {
+                    body.insertAdjacentHTML('beforeend', `<ul class="intake-warning-list">${pr.warnings.map(w => `<li><strong>${_esc(w.code)}:</strong> ${_esc(w.message)}</li>`).join('')}</ul>`);
+                }
+                body.insertAdjacentHTML('beforeend', `<p style="font-size:11px;color:var(--text-muted);margin:4px 0;">Target: <code>${_esc(pr.targetRevisionPath || '')}</code></p>`);
+                body.insertAdjacentHTML('beforeend', '<h4 style="margin:8px 0 4px 0;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);">Planned actions</h4>');
+                body.insertAdjacentHTML('beforeend', `<p style="font-size:11px;color:var(--text-muted);margin:4px 0;"><strong>Nothing has been written yet.</strong> Review and click Promote to commit.</p>`);
+                body.insertAdjacentHTML('beforeend', _renderActionsTable(pr.actions));
+                const canPromote = !!pr.planValid;
+                footer.innerHTML = `
+                    <button class="btn btn-secondary" id="iwBackBtn" type="button">← Back</button>
+                    <div class="iw-footer-right">
+                        <button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel intake</button>
+                        <button class="btn btn-primary"   id="iwPromoteBtn" type="button" ${canPromote ? '' : 'disabled'}>Promote →</button>
+                    </div>
+                `;
+                document.getElementById('iwBackBtn').addEventListener('click', () => go(2));
+                document.getElementById('iwCancelBtn').addEventListener('click', close);
+                if (canPromote) {
+                    document.getElementById('iwPromoteBtn').addEventListener('click', () => {
+                        s.promoteLoading = true; s.promoteResult = null;
+                        go(5);
+                        _runPromote();
+                    });
+                }
+            }
+
+            // Step 4 — overwrite retype-to-confirm -------------------------
+            function renderStep4() {
+                const existingRevs = (s.sourceData?.revisions || []).map(r => r.name);
+                const existsMsg = `Revision <code>${_esc(s.revision)}</code> already exists at <code>parts/${_esc(s.partNumber)}/${_esc(s.revision)}</code>. ` +
+                                  `Existing revisions: ${existingRevs.join(', ')}.`;
+                body.insertAdjacentHTML('beforeend', `<div class="intake-banner warn">${existsMsg}</div>`);
+                body.insertAdjacentHTML('beforeend', `
+                    <div class="intake-confirm-box">
+                        <div class="iw-confirm-prompt">
+                            <strong>Overwrite ${_esc(s.revision)}?</strong> The wizard will replace the wizard-managed files
+                            (drawing map, part metadata, manifest, stub profile) in the existing folder. Curated files
+                            (.STL / .glb / view PNGs) will be left alone (§6.4 of the plan).
+                            Type <code>${_esc(s.revision)}</code> below to confirm.
+                        </div>
+                        <input type="text" id="iwOverwriteInput" value="${_esc(s.overwriteInput)}" placeholder="Type ${_esc(s.revision)} to confirm overwrite">
+                    </div>
+                `);
+                const confirmInput = document.getElementById('iwOverwriteInput');
+                footer.innerHTML = `
+                    <button class="btn btn-secondary" id="iwBackBtn" type="button">← Back to source</button>
+                    <div class="iw-footer-right">
+                        <button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel intake</button>
+                        <button class="btn btn-primary"   id="iwOverwriteBtn" type="button" disabled>Re-preview with overwrite</button>
+                    </div>
+                `;
+                document.getElementById('iwBackBtn').addEventListener('click', () => go(2));
+                document.getElementById('iwCancelBtn').addEventListener('click', close);
+                const overwriteBtn = document.getElementById('iwOverwriteBtn');
+                confirmInput.addEventListener('input', () => {
+                    s.overwriteInput = confirmInput.value;
+                    overwriteBtn.disabled = (confirmInput.value !== s.revision);
+                });
+                overwriteBtn.addEventListener('click', () => {
+                    if (s.overwriteInput !== s.revision) return;
+                    clearBanner();
+                    s.previewLoading = true; s.previewResult = null;
+                    go(3);
+                    _loadPreview();
+                });
+            }
+
+            // Step 5 — promote ---------------------------------------------
+            async function _runPromote() {
+                try {
+                    const r = await fetch('/api/library/intake/promote', {
+                        method:  'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body:    JSON.stringify(_intakeBody()),
+                    });
+                    s.promoteResult = await r.json().catch(() => null);
+                    s.promoteLoading = false;
+                    // Trigger /api/profiles refresh so the picker repaints with
+                    // the new [INTAKE] badge from Step 1 of the wizard.
+                    if (s.promoteResult?.success) _refreshProfilesInSession();
+                    go(6);
+                } catch (e) {
+                    s.promoteLoading = false;
+                    s.promoteResult = { success: false, errors: [{ code: 'network', message: e.message }] };
+                    go(6);
+                }
+            }
+            function renderStep5() {
+                body.insertAdjacentHTML('beforeend', `<div class="intake-promote-spinner">Promoting ${_esc(s.partNumber)} ${_esc(s.revision)}…</div>`);
+                footer.innerHTML = `<div></div><div class="iw-footer-right"><button class="btn btn-secondary" disabled>Working…</button></div>`;
+            }
+
+            // Step 6 — done summary ----------------------------------------
+            function renderStep6() {
+                const pr = s.promoteResult || {};
+                if (pr.success) {
+                    const committed = (pr.executed || []).filter(a => a.committed && a.kind !== 'SKIP');
+                    body.insertAdjacentHTML('beforeend', `
+                        <div class="intake-banner success">
+                            ✅ Promoted <strong>${_esc(s.partNumber)} ${_esc(s.revision)}</strong> successfully.
+                            ${committed.length} file${committed.length !== 1 ? 's' : ''} written.
+                        </div>
+                    `);
+                    body.insertAdjacentHTML('beforeend', `
+                        <div class="intake-summary-section">
+                            <h4>Target path</h4>
+                            <code style="font-size:11px;">${_esc(pr.targetRevisionPath || '')}</code>
+                        </div>
+                    `);
+                    body.insertAdjacentHTML('beforeend', `
+                        <div class="intake-summary-section">
+                            <h4>Files committed</h4>
+                            <ul class="intake-summary-paths">${committed.map(a => `<li>${_esc(a.path)}</li>`).join('')}</ul>
+                        </div>
+                    `);
+                    footer.innerHTML = `
+                        <button class="btn btn-secondary" id="iwAnotherBtn" type="button">Start another intake</button>
+                        <div class="iw-footer-right">
+                            <button class="btn btn-secondary" id="iwViewPartBtn" type="button">View part in app</button>
+                            <button class="btn btn-primary"   id="iwDoneBtn"    type="button">Done</button>
+                        </div>
+                    `;
+                    document.getElementById('iwAnotherBtn').addEventListener('click', () => { s = _emptyState(); render(); });
+                    document.getElementById('iwViewPartBtn').addEventListener('click', () => {
+                        // Use the existing part-selection plumbing; the Step 1
+                        // stub-aware UI will render the [INTAKE] badge + banner.
+                        if (typeof selectPartNumber === 'function') selectPartNumber(s.partNumber, false);
+                        close();
+                    });
+                    document.getElementById('iwDoneBtn').addEventListener('click', close);
+                } else {
+                    body.insertAdjacentHTML('beforeend', `<div class="intake-banner">❌ Promote failed.</div>`);
+                    if (pr.errors?.length) {
+                        body.insertAdjacentHTML('beforeend', `<ul class="intake-error-list">${pr.errors.map(e => `<li><strong>${_esc(e.code)}:</strong> ${_esc(e.message)}</li>`).join('')}</ul>`);
+                    }
+                    if (pr.executed?.length) {
+                        body.insertAdjacentHTML('beforeend', `<h4 style="margin:8px 0 4px 0;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);">Actions attempted</h4>`);
+                        body.insertAdjacentHTML('beforeend', _renderActionsTable(pr.executed.map(a => ({
+                            kind:   a.committed ? a.kind : 'FAILED',
+                            path:   a.path,
+                            source: a.detail || '',
+                            bytes:  0,
+                        }))));
+                    }
+                    footer.innerHTML = `
+                        <button class="btn btn-secondary" id="iwBackBtn" type="button">← Back to preview</button>
+                        <div class="iw-footer-right">
+                            <button class="btn btn-primary" id="iwCloseBtn" type="button">Close</button>
+                        </div>
+                    `;
+                    document.getElementById('iwBackBtn').addEventListener('click', () => { s.previewLoading = true; s.previewResult = null; go(3); _loadPreview(); });
+                    document.getElementById('iwCloseBtn').addEventListener('click', close);
+                }
+            }
+
+            // ── Helpers ───────────────────────────────────────────────────
+            function _intakeBody() {
+                const out = {
+                    partNumber:        s.partNumber,
+                    revision:          s.revision,
+                    intakeMode:        s.intakeMode,
+                    drawingPackageId:  s.drawingPackageId || '',
+                    partPackageId:     s.partPackageId,
+                };
+                if (s.drawingSourceDocPath) out.drawingSourceDocPath = s.drawingSourceDocPath;
+                if (s.partSourceDocPath)    out.partSourceDocPath    = s.partSourceDocPath;
+                if (s.overwriteInput === s.revision) out.overwriteConfirmed = s.revision;
+                return out;
+            }
+            async function _refreshProfilesInSession() {
+                try {
+                    const r = await fetch('/api/profiles');
+                    if (!r.ok) return;
+                    const profiles = await r.json();
+                    if (typeof state !== 'undefined' && Array.isArray(profiles)) {
+                        state.profiles = profiles;
+                        if (typeof populateDropdown === 'function') populateDropdown(profiles);
+                        if (typeof profileCountEl !== 'undefined' && profileCountEl)
+                            profileCountEl.textContent = `Profiles: ${profiles.length}`;
+                    }
+                } catch (_) { /* swallow -- refresh is best-effort */ }
+            }
+            function _esc(v) {
+                return String(v == null ? '' : v)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+            function _fmtBytes(n) {
+                if (n < 1024) return `${n} B`;
+                if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+                return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+            }
+
+            openBtn.addEventListener('click', open);
+            closeBtn.addEventListener('click', close);
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Escape' && !panel.hasAttribute('hidden')) close();
+            });
+            window._openIntakeWizard = open;
+        })();
     </script>
+
+    <!-- ── Library Intake Wizard panel (Step 3 of the wizard) ──
+         Right-side slide-out overlay per docs/library-intake-wizard-plan.md
+         §8.1. Sibling of <script>, not nested inside any layout container,
+         so it can fixed-position freely without flexbox interference. The
+         JS IIFE above owns all step-state + rendering; this DOM is just
+         the static shell. -->
+    <div class="intake-wizard-panel" id="intakeWizardPanel" hidden role="dialog" aria-labelledby="intakeWizardTitle">
+        <div class="intake-wizard-header">
+            <div>
+                <div class="iw-title" id="intakeWizardTitle">Add to Library</div>
+                <div class="iw-subtitle">Library Intake Wizard · Step <span id="intakeWizardStepNum">1</span> of 6</div>
+            </div>
+            <button class="intake-wizard-close-btn" id="intakeWizardCloseBtn" type="button" aria-label="Close wizard">×</button>
+        </div>
+        <div class="intake-step-bar" id="intakeWizardStepBar" aria-hidden="true"></div>
+        <div class="intake-wizard-body"   id="intakeWizardBody"></div>
+        <div class="intake-wizard-footer" id="intakeWizardFooter"></div>
+    </div>
 </body>
 </html>

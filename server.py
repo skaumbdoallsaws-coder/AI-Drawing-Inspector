@@ -59,11 +59,15 @@ from ai_inspector.bridge import (
     KIND_PART,
     KIND_ASSEMBLY,
 )
-# Phase 3 telemetry: endpoint timing middleware + workflow stage events.
-# All helpers are soft-fail (telemetry exceptions never affect responses).
+# Phase 2 + 3 telemetry instrumentation. All helpers are soft-fail
+# (telemetry exceptions never affect responses).
 from ai_inspector.telemetry import (
+    classify_exception_status,
+    record_anthropic_call,
     record_endpoint_event,
+    record_openai_transcription,
     record_workflow_stage,
+    time_block,
 )
 
 # Configure logging
@@ -214,18 +218,32 @@ async def _fallback_openai_transcribe(audio_bytes, filename=None):
     if not api_key:
         raise HTTPException(status_code=500, detail="Local STT failed and no OPENAI_API_KEY for fallback")
 
-    try:
-        import openai
-        client = openai.OpenAI(api_key=api_key)
-        audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = filename or "recording.webm"
-        transcript = await asyncio.to_thread(
-            client.audio.transcriptions.create,
-            model="whisper-1", file=audio_file, response_format="text",
-        )
-        return {"text": transcript.strip()}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
+    # Phase 2 telemetry: Whisper transcription. Per pricing.py whisper-1
+    # is confidence="unknown" (per-audio-minute, not per-token), so cost
+    # is recorded as 0; latency + status are still useful.
+    with time_block() as _elapsed_ms:
+        try:
+            import openai
+            client = openai.OpenAI(api_key=api_key)
+            audio_file = io.BytesIO(audio_bytes)
+            audio_file.name = filename or "recording.webm"
+            transcript = await asyncio.to_thread(
+                client.audio.transcriptions.create,
+                model="whisper-1", file=audio_file, response_format="text",
+            )
+            record_openai_transcription(
+                model="whisper-1", latency_ms=_elapsed_ms(),
+                route="/api/voice/transcribe", workflow="voice_transcribe", agentType="none",
+            )
+            return {"text": transcript.strip()}
+        except Exception as e:
+            _status, _err = classify_exception_status(e)
+            record_openai_transcription(
+                model="whisper-1", latency_ms=_elapsed_ms(),
+                status=_status, errorType=_err,
+                route="/api/voice/transcribe", workflow="voice_transcribe", agentType="none",
+            )
+            raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
 
 
 # Assembly reverse-lookup data (populated at startup)
@@ -4371,13 +4389,34 @@ async def agent_suggestions(request: AgentSuggestionsRequest):
         # Select agent-type-specific prompt (Feature #134)
         active_prompt = SUGGESTION_PROMPTS.get(request.agent_type, SUGGESTION_PROMPT)
 
-        response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=256,
-            messages=[{
-                "role": "user",
-                "content": f"{active_prompt}\n\n--- INSPECTION ISSUES ---\n{context_text}"
-            }],
+        # Phase 2 telemetry: time + record. Re-raise so the outer
+        # try/except keeps its HTTP-error shape.
+        _model = "claude-sonnet-4-5-20250929"
+        _agent_type = getattr(request, "agent_type", None) or "none"
+        with time_block() as _elapsed_ms:
+            try:
+                response = client.messages.create(
+                    model=_model,
+                    max_tokens=256,
+                    messages=[{
+                        "role": "user",
+                        "content": f"{active_prompt}\n\n--- INSPECTION ISSUES ---\n{context_text}"
+                    }],
+                )
+            except Exception as _ex:
+                _s, _e = classify_exception_status(_ex)
+                record_anthropic_call(
+                    model=_model, response=None, latency_ms=_elapsed_ms(),
+                    status=_s, errorType=_e,
+                    route="/api/agent/suggestions", workflow="agent_suggestions",
+                    agentType=_agent_type,
+                )
+                raise
+
+        record_anthropic_call(
+            model=_model, response=response, latency_ms=_elapsed_ms(),
+            route="/api/agent/suggestions", workflow="agent_suggestions",
+            agentType=_agent_type,
         )
 
         # Parse response
@@ -6885,11 +6924,31 @@ async def agent_chat(request: AgentChatRequest):
         messages.append({"role": "user", "content": user_content})
 
         # Call Claude
-        response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=messages,
+        # Phase 2 telemetry.
+        _model = "claude-sonnet-4-5-20250929"
+        _agent_type = getattr(request, "agent_type", None) or "none"
+        with time_block() as _elapsed_ms:
+            try:
+                response = client.messages.create(
+                    model=_model,
+                    max_tokens=2048,
+                    system=system_prompt,
+                    messages=messages,
+                )
+            except Exception as _ex:
+                _s, _e = classify_exception_status(_ex)
+                record_anthropic_call(
+                    model=_model, response=None, latency_ms=_elapsed_ms(),
+                    status=_s, errorType=_e,
+                    route="/api/agent/chat", workflow="agent_chat",
+                    agentType=_agent_type,
+                )
+                raise
+
+        record_anthropic_call(
+            model=_model, response=response, latency_ms=_elapsed_ms(),
+            route="/api/agent/chat", workflow="agent_chat",
+            agentType=_agent_type,
         )
 
         # Extract text response
@@ -7622,7 +7681,28 @@ async def agent_chat_stream(request: AgentChatRequest):
                 create_kwargs["tools"] = tools
                 create_kwargs["tool_choice"] = tool_choice
 
-            response = client.messages.create(**create_kwargs)
+            # Phase 2 telemetry: stream main response.
+            _stream_agent_type = getattr(request, "agent_type", None) or "none"
+            with time_block() as _stream_elapsed_ms:
+                try:
+                    response = client.messages.create(**create_kwargs)
+                except Exception as _ex:
+                    _s, _e = classify_exception_status(_ex)
+                    record_anthropic_call(
+                        model="claude-sonnet-4-5-20250929", response=None,
+                        latency_ms=_stream_elapsed_ms(),
+                        status=_s, errorType=_e,
+                        route="/api/agent/chat/stream", workflow="agent_chat_stream",
+                        agentType=_stream_agent_type,
+                    )
+                    raise
+
+            record_anthropic_call(
+                model="claude-sonnet-4-5-20250929", response=response,
+                latency_ms=_stream_elapsed_ms(),
+                route="/api/agent/chat/stream", workflow="agent_chat_stream",
+                agentType=_stream_agent_type,
+            )
 
             # Check for tool_use
             tool_use_block = None
@@ -7701,11 +7781,31 @@ async def agent_chat_stream(request: AgentChatRequest):
                 }]
             })
 
-            summary_response = client.messages.create(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=2048,
-                system=system_prompt,
-                messages=messages,
+            # Phase 2 telemetry: stream summary response (tool-use round-trip).
+            with time_block() as _summary_elapsed_ms:
+                try:
+                    summary_response = client.messages.create(
+                        model="claude-sonnet-4-5-20250929",
+                        max_tokens=2048,
+                        system=system_prompt,
+                        messages=messages,
+                    )
+                except Exception as _ex:
+                    _s, _e = classify_exception_status(_ex)
+                    record_anthropic_call(
+                        model="claude-sonnet-4-5-20250929", response=None,
+                        latency_ms=_summary_elapsed_ms(),
+                        status=_s, errorType=_e,
+                        route="/api/agent/chat/stream", workflow="agent_chat_stream",
+                        agentType=_stream_agent_type,
+                    )
+                    raise
+
+            record_anthropic_call(
+                model="claude-sonnet-4-5-20250929", response=summary_response,
+                latency_ms=_summary_elapsed_ms(),
+                route="/api/agent/chat/stream", workflow="agent_chat_stream",
+                agentType=_stream_agent_type,
             )
 
             summary_text = ""
@@ -7759,13 +7859,34 @@ async def agent_summarize(request: AgentSummarizeRequest):
 
         summarize_prompt = f"Summarize this conversation between a user and the {request.agent_name} agent about part {request.part_number}. Extract: key findings, measurements mentioned, deviations discussed, questions asked, and any decisions made. Output max 150 words as a concise bulleted summary."
 
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=500,
-            messages=[{
-                "role": "user",
-                "content": f"{summarize_prompt}\n\n--- CONVERSATION ---\n{conv_text}"
-            }],
+        # Phase 2 telemetry: cross-agent summary call (Haiku).
+        _model = "claude-haiku-4-5-20251001"
+        _agent_type = getattr(request, "agent_name", None) or "none"
+        _pn = getattr(request, "part_number", None)
+        with time_block() as _elapsed_ms:
+            try:
+                response = client.messages.create(
+                    model=_model,
+                    max_tokens=500,
+                    messages=[{
+                        "role": "user",
+                        "content": f"{summarize_prompt}\n\n--- CONVERSATION ---\n{conv_text}"
+                    }],
+                )
+            except Exception as _ex:
+                _s, _e = classify_exception_status(_ex)
+                record_anthropic_call(
+                    model=_model, response=None, latency_ms=_elapsed_ms(),
+                    status=_s, errorType=_e,
+                    route="/api/agent/summarize", workflow="agent_summary",
+                    agentType=_agent_type, partNumber=_pn,
+                )
+                raise
+
+        record_anthropic_call(
+            model=_model, response=response, latency_ms=_elapsed_ms(),
+            route="/api/agent/summarize", workflow="agent_summary",
+            agentType=_agent_type, partNumber=_pn,
         )
 
         summary_text = ""
@@ -7844,11 +7965,30 @@ Reasoning in 1-2 sentences with assembly/functional context.
         if context_parts:
             system_prompt += "\n\n" + "\n".join(context_parts)
 
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            system=system_prompt,
-            messages=messages,
+        # Phase 2 telemetry: FAI Sage verdicts (Sonnet 4).
+        _model = "claude-sonnet-4-20250514"
+        with time_block() as _elapsed_ms:
+            try:
+                response = client.messages.create(
+                    model=_model,
+                    max_tokens=2000,
+                    system=system_prompt,
+                    messages=messages,
+                )
+            except Exception as _ex:
+                _s, _e = classify_exception_status(_ex)
+                record_anthropic_call(
+                    model=_model, response=None, latency_ms=_elapsed_ms(),
+                    status=_s, errorType=_e,
+                    route="/api/fai-verdicts", workflow="fai_verdict",
+                    agentType="sage",
+                )
+                raise
+
+        record_anthropic_call(
+            model=_model, response=response, latency_ms=_elapsed_ms(),
+            route="/api/fai-verdicts", workflow="fai_verdict",
+            agentType="sage",
         )
 
         response_text = response.content[0].text if response.content else ""
@@ -7938,10 +8078,29 @@ Do not include any other text, explanation, or commentary. Only FILL lines."""
 
         client = anthropic.Anthropic(api_key=api_key)
 
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
+        # Phase 2 telemetry: FAI Sage Fill (Sonnet 4).
+        _model = "claude-sonnet-4-20250514"
+        with time_block() as _elapsed_ms:
+            try:
+                response = client.messages.create(
+                    model=_model,
+                    max_tokens=2000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            except Exception as _ex:
+                _s, _e = classify_exception_status(_ex)
+                record_anthropic_call(
+                    model=_model, response=None, latency_ms=_elapsed_ms(),
+                    status=_s, errorType=_e,
+                    route="/api/fai-agent-fill", workflow="fai_verdict",
+                    agentType="sage",
+                )
+                raise
+
+        record_anthropic_call(
+            model=_model, response=response, latency_ms=_elapsed_ms(),
+            route="/api/fai-agent-fill", workflow="fai_verdict",
+            agentType="sage",
         )
 
         response_text = response.content[0].text if response.content else ""

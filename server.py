@@ -17,9 +17,10 @@ import shutil
 import threading
 import asyncio
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from dotenv import load_dotenv
 
@@ -43,6 +44,20 @@ from ai_inspector.utils.drawing_map import (
     sanitize_part_number,
 )
 from ai_inspector.classification import classify_drawing_mode
+from ai_inspector.bridge import (
+    BridgeClient,
+    BridgeUnavailableError,
+    BridgeUnauthorizedError,
+    BridgeJobConflictError,
+    BridgeBadResponseError,
+    JOB_STATE_DONE,
+    JOB_STATE_DENIED,
+    JOB_STATE_FAILED,
+    JobSnapshot,
+    KIND_DRAWING,
+    KIND_PART,
+    KIND_ASSEMBLY,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -597,6 +612,898 @@ async def get_drawing_map(part_number: str, revision: Optional[str] = Query(None
     except Exception as e:
         logger.error(f"Error getting drawing map for '{safe_pn}': {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Phase 10D: SOLIDWORKS extraction bridge endpoints ──────────────
+#
+# /api/bridge/status            — discoverability probe; always 200
+# /api/request-extraction       — drives the bridge end-to-end and
+#                                 imports the package into 400S_Sorted_Library
+#
+# See ai_inspector/bridge/ for the client + protocol details.
+# Audit trail spans both sides: the SW addin writes
+# %LOCALAPPDATA%\InspectorPro\Bridge\audit.log; this server logs to
+# the standard logger with the prefix "request_extraction.".
+#
+# One request at a time per the Week 10D scope: an asyncio.Lock
+# serializes calls to /api/request-extraction so the SW user does not
+# see overlapping approval windows.
+
+_request_extraction_lock = asyncio.Lock()
+
+# Configurable path to the inspectorpkg CLI used for validate-package +
+# compat-export. Override via INSPECTORPKG_CLI env var. The default is
+# the Release build alongside the Week-9+ SOLIDWORKS extractor repo —
+# fragile to dev-machine layout, which is why it is overridable.
+_DEFAULT_INSPECTORPKG_CLI = (
+    r"C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\Projects"
+    r"\InspectorPro.SolidWorks\src\InspectorPro.PackageCli\bin\Release\net48\inspectorpkg.exe"
+)
+
+
+def _inspectorpkg_cli_path() -> Optional[str]:
+    """Return a usable inspectorpkg.exe path or None if not found."""
+    candidate = os.environ.get("INSPECTORPKG_CLI") or _DEFAULT_INSPECTORPKG_CLI
+    return candidate if (candidate and Path(candidate).exists()) else None
+
+
+class RequestExtractionBody(BaseModel):
+    """POST /api/request-extraction body. Field names mirror the bridge
+    JSON exactly so request flows are easy to trace end-to-end."""
+    partNumber: str
+    expectedDocPath: Optional[str] = None
+
+
+@app.get("/api/bridge/status")
+async def bridge_status():
+    """Discoverability probe for the InspectorPro app's UI.
+
+    Always returns 200 so callers can render a clean disabled state
+    when the bridge is missing — they should NOT need try/except for
+    the common "SOLIDWORKS isn't running" case.
+
+    Week 11 fields:
+      - authRequired:  bridge has Week-11 auth enabled
+      - authenticated: our request authenticated successfully
+    A Week-11 bridge that we can reach but cannot authenticate against
+    surfaces available=true, authRequired=true, authenticated=false so
+    the UI can render a "Bridge: auth missing / unauthorized" state
+    rather than the generic "unavailable".
+    """
+    client = BridgeClient()
+    info = client.discover()
+    if info is None:
+        return {
+            "available": False,
+            "authRequired": False,
+            "authenticated": False,
+            "message": "SOLIDWORKS bridge not available "
+                       "(InspectorPro add-in not loaded, or SOLIDWORKS not running).",
+        }
+    status = await client.status()
+    if status is None:
+        return {
+            "available": False,
+            "authRequired": False,
+            "authenticated": False,
+            "message": "SOLIDWORKS bridge port file present but the bridge is not responding.",
+        }
+
+    # Week-11 bridge with auth enforced: when our token is missing or
+    # wrong, the bridge replies 200 with the minimal body
+    # (authRequired=true, authenticated=false, no activeDoc). Surface
+    # that to the UI as a distinct state.
+    if status.auth_required and not status.authenticated:
+        return {
+            "available": True,
+            "authRequired": True,
+            "authenticated": False,
+            "bridgeVersion": status.bridge_version,
+            "message": "SOLIDWORKS bridge is running but the app's token does not match. "
+                       "Verify %LOCALAPPDATA%/InspectorPro/Bridge/bridge_token.",
+        }
+
+    return {
+        "available": True,
+        "authRequired": status.auth_required,
+        "authenticated": status.authenticated,
+        "swRunning": status.sw_running,
+        "bridgeVersion": status.bridge_version,
+        "swProcessId": status.sw_process_id,
+        "activeDoc": (
+            None if status.active_doc is None else {
+                "type":  status.active_doc.type,
+                "title": status.active_doc.title,
+                "path":  status.active_doc.path,
+            }
+        ),
+    }
+
+
+@app.post("/api/request-extraction")
+async def request_extraction(body: RequestExtractionBody):
+    """Drive the SOLIDWORKS bridge end-to-end and import the resulting
+    drawing package into 400S_Sorted_Library.
+
+    Phases (each emits a log line under "request_extraction.*"):
+      start            → request received
+      precheck         → bridge alive, active doc is a drawing
+      job.created      → POST /jobs/extract returned awaiting-approval
+      bridge.done      → user approved + extraction completed
+      bridge.denied    → user denied or approval timed out
+      bridge.failed    → extraction threw on the SW side
+      package.downloaded
+      package.validated
+      compat.exported
+      imported         → atomic-replace into 400S_Sorted_Library + load verified
+      failed.<phase>   → any non-recoverable failure
+    """
+    safe_pn = sanitize_part_number(body.partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    expected_doc_path = (body.expectedDocPath or "").strip() or None
+
+    if _request_extraction_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="Another extraction request is in progress; one at a time.",
+        )
+
+    async with _request_extraction_lock:
+        return await _drive_extraction(safe_pn, expected_doc_path)
+
+
+@app.post("/api/request-part-extraction")
+async def request_part_extraction(body: RequestExtractionBody):
+    """Drive the bridge to extract a Part package and install it as a
+    sidecar under 400S_Sorted_Library/_bridge_imports/part/{pn}/.
+
+    Sidecar-only — never touches manual library files (the curated
+    {pn}.json / {pn}_inspection_profile.json / view PNGs / etc. under
+    400S_Sorted_Library/parts/{pn}/...). See
+    docs/bridge-part-assembly-app-integration-plan.md §4.2.
+
+    Same single-flight gate as the drawing endpoint — the SW user
+    only ever sees one approval modal at a time.
+    """
+    safe_pn = sanitize_part_number(body.partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    expected_doc_path = (body.expectedDocPath or "").strip() or None
+
+    if _request_extraction_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="Another extraction request is in progress; one at a time.",
+        )
+
+    async with _request_extraction_lock:
+        return await _drive_part_extraction(safe_pn, expected_doc_path)
+
+
+@app.post("/api/request-assembly-extraction")
+async def request_assembly_extraction(body: RequestExtractionBody):
+    """Drive the bridge to extract an Assembly package and install it
+    as a sidecar under 400S_Sorted_Library/_bridge_imports/assembly/{pn}/.
+
+    Same sidecar-only / single-flight contract as the part endpoint
+    above. See docs/bridge-part-assembly-app-integration-plan.md §4.3.
+    """
+    safe_pn = sanitize_part_number(body.partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    expected_doc_path = (body.expectedDocPath or "").strip() or None
+
+    if _request_extraction_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="Another extraction request is in progress; one at a time.",
+        )
+
+    async with _request_extraction_lock:
+        return await _drive_assembly_extraction(safe_pn, expected_doc_path)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Shared bridge pipeline (Phase B refactor)
+# ─────────────────────────────────────────────────────────────────────
+#
+# The full bridge extraction pipeline has two distinct halves:
+#
+#   Half 1 (kind-agnostic, shared):
+#     precheck → POST /jobs/extract → poll → download .zip → validate
+#       via inspectorpkg validate-package → unzip into staging
+#
+#   Half 2 (kind-specific, per-orchestrator):
+#     drawing  → compat-export + atomic-replace into library root with
+#                .bak rollback + load_drawing_map verify
+#     part     → sidecar install into _bridge_imports/part/{pn}/{pkgId}/
+#     assembly → sidecar install into _bridge_imports/assembly/{pn}/{pkgId}/
+#
+# `_bridge_extract_and_unpack` is half 1; the three `_drive_*_extraction`
+# orchestrators below own half 2. Drawing's half 2 logic was written
+# pre-Phase-A and the orchestrator preserves its byte-equivalent
+# behaviour (same .bak rollback, same atomic-replace, same load_verify
+# probe, same cleanup ordering).
+
+
+@dataclass
+class _BridgeFetchOk:
+    """Successful outcome of the kind-agnostic bridge pipeline.
+
+    The caller is responsible for the per-kind import tail AND for
+    cleaning up `zip_path` and `pkg_folder` after a successful import
+    (the helper does NOT clean them up on success — different
+    orchestrators have slightly different cleanup ordering). The
+    helper DOES clean both up on its own failure paths so a partial
+    download / unzip cannot leak into a future re-extraction.
+    """
+    snap: JobSnapshot
+    pkg_folder: Path     # unzipped {packageId}.inspectorpkg/ in staging_dir
+    zip_path: Path       # downloaded {packageId}.inspectorpkg.zip in staging_dir
+    library_root: Path   # 400S_Sorted_Library
+    staging_dir: Path    # library_root / _staging
+
+
+class _BridgeNotDone(Exception):
+    """Bridge reached a terminal state OTHER than DONE (denied, failed,
+    or anything unexpected). Caller catches and renders its own
+    kind-specific failure response shape — denied/failed do NOT raise
+    HTTPException because the consumer-visible 200 OK + success=false
+    is part of the established contract.
+
+    Transport / timeout / precondition failures are raised as
+    HTTPException directly from the helper instead.
+    """
+    def __init__(self, snap: JobSnapshot):
+        super().__init__(f"bridge terminal state {snap.state}")
+        self.snap = snap
+
+
+# Per-kind precheck wording. Drawing strings are byte-equivalent to the
+# pre-Phase-B wording; part / assembly use parallel structure with the
+# right doctype + file-extension hints.
+_PRECHECK_NO_DOC_HINT = {
+    KIND_DRAWING:  "Open the drawing first.",
+    KIND_PART:     "Open the part first.",
+    KIND_ASSEMBLY: "Open the assembly first.",
+}
+_PRECHECK_EXPECTED_TYPE = {
+    KIND_DRAWING:  "Drawing",
+    KIND_PART:     "Part",
+    KIND_ASSEMBLY: "Assembly",
+}
+_PRECHECK_OPEN_HINT = {
+    KIND_DRAWING:  "Open the drawing for this part and try again.",
+    KIND_PART:     "Open the corresponding .SLDPRT file and try again.",
+    KIND_ASSEMBLY: "Open the corresponding .SLDASM file and try again.",
+}
+
+
+async def _bridge_extract_and_unpack(
+    *,
+    kind: str,
+    part_number: str,
+    expected_doc_path: Optional[str],
+    log_prefix: str,
+) -> _BridgeFetchOk:
+    """Run the kind-agnostic phases of bridge extraction:
+        precheck → POST /jobs/extract → poll → download → validate → unzip
+
+    Behavioural contract:
+      - HTTPException on transport / timeout / precondition / validate /
+        unzip failures (FastAPI propagates to the client directly).
+      - _BridgeNotDone(snap) on bridge terminal state DENIED / FAILED.
+        Caller catches and renders a 200 OK with success=false + the
+        relevant kind/jobState/message fields.
+      - _BridgeFetchOk on bridge terminal state DONE.
+
+    `log_prefix` lets each per-kind orchestrator namespace its log
+    lines:  "request_extraction" (drawing — preserves byte-equivalent
+    grep recipes), "request_part_extraction", "request_assembly_extraction".
+
+    Drawing flow stays byte-equivalent on the wire: when kind=KIND_DRAWING
+    the bridge POST omits the `kind` field entirely (same body the
+    pre-Phase-A client sent). For non-drawing kinds, the kind field is
+    explicitly sent and the bridge dispatches accordingly.
+    """
+    log = logger
+    log.info("%s.start pn=%s expectedDocPath=%s", log_prefix, part_number, expected_doc_path)
+    client = BridgeClient()
+
+    # ── Precheck: bridge available + authenticated + active doc matches kind ──
+    status = await client.status()
+    if status is None:
+        log.warning("%s.failed.bridge_unavailable pn=%s", log_prefix, part_number)
+        raise HTTPException(
+            status_code=503,
+            detail="SOLIDWORKS bridge not available. "
+                   "Open SOLIDWORKS with the InspectorPro add-in enabled and try again.",
+        )
+    # Week 11: Bridge running with auth, but our token does not match.
+    # Fail FAST with 401 + actionable message, do not even try POSTing.
+    if status.auth_required and not status.authenticated:
+        log.warning("%s.failed.unauthorized pn=%s", log_prefix, part_number)
+        raise HTTPException(
+            status_code=401,
+            detail="SOLIDWORKS bridge token is missing or invalid. "
+                   "Restart SOLIDWORKS so the InspectorPro add-in regenerates "
+                   "%LOCALAPPDATA%/InspectorPro/Bridge/bridge_token, then retry.",
+        )
+    if status.active_doc is None:
+        log.warning("%s.failed.no_active_doc pn=%s", log_prefix, part_number)
+        raise HTTPException(
+            status_code=409,
+            detail="No active document in SOLIDWORKS. " + _PRECHECK_NO_DOC_HINT[kind],
+        )
+    expected_type = _PRECHECK_EXPECTED_TYPE[kind]
+    if status.active_doc.type != expected_type:
+        # Drawing path uses the existing log key "not_a_drawing" for
+        # byte-equivalent grep recipes; other kinds get the new
+        # "kind_mismatch" key so callers can distinguish at a glance.
+        log_key = "not_a_drawing" if kind == KIND_DRAWING else "kind_mismatch"
+        log.warning("%s.failed.%s pn=%s active_type=%s",
+                    log_prefix, log_key, part_number, status.active_doc.type)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Active document in SOLIDWORKS is a {status.active_doc.type}, not a {expected_type}. "
+                   + _PRECHECK_OPEN_HINT[kind],
+        )
+    log.info("%s.precheck pn=%s active_doc_path=%s",
+             log_prefix, part_number, status.active_doc.path)
+
+    # ── Create job (triggers SW approval window) ───────────────────
+    try:
+        # Drawing flow stays byte-equivalent on the wire: omit `kind`
+        # entirely. Bridge defaults missing kind to "drawing" via
+        # BridgeKindNormaliser.Normalise, so the POST body and the
+        # bridge's audit line are unchanged from pre-Phase-A.
+        if kind == KIND_DRAWING:
+            create = await client.request_extraction(part_number, expected_doc_path)
+        else:
+            create = await client.request_extraction(part_number, expected_doc_path, kind=kind)
+    except BridgeUnauthorizedError as ex:
+        log.warning("%s.failed.unauthorized pn=%s msg=%s", log_prefix, part_number, ex)
+        raise HTTPException(
+            status_code=401,
+            detail="SOLIDWORKS bridge rejected the token. "
+                   "Restart SOLIDWORKS to refresh the local bridge_token, then retry.",
+        )
+    except BridgeJobConflictError as ex:
+        log.warning("%s.failed.bridge_conflict pn=%s active_job=%s",
+                    log_prefix, part_number, ex.active_job_id)
+        raise HTTPException(status_code=409, detail=str(ex))
+    except BridgeUnavailableError as ex:
+        log.warning("%s.failed.bridge_gone pn=%s msg=%s", log_prefix, part_number, ex)
+        raise HTTPException(status_code=503, detail=f"SOLIDWORKS bridge unavailable: {ex}")
+    except BridgeBadResponseError as ex:
+        log.error("%s.failed.bridge_bad pn=%s status=%s body=%s",
+                  log_prefix, part_number, ex.status_code, (ex.body or "")[:300])
+        # 400 = precondition failure (e.g. doc changed between precheck and POST,
+        #       or the bridge surfaces its own kind-mismatch wording from 5a.7).
+        if ex.status_code == 400:
+            raise HTTPException(status_code=409, detail=ex.body or str(ex))
+        raise HTTPException(status_code=502, detail=f"bridge error: {ex}")
+
+    job_id = create.job_id
+    log.info("%s.job.created pn=%s jobId=%s state=%s",
+             log_prefix, part_number, job_id, create.state)
+
+    # ── Poll until terminal (10-min hard cap) ──────────────────────
+    try:
+        snap = await client.wait_for_terminal(job_id, poll_interval_s=1.0, timeout_s=600.0)
+    except asyncio.TimeoutError:
+        log.error("%s.failed.job_timeout pn=%s jobId=%s", log_prefix, part_number, job_id)
+        raise HTTPException(
+            status_code=504,
+            detail="Timed out waiting for SOLIDWORKS extraction (10 minutes). "
+                   "The job may still complete in SOLIDWORKS; check the add-in's audit log.",
+        )
+    except BridgeUnauthorizedError as ex:
+        log.error("%s.failed.unauthorized_midpoll pn=%s jobId=%s msg=%s",
+                  log_prefix, part_number, job_id, ex)
+        raise HTTPException(
+            status_code=401,
+            detail="SOLIDWORKS bridge revoked the token mid-job. "
+                   "Restart SOLIDWORKS to refresh bridge_token and retry.",
+        )
+    except BridgeUnavailableError as ex:
+        log.error("%s.failed.bridge_lost pn=%s jobId=%s msg=%s",
+                  log_prefix, part_number, job_id, ex)
+        raise HTTPException(status_code=503, detail=f"bridge lost mid-job: {ex}")
+
+    if snap.state in (JOB_STATE_DENIED, JOB_STATE_FAILED):
+        # Caller renders its own kind-aware response shape.
+        if snap.state == JOB_STATE_DENIED:
+            log.info("%s.bridge.denied pn=%s jobId=%s reason=%s",
+                     log_prefix, part_number, job_id, snap.error or "")
+        else:
+            log.error("%s.bridge.failed pn=%s jobId=%s reason=%s",
+                      log_prefix, part_number, job_id, snap.error or "")
+        raise _BridgeNotDone(snap)
+    if snap.state != JOB_STATE_DONE:
+        log.error("%s.failed.unexpected_state pn=%s jobId=%s state=%s",
+                  log_prefix, part_number, job_id, snap.state)
+        raise HTTPException(status_code=500, detail=f"unexpected terminal state {snap.state!r}")
+
+    # bridge.done log line — drawing keeps the original sheets/views
+    # tail for byte-equivalent grep recipes; part/assembly use a
+    # kind-aware line that reports the relevant counts.
+    if kind == KIND_DRAWING:
+        log.info("%s.bridge.done pn=%s jobId=%s packageId=%s sheets=%s views=%s",
+                 log_prefix, part_number, job_id, snap.package_id,
+                 snap.sheet_count, snap.view_count)
+    elif kind == KIND_PART:
+        log.info("%s.bridge.done pn=%s jobId=%s packageId=%s features=%s config=%s",
+                 log_prefix, part_number, job_id, snap.package_id,
+                 snap.feature_count, snap.active_configuration)
+    else:  # KIND_ASSEMBLY
+        log.info("%s.bridge.done pn=%s jobId=%s packageId=%s components=%s mates=%s config=%s",
+                 log_prefix, part_number, job_id, snap.package_id,
+                 snap.component_count, snap.mate_count, snap.active_configuration)
+
+    # ── Stage path + download zip ──────────────────────────────────
+    library_root = Path("400S_Sorted_Library")
+    staging_dir = library_root / "_staging"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    if not snap.package_id:
+        raise HTTPException(status_code=500, detail="bridge returned no packageId on done")
+    zip_path = staging_dir / f"{snap.package_id}.inspectorpkg.zip"
+
+    try:
+        bytes_written = await client.download_package(job_id, zip_path)
+    except BridgeUnauthorizedError as ex:
+        log.error("%s.failed.unauthorized_download pn=%s jobId=%s msg=%s",
+                  log_prefix, part_number, job_id, ex)
+        raise HTTPException(
+            status_code=401,
+            detail="SOLIDWORKS bridge rejected the token on package download. "
+                   "Restart SOLIDWORKS to refresh bridge_token and retry.",
+        )
+    except BridgeBadResponseError as ex:
+        log.error("%s.failed.download_http pn=%s jobId=%s status=%s",
+                  log_prefix, part_number, job_id, ex.status_code)
+        if ex.status_code == 410:
+            raise HTTPException(status_code=410,
+                                detail="Package expired before download (5-minute TTL elapsed).")
+        raise HTTPException(status_code=502, detail=f"package download HTTP {ex.status_code}")
+    except BridgeUnavailableError as ex:
+        log.error("%s.failed.download_transport pn=%s jobId=%s msg=%s",
+                  log_prefix, part_number, job_id, ex)
+        raise HTTPException(status_code=503, detail=f"package download failed: {ex}")
+    log.info("%s.package.downloaded pn=%s jobId=%s bytes=%d path=%s",
+             log_prefix, part_number, job_id, bytes_written, zip_path)
+
+    # ── Validate via inspectorpkg CLI ──────────────────────────────
+    cli = _inspectorpkg_cli_path()
+    if cli is None:
+        log.error("%s.failed.cli_missing INSPECTORPKG_CLI=%s default=%s",
+                  log_prefix, os.environ.get("INSPECTORPKG_CLI"), _DEFAULT_INSPECTORPKG_CLI)
+        # On failure, clean up the staged zip so a future re-extraction
+        # is not confused by an orphan file.
+        try: zip_path.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(
+            status_code=500,
+            detail="inspectorpkg CLI not found. Set INSPECTORPKG_CLI env var or rebuild "
+                   "the InspectorPro.SolidWorks Release configuration.",
+        )
+
+    try:
+        rc = _run_subprocess([cli, "validate-package", str(zip_path)])
+        if rc != 0:
+            log.error("%s.failed.validate pn=%s rc=%d zip=%s",
+                      log_prefix, part_number, rc, zip_path)
+            try: zip_path.unlink(missing_ok=True)
+            except Exception: pass
+            raise HTTPException(status_code=500, detail=f"validate-package failed (rc={rc})")
+        log.info("%s.package.validated pn=%s", log_prefix, part_number)
+    except FileNotFoundError as ex:
+        log.error("%s.failed.cli_run pn=%s msg=%s", log_prefix, part_number, ex)
+        try: zip_path.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail=f"inspectorpkg CLI invoke failed: {ex}")
+
+    # ── Unzip into staging ─────────────────────────────────────────
+    # Zip's top-level entry is the {packageId}.inspectorpkg folder.
+    import zipfile
+    pkg_folder = staging_dir / f"{snap.package_id}.inspectorpkg"
+    if pkg_folder.exists():
+        shutil.rmtree(pkg_folder, ignore_errors=True)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(staging_dir)
+    except Exception as ex:
+        log.error("%s.failed.unzip pn=%s msg=%s", log_prefix, part_number, ex)
+        try: zip_path.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail=f"unzip failed: {ex}")
+    if not pkg_folder.exists():
+        log.error("%s.failed.unzip_layout pn=%s expected=%s",
+                  log_prefix, part_number, pkg_folder)
+        try: zip_path.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail="zip did not contain expected package folder")
+
+    return _BridgeFetchOk(
+        snap=snap,
+        pkg_folder=pkg_folder,
+        zip_path=zip_path,
+        library_root=library_root,
+        staging_dir=staging_dir,
+    )
+
+
+def _install_sidecar(
+    *,
+    kind: str,
+    part_number: str,
+    package_id: str,
+    pkg_folder: Path,
+    library_root: Path,
+    log_prefix: str,
+) -> Tuple[Path, Path]:
+    """Install pkg_folder contents to:
+        library_root / _bridge_imports / {kind} / {part_number} / {package_id} /
+
+    Update the _latest.txt pointer atomically. Idempotent for the same
+    package_id (re-extracting identical content is a quick no-op pass).
+
+    Returns (target_dir, latest_pointer_path) on success.
+    Raises HTTPException(500) on copy / rename / pointer write failure;
+    in failure cases, the .partial dir is removed and _latest.txt is
+    NOT updated — per the user directive, failure paths must never
+    create a successful sidecar pointer.
+    """
+    log = logger
+    base = library_root / "_bridge_imports" / kind / part_number
+    target = base / package_id
+    latest = base / "_latest.txt"
+
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception as ex:
+        log.error("%s.failed.sidecar_mkdir pn=%s msg=%s", log_prefix, part_number, ex)
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to create sidecar dir {base}: {ex}",
+        )
+
+    if target.exists():
+        # Idempotent re-extract of identical content. We trust the bridge
+        # packageId (sha256 of content) — same id means same bytes. Skip
+        # the copy and just refresh the _latest.txt pointer.
+        log.info("%s.sidecar.idempotent pn=%s packageId=%s target=%s",
+                 log_prefix, part_number, package_id, target)
+    else:
+        partial = base / f"{package_id}.partial"
+        if partial.exists():
+            shutil.rmtree(partial, ignore_errors=True)
+        try:
+            shutil.copytree(pkg_folder, partial)
+            os.rename(partial, target)
+        except Exception as ex:
+            log.error("%s.failed.sidecar_install pn=%s msg=%s", log_prefix, part_number, ex)
+            # Tidy the partial so a future re-extraction sees a clean slate.
+            try: shutil.rmtree(partial, ignore_errors=True)
+            except Exception: pass
+            raise HTTPException(
+                status_code=500,
+                detail=f"failed to install sidecar package: {ex}",
+            )
+
+    # Update _latest.txt via tmp + atomic rename. Intentionally LAST so
+    # a partial install never produces a stale pointer claim.
+    latest_tmp = base / "_latest.txt.tmp"
+    try:
+        latest_tmp.write_text(package_id, encoding="utf-8")
+        os.replace(latest_tmp, latest)
+    except Exception as ex:
+        log.error("%s.failed.sidecar_pointer pn=%s msg=%s", log_prefix, part_number, ex)
+        try: latest_tmp.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to update sidecar _latest.txt pointer: {ex}",
+        )
+
+    log.info("%s.sidecar.installed pn=%s packageId=%s target=%s",
+             log_prefix, part_number, package_id, target)
+    return target, latest
+
+
+def _denial_response(kind: str, snap: JobSnapshot, *, include_kind_field: bool) -> dict:
+    """Shape a 200 OK + success=false response for bridge DENIED/FAILED.
+
+    Drawing endpoint (include_kind_field=False) returns the pre-Phase-B
+    shape verbatim: {success, jobState, message}. Part/assembly endpoints
+    set include_kind_field=True so consumers can dispatch on it.
+    """
+    if snap.state == JOB_STATE_DENIED:
+        message = "Extraction denied in SOLIDWORKS" + (f" ({snap.error})" if snap.error else ".")
+    elif snap.state == JOB_STATE_FAILED:
+        message = "SOLIDWORKS extraction failed" + (f": {snap.error}" if snap.error else ".")
+    else:
+        message = f"unexpected terminal state {snap.state!r}"
+    body: Dict[str, Any] = {
+        "success":  False,
+        "jobState": snap.state,
+        "message":  message,
+    }
+    if include_kind_field:
+        body["kind"] = kind
+    return body
+
+
+async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
+    """Drawing-specific orchestrator (Phase B refactor).
+
+    Pre-Phase-B this function did everything inline. The kind-agnostic
+    half (precheck through unzip) now lives in _bridge_extract_and_unpack;
+    the half-2 tail (compat-export + atomic-replace into library root +
+    load_drawing_map verify + .bak rollback) stays here because that
+    behaviour is drawing-specific and intentionally byte-equivalent
+    with the pre-Phase-B implementation.
+    """
+    log = logger
+    try:
+        ok = await _bridge_extract_and_unpack(
+            kind=KIND_DRAWING,
+            part_number=part_number,
+            expected_doc_path=expected_doc_path,
+            log_prefix="request_extraction",
+        )
+    except _BridgeNotDone as nd:
+        return _denial_response(KIND_DRAWING, nd.snap, include_kind_field=False)
+
+    snap          = ok.snap
+    pkg_folder    = ok.pkg_folder
+    zip_path      = ok.zip_path
+    library_root  = ok.library_root
+    staging_dir   = ok.staging_dir
+    cli           = _inspectorpkg_cli_path()  # already proven non-None inside the helper
+
+    # Run compat-export → drops {pn}_drawing_map.json + {pn}_drawing.pdf in staging
+    try:
+        rc = _run_subprocess([
+            cli, "compat-export",
+            "--in",  str(pkg_folder),
+            "--out", str(staging_dir),
+            "--pn",  part_number,
+        ])
+        if rc != 0:
+            log.error("request_extraction.failed.compat_export pn=%s rc=%d", part_number, rc)
+            raise HTTPException(status_code=500, detail=f"compat-export failed (rc={rc})")
+    except FileNotFoundError as ex:
+        log.error("request_extraction.failed.cli_run pn=%s msg=%s", part_number, ex)
+        raise HTTPException(status_code=500, detail=f"inspectorpkg CLI invoke failed: {ex}")
+
+    new_map = staging_dir / f"{part_number}_drawing_map.json"
+    new_pdf = staging_dir / f"{part_number}_drawing.pdf"
+    if not new_map.exists():
+        log.error("request_extraction.failed.compat_no_map pn=%s expected=%s", part_number, new_map)
+        raise HTTPException(status_code=500, detail="compat-export did not produce drawing_map.json")
+    log.info("request_extraction.compat.exported pn=%s map=%s pdf=%s",
+             part_number, new_map, new_pdf if new_pdf.exists() else "(none)")
+
+    # ── Atomic replace into library root + verify load ─────────────
+    dest_map = library_root / f"{part_number}_drawing_map.json"
+    dest_pdf = library_root / f"{part_number}_drawing.pdf"
+
+    # Per Week 10D direction: do not delete old map until the new map
+    # has loaded successfully through load_drawing_map. Strategy:
+    #   1. Move existing dest_map to dest_map.bak  (preserves rollback)
+    #   2. Atomically install new file at dest_map (tmp + os.replace)
+    #   3. Probe load_drawing_map on the now-installed file
+    #   4. On success: delete the .bak file. On failure: restore .bak.
+    backup_map = dest_map.with_suffix(dest_map.suffix + ".bak")
+    backup_pdf = dest_pdf.with_suffix(dest_pdf.suffix + ".bak")
+    if dest_map.exists():
+        try:
+            if backup_map.exists():
+                backup_map.unlink()
+            os.replace(dest_map, backup_map)
+        except Exception as ex:
+            log.error("request_extraction.failed.backup pn=%s msg=%s", part_number, ex)
+            raise HTTPException(status_code=500, detail=f"failed to back up old drawing map: {ex}")
+    if dest_pdf.exists():
+        try:
+            if backup_pdf.exists():
+                backup_pdf.unlink()
+            os.replace(dest_pdf, backup_pdf)
+        except Exception:
+            pass  # PDF backup failure is non-fatal — map is the source of truth
+
+    # Stage the new files via tmp + rename for atomicity
+    def _atomic_install(src: Path, dest: Path) -> None:
+        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        if tmp.exists():
+            tmp.unlink()
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dest)
+
+    try:
+        _atomic_install(new_map, dest_map)
+    except Exception as ex:
+        log.error("request_extraction.failed.install_map pn=%s msg=%s", part_number, ex)
+        # Restore backup if we had moved it aside
+        if backup_map.exists():
+            try: os.replace(backup_map, dest_map)
+            except Exception: pass
+        raise HTTPException(status_code=500, detail=f"failed to install drawing map: {ex}")
+
+    if new_pdf.exists():
+        try:
+            _atomic_install(new_pdf, dest_pdf)
+        except Exception as ex:
+            log.warning("request_extraction.warn.install_pdf pn=%s msg=%s", part_number, ex)
+            # PDF install failure is non-fatal; map already in place.
+
+    # Verify load_drawing_map works on the newly-installed file
+    try:
+        loaded = load_drawing_map(part_number, str(library_root))
+    except Exception as ex:
+        loaded = None
+        log.error("request_extraction.failed.load_probe pn=%s msg=%s", part_number, ex)
+
+    if loaded is None:
+        # Roll back map (and pdf if backed up)
+        log.error("request_extraction.failed.load_verify pn=%s — rolling back", part_number)
+        if backup_map.exists():
+            try: os.replace(backup_map, dest_map)
+            except Exception as rollback_ex:
+                log.error("request_extraction.failed.rollback pn=%s msg=%s", part_number, rollback_ex)
+        else:
+            try: dest_map.unlink()
+            except Exception: pass
+        if backup_pdf.exists():
+            try: os.replace(backup_pdf, dest_pdf)
+            except Exception: pass
+        raise HTTPException(
+            status_code=500,
+            detail="newly imported drawing map failed to load; restored previous version.",
+        )
+
+    # Success — clean up backups + staging artifacts
+    for p in (backup_map, backup_pdf):
+        try:
+            if p.exists(): p.unlink()
+        except Exception: pass
+    try:
+        zip_path.unlink(missing_ok=True)
+    except Exception: pass
+    try:
+        if pkg_folder.exists(): shutil.rmtree(pkg_folder, ignore_errors=True)
+    except Exception: pass
+    try: new_map.unlink(missing_ok=True)
+    except Exception: pass
+    try:
+        if new_pdf.exists(): new_pdf.unlink()
+    except Exception: pass
+
+    log.info("request_extraction.imported pn=%s packageId=%s map=%s pdf=%s",
+             part_number, snap.package_id, dest_map, dest_pdf if dest_pdf.exists() else "(none)")
+
+    return {
+        "success": True,
+        "packageId": snap.package_id,
+        "drawingMapPath": str(dest_map),
+        "pdfPath": str(dest_pdf) if dest_pdf.exists() else None,
+        "sheetCount": snap.sheet_count,
+        "viewCount": snap.view_count,
+    }
+
+
+async def _drive_part_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
+    """Part-specific orchestrator. After the shared pipeline produces
+    an unzipped pkg_folder, install it as a sidecar and return the
+    response shape spec'd in plan §3.1 (success / kind / packageId /
+    importPath / latestPointerPath / featureCount / activeConfiguration).
+
+    Never touches manual library data. Failure paths leave _latest.txt
+    untouched so a downstream consumer can rely on the pointer always
+    naming a successfully-installed packageId.
+    """
+    log = logger
+    try:
+        ok = await _bridge_extract_and_unpack(
+            kind=KIND_PART,
+            part_number=part_number,
+            expected_doc_path=expected_doc_path,
+            log_prefix="request_part_extraction",
+        )
+    except _BridgeNotDone as nd:
+        return _denial_response(KIND_PART, nd.snap, include_kind_field=True)
+
+    snap = ok.snap
+    target, latest = _install_sidecar(
+        kind=KIND_PART,
+        part_number=part_number,
+        package_id=snap.package_id or "unknown",
+        pkg_folder=ok.pkg_folder,
+        library_root=ok.library_root,
+        log_prefix="request_part_extraction",
+    )
+
+    # Cleanup staging artifacts (the sidecar copy is the durable record)
+    try: ok.zip_path.unlink(missing_ok=True)
+    except Exception: pass
+    try:
+        if ok.pkg_folder.exists(): shutil.rmtree(ok.pkg_folder, ignore_errors=True)
+    except Exception: pass
+
+    log.info("request_part_extraction.imported pn=%s packageId=%s target=%s",
+             part_number, snap.package_id, target)
+
+    return {
+        "success":             True,
+        "kind":                KIND_PART,
+        "packageId":           snap.package_id,
+        "importPath":          str(target),
+        "latestPointerPath":   str(latest),
+        "featureCount":        snap.feature_count,
+        "activeConfiguration": snap.active_configuration,
+    }
+
+
+async def _drive_assembly_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
+    """Assembly-specific orchestrator. Mirrors _drive_part_extraction
+    with assembly-specific response fields (componentCount, mateCount,
+    activeConfiguration). See plan §3.1."""
+    log = logger
+    try:
+        ok = await _bridge_extract_and_unpack(
+            kind=KIND_ASSEMBLY,
+            part_number=part_number,
+            expected_doc_path=expected_doc_path,
+            log_prefix="request_assembly_extraction",
+        )
+    except _BridgeNotDone as nd:
+        return _denial_response(KIND_ASSEMBLY, nd.snap, include_kind_field=True)
+
+    snap = ok.snap
+    target, latest = _install_sidecar(
+        kind=KIND_ASSEMBLY,
+        part_number=part_number,
+        package_id=snap.package_id or "unknown",
+        pkg_folder=ok.pkg_folder,
+        library_root=ok.library_root,
+        log_prefix="request_assembly_extraction",
+    )
+
+    try: ok.zip_path.unlink(missing_ok=True)
+    except Exception: pass
+    try:
+        if ok.pkg_folder.exists(): shutil.rmtree(ok.pkg_folder, ignore_errors=True)
+    except Exception: pass
+
+    log.info("request_assembly_extraction.imported pn=%s packageId=%s target=%s",
+             part_number, snap.package_id, target)
+
+    return {
+        "success":             True,
+        "kind":                KIND_ASSEMBLY,
+        "packageId":           snap.package_id,
+        "importPath":          str(target),
+        "latestPointerPath":   str(latest),
+        "componentCount":      snap.component_count,
+        "mateCount":           snap.mate_count,
+        "activeConfiguration": snap.active_configuration,
+    }
+
+
+def _run_subprocess(argv: list) -> int:
+    """Run a subprocess synchronously inside the FastAPI handler.
+    inspectorpkg validate-package + compat-export are file-IO bound and
+    typically <500ms, so blocking the event loop briefly is acceptable
+    for a manual one-at-a-time UX. If this ever becomes hot, lift into
+    asyncio.to_thread()."""
+    import subprocess
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    if proc.returncode != 0:
+        logger.error("subprocess failed argv=%s rc=%d stderr=%s",
+                     argv, proc.returncode, (proc.stderr or "")[:500])
+    return proc.returncode
 
 
 @app.post("/api/inspect")

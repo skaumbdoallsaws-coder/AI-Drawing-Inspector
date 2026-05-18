@@ -100,10 +100,14 @@ def _library_score(path: Path) -> int:
 
 
 def _primary_workspace_library_from_worktree(repo_root: Path) -> Optional[Path]:
-    """Return the primary workspace library when running from .claude/worktrees."""
+    """Return the primary workspace library when running from a feature worktree."""
     for parent in [repo_root, *repo_root.parents]:
         if parent.name == ".claude":
             return parent.parent / _DEFAULT_LIBRARY_NAME
+        if parent.name == "tmp":
+            primary = parent.parent / _DEFAULT_LIBRARY_NAME
+            if primary.exists() and primary.is_dir():
+                return primary
     return None
 
 

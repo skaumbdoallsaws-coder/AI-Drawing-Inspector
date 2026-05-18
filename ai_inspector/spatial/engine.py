@@ -19,6 +19,16 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from PIL import Image
 
+# Phase 2 telemetry instrumentation. Soft-fail by design: if any of
+# these helpers throw, the wrapper inside the helper catches it and
+# logs a warning — the calling extraction/report path keeps running.
+from ai_inspector.telemetry import (
+    classify_exception_status,
+    record_anthropic_call,
+    record_openai_call,
+    time_block,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -694,11 +704,31 @@ class SpatialInspector:
         content.append({"type": "text", "text": prompt})
 
         client = anthropic.Anthropic(api_key=self._anthropic_key)
-        response = client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=INSPECTION_SYSTEM,
-            messages=[{"role": "user", "content": content}],
+
+        # Phase 2 telemetry: time the provider call only (post-processing
+        # excluded per §4.1 of usage-cost-dashboard-plan.md). Record both
+        # success and error cases. Helper is soft-fail; original exception
+        # propagation is unchanged.
+        with time_block() as _elapsed_ms:
+            try:
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=4096,
+                    system=INSPECTION_SYSTEM,
+                    messages=[{"role": "user", "content": content}],
+                )
+            except Exception as _ex:
+                _status, _err = classify_exception_status(_ex)
+                record_anthropic_call(
+                    model=model, response=None, latency_ms=_elapsed_ms(),
+                    status=_status, errorType=_err,
+                    route="engine/inspection", workflow="inspection", agentType="iris",
+                )
+                raise
+
+        record_anthropic_call(
+            model=model, response=response, latency_ms=_elapsed_ms(),
+            route="engine/inspection", workflow="inspection", agentType="iris",
         )
 
         raw = ""
@@ -782,14 +812,33 @@ class SpatialInspector:
         )
 
         client = OpenAI(api_key=self._openai_key)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": REPORT_SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=3000,
-            temperature=0.3,
+
+        # Phase 2 telemetry: same pattern as the Claude inspection above.
+        with time_block() as _elapsed_ms:
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": REPORT_SYSTEM},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=3000,
+                    temperature=0.3,
+                )
+            except Exception as _ex:
+                _status, _err = classify_exception_status(_ex)
+                record_openai_call(
+                    model=model, response=None, latency_ms=_elapsed_ms(),
+                    status=_status, errorType=_err,
+                    route="engine/report", workflow="report", agentType="none",
+                    partNumber=part_number,
+                )
+                raise
+
+        record_openai_call(
+            model=model, response=response, latency_ms=_elapsed_ms(),
+            route="engine/report", workflow="report", agentType="none",
+            partNumber=part_number,
         )
 
         report_text = response.choices[0].message.content

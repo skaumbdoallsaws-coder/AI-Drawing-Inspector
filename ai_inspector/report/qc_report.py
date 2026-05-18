@@ -13,6 +13,9 @@ from ..config import default_config
 from ..comparison.diff_result import DiffResult
 from ..classifier.drawing_classifier import DrawingType
 
+# Phase 2 telemetry. Soft-fail by design.
+from ..telemetry import classify_exception_status, record_openai_call, time_block
+
 
 # Report prompt template
 REPORT_PROMPT_TEMPLATE = '''You are a Quality Control engineer reviewing an engineering drawing inspection.
@@ -178,20 +181,38 @@ class QCReportGenerator:
         prompt = self._build_prompt(diff_result, drawing_type, quality_notes)
 
         # Call GPT-4o-mini
-        try:
-            client = self._get_client()
-            response = client.chat.completions.create(
-                model=self.model_id,
-                messages=[
-                    {"role": "system", "content": "You are a Quality Control engineer writing inspection reports."},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-            )
-            report_text = response.choices[0].message.content
-        except Exception as e:
-            report_text = f"Error generating report: {str(e)}\n\nRaw data:\n{json.dumps(diff_result.to_dict(), indent=2)}"
+        # Phase 2 telemetry: time the provider call only; record on both
+        # the success and the error path. Existing defensive behavior
+        # (set report_text to a fallback string instead of re-raising)
+        # is preserved verbatim — telemetry adds an event, not a new
+        # exception path.
+        with time_block() as _elapsed_ms:
+            try:
+                client = self._get_client()
+                response = client.chat.completions.create(
+                    model=self.model_id,
+                    messages=[
+                        {"role": "system", "content": "You are a Quality Control engineer writing inspection reports."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                )
+                report_text = response.choices[0].message.content
+                record_openai_call(
+                    model=self.model_id, response=response, latency_ms=_elapsed_ms(),
+                    route="qc_report/generate", workflow="report", agentType="none",
+                    partNumber=diff_result.part_number,
+                )
+            except Exception as e:
+                _status, _err = classify_exception_status(e)
+                record_openai_call(
+                    model=self.model_id, response=None, latency_ms=_elapsed_ms(),
+                    status=_status, errorType=_err,
+                    route="qc_report/generate", workflow="report", agentType="none",
+                    partNumber=diff_result.part_number,
+                )
+                report_text = f"Error generating report: {str(e)}\n\nRaw data:\n{json.dumps(diff_result.to_dict(), indent=2)}"
 
         # Determine status
         status = "PASS" if diff_result.passed else "FAIL"
@@ -409,23 +430,38 @@ def generate_from_pipeline(
     )
 
     # --- Call GPT ---
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a QC inspector. Use ONLY the provided JSON data. Never fabricate data."},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=1500,
-            temperature=0.15,
-        )
-        report_text = response.choices[0].message.content
-        tokens_used = response.usage.total_tokens if response.usage else 0
-    except Exception as e:
-        report_text = f"Error generating report: {e}\n\nContext:\n{context_json}"
-        tokens_used = 0
+    # Phase 2 telemetry: same pattern as the class method above.
+    _pn = (sw_identity or {}).get("partNumber", "")
+    with time_block() as _elapsed_ms:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a QC inspector. Use ONLY the provided JSON data. Never fabricate data."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=1500,
+                temperature=0.15,
+            )
+            report_text = response.choices[0].message.content
+            tokens_used = response.usage.total_tokens if response.usage else 0
+            record_openai_call(
+                model=model, response=response, latency_ms=_elapsed_ms(),
+                route="qc_report/generate_v2", workflow="report", agentType="none",
+                partNumber=_pn,
+            )
+        except Exception as e:
+            _status, _err = classify_exception_status(e)
+            record_openai_call(
+                model=model, response=None, latency_ms=_elapsed_ms(),
+                status=_status, errorType=_err,
+                route="qc_report/generate_v2", workflow="report", agentType="none",
+                partNumber=_pn,
+            )
+            report_text = f"Error generating report: {e}\n\nContext:\n{context_json}"
+            tokens_used = 0
 
     # --- Determine status from data ---
     has_critical = len(critical_missing) > 0

@@ -1,6 +1,6 @@
 # AI Engineering Drawing Inspector - Project Status
 
-**Last Updated:** March 5, 2026
+**Last Updated:** May 18, 2026
 
 ---
 
@@ -10,9 +10,49 @@ Build an AI-powered platform that **unifies Engineering, Purchasing, and Manufac
 
 ---
 
-## Current Status: InspectorPro v1.1 — Three-Agent Platform (Iris + Sage + Scout)
+## Current Status: InspectorPro v1.2 — Unified App (UI + Bridge + Telemetry)
 
-### Latest Milestone (March 5, 2026)
+### Latest Milestone (May 18, 2026)
+
+**One Unified Lineage — Light/Dark/Training UI + SOLIDWORKS Bridge + Telemetry Through Phase 3**
+
+The bridge/telemetry work that previously lived on the old dark-only UI lineage (`fea-morph-exaggeration-2026-04-26`) has been reconciled onto `main`'s light/dark/training UI. There is now a single source of truth for app, bridge, and telemetry work.
+
+**Branch:** `ui-bridge-telemetry-unified-2026-05-18`
+**Tag:** `milestone/ui-bridge-telemetry-unified`
+**Worktree (local):** `tmp/ui-bridge-telemetry-unified-2026-05-18/`
+
+**What landed (11 commits on top of main `489adc4`):**
+
+- **Telemetry foundation (Phase 1)** — `ai_inspector/telemetry/` module: `TelemetryEvent` dataclass, SQLite-backed `TelemetryStore` (`runtime_metrics/inspectorpro_metrics.sqlite`), pricing table with cost+confidence, soft-fail helpers. 51 unit tests.
+- **Provider-call instrumentation (Phase 2)** — engine.py + qc_report.py + 8 server.py call sites (`/api/voice/transcribe`, `/api/agent/suggestions`, `/api/agent/chat`, `/api/agent/chat/stream` × 2, `/api/agent/summarize`, `/api/fai-verdicts`, `/api/fai-agent-fill`). Captures model, tokens, latency, cost, status, errorType per call.
+- **Endpoint + workflow timing (Phase 3)** — FastAPI middleware (filters `/api/*` only, soft-fail), `/api/inspect` stage events (validate_input/inspect/enrichment/response_assembly/total), bridge workflow stage events (precheck/job_create/approval_wait/extract_wait/download/validate/unzip/import/total) with the approval-wait vs extract-wait split using the `on_state_change` callback on `wait_for_terminal`.
+- **SOLIDWORKS bridge backend** — `/api/bridge/status`, `/api/request-extraction`, `/api/request-part-extraction`, `/api/request-assembly-extraction`, `_bridge_extract_and_unpack` (kind-agnostic pipeline), `_install_sidecar`, drawing compat-export + atomic-replace + .bak rollback, part/assembly sidecar install under `400S_Sorted_Library/_bridge_imports/{kind}/{pn}/{packageId}/`.
+- **SOLIDWORKS bridge frontend** — bridge status pill + Re-extract button inside Part Information panel, smart auto-relabel by activeDoc.type (Drawing/Part/Assembly), assembly-id inference from activeDoc.path, 5-second status polling, all painted with main's status tokens (`var(--present)`, `var(--missing)`, `var(--partial)`) so the pill reads cleanly in both themes.
+- **Latent bug fixes** — `record_endpoint_event` errorType-tag collision (was soft-failing every `/api/*` event silently); `ai_inspector/spatial/__init__.py` was untracked on main, blocking `import server` on fresh clones.
+
+**End-to-end verified on the unified app:**
+
+- Light/dark theme toggle: PASS
+- Training tab UI: PASS
+- Sales-demo light-mode polish: PASS
+- Part 1030024 bridge extraction: PASS
+  - Sidecar at `_bridge_imports/part/1030024/4c9d1ceb.../` with `_latest.txt` pointer
+  - Bridge audit sequence: job.requested → job.approval.shown → job.approved → job.extract.start → job.extract.done → job.package.materialized → job.package.served
+  - Telemetry captured full stage breakdown: precheck 3.6s, job_create 3.8s, **approval_wait 60.8s** (operator), **extract_wait 6.0s** (extractor), download 2.3s, validate 0.4s, unzip 0.02s, import 0.07s, total 77.1s — split working as intended
+  - Zero telemetry warnings during full session (206 events captured)
+
+**Deprecated:** the old dark-only UI lineage (`fea-morph-exaggeration-2026-04-26` and related `theme-analysis-light-dark-2026-05-06` / `worktree-training-solidworks-layout-2026-05-10` / `sales-coaching-tone-2026-05-06`) — do NOT build new app/bridge/telemetry work against those branches. See [`docs/lineage-status.md`](docs/lineage-status.md) for migration guidance and the canonical do-not-build list.
+
+**Explicit gaps still open (not regressions, deferred followups):**
+
+1. **Usage / Cost / Latency dashboard UI** — backend telemetry through Phase 3 is fully landed and verified; the frontend tab that visualises it is intentionally not built yet. SQLite store at `runtime_metrics/inspectorpro_metrics.sqlite` is the data source when Phase 4 resumes.
+2. **Library Intake Wizard** — plan only, no implementation.
+3. **Docs/scripts from the deprecated lineage** — 7 docs files (`docs/bridge-*`, `docs/pilot-*`, `docs/library-*`, `docs/installer-*`) and `scripts/collect-pilot-bundle.ps1` still on the deprecated branch; documentation only, can be cherry-picked at any time. See `docs/lineage-status.md`.
+
+---
+
+### Previous Milestone (March 5, 2026)
 
 **Demo-Ready Platform — Three Departments, One Tool**
 

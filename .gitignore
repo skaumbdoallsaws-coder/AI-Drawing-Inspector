@@ -57,6 +57,8 @@ datasets/*.yaml
 # Generated runtime artifacts -- never check these in
 # Local SQLite telemetry store (created at runtime by ai_inspector.telemetry)
 runtime_metrics/
+# Server log files written at runtime
+runtime_logs/
 # Pilot-bundle archives produced by scripts/collect-pilot-bundle.ps1
 pilot_diagnostics/
 # Raw packages copied in from the SOLIDWORKS bridge before sidecar install

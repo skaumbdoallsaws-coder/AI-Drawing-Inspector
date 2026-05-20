@@ -1,6 +1,6 @@
 # AI Engineering Drawing Inspector - Project Status
 
-**Last Updated:** May 18, 2026
+**Last Updated:** May 20, 2026
 
 ---
 
@@ -10,9 +10,39 @@ Build an AI-powered platform that **unifies Engineering, Purchasing, and Manufac
 
 ---
 
-## Current Status: InspectorPro v1.2 — Unified App (UI + Bridge + Telemetry)
+## Current Status: InspectorPro v1.3 — Unified App + Usage Dashboard + Library Intake Wizard MVP
 
-### Latest Milestone (May 18, 2026)
+### Latest Milestone (May 20, 2026)
+
+**Library Intake Wizard MVP shipped + Usage dashboard UI shipped — end-to-end verified on real SOLIDWORKS extraction**
+
+The two items that were intentionally deferred at the 2026-05-18 unified-branch milestone tag (`milestone/ui-bridge-telemetry-unified`) have both shipped:
+
+**1. Usage / Cost / Latency dashboard UI** — frontend tab that visualises the Phase-3 telemetry SQLite store (`runtime_metrics/inspectorpro_metrics.sqlite`). Lives in `static/index.html` (Usage tab) and adds reporting endpoints in `server.py`. Landed in commit `61a0dcb feat(telemetry): add usage tracking dashboard`.
+
+**2. Library Intake Wizard MVP** — right-side wizard panel that commits a bridge-extracted part + drawing into the canonical per-revision library shape, with the matching stub-aware consumer surface (Profile-incomplete badge / banner / disabled-Inspect gate). MVP scope is part + drawing only; assembly intake and Profile Builder remain out of scope per the canonical plan (`docs/library-intake-wizard-plan.md`). Landed in four commits:
+- `9ad125f feat(library-intake): stub-profile awareness gate (Step 1)` — `/api/profile-details` + `/api/inspect` stub-aware gates + frontend `[INTAKE]` badge / Profile-incomplete banner / disabled Inspect button
+- `61a05be feat(library-intake): preview + promote backend (Step 2)` — `/api/library/intake/preview` + `/api/library/intake/promote` with `.partial` atomic-rename safety, `.bak` rollback on root files, single-flight asyncio lock, §5.7 real-profile protection
+- `d9644a7 feat(library-intake): wizard frontend (Step 3)` — `/api/library/revisions/{pn}` endpoint + 6-step wizard JS IIFE (Identity / Source / Preview / Confirm / Promote / Done) with retype-to-confirm overwrite gate, fail-closed on errors, success path that refreshes `/api/profiles` in-session
+- `c4c08f6 fix(library-intake): stabilize wizard after end-to-end smoke` — DOMContentLoaded init wrap (wizard panel HTML is after the script tag), bridge `_bridge_extract_and_unpack` pinned to `LIBRARY_DIR` (was CWD-relative `Path("400S_Sorted_Library")` and wrote into worktree-local stub library), wizard now caches bridge extraction responses and carries `drawingSheetCount` / `drawingViewCount` / `partFeatureCount` / `partActiveConfiguration` / source-doc paths into preview + promote bodies so `intake_manifest.json` records full provenance
+
+**End-to-end verified on real SOLIDWORKS data — part 1030024:**
+- `revC` promoted during initial smoke (Step 2/3 baseline) — confirmed canonical per-rev layout, sidecar untouched, bridge audit clean
+- `revD` promoted after stabilization fix (`c4c08f6`) — confirmed **full provenance in `intake_manifest.json`**: sourceDrawing.packageId + sourceDocPath populated, `sheetCount: 1`, `viewCount: 5`, sourcePart.packageId + sourceDocPath populated, `featureCount: 46`, `activeConfiguration: "Default"`, bridgeBaseline pinned to `{addinCommit: c043fbe, appCommit: c2de55d}`
+- Both promotes landed under `400S_Sorted_Library/parts/1030024/rev{C,D}/`; the existing real `1030024_inspection_profile.json` at root was correctly left untouched (§5.7 row 3 — wizard never shadows a real profile). No `[INTAKE]` badge for this part, as expected.
+
+**Test coverage**: 102 tests pass across `tests/test_intake_wizard_frontend.py` (12), `tests/test_intake_preview_promote.py` (22), `tests/test_intake_stub_gate.py` (10), `tests/test_telemetry.py` (51), `tests/test_drawing_map.py` (7). Regression guards in place for the three stabilization fixes: DOMContentLoaded init pattern, `LIBRARY_DIR`-resolved bridge paths, full-metadata round-trip into `intake_manifest.json`. `test_drawing_differ` skipped (pre-existing missing-fixture issue, unchanged from main).
+
+**Open items still parked** (none affect runtime):
+1. Six docs/scripts still only on the deprecated `fea-morph-exaggeration-2026-04-26` lineage (bridge-part-assembly-app-integration-plan, customer-overview, installer-phase6-blocked, pilot-demo-script, production-pilot-packaging-checklist, solidworks-bridge docs + the `scripts/collect-pilot-bundle.ps1` helper). Can be cherry-picked at any time. See `docs/lineage-status.md`.
+2. Assembly intake through the wizard — out of MVP scope per plan §3.2.
+3. Profile Builder — out of MVP scope per plan §12.2 future.
+
+**Deprecated lineage warning still in force**: do NOT branch new app/bridge/telemetry/library-intake work off `fea-morph-exaggeration-2026-04-26` or related dark-only-era branches. The unified branch (`ui-bridge-telemetry-unified-2026-05-18` at the latest HEAD) is the single source of truth. See `docs/lineage-status.md`.
+
+---
+
+### Previous Milestone (May 18, 2026)
 
 **One Unified Lineage — Light/Dark/Training UI + SOLIDWORKS Bridge + Telemetry Through Phase 3**
 
@@ -44,11 +74,11 @@ The bridge/telemetry work that previously lived on the old dark-only UI lineage 
 
 **Deprecated:** the old dark-only UI lineage (`fea-morph-exaggeration-2026-04-26` and related `theme-analysis-light-dark-2026-05-06` / `worktree-training-solidworks-layout-2026-05-10` / `sales-coaching-tone-2026-05-06`) — do NOT build new app/bridge/telemetry work against those branches. See [`docs/lineage-status.md`](docs/lineage-status.md) for migration guidance and the canonical do-not-build list.
 
-**Explicit gaps still open (not regressions, deferred followups):**
+**Explicit gaps still open (not regressions, deferred followups; status as of 2026-05-18 tag — see the May 20 entry above for what has since landed):**
 
-1. **Usage / Cost / Latency dashboard UI** — backend telemetry through Phase 3 is fully landed and verified; the frontend tab that visualises it is intentionally not built yet. SQLite store at `runtime_metrics/inspectorpro_metrics.sqlite` is the data source when Phase 4 resumes.
-2. **Library Intake Wizard** — plan only, no implementation.
-3. **Docs/scripts from the deprecated lineage** — 7 docs files (`docs/bridge-*`, `docs/pilot-*`, `docs/library-*`, `docs/installer-*`) and `scripts/collect-pilot-bundle.ps1` still on the deprecated branch; documentation only, can be cherry-picked at any time. See `docs/lineage-status.md`.
+1. **Usage / Cost / Latency dashboard UI** — backend telemetry through Phase 3 is fully landed and verified; the frontend tab that visualises it is intentionally not built yet. *(SHIPPED 2026-05-18 in commit `61a0dcb` — see May 20 entry.)*
+2. **Library Intake Wizard** — plan only, no implementation. *(MVP SHIPPED 2026-05-18 → 2026-05-20 across commits `eea0c78` + `9ad125f` + `61a05be` + `d9644a7` + `c4c08f6` — see May 20 entry.)*
+3. **Docs/scripts from the deprecated lineage** — 7 docs files (`docs/bridge-*`, `docs/pilot-*`, `docs/library-*`, `docs/installer-*`) and `scripts/collect-pilot-bundle.ps1` still on the deprecated branch; documentation only, can be cherry-picked at any time. *(library-intake-wizard-plan.md ported 2026-05-18 in commit `eea0c78`; 6 docs + 1 script still pending — see `docs/lineage-status.md`.)*
 
 ---
 

@@ -1,6 +1,9 @@
 # App Lineage Status
 
-**Effective: 2026-05-18**
+**Effective: 2026-05-20**  *(originally written 2026-05-18 alongside the
+`milestone/ui-bridge-telemetry-unified` tag; refreshed to reflect the
+Usage dashboard UI and Library Intake Wizard MVP that landed in the
+days immediately after the tag.)*
 
 ## Source of truth
 
@@ -79,35 +82,79 @@ fd225f7 chore(repo): ignore generated runtime artifacts                    (Step
 ```
 
 
-## What is NOT in the unified branch yet
+## What has landed AFTER the original milestone tag
 
-Acknowledged gaps as of the milestone tag. Each is a separate followup,
-not a regression:
+`milestone/ui-bridge-telemetry-unified` (commit `a2d1d27`) was placed
+on 2026-05-18 to anchor the reconciliation state. Two MVP features
+shipped immediately after that tag and are now in the unified branch
+HEAD:
 
-1. **Usage / Cost / Latency dashboard UI** -- backend telemetry through
-   Phase 3 is fully landed and verified, but the frontend dashboard tab
-   that visualises it is intentionally NOT built. Phase 4 (frontend) was
-   paused for the reconciliation. The SQLite store at
-   `runtime_metrics/inspectorpro_metrics.sqlite` is the data source when
-   that work resumes.
-2. **Library Intake Wizard implementation** -- only the plan exists on the
-   deprecated branch. Implementation was deferred during reconciliation
-   to keep this branch focused.
-3. **Docs and scripts from the deprecated lineage** -- the following are
-   still on `fea-morph-exaggeration-2026-04-26` and have not been moved
-   to the unified branch:
+1. **Usage / Cost / Latency dashboard UI** -- frontend tab that
+   visualises the Phase-3 telemetry store. Lives in
+   `static/index.html` (Usage tab) and adds reporting endpoints in
+   `server.py`. Landed in commit `61a0dcb feat(telemetry): add usage
+   tracking dashboard`. SQLite source remains
+   `runtime_metrics/inspectorpro_metrics.sqlite`.
+
+2. **Library Intake Wizard MVP** -- right-side wizard panel that
+   commits a bridge-extracted part + drawing into the canonical
+   per-revision library shape, with the matching stub-aware
+   consumer surface. Landed in four commits:
+   - `9ad125f feat(library-intake): stub-profile awareness gate (Step 1)`
+     -- /api/profile-details + /api/inspect stub-aware gates +
+     frontend [INTAKE] badge / Profile-incomplete banner / disabled
+     Inspect button.
+   - `61a05be feat(library-intake): preview + promote backend (Step 2)`
+     -- /api/library/intake/preview + /promote endpoints with .partial
+     safety, .bak rollback, single-flight lock, sec 5.7 real-profile
+     protection.
+   - `d9644a7 feat(library-intake): wizard frontend (Step 3)` --
+     /api/library/revisions/{pn} endpoint + 6-step wizard JS IIFE.
+   - `c4c08f6 fix(library-intake): stabilize wizard after end-to-end
+     smoke` -- DOMContentLoaded init + bridge LIBRARY_DIR pin +
+     extraction-metadata pass-through into intake_manifest.
+
+   Verified end-to-end on real SOLIDWORKS extraction of part
+   **1030024**: `revC` promoted during initial smoke; `revD`
+   promoted after the stabilization fix with full provenance
+   confirmed in `intake_manifest.json` (sourceDrawing.packageId +
+   sourceDocPath + sheetCount=1 + viewCount=5; sourcePart.packageId
+   + sourceDocPath + featureCount=46 + activeConfiguration=Default).
+   Both promotes landed under
+   `400S_Sorted_Library/parts/1030024/rev{C,D}/`; the existing real
+   inspection profile at root was correctly left untouched (sec 5.7
+   row 3 protection -- no [INTAKE] badge for this part, as expected).
+
+   The canonical plan document (`docs/library-intake-wizard-plan.md`)
+   was also cherry-picked over from the deprecated branch in
+   commit `eea0c78`; the unified branch now carries it.
+
+## What is STILL NOT in the unified branch
+
+These are the followups that remain. None affect runtime behaviour.
+
+1. **Docs and scripts from the deprecated lineage that are still on
+   `fea-morph-exaggeration-2026-04-26` only**:
    - `docs/bridge-part-assembly-app-integration-plan.md`
    - `docs/customer-overview.md`
    - `docs/installer-phase6-blocked.md`
-   - `docs/library-intake-wizard-plan.md`
    - `docs/pilot-demo-script.md`
    - `docs/production-pilot-packaging-checklist.md`
    - `docs/solidworks-bridge.md`
    - `scripts/collect-pilot-bundle.ps1`
 
-   These are documentation/tooling; they do not affect runtime behaviour.
-   They can be cherry-picked over to the unified branch at any time
-   without coordinating with running services.
+   These can be cherry-picked over at any time without coordinating
+   with running services.
+
+2. **Assembly intake** through the wizard -- out of MVP scope per
+   plan sec 3.2 / sec 10.3. The wizard accepts only part + drawing.
+   Assembly extraction still works via the existing
+   `/api/request-assembly-extraction` (sidecar-only) flow.
+
+3. **Profile Builder** -- a future tool that would let an operator
+   author a real (non-stub) `{pn}_inspection_profile.json` through
+   a guided flow. Out of MVP scope per plan sec 12.2 future.
+   Until it exists, real profiles continue to be hand-authored.
 
 
 ## Migration guidance

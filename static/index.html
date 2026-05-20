@@ -7273,6 +7273,12 @@
             padding: 4px 10px;
             width: 100%;
         }
+        .profile-builder-open-btn {
+            margin-top: 6px;
+            font-size: 11px;
+            padding: 4px 10px;
+            width: 100%;
+        }
         .intake-wizard-panel {
             position: fixed;
             top: 96px;
@@ -7488,6 +7494,56 @@
         }
         .intake-step-bar .iw-step-dot.active { background: var(--accent); }
         .intake-step-bar .iw-step-dot.done   { background: var(--present); }
+        .profile-builder-panel .pb-context-grid {
+            display: grid;
+            grid-template-columns: minmax(120px, 35%) 1fr;
+            gap: 6px 10px;
+            margin: 8px 0 12px 0;
+            font-size: 11px;
+        }
+        .profile-builder-panel .pb-label {
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+        .profile-builder-panel .pb-value {
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+        .profile-builder-panel .pb-json {
+            width: 100%;
+            min-height: 240px;
+            resize: vertical;
+            background: var(--bg-input);
+            color: var(--text-primary);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 8px;
+            font: 11px/1.4 ui-monospace, monospace;
+        }
+        .profile-builder-panel .pb-textarea {
+            width: 100%;
+            min-height: 72px;
+            resize: vertical;
+            background: var(--bg-input);
+            color: var(--text-primary);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 8px;
+            font: 12px/1.4 inherit;
+        }
+        .profile-builder-panel .pb-issue-list {
+            margin: 8px 0 12px 0;
+            padding: 0;
+            list-style: none;
+            font-size: 11px;
+        }
+        .profile-builder-panel .pb-issue-list li {
+            padding: 3px 0;
+            color: var(--partial);
+        }
+        .profile-builder-panel .pb-issue-list li.pb-error {
+            color: var(--missing);
+        }
     </style>
     <!-- Three.js for 3D Model Viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -7991,6 +8047,8 @@
                          library shape). -->
                     <button class="btn btn-secondary intake-wizard-open-btn"
                             id="openIntakeWizardBtn" type="button">+ Add to Library</button>
+                    <button class="btn btn-secondary profile-builder-open-btn"
+                            id="openProfileBuilderBtn" type="button">Build Inspection Profile</button>
                 </div>
 
                 <!-- CAD Views Toggle -->
@@ -32584,6 +32642,273 @@
         })();
 
         /*
+         * Profile Builder MVP.
+         * Drafts a real inspection profile from promoted part+drawing
+         * context, then requires a separate Apply action. Applying over a
+         * real profile is blocked by the backend unless the user confirms
+         * with the part number.
+         */
+        (function () {
+            function initProfileBuilder() {
+                const panel = document.getElementById('profileBuilderPanel');
+                const openBtn = document.getElementById('openProfileBuilderBtn');
+                if (!panel || !openBtn) return;
+                const closeBtn = document.getElementById('profileBuilderCloseBtn');
+                const body = document.getElementById('profileBuilderBody');
+                const footer = document.getElementById('profileBuilderFooter');
+
+                let pb = emptyState();
+
+                function emptyState() {
+                    const pn = (typeof state !== 'undefined' && state && state.partNumber) ? state.partNumber : '';
+                    return {
+                        partNumber: pn || '',
+                        revision: '',
+                        instructions: '',
+                        context: null,
+                        loadingContext: false,
+                        generating: false,
+                        applying: false,
+                        draftText: '',
+                        validationIssues: [],
+                        overwriteConfirmed: '',
+                        bannerKind: 'info',
+                        bannerText: 'Generate a draft profile from the promoted part metadata and drawing map. Review before applying.',
+                    };
+                }
+
+                function esc(v) {
+                    return String(v == null ? '' : v)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                }
+                function bannerHtml() {
+                    if (!pb.bannerText) return '';
+                    return `<div class="intake-banner ${esc(pb.bannerKind || 'info')}" role="status">${esc(pb.bannerText)}</div>`;
+                }
+                function issueHtml(issues) {
+                    if (!Array.isArray(issues) || !issues.length) return '<div class="iw-hint">No validator warnings.</div>';
+                    return `<ul class="pb-issue-list">${issues.map(i => {
+                        const sev = String(i.severity || 'warning').toLowerCase();
+                        const cls = sev === 'error' ? ' class="pb-error"' : '';
+                        return `<li${cls}>${esc(sev.toUpperCase())}: ${esc(i.feature_name || i.featureName || 'profile')} — ${esc(i.issue || '')}</li>`;
+                    }).join('')}</ul>`;
+                }
+                function contextGridHtml() {
+                    const ctx = pb.context || {};
+                    const existing = ctx.existingProfile || {};
+                    const paths = ctx.paths || {};
+                    const ps = ctx.partSummary || {};
+                    const ds = ctx.drawingSummary || {};
+                    return `
+                        <div class="pb-context-grid">
+                            <div class="pb-label">Part</div><div class="pb-value">${esc(pb.partNumber || '(none)')}</div>
+                            <div class="pb-label">Revision</div><div class="pb-value">${esc(pb.revision || ctx.revision || '(latest)')}</div>
+                            <div class="pb-label">Existing profile</div><div class="pb-value">${esc(existing.kind || 'unknown')} ${existing.path ? `· ${esc(existing.path)}` : ''}</div>
+                            <div class="pb-label">Part context</div><div class="pb-value">${esc(ps.featureCount || 0)} feature(s) · ${esc(paths.partMetadata || '')}</div>
+                            <div class="pb-label">Drawing context</div><div class="pb-value">${esc(ds.sheetCount || 0)} sheet(s), ${esc(ds.viewCount || 0)} view(s) · ${esc(paths.drawingMap || '')}</div>
+                        </div>`;
+                }
+                function render() {
+                    body.innerHTML = bannerHtml() + `
+                        <div class="intake-field-row">
+                            <label for="profileBuilderPn">Part number</label>
+                            <input type="text" id="profileBuilderPn" value="${esc(pb.partNumber)}" placeholder="1030024">
+                            <div class="iw-hint">Use a part that has already been promoted by the Library Intake Wizard.</div>
+                        </div>
+                        <div class="intake-field-row">
+                            <label for="profileBuilderRev">Revision</label>
+                            <input type="text" id="profileBuilderRev" value="${esc(pb.revision)}" placeholder="blank = latest revision">
+                        </div>
+                        <div class="intake-field-row">
+                            <label for="profileBuilderInstructions">Builder notes</label>
+                            <textarea class="pb-textarea" id="profileBuilderInstructions" placeholder="Optional: critical surfaces, inspection priorities, naming preferences...">${esc(pb.instructions)}</textarea>
+                        </div>
+                        ${pb.loadingContext ? '<div class="intake-promote-spinner">Loading context...</div>' : ''}
+                        ${pb.context ? contextGridHtml() : ''}
+                        ${pb.generating ? '<div class="intake-promote-spinner">Generating draft profile...</div>' : ''}
+                        ${pb.draftText ? `
+                            <div class="intake-field-row">
+                                <label for="profileBuilderDraft">Draft profile JSON</label>
+                                <textarea class="pb-json" id="profileBuilderDraft" spellcheck="false">${esc(pb.draftText)}</textarea>
+                            </div>
+                            <div class="intake-summary-section">
+                                <h4>Validator</h4>
+                                ${issueHtml(pb.validationIssues)}
+                            </div>
+                            <div class="intake-field-row">
+                                <label for="profileBuilderOverwrite">Overwrite confirmation</label>
+                                <input type="text" id="profileBuilderOverwrite" value="${esc(pb.overwriteConfirmed)}" placeholder="Only required when replacing a real profile">
+                                <div class="iw-hint">If a real profile exists, type the part number exactly before Apply.</div>
+                            </div>
+                        ` : ''}
+                    `;
+                    footer.innerHTML = `
+                        <button class="btn btn-secondary" id="profileBuilderRefreshBtn" type="button">Refresh Context</button>
+                        <div class="iw-footer-right">
+                            <button class="btn btn-secondary" id="profileBuilderGenerateBtn" type="button" ${pb.generating || pb.loadingContext ? 'disabled' : ''}>Generate Draft</button>
+                            <button class="btn btn-primary" id="profileBuilderApplyBtn" type="button" ${!pb.draftText || pb.applying ? 'disabled' : ''}>Apply Profile</button>
+                        </div>
+                    `;
+                    bindInputs();
+                }
+                function bindInputs() {
+                    const pnEl = document.getElementById('profileBuilderPn');
+                    const revEl = document.getElementById('profileBuilderRev');
+                    const instrEl = document.getElementById('profileBuilderInstructions');
+                    const draftEl = document.getElementById('profileBuilderDraft');
+                    const confirmEl = document.getElementById('profileBuilderOverwrite');
+                    if (pnEl) pnEl.addEventListener('input', () => { pb.partNumber = pnEl.value.trim(); });
+                    if (revEl) revEl.addEventListener('input', () => { pb.revision = revEl.value.trim(); });
+                    if (instrEl) instrEl.addEventListener('input', () => { pb.instructions = instrEl.value; });
+                    if (draftEl) draftEl.addEventListener('input', () => { pb.draftText = draftEl.value; });
+                    if (confirmEl) confirmEl.addEventListener('input', () => { pb.overwriteConfirmed = confirmEl.value.trim(); });
+                    document.getElementById('profileBuilderRefreshBtn')?.addEventListener('click', loadContext);
+                    document.getElementById('profileBuilderGenerateBtn')?.addEventListener('click', generateDraft);
+                    document.getElementById('profileBuilderApplyBtn')?.addEventListener('click', applyDraft);
+                }
+                async function loadContext() {
+                    if (!pb.partNumber) {
+                        pb.bannerKind = 'warn';
+                        pb.bannerText = 'Select or type a part number first.';
+                        render();
+                        return;
+                    }
+                    pb.loadingContext = true;
+                    pb.bannerKind = 'info';
+                    pb.bannerText = 'Loading promoted part and drawing context...';
+                    render();
+                    try {
+                        const q = pb.revision ? `?revision=${encodeURIComponent(pb.revision)}` : '';
+                        const res = await fetch(`/api/profile-builder/context/${encodeURIComponent(pb.partNumber)}${q}`);
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.detail || res.statusText);
+                        pb.context = data;
+                        if (!pb.revision && data.revision) pb.revision = data.revision;
+                        if (data.ready) {
+                            pb.bannerKind = 'success';
+                            pb.bannerText = 'Context ready. Generate a draft, then review before applying.';
+                        } else {
+                            pb.bannerKind = 'warn';
+                            pb.bannerText = 'Context incomplete: ' + (data.missing || []).join(', ');
+                        }
+                    } catch (e) {
+                        pb.context = null;
+                        pb.bannerKind = 'warn';
+                        pb.bannerText = 'Could not load Profile Builder context: ' + (e && e.message ? e.message : String(e));
+                    } finally {
+                        pb.loadingContext = false;
+                        render();
+                    }
+                }
+                async function generateDraft() {
+                    pb.generating = true;
+                    pb.bannerKind = 'info';
+                    pb.bannerText = 'Calling Profile Builder. This may take a few seconds.';
+                    render();
+                    try {
+                        const res = await fetch('/api/profile-builder/generate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                partNumber: pb.partNumber,
+                                revision: pb.revision || null,
+                                instructions: pb.instructions || '',
+                            }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.message || data.detail || res.statusText);
+                        pb.context = data.context || pb.context;
+                        pb.draftText = JSON.stringify(data.draftProfile, null, 2);
+                        pb.validationIssues = data.validationIssues || [];
+                        pb.bannerKind = 'success';
+                        pb.bannerText = 'Draft generated. Review the JSON before applying.';
+                    } catch (e) {
+                        pb.bannerKind = 'warn';
+                        pb.bannerText = 'Draft generation failed: ' + (e && e.message ? e.message : String(e));
+                    } finally {
+                        pb.generating = false;
+                        render();
+                    }
+                }
+                async function applyDraft() {
+                    let profile;
+                    try {
+                        profile = JSON.parse(pb.draftText);
+                    } catch (e) {
+                        pb.bannerKind = 'warn';
+                        pb.bannerText = 'Draft JSON is invalid. Fix it before applying.';
+                        render();
+                        return;
+                    }
+                    pb.applying = true;
+                    pb.bannerKind = 'info';
+                    pb.bannerText = 'Applying profile...';
+                    render();
+                    try {
+                        const res = await fetch('/api/profile-builder/apply', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                partNumber: pb.partNumber,
+                                revision: pb.revision || null,
+                                profile,
+                                overwriteConfirmed: pb.overwriteConfirmed || '',
+                            }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) {
+                            if (data.requiresOverwriteConfirmation) {
+                                pb.bannerKind = 'warn';
+                                pb.bannerText = data.message || 'Overwrite confirmation required.';
+                                return;
+                            }
+                            throw new Error(data.message || data.detail || res.statusText);
+                        }
+                        pb.validationIssues = data.validationIssues || [];
+                        pb.bannerKind = 'success';
+                        pb.bannerText = 'Profile applied: ' + (data.written || []).join(', ');
+                        if (window._toast) window._toast('Inspection profile applied for ' + pb.partNumber, 'success');
+                        try {
+                            const profiles = await fetch('/api/profiles').then(r => r.json());
+                            if (typeof state !== 'undefined' && Array.isArray(profiles)) {
+                                state.profiles = profiles;
+                                if (typeof populateDropdown === 'function') populateDropdown(profiles);
+                            }
+                            if (typeof selectPartNumber === 'function') selectPartNumber(pb.partNumber, false);
+                        } catch (_) { /* best effort refresh */ }
+                    } catch (e) {
+                        pb.bannerKind = 'warn';
+                        pb.bannerText = 'Apply failed: ' + (e && e.message ? e.message : String(e));
+                    } finally {
+                        pb.applying = false;
+                        render();
+                    }
+                }
+                function open() {
+                    pb = emptyState();
+                    panel.removeAttribute('hidden');
+                    render();
+                    loadContext();
+                }
+                function close() { panel.setAttribute('hidden', ''); }
+
+                openBtn.addEventListener('click', open);
+                closeBtn?.addEventListener('click', close);
+                document.addEventListener('keydown', e => {
+                    if (e.key === 'Escape' && !panel.hasAttribute('hidden')) close();
+                });
+                window._openProfileBuilder = open;
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initProfileBuilder, { once: true });
+            } else {
+                initProfileBuilder();
+            }
+        })();
+
+        /*
          * ─── Library Intake Wizard — frontend (Step 3) ─────────────────────
          * Right-side slide-out panel that walks the operator through a
          * 6-step intake flow per the user's MVP scope (a simplification
@@ -33151,6 +33476,22 @@
             }
         })();
     </script>
+
+    <!-- Profile Builder panel.
+         Draft/review/apply flow for replacing a Library Intake Wizard
+         stub with a real inspection profile. Sibling of <script> for the
+         same fixed-position reason as the intake wizard panel. -->
+    <div class="intake-wizard-panel profile-builder-panel" id="profileBuilderPanel" hidden role="dialog" aria-labelledby="profileBuilderTitle">
+        <div class="intake-wizard-header">
+            <div>
+                <div class="iw-title" id="profileBuilderTitle">Build Inspection Profile</div>
+                <div class="iw-subtitle">Draft from promoted CAD + drawing context</div>
+            </div>
+            <button class="intake-wizard-close-btn" id="profileBuilderCloseBtn" type="button" aria-label="Close Profile Builder">×</button>
+        </div>
+        <div class="intake-wizard-body"   id="profileBuilderBody"></div>
+        <div class="intake-wizard-footer" id="profileBuilderFooter"></div>
+    </div>
 
     <!-- ── Library Intake Wizard panel (Step 3 of the wizard) ──
          Right-side slide-out overlay per docs/library-intake-wizard-plan.md

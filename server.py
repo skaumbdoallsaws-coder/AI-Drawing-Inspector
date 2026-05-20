@@ -36,7 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ai_inspector.spatial import SpatialInspector
-from ai_inspector.spatial.profile_validator import validate_all_profiles
+from ai_inspector.spatial.profile_validator import validate_all_profiles, validate_profile
 from ai_inspector.utils.drawing_map import (
     apply_drawing_map_to_findings,
     load_drawing_map,
@@ -2727,6 +2727,502 @@ async def library_intake_promote(body: IntakeRequestBody):
     if not result.get("success", False):
         return JSONResponse(status_code=500, content=result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Profile Builder MVP
+# ---------------------------------------------------------------------------
+#
+# The Library Intake Wizard deliberately writes an incomplete stub when no
+# real inspection profile exists. Profile Builder is the next step: use the
+# promoted part metadata + drawing map to draft a real inspection profile,
+# then require an explicit apply action before replacing the stub. This tool
+# is intentionally draft/review oriented: it never silently overwrites a real
+# hand-authored profile.
+
+PROFILE_BUILDER_MODEL_DEFAULT = "claude-sonnet-4-5-20250929"
+PROFILE_BUILDER_AUTHOR        = "profile-builder@1.0.0"
+
+
+class ProfileBuilderGenerateBody(BaseModel):
+    partNumber:    str
+    revision:      Optional[str] = None
+    instructions:  Optional[str] = None
+    model:         Optional[str] = None
+
+
+class ProfileBuilderApplyBody(BaseModel):
+    partNumber:            str
+    revision:              Optional[str] = None
+    profile:               Dict[str, Any]
+    overwriteConfirmed:    Optional[str] = None
+
+
+def _profile_builder_revision_dirs(library_dir: Path, pn: str) -> List[Path]:
+    parts_dir = library_dir / "parts" / pn
+    if not parts_dir.exists() or not parts_dir.is_dir():
+        return []
+    return sorted(
+        [p for p in parts_dir.iterdir() if p.is_dir() and p.name.startswith("rev")],
+        key=lambda p: (p.stat().st_mtime, p.name),
+    )
+
+
+def _profile_builder_resolve_revision(library_dir: Path, pn: str, revision: Optional[str]) -> Tuple[Optional[str], Optional[Path]]:
+    if revision:
+        safe_rev = _intake_sanitize_revision(revision)
+        if not safe_rev:
+            raise HTTPException(status_code=400, detail="revision must match rev<alnum> (for example revA).")
+        rev_dir = library_dir / "parts" / pn / safe_rev
+        return safe_rev, rev_dir
+
+    dirs = _profile_builder_revision_dirs(library_dir, pn)
+    if not dirs:
+        return None, None
+    rev_dir = dirs[-1]
+    return rev_dir.name, rev_dir
+
+
+def _profile_builder_load_json(path: Optional[Path]) -> Optional[dict]:
+    if path is None or not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _profile_builder_profile_kind(data: Optional[dict]) -> str:
+    if data is None:
+        return "missing"
+    if _is_intake_stub_profile(data):
+        return "stub"
+    return "real"
+
+
+def _profile_builder_part_summary(part_data: Optional[dict]) -> dict:
+    if not isinstance(part_data, dict):
+        return {"featureCount": 0, "features": [], "featureTypes": {}}
+
+    raw_features: List[dict] = []
+    if isinstance(part_data.get("featureTree"), list):
+        skip_types = {
+            "commentsfolder", "favoritefolder", "historyfolder", "selectionsetfolder",
+            "sensorfolder", "docsfolder", "detailcabinet", "surfacebodyfolder",
+            "solidbodyfolder", "envfolder", "inkmarkupfolder", "eqnfolder",
+            "materialfolder", "refplane", "originprofilefeature", "refaxis",
+        }
+        for feat in part_data.get("featureTree", []):
+            if not isinstance(feat, dict):
+                continue
+            ftype = str(feat.get("type") or "")
+            if ftype.lower() in skip_types:
+                continue
+            raw_features.append({
+                "name": feat.get("name", ""),
+                "type": ftype,
+                "suppressed": bool(feat.get("suppressedInActive", False)),
+            })
+    elif isinstance(part_data.get("features"), list):
+        for feat in part_data.get("features", []):
+            if isinstance(feat, dict):
+                raw_features.append({
+                    "name": feat.get("name") or feat.get("id") or "",
+                    "type": feat.get("type", ""),
+                    "suppressed": bool(feat.get("suppressed", False)),
+                })
+
+    type_counts: Dict[str, int] = {}
+    for feat in raw_features:
+        ftype = str(feat.get("type") or "Unknown")
+        type_counts[ftype] = type_counts.get(ftype, 0) + 1
+
+    return {
+        "documentType": part_data.get("documentType"),
+        "activeConfiguration": part_data.get("activeConfiguration"),
+        "units": part_data.get("units"),
+        "boundingBox": part_data.get("boundingBox", {}),
+        "massProperties": {
+            "mass_kg": ((part_data.get("massProperties") or {}).get("mass_kg")),
+            "volumeMm3": ((part_data.get("massProperties") or {}).get("volumeMm3")),
+            "surfaceAreaMm2": ((part_data.get("massProperties") or {}).get("surfaceAreaMm2")),
+        },
+        "featureCount": len(raw_features),
+        "featureTypes": type_counts,
+        "features": raw_features[:60],
+    }
+
+
+def _profile_builder_drawing_summary(drawing_map: Optional[dict]) -> dict:
+    if not isinstance(drawing_map, dict):
+        return {"sheetCount": 0, "viewCount": 0, "dimensions": [], "notes": [], "gtols": []}
+
+    sheets = drawing_map.get("sheets") if isinstance(drawing_map.get("sheets"), list) else []
+    dimensions: List[dict] = []
+    notes: List[str] = []
+    gtols: List[str] = []
+    view_count = 0
+
+    for sheet in sheets:
+        if not isinstance(sheet, dict):
+            continue
+        sheet_name = sheet.get("sheetName") or sheet.get("name") or ""
+        views = sheet.get("views") if isinstance(sheet.get("views"), list) else []
+        view_count += len(views)
+        for view in views:
+            if not isinstance(view, dict):
+                continue
+            view_name = view.get("viewName") or view.get("name") or ""
+            anns = view.get("annotations") if isinstance(view.get("annotations"), list) else []
+            for ann in anns:
+                if not isinstance(ann, dict):
+                    continue
+                dim = ann.get("dimensionText")
+                note = ann.get("noteText")
+                gtol = ann.get("gtolText")
+                if dim and len(dimensions) < 60:
+                    dimensions.append({
+                        "sheet": sheet_name,
+                        "view": view_name,
+                        "text": str(dim),
+                        "featureName": ann.get("featureName"),
+                    })
+                if note and len(notes) < 30:
+                    notes.append(str(note))
+                if gtol and len(gtols) < 30:
+                    gtols.append(str(gtol))
+
+    return {
+        "fileName": drawing_map.get("fileName"),
+        "referencedModelPath": drawing_map.get("referencedModelPath"),
+        "sheetCount": len(sheets),
+        "viewCount": view_count,
+        "projectionType": (sheets[0].get("projectionType") if sheets and isinstance(sheets[0], dict) else None),
+        "dimensions": dimensions,
+        "notes": notes,
+        "gtols": gtols,
+    }
+
+
+def _profile_builder_context(library_dir: Path, pn: str, revision: Optional[str]) -> dict:
+    safe_rev, rev_dir = _profile_builder_resolve_revision(library_dir, pn, revision)
+    root_profile_path = library_dir / f"{pn}_inspection_profile.json"
+    root_profile = _profile_builder_load_json(root_profile_path)
+
+    part_path = (rev_dir / f"{pn}.json") if rev_dir is not None else (library_dir / f"{pn}.json")
+    drawing_map_path = (rev_dir / f"{pn}_drawing_map.json") if rev_dir is not None else (library_dir / f"{pn}_drawing_map.json")
+    manifest_path = (rev_dir / "intake_manifest.json") if rev_dir is not None else None
+
+    part_data = _profile_builder_load_json(part_path)
+    drawing_map = _profile_builder_load_json(drawing_map_path)
+    manifest = _profile_builder_load_json(manifest_path)
+
+    missing = []
+    if safe_rev and rev_dir is not None and not rev_dir.exists():
+        missing.append("revision")
+    if part_data is None:
+        missing.append("part_metadata")
+    if drawing_map is None:
+        missing.append("drawing_map")
+
+    return {
+        "partNumber": pn,
+        "revision": safe_rev,
+        "ready": not missing,
+        "missing": missing,
+        "paths": {
+            "revisionDir": _intake_relpath(library_dir, rev_dir) if rev_dir is not None else "",
+            "partMetadata": _intake_relpath(library_dir, part_path),
+            "drawingMap": _intake_relpath(library_dir, drawing_map_path),
+            "intakeManifest": _intake_relpath(library_dir, manifest_path) if manifest_path else "",
+            "rootProfile": _intake_relpath(library_dir, root_profile_path),
+        },
+        "existingProfile": {
+            "kind": _profile_builder_profile_kind(root_profile),
+            "path": _intake_relpath(library_dir, root_profile_path),
+            "partName": (root_profile or {}).get("part_name") or (root_profile or {}).get("name") or "",
+        },
+        "intakeManifest": manifest or {},
+        "partSummary": _profile_builder_part_summary(part_data),
+        "drawingSummary": _profile_builder_drawing_summary(drawing_map),
+    }
+
+
+def _profile_builder_prompt(context: dict, instructions: Optional[str]) -> str:
+    payload = {
+        "partNumber": context.get("partNumber"),
+        "revision": context.get("revision"),
+        "existingProfile": context.get("existingProfile"),
+        "intakeManifest": context.get("intakeManifest"),
+        "partSummary": context.get("partSummary"),
+        "drawingSummary": context.get("drawingSummary"),
+        "operatorInstructions": instructions or "",
+    }
+    return (
+        "You are drafting an InspectorPro inspection profile for a manufacturing part.\n"
+        "Return ONLY valid JSON. Do not include markdown.\n\n"
+        "Required JSON shape:\n"
+        "{\n"
+        '  "part_number": "<part number>",\n'
+        '  "part_name": "<short product name>",\n'
+        '  "part_description": "<plain-language manufacturing description>",\n'
+        '  "features": [\n'
+        '    {"name": "<feature group>", "type": "<feature type>", "count": <integer>, "spatial_description": "<where it appears in the drawing/views>"}\n'
+        "  ],\n"
+        '  "view_expectations": {\n'
+        '    "front_or_plan": "<expected drawing content>",\n'
+        '    "side_or_right": "<expected drawing content>",\n'
+        '    "top": "<expected drawing content>",\n'
+        '    "isometric": "<expected drawing content>",\n'
+        '    "section_views": "<expected drawing content>",\n'
+        '    "detail_views": "<expected drawing content>"\n'
+        "  }\n"
+        "}\n\n"
+        "Rules:\n"
+        "- This is a draft profile for human review, not final QC authority.\n"
+        "- Group repeated features into logical feature groups with counts.\n"
+        "- Use only supplied CAD/drawing context. If uncertain, be conservative.\n"
+        "- Do not invent tolerances, materials, supplier requirements, or criticality not supported by the context.\n"
+        "- Do not include source/status/inspectionReady fields; applying the draft makes it a real profile.\n\n"
+        "--- CONTEXT JSON ---\n"
+        f"{json.dumps(payload, indent=2)}"
+    )
+
+
+def _extract_json_object(text: str) -> dict:
+    text = (text or "").strip()
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError("model did not return a JSON object")
+    data = json.loads(match.group(0))
+    if not isinstance(data, dict):
+        raise ValueError("model JSON was not an object")
+    return data
+
+
+def _normalize_profile_builder_draft(profile: dict, pn: str) -> dict:
+    if not isinstance(profile, dict):
+        raise ValueError("profile must be a JSON object")
+
+    out: Dict[str, Any] = {
+        "part_number": str(profile.get("part_number") or pn),
+        "part_name": str(profile.get("part_name") or profile.get("name") or pn),
+        "part_description": str(profile.get("part_description") or profile.get("description") or ""),
+        "features": [],
+        "view_expectations": profile.get("view_expectations") if isinstance(profile.get("view_expectations"), dict) else {},
+    }
+
+    raw_features = profile.get("features")
+    if isinstance(raw_features, dict):
+        raw_features = raw_features.get("items") or raw_features.get("features")
+    if not isinstance(raw_features, list):
+        raw_features = []
+
+    for idx, feat in enumerate(raw_features):
+        if not isinstance(feat, dict):
+            continue
+        name = str(feat.get("name") or f"Feature {idx + 1}").strip()
+        ftype = str(feat.get("type") or "Feature").strip()
+        try:
+            count = int(feat.get("count", 1))
+        except Exception:
+            count = 1
+        out["features"].append({
+            "name": name,
+            "type": ftype,
+            "count": max(1, count),
+            "spatial_description": str(feat.get("spatial_description") or feat.get("description") or "").strip(),
+        })
+
+    if not out["features"]:
+        raise ValueError("profile must include at least one feature")
+    return out
+
+
+def _generate_profile_builder_draft(context: dict, instructions: Optional[str], model: Optional[str]) -> Tuple[dict, str]:
+    try:
+        import anthropic
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Anthropic SDK not installed")
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    selected_model = (model or os.getenv("INSPECTORPRO_PROFILE_BUILDER_MODEL") or PROFILE_BUILDER_MODEL_DEFAULT).strip()
+    client = anthropic.Anthropic(api_key=api_key)
+    prompt = _profile_builder_prompt(context, instructions)
+
+    with time_block() as _elapsed_ms:
+        try:
+            response = client.messages.create(
+                model=selected_model,
+                max_tokens=3000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception as ex:
+            status, error_type = classify_exception_status(ex)
+            record_anthropic_call(
+                model=selected_model, response=None, latency_ms=_elapsed_ms(),
+                status=status, errorType=error_type,
+                route="/api/profile-builder/generate",
+                workflow="profile_builder",
+                agentType="profile_builder",
+                partNumber=context.get("partNumber"),
+            )
+            raise
+
+    record_anthropic_call(
+        model=selected_model, response=response, latency_ms=_elapsed_ms(),
+        route="/api/profile-builder/generate",
+        workflow="profile_builder",
+        agentType="profile_builder",
+        partNumber=context.get("partNumber"),
+    )
+
+    response_text = ""
+    for block in getattr(response, "content", []) or []:
+        if hasattr(block, "text"):
+            response_text += block.text
+    return _extract_json_object(response_text), selected_model
+
+
+def _profile_builder_write_json_atomic(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    bak = path.with_suffix(path.suffix + ".bak")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    if path.exists():
+        try:
+            if bak.exists():
+                bak.unlink()
+            os.replace(path, bak)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+    os.replace(tmp, path)
+
+
+@app.get("/api/profile-builder/context/{partNumber}")
+async def profile_builder_context(partNumber: str, revision: Optional[str] = Query(default=None)):
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    return _profile_builder_context(library_path(), safe_pn, revision)
+
+
+@app.post("/api/profile-builder/generate")
+async def profile_builder_generate(body: ProfileBuilderGenerateBody):
+    safe_pn = sanitize_part_number(body.partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    context = _profile_builder_context(library_path(), safe_pn, body.revision)
+    if not context.get("ready"):
+        return JSONResponse(status_code=409, content={
+            "success": False,
+            "error": "profile_builder_context_incomplete",
+            "message": "Profile Builder needs promoted part metadata and drawing map before it can draft a profile.",
+            "missing": context.get("missing", []),
+            "context": context,
+        })
+
+    try:
+        raw_profile, model_used = _generate_profile_builder_draft(context, body.instructions, body.model)
+        draft = _normalize_profile_builder_draft(raw_profile, safe_pn)
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.error("profile_builder.generate failed pn=%s msg=%s", safe_pn, ex)
+        raise HTTPException(status_code=500, detail=f"Profile Builder failed: {ex}")
+
+    issues = validate_profile(draft)
+    return {
+        "success": True,
+        "partNumber": safe_pn,
+        "revision": context.get("revision"),
+        "model": model_used,
+        "draftProfile": draft,
+        "validationIssues": issues,
+        "context": {
+            "paths": context.get("paths", {}),
+            "existingProfile": context.get("existingProfile", {}),
+            "partFeatureCount": (context.get("partSummary") or {}).get("featureCount", 0),
+            "drawingSheetCount": (context.get("drawingSummary") or {}).get("sheetCount", 0),
+            "drawingViewCount": (context.get("drawingSummary") or {}).get("viewCount", 0),
+        },
+    }
+
+
+@app.post("/api/profile-builder/apply")
+async def profile_builder_apply(body: ProfileBuilderApplyBody):
+    safe_pn = sanitize_part_number(body.partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev, rev_dir = _profile_builder_resolve_revision(library_path(), safe_pn, body.revision)
+    if safe_rev and (rev_dir is None or not rev_dir.exists()):
+        raise HTTPException(status_code=404, detail=f"Revision {safe_rev} does not exist for part {safe_pn}")
+
+    try:
+        profile = _normalize_profile_builder_draft(body.profile, safe_pn)
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Invalid profile draft: {ex}")
+    issues = validate_profile(profile)
+    hard_errors = [i for i in issues if i.get("severity") == "error"]
+    if hard_errors:
+        return JSONResponse(status_code=422, content={
+            "success": False,
+            "error": "profile_validation_failed",
+            "message": "Profile has validation errors. Fix the draft before applying.",
+            "validationIssues": issues,
+        })
+
+    library_dir = library_path()
+    root_profile = library_dir / f"{safe_pn}_inspection_profile.json"
+    existing = _profile_builder_load_json(root_profile)
+    existing_kind = _profile_builder_profile_kind(existing)
+    if existing_kind == "real" and (body.overwriteConfirmed or "").strip() != safe_pn:
+        return JSONResponse(status_code=409, content={
+            "success": False,
+            "error": "real_profile_overwrite_requires_confirmation",
+            "message": f"A real profile already exists. Type {safe_pn} to confirm overwrite.",
+            "requiresOverwriteConfirmation": True,
+            "confirmationText": safe_pn,
+            "existingProfile": {"kind": existing_kind, "path": _intake_relpath(library_dir, root_profile)},
+        })
+
+    written: List[str] = []
+    try:
+        _profile_builder_write_json_atomic(root_profile, profile)
+        written.append(_intake_relpath(library_dir, root_profile))
+        if rev_dir is not None and rev_dir.exists():
+            rev_profile = rev_dir / f"{safe_pn}_inspection_profile.json"
+            _profile_builder_write_json_atomic(rev_profile, profile)
+            written.append(_intake_relpath(library_dir, rev_profile))
+    except Exception as ex:
+        logger.error("profile_builder.apply failed pn=%s msg=%s", safe_pn, ex)
+        raise HTTPException(status_code=500, detail=f"failed to write profile: {ex}")
+
+    if inspector is not None and hasattr(inspector, "refresh_profile_index"):
+        try:
+            inspector.refresh_profile_index()
+        except Exception as ex:
+            logger.warning("profile_builder.refresh_profile_index failed pn=%s: %s", safe_pn, ex)
+
+    return {
+        "success": True,
+        "partNumber": safe_pn,
+        "revision": safe_rev,
+        "written": written,
+        "validationIssues": issues,
+        "replacedProfileKind": existing_kind,
+    }
 
 
 @app.post("/api/inspect")

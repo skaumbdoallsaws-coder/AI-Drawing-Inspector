@@ -314,6 +314,49 @@ def test_promote_writes_intake_manifest_contents(intake_library: Path):
     assert "1099999_drawing.pdf" in file_paths
 
 
+def test_promote_carries_all_metadata_fields_into_manifest(intake_library: Path):
+    """Regression for the 'intake_manifest had blank/null drawing
+    metadata' smoke bug. Drawing extraction has no on-disk sidecar
+    for the backend to enrich from (the staging zip is cleaned up
+    by /api/request-extraction's atomic install), so the body fields
+    are the ONLY source for sourceDrawing.packageId / sheetCount /
+    viewCount / sourceDocPath in intake_manifest.json. Confirm every
+    field the wizard now passes survives the round-trip into the
+    manifest, AND that body fields take precedence over sidecar
+    enrichment for part metadata."""
+    # Remove the sidecar manifest so backend enrichment cannot mask a
+    # missing pass-through (this test isolates body -> manifest).
+    sidecar_manifest = (intake_library / "_bridge_imports" / "part"
+                        / "1099999" / "deadbeef0002" / "manifest.json")
+    if sidecar_manifest.exists():
+        sidecar_manifest.unlink()
+
+    body = _default_body()
+    body["drawingPackageId"]        = "DRAWING_PKG_001"
+    body["drawingSheetCount"]       = 3
+    body["drawingViewCount"]        = 12
+    body["drawingSourceDocPath"]    = "C:/cad/big-drawing.SLDDRW"
+    body["partFeatureCount"]        = 99
+    body["partActiveConfiguration"] = "TestConfig"
+    body["partSourceDocPath"]       = "C:/cad/small-part.SLDPRT"
+
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/promote", json=body)
+    assert r.status_code == 200, r.text
+
+    manifest = json.loads((intake_library / "parts" / "1099999" / "revA" / "intake_manifest.json").read_text(encoding="utf-8"))
+    # Drawing block: every body field must survive into the manifest.
+    assert manifest["sourceDrawing"]["packageId"]     == "DRAWING_PKG_001"
+    assert manifest["sourceDrawing"]["sheetCount"]    == 3
+    assert manifest["sourceDrawing"]["viewCount"]     == 12
+    assert manifest["sourceDrawing"]["sourceDocPath"] == "C:/cad/big-drawing.SLDDRW"
+    # Part block: body wins over absent sidecar enrichment.
+    assert manifest["sourcePart"]["packageId"]           == "deadbeef0002"
+    assert manifest["sourcePart"]["featureCount"]        == 99
+    assert manifest["sourcePart"]["activeConfiguration"] == "TestConfig"
+    assert manifest["sourcePart"]["sourceDocPath"]       == "C:/cad/small-part.SLDPRT"
+
+
 def test_promote_writes_stub_at_root_and_per_rev(intake_library: Path):
     client = TestClient(server.app)
     r = client.post("/api/library/intake/promote", json=_default_body())

@@ -1439,7 +1439,7 @@ async def _bridge_extract_and_unpack(
                  snap.component_count, snap.mate_count, snap.active_configuration)
 
     # ── Stage path + download zip ──────────────────────────────────
-    library_root = Path("400S_Sorted_Library")
+    library_root = LIBRARY_DIR
     staging_dir = library_root / "_staging"
     staging_dir.mkdir(parents=True, exist_ok=True)
     if not snap.package_id:

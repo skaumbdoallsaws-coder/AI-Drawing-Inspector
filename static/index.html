@@ -32537,6 +32537,31 @@
                         return;
                     }
 
+                    // Library Intake Wizard auto-fill: cache the bridge
+                    // response under a per-kind slot so the wizard's
+                    // /api/library/intake/preview and /promote bodies can
+                    // be populated with sheetCount / viewCount /
+                    // featureCount / activeConfiguration / sourceDocPath
+                    // without the operator pasting them by hand. Drawing
+                    // extraction has no on-disk sidecar to enrich from on
+                    // the backend, so this client-side capture is the only
+                    // source of sourceDrawing metadata for intake_manifest.
+                    // pollBridgeStatus is frozen while inFlight is true, so
+                    // currentActiveDoc still holds the doc the operator
+                    // extracted FROM (its `path` is the sourceDocPath).
+                    try {
+                        const cachedKind = (currentActiveDocKind || '').toLowerCase();
+                        if (cachedKind) {
+                            window._lastBridgeExtractions = window._lastBridgeExtractions || {};
+                            window._lastBridgeExtractions[cachedKind] = {
+                                partNumber:    pn,
+                                sourceDocPath: (currentActiveDoc && currentActiveDoc.path) || '',
+                                capturedAtMs:  Date.now(),
+                                responseData:  data,
+                            };
+                        }
+                    } catch (_) { /* cache is best-effort */ }
+
                     // Success path: kind-aware toast + per-kind post-success hook.
                     if (window._toast) window._toast(cfg.successToast(pn, data), 'success');
                     await cfg.postSuccess(pn);
@@ -32580,6 +32605,7 @@
          * extraction (the bridge's auto-relabel kind dispatch).
          */
         (function () {
+            function initIntakeWizard() {
             const panel    = document.getElementById('intakeWizardPanel');
             const openBtn  = document.getElementById('openIntakeWizardBtn');
             if (!panel || !openBtn) return;
@@ -32597,23 +32623,61 @@
             function _emptyState() {
                 return {
                     step: 1,
-                    partNumber:           '',
-                    revision:             '',
-                    intakeMode:           'brand-new-part',
-                    sourceLoading:        false,
-                    sourceData:           null,
-                    drawingPackageId:     '',
-                    partPackageId:        '',
-                    drawingSourceDocPath: '',
-                    partSourceDocPath:    '',
-                    previewLoading:       false,
-                    previewResult:        null,
-                    overwriteInput:       '',
-                    promoteLoading:       false,
-                    promoteResult:        null,
-                    bannerKind:           '',  // 'info' | 'warn' | 'success' | '' (no banner)
-                    bannerText:           '',
+                    partNumber:               '',
+                    revision:                 '',
+                    intakeMode:               'brand-new-part',
+                    sourceLoading:            false,
+                    sourceData:               null,
+                    // Metadata fields the wizard passes through to
+                    // /api/library/intake/preview + /promote so the
+                    // intake_manifest.json carries the full extraction
+                    // provenance. Drawing fields are auto-filled from
+                    // window._lastBridgeExtractions.drawing (captured at
+                    // bridge success path); part fields are auto-filled
+                    // from window._lastBridgeExtractions.part and from
+                    // /api/library/revisions/{pn}.lastBridgePartPackageId.
+                    drawingPackageId:         '',
+                    drawingSheetCount:        null,
+                    drawingViewCount:         null,
+                    drawingSourceDocPath:     '',
+                    partPackageId:            '',
+                    partFeatureCount:         null,
+                    partActiveConfiguration:  '',
+                    partSourceDocPath:        '',
+                    previewLoading:           false,
+                    previewResult:            null,
+                    overwriteInput:           '',
+                    promoteLoading:           false,
+                    promoteResult:            null,
+                    bannerKind:               '',  // 'info' | 'warn' | 'success' | '' (no banner)
+                    bannerText:               '',
                 };
+            }
+
+            // Pull captured drawing/part extraction metadata out of the
+            // bridge's window._lastBridgeExtractions cache (populated by
+            // the bridge IIFE's success path) and into wizard state. Only
+            // fills slots that are still empty so an operator override
+            // wins over the cache. Matches by partNumber to avoid cross-
+            // contaminating data from a previous part's extraction.
+            function _autofillFromBridgeCache(pn) {
+                const cache = (window._lastBridgeExtractions) || {};
+                const d = cache.drawing;
+                if (d && d.partNumber === pn) {
+                    const rd = d.responseData || {};
+                    if (!s.drawingPackageId && rd.packageId) s.drawingPackageId = rd.packageId;
+                    if (s.drawingSheetCount == null && typeof rd.sheetCount === 'number') s.drawingSheetCount = rd.sheetCount;
+                    if (s.drawingViewCount  == null && typeof rd.viewCount  === 'number') s.drawingViewCount  = rd.viewCount;
+                    if (!s.drawingSourceDocPath && d.sourceDocPath) s.drawingSourceDocPath = d.sourceDocPath;
+                }
+                const p = cache.part;
+                if (p && p.partNumber === pn) {
+                    const rp = p.responseData || {};
+                    if (!s.partPackageId && rp.packageId) s.partPackageId = rp.packageId;
+                    if (s.partFeatureCount == null && typeof rp.featureCount === 'number') s.partFeatureCount = rp.featureCount;
+                    if (!s.partActiveConfiguration && rp.activeConfiguration) s.partActiveConfiguration = rp.activeConfiguration;
+                    if (!s.partSourceDocPath && p.sourceDocPath) s.partSourceDocPath = p.sourceDocPath;
+                }
             }
 
             function open() {
@@ -32701,6 +32765,10 @@
                     s.partNumber  = pn;
                     s.revision    = rev;
                     s.intakeMode  = mode;
+                    // Pull whatever the bridge extraction success path
+                    // cached for this partNumber so the operator sees
+                    // pre-filled metadata on Step 2 instead of blanks.
+                    _autofillFromBridgeCache(pn);
                     clearBanner();
                     s.sourceLoading = true; s.sourceData = null;
                     go(2);
@@ -32748,6 +32816,29 @@
                 rows.push(['Intake mode',           _esc(s.intakeMode),                       false]);
                 rows.push(['Root drawing map',      sd.rootDrawingMapPresent ? 'Present (just extracted)' : 'MISSING — run Re-extract Drawing first', !sd.rootDrawingMapPresent]);
                 rows.push(['Bridge part package',   _esc(s.partPackageId || sd.lastBridgePartPackageId || 'MISSING — run Re-extract Part first'), !(s.partPackageId || sd.lastBridgePartPackageId)]);
+                // Captured drawing-extraction metadata. None of these come
+                // from the backend (drawing extraction has no on-disk
+                // sidecar) -- they are populated from the bridge IIFE's
+                // success-path cache. Surface them so the operator can see
+                // that the intake_manifest will carry real provenance.
+                if (s.drawingPackageId) {
+                    rows.push(['Drawing package',          _esc(s.drawingPackageId),                    false]);
+                }
+                if (s.drawingSheetCount != null) {
+                    rows.push(['Drawing sheets / views',   `${s.drawingSheetCount} sheet(s), ${s.drawingViewCount ?? '?'} view(s)`,  false]);
+                }
+                if (s.drawingSourceDocPath) {
+                    rows.push(['Drawing source path',      _esc(s.drawingSourceDocPath),                false]);
+                }
+                if (s.partFeatureCount != null) {
+                    rows.push(['Part features',            String(s.partFeatureCount),                  false]);
+                }
+                if (s.partActiveConfiguration) {
+                    rows.push(['Part configuration',       _esc(s.partActiveConfiguration),             false]);
+                }
+                if (s.partSourceDocPath) {
+                    rows.push(['Part source path',         _esc(s.partSourceDocPath),                   false]);
+                }
                 const existingRevs = (sd.revisions || []).map(r => r.name);
                 if (existingRevs.length) {
                     const conflict = existingRevs.includes(s.revision);
@@ -33008,8 +33099,17 @@
                     drawingPackageId:  s.drawingPackageId || '',
                     partPackageId:     s.partPackageId,
                 };
-                if (s.drawingSourceDocPath) out.drawingSourceDocPath = s.drawingSourceDocPath;
-                if (s.partSourceDocPath)    out.partSourceDocPath    = s.partSourceDocPath;
+                // Pass-through extraction provenance. The pydantic
+                // IntakeRequestBody declares each as Optional[...], so
+                // omitting a field when we don't have a value leaves the
+                // backend with its declared default (None) and the
+                // manifest writes the blank-correct shape.
+                if (s.drawingSourceDocPath)        out.drawingSourceDocPath        = s.drawingSourceDocPath;
+                if (s.partSourceDocPath)           out.partSourceDocPath           = s.partSourceDocPath;
+                if (s.drawingSheetCount != null)   out.drawingSheetCount           = s.drawingSheetCount;
+                if (s.drawingViewCount  != null)   out.drawingViewCount            = s.drawingViewCount;
+                if (s.partFeatureCount  != null)   out.partFeatureCount            = s.partFeatureCount;
+                if (s.partActiveConfiguration)     out.partActiveConfiguration     = s.partActiveConfiguration;
                 if (s.overwriteInput === s.revision) out.overwriteConfirmed = s.revision;
                 return out;
             }
@@ -33043,6 +33143,12 @@
                 if (e.key === 'Escape' && !panel.hasAttribute('hidden')) close();
             });
             window._openIntakeWizard = open;
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initIntakeWizard, { once: true });
+            } else {
+                initIntakeWizard();
+            }
         })();
     </script>
 

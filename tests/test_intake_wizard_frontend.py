@@ -200,3 +200,74 @@ def test_served_html_does_not_break_step1_stub_surface():
         'profile_incomplete',
     ]:
         assert marker in html, f"Step 1 marker regressed: {marker!r}"
+
+
+# ── Stabilization-pass regression guards ──────────────────────────────
+
+
+def test_served_html_wizard_initializes_after_dom_ready():
+    """Regression for the 'wizard button does nothing on first click'
+    smoke bug. The wizard panel HTML is positioned AFTER the script
+    tag that runs the wizard IIFE -- without a DOMContentLoaded gate,
+    document.getElementById('intakeWizardPanel') returns null at IIFE
+    eval time and the early-return `if (!panel || !openBtn) return;`
+    fires silently. Confirm the init-defer pattern is in the served
+    HTML so the wizard wires up regardless of script vs. DOM ordering."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    assert 'function initIntakeWizard()' in html, \
+        "wizard init was inlined again -- needs to live inside initIntakeWizard()"
+    assert "document.readyState === 'loading'" in html, \
+        "readyState gate missing -- wizard will silently no-op if HTML loads first"
+    assert "'DOMContentLoaded', initIntakeWizard" in html, \
+        "DOMContentLoaded dispatch missing -- wizard will silently no-op"
+
+
+def test_bridge_extract_uses_resolved_library_dir():
+    """Regression for the 'worktree-local stub library' smoke bug.
+    _bridge_extract_and_unpack was using Path('400S_Sorted_Library')
+    which resolves against process CWD -- when uvicorn runs from a
+    worktree under tmp/, the bridge wrote drawings into a fake
+    library next to the worktree instead of the canonical one. Must
+    use the resolved server.LIBRARY_DIR (which respects the multi-
+    candidate scoring in _resolve_library_dir)."""
+    import inspect
+    src = inspect.getsource(server._bridge_extract_and_unpack)
+    # Old buggy patterns must not return
+    assert 'Path("400S_Sorted_Library")' not in src, \
+        "bridge still uses CWD-relative Path('400S_Sorted_Library') -- " \
+        "worktree-local library bug is back"
+    assert "Path('400S_Sorted_Library')" not in src
+    # New correct pattern present
+    assert "library_root = LIBRARY_DIR" in src, \
+        "bridge no longer pins library_root to the resolved LIBRARY_DIR"
+
+
+def test_wizard_metadata_capture_helpers_present():
+    """Regression for the 'intake_manifest has blank drawing metadata'
+    smoke bug. The wizard must (a) cache the bridge response in
+    window._lastBridgeExtractions, (b) pull from it via
+    _autofillFromBridgeCache when the operator advances past Step 1,
+    and (c) include the captured count fields in _intakeBody so they
+    flow into preview/promote and into intake_manifest.json. Static
+    checks here -- behavioural coverage is in
+    test_intake_preview_promote.test_promote_carries_all_metadata_fields_into_manifest."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        # Cache write on bridge success
+        'window._lastBridgeExtractions',
+        # State fields the cache populates
+        'drawingSheetCount:        null',
+        'drawingViewCount:         null',
+        'partFeatureCount:         null',
+        # Auto-fill helper
+        'function _autofillFromBridgeCache',
+        '_autofillFromBridgeCache(pn)',
+        # _intakeBody includes the new keys
+        'out.drawingSheetCount',
+        'out.drawingViewCount',
+        'out.partFeatureCount',
+        'out.partActiveConfiguration',
+    ]:
+        assert marker in html, f"wizard metadata wiring regressed: {marker!r}"

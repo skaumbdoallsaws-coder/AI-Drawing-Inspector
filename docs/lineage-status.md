@@ -1,9 +1,9 @@
 # App Lineage Status
 
-**Effective: 2026-05-20**  *(originally written 2026-05-18 alongside the
-`milestone/ui-bridge-telemetry-unified` tag; refreshed to reflect the
-Usage dashboard UI and Library Intake Wizard MVP that landed in the
-days immediately after the tag.)*
+**Effective: 2026-05-21**  *(originally written 2026-05-18 alongside the
+`milestone/ui-bridge-telemetry-unified` tag; refreshed 2026-05-20 for
+the Usage dashboard UI + Library Intake Wizard MVP; refreshed
+2026-05-21 for the Profile Builder MVP.)*
 
 ## Source of truth
 
@@ -129,6 +129,36 @@ HEAD:
    was also cherry-picked over from the deprecated branch in
    commit `eea0c78`; the unified branch now carries it.
 
+3. **Profile Builder MVP** (added 2026-05-21) -- closes the wizard
+   intake -> stub gap by letting an operator draft + review + apply
+   a real inspection profile in the same session as a wizard
+   promote. Plan-sec-12.2-future is no longer pending: a v1 of the
+   Profile Builder ships in the unified branch as four commits:
+   - `cea1332 feat(profile-builder): draft and apply inspection profiles`
+     -- draft + apply endpoints, replaces the intake stub at both
+     root and per-rev locations
+   - `653548b feat(profile-builder): add few-shot inspection prompt`
+     -- two-example prompt (revolved flange + machined bracket with
+     GD&T) teaching feature grouping vs per-dimension rows
+   - `a11b137 fix(profile-builder): tighten generated feature
+     grouping rules` -- addressed the "one feature per dimension"
+     failure mode seen in initial drafting
+   - `94a13aa fix(profile-builder): block unsupported material
+     claims` -- prompt no longer fabricates a material when none is
+     stated on the drawing or in the title block
+
+   Verified end-to-end on **1030024/revD**: operator drafted +
+   reviewed + applied a 3-feature profile (Main flange body,
+   Bolt-circle counterbored holes count=12, Central bore step
+   register). Profile present at both
+   `400S_Sorted_Library/1030024_inspection_profile.json` and
+   `400S_Sorted_Library/parts/1030024/revD/1030024_inspection_profile.json`
+   (5,672 bytes each, identical). The prior real "End Effector
+   Mounting Flange" profile was correctly REPLACED; `source` /
+   `status` / `inspectionReady` are absent in the applied profile
+   (real, not a stub). Material inference guard worked: drawing did
+   not specify material, applied profile does not claim one.
+
 ## What is STILL NOT in the unified branch
 
 These are the followups that remain. None affect runtime behaviour.
@@ -146,15 +176,25 @@ These are the followups that remain. None affect runtime behaviour.
    These can be cherry-picked over at any time without coordinating
    with running services.
 
-2. **Assembly intake** through the wizard -- out of MVP scope per
-   plan sec 3.2 / sec 10.3. The wizard accepts only part + drawing.
-   Assembly extraction still works via the existing
-   `/api/request-assembly-extraction` (sidecar-only) flow.
+2. **Assembly intake** through the wizard + **assembly Profile
+   Builder** -- still out of MVP scope. The wizard accepts only
+   part + drawing (plan sec 3.2 / sec 10.3); the Profile Builder
+   v1 likewise targets parts only. Assembly extraction continues
+   to work via the existing `/api/request-assembly-extraction`
+   (sidecar-only) flow but does not yet promote into a per-revision
+   library shape or produce a profile. This is the next recommended
+   engineering track.
 
-3. **Profile Builder** -- a future tool that would let an operator
-   author a real (non-stub) `{pn}_inspection_profile.json` through
-   a guided flow. Out of MVP scope per plan sec 12.2 future.
-   Until it exists, real profiles continue to be hand-authored.
+3. **Profile Builder v2 enhancements** -- v1 covers the draft +
+   apply round trip. Not yet implemented:
+   - structured `evidence` refs (today: plain English; v2: typed
+     `{view, kind, id}` tuples so the reviewer round trip is
+     fully traceable from the manifest down to the source dim/note)
+   - reviewer-facing diff against the prior revision's profile so
+     a revB -> revC promote highlights what changed in the
+     features list
+   - bulk re-draft on revision bump (today the operator clicks
+     through one part at a time)
 
 
 ## Migration guidance

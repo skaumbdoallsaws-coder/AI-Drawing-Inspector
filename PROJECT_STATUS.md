@@ -1,6 +1,6 @@
 # AI Engineering Drawing Inspector - Project Status
 
-**Last Updated:** May 20, 2026
+**Last Updated:** May 21, 2026
 
 ---
 
@@ -10,9 +10,42 @@ Build an AI-powered platform that **unifies Engineering, Purchasing, and Manufac
 
 ---
 
-## Current Status: InspectorPro v1.3 — Unified App + Usage Dashboard + Library Intake Wizard MVP
+## Current Status: InspectorPro v1.4 — Profile Builder MVP
 
-### Latest Milestone (May 20, 2026)
+### Latest Milestone (May 21, 2026)
+
+**Profile Builder MVP shipped — operator-reviewed inspection profile generation from promoted part metadata, verified end-to-end on 1030024/revD**
+
+The Profile Builder closes the last gap left after the Library Intake Wizard MVP (2026-05-20). Previously, the wizard could promote a part into the canonical per-revision library shape, but it could only write a `library_intake_stub` profile (`inspectionReady: false`) — a real inspection profile still had to be hand-authored. The Profile Builder takes the promoted part metadata + drawing-map context, drafts a candidate profile via LLM with few-shot examples, lets the operator review/edit, and applies it to both the root and per-revision locations (replacing the stub).
+
+**Commits (in order):**
+- `cea1332 feat(profile-builder): draft and apply inspection profiles` — endpoint(s), draft + apply flow, replaces the intake stub at both root and per-rev locations
+- `653548b feat(profile-builder): add few-shot inspection prompt` — embedded the two-example prompt (revolved flange + machined bracket with GD&T) that teaches feature grouping vs per-dimension rows
+- `a11b137 fix(profile-builder): tighten generated feature grouping rules` — addressed the "one feature per dimension" failure mode that surfaced during initial drafting
+- `94a13aa fix(profile-builder): block unsupported material claims` — material inference guard so the prompt cannot invent a material when none is stated on the drawing or title block
+
+**End-to-end verified on 1030024/revD:**
+- Operator drafted, reviewed, and applied a 3-feature profile through the wizard:
+  1. **Main flange body** (revolved, count: 1)
+  2. **Bolt-circle counterbored holes** (counterbore, count: 12)
+  3. **Central bore step register** (cylindrical_surface, count: 1)
+- Profile lives at both `400S_Sorted_Library/1030024_inspection_profile.json` and `400S_Sorted_Library/parts/1030024/revD/1030024_inspection_profile.json` (5,672 bytes each, identical — confirmed)
+- The previously-existing real profile (`End Effector Mounting Flange`) was correctly REPLACED — `source`/`status`/`inspectionReady` are absent in the applied profile (real profile, not a stub), so `/api/profile-details/1030024` no longer surfaces stub-aware gating fields
+- Material inference guard worked: drawing did not specify material, prompt did not claim one — no fabricated material field in the applied profile
+- Live `GET /api/profile-details/1030024` on `:8020` returns the 3-feature profile
+
+**Test coverage:** 112 tests pass across `tests/test_profile_builder.py` (10 new), `tests/test_intake_wizard_frontend.py` (12), `tests/test_intake_preview_promote.py` (22), `tests/test_intake_stub_gate.py` (10), `tests/test_telemetry.py` (51), `tests/test_drawing_map.py` (7). `test_drawing_differ` skipped (pre-existing missing-fixture issue, unchanged from main).
+
+**Open items still parked** (none affect runtime):
+1. **Assembly intake through the wizard + assembly Profile Builder** — out of MVP scope per plan §3.2 / §10.3 for the wizard; out of scope by definition for v1 of the Profile Builder. Recommended next engineering track.
+2. **Profile Builder v2 enhancements** — schema-typed `evidence` refs (today: plain English; better: structured `{view, kind, id}` tuples for downstream traceability); reviewer-facing diff against prior revision's profile; bulk re-draft against newly-extracted drawings on revision bump.
+3. **Six docs/scripts still only on the deprecated `fea-morph-exaggeration-2026-04-26` lineage** (bridge-part-assembly plan, customer-overview, installer-phase6-blocked, pilot-demo-script, production-pilot-packaging-checklist, solidworks-bridge docs + `scripts/collect-pilot-bundle.ps1`). Can be cherry-picked at any time. See `docs/lineage-status.md`.
+
+**Deprecated lineage warning still in force:** do NOT branch new app / bridge / telemetry / library-intake / profile-builder work off `fea-morph-exaggeration-2026-04-26` or related dark-only-era branches. The unified branch (`ui-bridge-telemetry-unified-2026-05-18` at HEAD) is the single source of truth. See `docs/lineage-status.md`.
+
+---
+
+### Previous Milestone (May 20, 2026)
 
 **Library Intake Wizard MVP shipped + Usage dashboard UI shipped — end-to-end verified on real SOLIDWORKS extraction**
 

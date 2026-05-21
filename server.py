@@ -2063,6 +2063,39 @@ _INTAKE_NUMBERING_STRIP_SUFFIXES = (
     "_colored", "_assembly",
 )
 
+# Canonical JSON keys an assembly file uses to reference one of its
+# component part numbers. PartNo observed in the wild
+# (6000302_assembly.json: customProperties.PartNo); the alternate
+# spellings are listed for defensive coverage of future extractor
+# versions / hand-authored exports.
+_INTAKE_ASSEMBLY_PART_KEYS = {"PartNo", "part_number", "partNumber", "part_no"}
+
+# Token shape for assembly-internal part-number references. Tighter
+# than the root-stem scanner because we MUST NOT treat coordinate or
+# count values from a SOLIDWORKS dump as part numbers if they happen
+# to be numeric. Matches the project convention (~7-character tokens
+# like "1030031") with tolerance for the variant-letter form
+# "1030001C" observed at root.
+_INTAKE_ASSEMBLY_PART_REF_RE = re.compile(r"^\d{4,7}[A-Za-z0-9]{0,3}$")
+
+
+def _intake_collect_assembly_part_refs(obj: Any, accumulator: set) -> None:
+    """Recursively walk a parsed JSON value, adding any string value
+    found under one of the canonical assembly part-number keys
+    (_INTAKE_ASSEMBLY_PART_KEYS) when it matches the part-ref token
+    shape. Defensive: tolerates dicts, lists, scalars, and non-string
+    values; never raises."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in _INTAKE_ASSEMBLY_PART_KEYS and isinstance(v, str):
+                t = v.strip()
+                if _INTAKE_ASSEMBLY_PART_REF_RE.match(t):
+                    accumulator.add(t)
+            _intake_collect_assembly_part_refs(v, accumulator)
+    elif isinstance(obj, list):
+        for item in obj:
+            _intake_collect_assembly_part_refs(item, accumulator)
+
 
 def _intake_used_part_numbers(library_dir: Path) -> set:
     """All part / assembly number tokens currently in use anywhere in the
@@ -2075,7 +2108,15 @@ def _intake_used_part_numbers(library_dir: Path) -> set:
       2. parts/{pn}/ subdirectory names -- catches parts that have a
          per-revision folder but no root profile yet (the model-only
          intake path leaves it in exactly this state).
-      3. assemblies/{id}_assembly.json stems (existing convention).
+      3. assemblies/**/*_assembly.json stems (existing convention) AND
+         every PartNo / part_number / partNumber / part_no string value
+         found by walking each assembly JSON recursively. This is the
+         fix for the smoke bug where 1030031 was suggested as "next
+         available" even though it was already in use as a BOM
+         component (Straight Rail) inside the 6000302 Straight Roller
+         Conveyor assembly. A part number referenced inside an
+         assembly's customProperties is just as "taken" as one with a
+         root profile file.
 
     A part number that collides with an assembly is detected in either
     direction because the scan is union-of-all-locations regardless of
@@ -2104,8 +2145,24 @@ def _intake_used_part_numbers(library_dir: Path) -> set:
 
     assemblies_dir = library_dir / "assemblies"
     if assemblies_dir.exists() and assemblies_dir.is_dir():
-        for f in assemblies_dir.glob("*_assembly.json"):
+        # Assembly identifier from filename stem. rglob picks up both
+        # the top-level 6000302_assembly.json and any nested
+        # 6000300/revA/6000300_assembly.json variants.
+        for f in assemblies_dir.rglob("*_assembly.json"):
             used.add(f.stem.replace("_assembly", ""))
+        # Recursive component-PartNo walk. Every .json under
+        # assemblies/ is parsed; failures are silently skipped so a
+        # malformed file does not break the suggester. Catches BOM
+        # rows, customProperties blocks, partDataCache entries,
+        # mateRelationships, and any future assembly-shaped JSON the
+        # extractor adds.
+        for f in assemblies_dir.rglob("*.json"):
+            try:
+                with open(f, "r", encoding="utf-8-sig") as fh:
+                    data = json.load(fh)
+            except Exception:
+                continue
+            _intake_collect_assembly_part_refs(data, used)
 
     return used
 

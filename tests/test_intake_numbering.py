@@ -90,6 +90,132 @@ def test_used_part_numbers_includes_subdir_only_parts(numbering_library: Path):
     assert "1030009" in used
 
 
+def test_used_part_numbers_includes_assembly_internal_partno_refs(tmp_path: Path,
+                                                                   monkeypatch: pytest.MonkeyPatch):
+    """Regression for the 1030031 Straight-Rail smoke bug: a part
+    number referenced inside an assembly's customProperties is just
+    as 'taken' as one with a root profile. Mirrors the real-world
+    shape observed in 400S_Sorted_Library/assemblies/6000302_assembly.json
+    (customProperties.PartNo)."""
+    library = tmp_path / "asm_lib"
+    (library / "assemblies").mkdir(parents=True)
+    (library / "assemblies" / "6000302_assembly.json").write_text(json.dumps({
+        "identity":   {"id": "6000302", "name": "Straight Roller Conveyor"},
+        "components": [
+            {"name": "Straight Rail",
+             "customProperties": {"PartNo": "1030031", "Description": "Straight Rail"}},
+            {"name": "Roller",
+             "customProperties": {"PartNo": "1030032", "Description": "Roller"}},
+        ],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    used = server._intake_used_part_numbers(library)
+    assert "1030031" in used, "PartNo 1030031 inside 6000302 component was missed by the scanner"
+    assert "1030032" in used
+    # Assembly identifier itself also captured (existing behaviour)
+    assert "6000302" in used
+
+
+def test_used_part_numbers_assembly_walk_accepts_alternate_part_keys(tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch):
+    """All four canonical key spellings (PartNo, part_number, partNumber,
+    part_no) must be honored so a future extractor variant cannot
+    silently regress the suggester."""
+    library = tmp_path / "asm_lib2"
+    (library / "assemblies").mkdir(parents=True)
+    (library / "assemblies" / "9000001_assembly.json").write_text(json.dumps({
+        "rows": [
+            {"PartNo":      "5000001"},
+            {"part_number": "5000002"},
+            {"partNumber":  "5000003"},
+            {"part_no":     "5000004"},
+            # Negative: a non-matching key with a part-number-shaped value
+            # must NOT be collected (avoids consuming coordinate / count
+            # values that happen to look numeric).
+            {"someOtherKey": "5000999"},
+        ],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    used = server._intake_used_part_numbers(library)
+    for pn in ("5000001", "5000002", "5000003", "5000004"):
+        assert pn in used, f"alternate-spelling part ref missed: {pn}"
+    assert "5000999" not in used, "non-canonical key was accidentally consumed"
+
+
+def test_used_part_numbers_assembly_walk_rejects_non_part_token_shapes(tmp_path: Path,
+                                                                       monkeypatch: pytest.MonkeyPatch):
+    """The token-shape filter must skip non-part-number values that
+    happen to land under one of the canonical keys (free-text,
+    decimals, very-long hashes, empty strings)."""
+    library = tmp_path / "asm_lib3"
+    (library / "assemblies").mkdir(parents=True)
+    (library / "assemblies" / "9000002_assembly.json").write_text(json.dumps({
+        "components": [
+            {"PartNo": "ABCDEF"},
+            {"PartNo": "12.5"},
+            {"PartNo": ""},
+            {"PartNo": "deadbeef-uuid-very-long-token-1234567890"},
+            {"PartNo": "1030099"},  # this one IS a valid token shape
+        ],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    used = server._intake_used_part_numbers(library)
+    for bad in ("ABCDEF", "12.5", "", "deadbeef-uuid-very-long-token-1234567890"):
+        assert bad not in used, f"non-part-shape token leaked into used set: {bad!r}"
+    assert "1030099" in used
+
+
+def test_used_part_numbers_assembly_walk_recurses_nested_revisioned_dirs(tmp_path: Path,
+                                                                         monkeypatch: pytest.MonkeyPatch):
+    """assemblies/{id}/revA/{id}_assembly.json (the nested-revisioned
+    shape observed for 6000300) must be picked up. rglob is the
+    load-bearing change vs the previous glob."""
+    library = tmp_path / "asm_lib4"
+    nested = library / "assemblies" / "6000300" / "revA"
+    nested.mkdir(parents=True)
+    (nested / "6000300_assembly.json").write_text(json.dumps({
+        "components": [{"PartNo": "1040013"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    used = server._intake_used_part_numbers(library)
+    assert "6000300" in used, "nested *_assembly.json stem missed"
+    assert "1040013" in used, "nested assembly's PartNo ref missed"
+
+
+def test_used_part_numbers_assembly_walk_tolerates_malformed_json(tmp_path: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch):
+    """A broken JSON file under assemblies/ must NOT crash the scanner.
+    Suggester must remain usable even with one corrupt assembly file."""
+    library = tmp_path / "asm_lib5"
+    (library / "assemblies").mkdir(parents=True)
+    (library / "assemblies" / "broken_assembly.json").write_text("{ not valid json", encoding="utf-8")
+    (library / "assemblies" / "good_assembly.json").write_text(json.dumps({
+        "components": [{"PartNo": "1030555"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    used = server._intake_used_part_numbers(library)
+    # Broken file silently skipped; good file's PartNo still landed
+    assert "1030555" in used
+
+
+def test_next_part_number_skips_assembly_internal_pn(tmp_path: Path,
+                                                     monkeypatch: pytest.MonkeyPatch):
+    """End-to-end task assertion: with the 6000302 assembly carrying
+    PartNo 1030031, the next 1030xxx suggestion must NOT be 1030031."""
+    library = tmp_path / "asm_lib6"
+    (library / "assemblies").mkdir(parents=True)
+    (library / "assemblies" / "6000302_assembly.json").write_text(json.dumps({
+        "components": [{"PartNo": "1030031"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    suggestion = server._intake_next_part_number(library, prefix="1030")
+    assert suggestion != "1030031"
+    # With nothing else seeded, the next free should be the first free
+    # 1030xxx token -- 1030001. The assertion proves the helper saw and
+    # rejected 1030031 specifically.
+    assert suggestion == "1030001"
+
+
 def test_used_part_numbers_includes_assemblies(numbering_library: Path):
     used = server._intake_used_part_numbers(numbering_library)
     assert "6000300" in used

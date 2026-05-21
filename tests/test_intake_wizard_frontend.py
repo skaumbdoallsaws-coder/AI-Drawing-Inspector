@@ -243,6 +243,31 @@ def test_bridge_extract_uses_resolved_library_dir():
         "bridge no longer pins library_root to the resolved LIBRARY_DIR"
 
 
+def test_wizard_model_only_and_numbering_ui_present():
+    """Stabilization extension: the wizard JS must expose the model-only
+    checkbox + the suggest-next-number button + the MODEL ONLY header
+    banner helper. Without these markers the operator path for
+    SLDPRT-only intake silently fails to render."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        # Step 1 checkbox + button DOM IDs the JS wires up
+        'id="iwModelOnly"',
+        'id="iwSuggestPnBtn"',
+        # State field initialiser
+        'modelOnly:                false',
+        # Cross-step header helper
+        'function _modelOnlyHeaderHtml',
+        # MODEL ONLY label text (operator-visible per the task scope)
+        'MODEL ONLY',
+        # Body field that lets the backend skip the drawing gate
+        'out.modelOnly',
+        # Numbering endpoint URL the suggest button calls
+        '/api/library/numbering/next',
+    ]:
+        assert marker in html, f"model-only/numbering wiring regressed: {marker!r}"
+
+
 def test_wizard_metadata_capture_helpers_present():
     """Regression for the 'intake_manifest has blank drawing metadata'
     smoke bug. The wizard must (a) cache the bridge response in

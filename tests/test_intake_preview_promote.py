@@ -501,6 +501,205 @@ def test_promote_does_not_delete_bridge_imports_sidecar(intake_library: Path):
     assert sidecar_partjson.exists(), "wizard must NOT delete bridge sidecar"
 
 
+# ── Model-only intake mode ────────────────────────────────────────────
+
+
+def test_preview_model_only_does_not_require_drawing(intake_library: Path):
+    """modelOnly=True must skip the missing_drawing_map gate so a
+    brand-new SLDPRT-only intake can preview cleanly."""
+    # Remove the seeded drawing map so we are genuinely drawing-less
+    (intake_library / "1099999_drawing_map.json").unlink()
+    body = _default_body()
+    body["modelOnly"] = True
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/preview", json=body)
+    assert r.status_code == 200, r.text
+    plan = r.json()
+    assert plan["planValid"] is True
+    assert plan["modelOnly"] is True
+    # No drawing-map action in the plan
+    paths = [a["path"] for a in plan["actions"]]
+    assert not any("drawing_map" in p or "drawing.pdf" in p for p in paths), \
+        f"unexpected drawing rows in model-only plan: {paths}"
+    # Part + manifest + stub still planned
+    assert any(p.endswith("/1099999.json")              for p in paths)
+    assert any(p.endswith("/intake_manifest.json")      for p in paths)
+    # Stub still planned (no real profile at root in this fixture)
+    assert any(p.endswith("/1099999_inspection_profile.json") for p in paths)
+
+
+def test_promote_model_only_writes_no_drawing_files(intake_library: Path):
+    """Model-only promote must not write the drawing map or PDF -- at
+    per-rev OR at root. Confirms both halves of fix #2 in the
+    stabilization pass still apply (drawing path is gated, not silently
+    re-installed)."""
+    # Remove seeded drawing fixtures so a leak would be visible
+    (intake_library / "1099999_drawing_map.json").unlink()
+    if (intake_library / "1099999_drawing.pdf").exists():
+        (intake_library / "1099999_drawing.pdf").unlink()
+    body = _default_body()
+    body["modelOnly"] = True
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/promote", json=body)
+    assert r.status_code == 200, r.text
+    rev_dir = intake_library / "parts" / "1099999" / "revA"
+    assert not (rev_dir / "1099999_drawing_map.json").exists()
+    assert not (rev_dir / "1099999_drawing.pdf").exists()
+    assert not (intake_library / "1099999_drawing_map.json").exists()
+    assert not (intake_library / "1099999_drawing.pdf").exists()
+    # But part + manifest + stub ARE written
+    assert (rev_dir / "1099999.json").exists()
+    assert (rev_dir / "intake_manifest.json").exists()
+    assert (rev_dir / "1099999_inspection_profile.json").exists()
+    assert (intake_library / "1099999_inspection_profile.json").exists()
+    # The stub is the gate: inspectionReady must be False so the Step 1
+    # surface keeps the Inspect button disabled.
+    root_stub = json.loads((intake_library / "1099999_inspection_profile.json").read_text(encoding="utf-8"))
+    assert root_stub["source"] == "library_intake_stub"
+    assert root_stub["inspectionReady"] is False
+
+
+def test_promote_model_only_manifest_omits_drawing_map_files_entry(intake_library: Path):
+    """intake_manifest.files[] must NOT list a drawing_map row when the
+    promote is model-only (the file wasn't written)."""
+    (intake_library / "1099999_drawing_map.json").unlink()
+    body = _default_body()
+    body["modelOnly"] = True
+    client = TestClient(server.app)
+    client.post("/api/library/intake/promote", json=body)
+    manifest = json.loads((intake_library / "parts" / "1099999" / "revA" / "intake_manifest.json").read_text(encoding="utf-8"))
+    file_paths = {f["path"] for f in manifest["files"]}
+    assert "1099999_drawing_map.json" not in file_paths
+    assert "1099999.json"             in file_paths
+
+
+def test_promote_model_only_revB_after_real_revA_does_not_touch_root_drawing_map(intake_library: Path):
+    """If revA was promoted with a drawing (standard mode) and the
+    operator later promotes revB as model-only, the root pointer must
+    remain at revA's drawing map. The acceptance test's revA-then-revB
+    scenario depends on this -- otherwise revB would silently invalidate
+    the root pointer."""
+    # First, standard revA promote (drawing present from fixture)
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/promote", json=_default_body(revision="revA"))
+    assert r.status_code == 200, r.text
+    root_map_after_revA = (intake_library / "1099999_drawing_map.json").read_bytes()
+    # Capture the root mtime before revB so a silent overwrite would
+    # advance it even if the bytes happen to match.
+    import time as _t
+    root_map_path = intake_library / "1099999_drawing_map.json"
+    mtime_before = root_map_path.stat().st_mtime_ns
+    _t.sleep(0.05)  # ensure any subsequent write would have a later mtime
+    # Now model-only revB
+    body = _default_body(revision="revB")
+    body["modelOnly"] = True
+    r = client.post("/api/library/intake/promote", json=body)
+    assert r.status_code == 200, r.text
+    # Root pointer unchanged -- byte-equal AND mtime unchanged. The mtime
+    # check is the load-bearing one: a buggy model-only path that
+    # re-installed the same drawing-map bytes would still bump mtime.
+    assert root_map_path.read_bytes() == root_map_after_revA
+    assert root_map_path.stat().st_mtime_ns == mtime_before, \
+        "model-only revB silently re-installed the root drawing map (mtime advanced)"
+
+
+# ── Visual asset promotion (task 3 of extractor-parity pass) ──────────
+
+
+def _seed_visual_assets(sidecar_pkg_root: Path, pn: str = "1099999"):
+    """Drop simulated GLB + feature_colors + 4 view PNGs + STL inside
+    the sidecar package's part/ subdirectory. Today's shipped bridge
+    does not emit these, but the wizard treats them as copy-if-present
+    so a future bridge enhancement (or a manual operator drop) flows
+    straight through."""
+    part_subdir = sidecar_pkg_root / "part"
+    part_subdir.mkdir(parents=True, exist_ok=True)
+    (part_subdir / f"{pn}_colored.glb").write_bytes(b"glTF\x02\x00\x00\x00")
+    (part_subdir / f"{pn}_feature_colors.json").write_text('{"f1":"#ff0000"}', encoding="utf-8")
+    (part_subdir / f"{pn}_view_front.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (part_subdir / f"{pn}_view_top.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (part_subdir / f"{pn}_view_right.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (part_subdir / f"{pn}_view_isometric.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (part_subdir / f"{pn}.stl").write_text("solid", encoding="utf-8")
+
+
+def test_promote_copies_visual_assets_from_sidecar_when_present(intake_library: Path):
+    """When the sidecar has GLB / view PNGs / STL / feature_colors, the
+    promote copies them into the per-rev archive. Defensive forward-
+    compat for the bridge's planned visual export."""
+    pkg_root = intake_library / "_bridge_imports" / "part" / "1099999" / "deadbeef0002"
+    _seed_visual_assets(pkg_root)
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/promote", json=_default_body())
+    assert r.status_code == 200, r.text
+    rev_dir = intake_library / "parts" / "1099999" / "revA"
+    assert (rev_dir / "1099999_colored.glb").exists()
+    assert (rev_dir / "1099999_feature_colors.json").exists()
+    assert (rev_dir / "1099999_view_front.png").exists()
+    assert (rev_dir / "1099999_view_top.png").exists()
+    assert (rev_dir / "1099999_view_right.png").exists()
+    assert (rev_dir / "1099999_view_isometric.png").exists()
+    assert (rev_dir / "1099999.stl").exists()
+
+
+def test_promote_preserves_curated_visual_assets_on_overwrite(intake_library: Path):
+    """When the operator already placed a curated GLB in the per-rev
+    folder, OVERWRITE mode must NOT clobber it with the sidecar copy.
+    Mirrors §6.4 (preserve unmanaged files); the visual asset is treated
+    as 'unmanaged once present' because the operator's hand-placed copy
+    may be higher-quality than whatever the bridge produced."""
+    # Pre-create the rev dir with a curated GLB
+    rev_dir = intake_library / "parts" / "1099999" / "revA"
+    rev_dir.mkdir(parents=True)
+    curated = rev_dir / "1099999_colored.glb"
+    curated_bytes = b"CURATED_GLB_DO_NOT_OVERWRITE"
+    curated.write_bytes(curated_bytes)
+    # Sidecar has a different GLB
+    pkg_root = intake_library / "_bridge_imports" / "part" / "1099999" / "deadbeef0002"
+    _seed_visual_assets(pkg_root)
+    # Confirmed-overwrite promote
+    body = _default_body(overwrite_confirmed="revA")
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/promote", json=body)
+    assert r.status_code == 200, r.text
+    # Curated GLB survives byte-for-byte; sidecar's STL (no prior
+    # curated copy) lands fresh.
+    assert curated.read_bytes() == curated_bytes
+    assert (rev_dir / "1099999.stl").exists()
+
+
+def test_promote_no_visual_assets_in_sidecar_is_no_op(intake_library: Path):
+    """The today-bridge case: sidecar has only manifest.json + part.json,
+    no visual assets. Promote completes cleanly; the action list does
+    not gain any visual-asset rows (CREATE or SKIP)."""
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/promote", json=_default_body())
+    assert r.status_code == 200, r.text
+    rev_dir = intake_library / "parts" / "1099999" / "revA"
+    # No visual asset files in per-rev (because none in sidecar)
+    assert not (rev_dir / "1099999_colored.glb").exists()
+    assert not (rev_dir / "1099999.stl").exists()
+    # Action list should not have any visual-asset entries
+    body = r.json()
+    for a in body["executed"]:
+        assert "colored.glb"      not in a["path"]
+        assert "view_front.png"   not in a["path"]
+        assert ".stl"             not in a["path"]
+
+
+def test_visual_assets_helper_scans_both_pkg_root_and_part_subdir(intake_library: Path):
+    """The helper checks the package's part/ subdirectory first, then
+    falls back to the package root. Either location should yield the
+    file. Documents the defensive scan because the bridge's eventual
+    layout for visual assets is not yet pinned."""
+    pkg_root = intake_library / "_bridge_imports" / "part" / "1099999" / "deadbeef0002"
+    # Drop a GLB at the pkg root (NOT in part/)
+    (pkg_root / "1099999_colored.glb").write_bytes(b"glTF")
+    found = server._intake_visual_assets_in_sidecar(intake_library, "1099999", "deadbeef0002")
+    found_names = [p.name for p in found]
+    assert "1099999_colored.glb" in found_names
+
+
 # ── Single-flight lock smoke ──────────────────────────────────────────
 
 

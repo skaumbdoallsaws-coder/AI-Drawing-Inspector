@@ -2142,6 +2142,50 @@ def _intake_part_sidecar_partjson_path(library_dir: Path, pn: str, package_id: s
     return library_dir / "_bridge_imports" / "part" / pn / package_id / "part" / "part.json"
 
 
+# Visual-asset filenames the wizard promotes from the bridge sidecar
+# into parts/{pn}/rev{X}/ when present. Defensive: today's shipped
+# bridge does NOT produce these (the InspectorPro.SolidWorks add-in
+# planning doc explicitly defers GLB to the app side because SOLIDWORKS
+# has no native GLB exporter). This list is forward-compatible -- the
+# day the bridge or a sidecar-enhancement tool drops these files into
+# the package, the wizard copies them; until then it is a no-op.
+def _intake_visual_asset_filenames(pn: str) -> list:
+    return [
+        f"{pn}_colored.glb",
+        f"{pn}_feature_colors.json",
+        f"{pn}_view_front.png",
+        f"{pn}_view_top.png",
+        f"{pn}_view_right.png",
+        f"{pn}_view_isometric.png",
+        f"{pn}.stl",
+        f"{pn}.STL",  # case-insensitive filesystems vary; both spellings observed in the existing library
+    ]
+
+
+def _intake_visual_assets_in_sidecar(library_dir: Path, pn: str, package_id: str) -> list:
+    """Return paths of visual-asset files found in the bridge sidecar
+    package for this part. Scans both the package root and the package
+    `part/` subdirectory because the placement convention for visual
+    exports is not yet pinned (planning doc reference: the bridge
+    add-in defers GLB export to the app side; until the sidecar layout
+    is fixed, defensive scan in both spots)."""
+    found: list = []
+    pkg_root = library_dir / "_bridge_imports" / "part" / pn / package_id
+    if not pkg_root.exists():
+        return found
+    candidates = _intake_visual_asset_filenames(pn)
+    seen_names: set = set()
+    for parent in (pkg_root / "part", pkg_root):
+        if not parent.exists():
+            continue
+        for fn in candidates:
+            p = parent / fn
+            if p.exists() and fn not in seen_names:
+                found.append(p)
+                seen_names.add(fn)
+    return found
+
+
 def _intake_part_sidecar_manifest_path(library_dir: Path, pn: str, package_id: str) -> Path:
     """manifest.json at the package root inside the sidecar."""
     return library_dir / "_bridge_imports" / "part" / pn / package_id / "manifest.json"
@@ -2288,12 +2332,20 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
     drawing_pdf_src = library_dir / f"{safe_pn}_drawing.pdf"
     part_json_src   = _intake_part_sidecar_partjson_path(library_dir, safe_pn, body.partPackageId)
 
-    if not drawing_map_src.exists():
+    # Model-only mode: drawing is optional. The wizard MUST still write
+    # an intake stub so the part is discoverable + inspection is gated
+    # (inspectionReady=false). Drawing-related actions are simply
+    # omitted from the plan.
+    model_only = bool(getattr(body, "modelOnly", False))
+
+    if not model_only and not drawing_map_src.exists():
         errors.append({
             "code": "missing_drawing_map",
             "message": f"Drawing map not found at {_intake_relpath(library_dir, drawing_map_src)}. "
                        "Run drawing extraction first (Re-extract Drawing from SOLIDWORKS) so the "
-                       "root-level drawing map is in place before promoting.",
+                       "root-level drawing map is in place before promoting. Or, if this part has "
+                       "no drawing yet, re-post with modelOnly=true to import the SLDPRT only "
+                       "(inspection will remain disabled until a drawing is added).",
         })
     if not part_json_src.exists():
         errors.append({
@@ -2342,22 +2394,26 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
     # likely to leave a consistent intermediate state on a failure. ──
     overwrite_kind = "OVERWRITE" if rev_dir_exists else "CREATE"
 
-    drawing_map_bytes = drawing_map_src.stat().st_size
+    # Drawing-side bytes only computed when not model-only. The model-
+    # only path uses model_only_marker to signal downstream blocks
+    # to omit drawing rows + drawing-related root updates.
+    drawing_map_bytes = drawing_map_src.stat().st_size if (not model_only and drawing_map_src.exists()) else 0
     part_json_bytes   = part_json_src.stat().st_size
 
-    actions.append({
-        "kind":   overwrite_kind,
-        "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}_drawing_map.json"),
-        "bytes":  drawing_map_bytes,
-        "source": _intake_relpath(library_dir, drawing_map_src),
-    })
+    if not model_only:
+        actions.append({
+            "kind":   overwrite_kind,
+            "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}_drawing_map.json"),
+            "bytes":  drawing_map_bytes,
+            "source": _intake_relpath(library_dir, drawing_map_src),
+        })
     actions.append({
         "kind":   overwrite_kind,
         "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}.json"),
         "bytes":  part_json_bytes,
         "source": _intake_relpath(library_dir, part_json_src),
     })
-    pdf_will_copy = drawing_pdf_src.exists()
+    pdf_will_copy = (not model_only) and drawing_pdf_src.exists()
     if pdf_will_copy:
         actions.append({
             "kind":   overwrite_kind,
@@ -2365,6 +2421,32 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
             "bytes":  drawing_pdf_src.stat().st_size,
             "source": _intake_relpath(library_dir, drawing_pdf_src),
         })
+
+    # Visual-asset promotion (task 3 of the extractor-parity pass).
+    # Defensive: today's shipped bridge does NOT emit GLB / view PNGs
+    # / STL (the InspectorPro.SolidWorks add-in planning doc explicitly
+    # defers GLB to the app side). When the sidecar does carry these,
+    # the wizard copy-if-not-exists into the per-rev archive so the
+    # operator does not have to move them by hand. Curated assets
+    # already in the per-rev folder survive: the writer never clobbers
+    # an existing target (§6.4 spirit, applied to visual assets).
+    visual_src_paths = _intake_visual_assets_in_sidecar(library_dir, safe_pn, body.partPackageId)
+    for vp in visual_src_paths:
+        tgt = rev_dir / vp.name
+        if tgt.exists():
+            actions.append({
+                "kind":   "SKIP",
+                "path":   _intake_relpath(library_dir, tgt),
+                "bytes":  0,
+                "source": "curated asset preserved (already present in revision target)",
+            })
+        else:
+            actions.append({
+                "kind":   "CREATE",
+                "path":   _intake_relpath(library_dir, tgt),
+                "bytes":  vp.stat().st_size,
+                "source": _intake_relpath(library_dir, vp),
+            })
 
     # Synthesized files. Generate the content now so we can report exact
     # bytes (the preview's contract: "exact files that would be written").
@@ -2381,10 +2463,11 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
         part_source_doc_path=body.partSourceDocPath,
         part_feature_count=body.partFeatureCount,
         part_active_configuration=body.partActiveConfiguration,
-        files=[
-            {"path": f"{safe_pn}_drawing_map.json", "bytes": drawing_map_bytes},
-            {"path": f"{safe_pn}.json",             "bytes": part_json_bytes},
-        ] + ([{"path": f"{safe_pn}_drawing.pdf", "bytes": drawing_pdf_src.stat().st_size}] if pdf_will_copy else []),
+        files=(
+            ([{"path": f"{safe_pn}_drawing_map.json", "bytes": drawing_map_bytes}] if not model_only else [])
+            + [{"path": f"{safe_pn}.json", "bytes": part_json_bytes}]
+            + ([{"path": f"{safe_pn}_drawing.pdf", "bytes": drawing_pdf_src.stat().st_size}] if pdf_will_copy else [])
+        ),
         promoted_by=INTAKE_PROMOTED_BY_AGENT,
     )
     actions.append({
@@ -2420,30 +2503,35 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
 
     # Root drawing map (and pdf). Always UPDATE on subsequent runs; the
     # .bak rollback mirrors the existing drawing-extraction install
-    # pattern (§10.1).
-    root_map_path = library_dir / f"{safe_pn}_drawing_map.json"
-    actions.append({
-        "kind":   "UPDATE" if root_map_path.exists() else "CREATE",
-        "path":   _intake_relpath(library_dir, root_map_path),
-        "bytes":  drawing_map_bytes,
-        "source": _intake_relpath(library_dir, drawing_map_src),
-        "backup": _intake_relpath(library_dir, root_map_path.with_suffix(root_map_path.suffix + ".bak")),
-    })
-    if pdf_will_copy:
-        root_pdf_path = library_dir / f"{safe_pn}_drawing.pdf"
+    # pattern (§10.1). Skipped entirely in model-only mode: the wizard
+    # has no drawing bytes to push to the root pointer, and the prior
+    # root pointer (if any) must remain valid for its previously-
+    # promoted revision.
+    if not model_only:
+        root_map_path = library_dir / f"{safe_pn}_drawing_map.json"
         actions.append({
-            "kind":   "UPDATE" if root_pdf_path.exists() else "CREATE",
-            "path":   _intake_relpath(library_dir, root_pdf_path),
-            "bytes":  drawing_pdf_src.stat().st_size,
-            "source": _intake_relpath(library_dir, drawing_pdf_src),
-            "backup": _intake_relpath(library_dir, root_pdf_path.with_suffix(root_pdf_path.suffix + ".bak")),
+            "kind":   "UPDATE" if root_map_path.exists() else "CREATE",
+            "path":   _intake_relpath(library_dir, root_map_path),
+            "bytes":  drawing_map_bytes,
+            "source": _intake_relpath(library_dir, drawing_map_src),
+            "backup": _intake_relpath(library_dir, root_map_path.with_suffix(root_map_path.suffix + ".bak")),
         })
+        if pdf_will_copy:
+            root_pdf_path = library_dir / f"{safe_pn}_drawing.pdf"
+            actions.append({
+                "kind":   "UPDATE" if root_pdf_path.exists() else "CREATE",
+                "path":   _intake_relpath(library_dir, root_pdf_path),
+                "bytes":  drawing_pdf_src.stat().st_size,
+                "source": _intake_relpath(library_dir, drawing_pdf_src),
+                "backup": _intake_relpath(library_dir, root_pdf_path.with_suffix(root_pdf_path.suffix + ".bak")),
+            })
 
     return {
         "planValid":          True,
         "partNumber":         safe_pn,
         "revision":           safe_rev,
         "intakeMode":         body.intakeMode,
+        "modelOnly":          model_only,
         "targetRevisionPath": target_rel,
         "actions":            actions,
         "warnings":           warnings,
@@ -2477,6 +2565,7 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
     rev_dir  = library_dir / "parts" / safe_pn / safe_rev
     rev_dir_exists = rev_dir.exists()
     skip_stub = _intake_real_profile_present(library_dir, safe_pn)
+    model_only = bool(getattr(body, "modelOnly", False))
 
     drawing_map_src = library_dir / f"{safe_pn}_drawing_map.json"
     drawing_pdf_src = library_dir / f"{safe_pn}_drawing.pdf"
@@ -2484,12 +2573,18 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
 
     # Pre-read sources INTO MEMORY before any write -- §6.5 fail-closed.
     # If any source is unreadable, we abort before touching disk.
+    # In model-only mode the drawing files are skipped entirely; the
+    # part sidecar is still required (the wizard never produces a
+    # zero-file revision).
     try:
-        drawing_map_bytes = drawing_map_src.read_bytes()
-        part_json_bytes   = part_json_src.read_bytes()
-        drawing_pdf_bytes = drawing_pdf_src.read_bytes() if drawing_pdf_src.exists() else None
-        # Validate that the sources are at least parseable JSON (§7.3, §7.4)
-        json.loads(drawing_map_bytes.decode("utf-8-sig"))
+        if not model_only:
+            drawing_map_bytes = drawing_map_src.read_bytes()
+            json.loads(drawing_map_bytes.decode("utf-8-sig"))
+            drawing_pdf_bytes = drawing_pdf_src.read_bytes() if drawing_pdf_src.exists() else None
+        else:
+            drawing_map_bytes = b""
+            drawing_pdf_bytes = None
+        part_json_bytes = part_json_src.read_bytes()
         json.loads(part_json_bytes.decode("utf-8-sig"))
     except Exception as ex:
         return {**plan, "success": False, "executed": [],
@@ -2522,10 +2617,12 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
 
     # Build the manifest content using the same files list the plan
     # reported. Doing this AFTER we know the source bytes are real.
-    manifest_files: List[Dict[str, Any]] = [
-        {"path": f"{safe_pn}_drawing_map.json", "bytes": len(drawing_map_bytes)},
-        {"path": f"{safe_pn}.json",             "bytes": len(part_json_bytes)},
-    ]
+    # Model-only mode omits the drawing-map row because no drawing was
+    # promoted; the part.json is still required.
+    manifest_files: List[Dict[str, Any]] = []
+    if not model_only:
+        manifest_files.append({"path": f"{safe_pn}_drawing_map.json", "bytes": len(drawing_map_bytes)})
+    manifest_files.append({"path": f"{safe_pn}.json", "bytes": len(part_json_bytes)})
     if drawing_pdf_bytes is not None:
         manifest_files.append({"path": f"{safe_pn}_drawing.pdf", "bytes": len(drawing_pdf_bytes)})
 
@@ -2591,10 +2688,11 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
         rollback_paths.append(partial)
         try:
             partial.mkdir(parents=True, exist_ok=False)
-            (partial / f"{safe_pn}_drawing_map.json").write_bytes(drawing_map_bytes)
+            if not model_only:
+                (partial / f"{safe_pn}_drawing_map.json").write_bytes(drawing_map_bytes)
+                if drawing_pdf_bytes is not None:
+                    (partial / f"{safe_pn}_drawing.pdf").write_bytes(drawing_pdf_bytes)
             (partial / f"{safe_pn}.json").write_bytes(part_json_bytes)
-            if drawing_pdf_bytes is not None:
-                (partial / f"{safe_pn}_drawing.pdf").write_bytes(drawing_pdf_bytes)
             (partial / "intake_manifest.json").write_bytes(manifest_bytes)
             if not skip_stub:
                 (partial / f"{safe_pn}_inspection_profile.json").write_bytes(stub_bytes)
@@ -2606,23 +2704,27 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
             return {**plan, "success": False, "executed": executed,
                     "errors": [{"code": "per_rev_write_failed", "message": str(ex)}]}
         rollback_paths.clear()  # rename succeeded -- nothing to clean
-        _record("CREATE", rev_dir / f"{safe_pn}_drawing_map.json", True)
+        if not model_only:
+            _record("CREATE", rev_dir / f"{safe_pn}_drawing_map.json", True)
+            if drawing_pdf_bytes is not None:
+                _record("CREATE", rev_dir / f"{safe_pn}_drawing.pdf", True)
         _record("CREATE", rev_dir / f"{safe_pn}.json", True)
-        if drawing_pdf_bytes is not None:
-            _record("CREATE", rev_dir / f"{safe_pn}_drawing.pdf", True)
         _record("CREATE", rev_dir / "intake_manifest.json", True)
         if not skip_stub:
             _record("CREATE", rev_dir / f"{safe_pn}_inspection_profile.json", True)
     else:
         # Confirmed OVERWRITE -- per-file tmp + os.replace. Preserves
         # any curated files in the same dir per §6.4.
-        for fname, payload in [
-            (f"{safe_pn}_drawing_map.json",          drawing_map_bytes),
-            (f"{safe_pn}.json",                      part_json_bytes),
-            *( [(f"{safe_pn}_drawing.pdf", drawing_pdf_bytes)] if drawing_pdf_bytes is not None else [] ),
-            ("intake_manifest.json",                 manifest_bytes),
-            *( [(f"{safe_pn}_inspection_profile.json", stub_bytes)] if not skip_stub else [] ),
-        ]:
+        overwrite_pairs: List = []
+        if not model_only:
+            overwrite_pairs.append((f"{safe_pn}_drawing_map.json", drawing_map_bytes))
+            if drawing_pdf_bytes is not None:
+                overwrite_pairs.append((f"{safe_pn}_drawing.pdf", drawing_pdf_bytes))
+        overwrite_pairs.append((f"{safe_pn}.json", part_json_bytes))
+        overwrite_pairs.append(("intake_manifest.json", manifest_bytes))
+        if not skip_stub:
+            overwrite_pairs.append((f"{safe_pn}_inspection_profile.json", stub_bytes))
+        for fname, payload in overwrite_pairs:
             tgt = rev_dir / fname
             tmp = tgt.with_suffix(tgt.suffix + ".tmp")
             try:
@@ -2635,6 +2737,26 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
                 _record("OVERWRITE", tgt, False, detail=str(ex))
                 return {**plan, "success": False, "executed": executed,
                         "errors": [{"code": "per_rev_overwrite_failed", "message": str(ex)}]}
+
+    # ── Visual-asset copy (task 3 of the extractor-parity pass). ──
+    # Copy-if-not-exists from the bridge sidecar into the per-rev
+    # archive. Runs for BOTH new + overwrite paths and for BOTH
+    # standard + model-only intakes. Curated assets already in the
+    # target are skipped, not clobbered (§6.4 spirit applied to
+    # visual assets). Failures are logged in `executed` but do not
+    # fail the promote -- visual assets are presentational; the
+    # canonical archive (part.json + manifest) is already committed.
+    visual_src_paths = _intake_visual_assets_in_sidecar(library_dir, safe_pn, body.partPackageId)
+    for vp in visual_src_paths:
+        tgt = rev_dir / vp.name
+        if tgt.exists():
+            _record("SKIP", tgt, True, detail="curated asset preserved (already present)")
+            continue
+        try:
+            tgt.write_bytes(vp.read_bytes())
+            _record("CREATE", tgt, True, detail="copied from bridge sidecar")
+        except Exception as ex:
+            _record("CREATE", tgt, False, detail=f"visual asset copy failed: {ex}")
 
     # ── Root file updates (.bak rollback per §10.1 / mirror of
     # _drive_extraction's pattern). The per-rev archive is already
@@ -2659,14 +2781,18 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
             root_failures.append(f"{_intake_relpath(library_dir, dest)}: {ex}")
             return False
 
-    root_map = library_dir / f"{safe_pn}_drawing_map.json"
-    ok = _install_root_file(drawing_map_bytes, root_map)
-    _record("UPDATE" if ok else "FAILED", root_map, ok)
+    # Model-only mode does NOT touch the root drawing_map / drawing.pdf
+    # pointers. The previously-promoted revision's pointer must remain
+    # valid -- this part has no drawing to push.
+    if not model_only:
+        root_map = library_dir / f"{safe_pn}_drawing_map.json"
+        ok = _install_root_file(drawing_map_bytes, root_map)
+        _record("UPDATE" if ok else "FAILED", root_map, ok)
 
-    if drawing_pdf_bytes is not None:
-        root_pdf = library_dir / f"{safe_pn}_drawing.pdf"
-        ok = _install_root_file(drawing_pdf_bytes, root_pdf)
-        _record("UPDATE" if ok else "FAILED", root_pdf, ok)
+        if drawing_pdf_bytes is not None:
+            root_pdf = library_dir / f"{safe_pn}_drawing.pdf"
+            ok = _install_root_file(drawing_pdf_bytes, root_pdf)
+            _record("UPDATE" if ok else "FAILED", root_pdf, ok)
 
     if not skip_stub:
         root_stub = library_dir / f"{safe_pn}_inspection_profile.json"
@@ -2706,6 +2832,13 @@ class IntakeRequestBody(BaseModel):
     partFeatureCount:          Optional[int] = None
     partActiveConfiguration:   Optional[str] = None
     overwriteConfirmed:        Optional[str] = None           # must equal revision to allow overwrite
+    # Model-only intake: the operator extracted a SLDPRT but has no
+    # accompanying drawing yet. Skips the drawing-required gate in
+    # _compute_intake_plan and skips drawing-related writes in
+    # _execute_intake_plan. Stub profile is still written because no
+    # real inspection profile can be authored without a drawing
+    # describing what to inspect.
+    modelOnly:                 bool = False
 
 
 @app.get("/api/library/numbering/next")

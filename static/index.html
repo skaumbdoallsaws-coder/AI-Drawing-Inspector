@@ -32969,6 +32969,14 @@
                     partFeatureCount:         null,
                     partActiveConfiguration:  '',
                     partSourceDocPath:        '',
+                    // Model-only intake: operator extracted a SLDPRT but
+                    // does NOT have a drawing yet. Skips the drawing-
+                    // required gate in the backend + hides drawing-side
+                    // rows in the wizard UI. Stub profile is still
+                    // written (inspection remains disabled until a real
+                    // profile is authored against a future drawing).
+                    modelOnly:                false,
+                    numberSuggestLoading:     false,
                     previewLoading:           false,
                     previewResult:            null,
                     overwriteInput:           '',
@@ -33046,15 +33054,36 @@
                 }
             }
 
-            // Step 1 — pn + rev + mode -------------------------------------
+            // MODEL ONLY indicator shown across all steps when the
+            // checkbox is set, so the operator never loses sight of
+            // the fact that this intake will NOT produce an
+            // inspectable part.
+            function _modelOnlyHeaderHtml() {
+                if (!s.modelOnly) return '';
+                return `<div class="intake-banner warn" role="status">
+                    <strong>MODEL ONLY · INSPECTION INCOMPLETE</strong> —
+                    no drawing will be promoted. An intake stub will be written
+                    so the part is discoverable, but inspection will remain
+                    disabled until a real profile is authored against a future
+                    drawing.
+                </div>`;
+            }
+
+            // Step 1 — pn + rev + mode + model-only + numbering --------------
             function renderStep1() {
-                body.insertAdjacentHTML('beforeend', `
+                body.insertAdjacentHTML('beforeend', _modelOnlyHeaderHtml() + `
                     <div class="intake-field-row">
                         <label for="iwPnInput">Part number</label>
-                        <input type="text" id="iwPnInput" autocomplete="off"
-                               value="${_esc(s.partNumber)}"
-                               placeholder="e.g. 1099999">
-                        <span class="iw-hint">Numeric or alphanumeric token; must match what was extracted.</span>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="text" id="iwPnInput" autocomplete="off"
+                                   value="${_esc(s.partNumber)}"
+                                   placeholder="e.g. 1099999"
+                                   style="flex:1;">
+                            <button class="btn btn-secondary" id="iwSuggestPnBtn" type="button"
+                                    title="Calls /api/library/numbering/next; prefix is taken from the first 4 chars of the current input or defaults to 1030"
+                                    style="font-size:11px;padding:4px 8px;">Suggest…</button>
+                        </div>
+                        <span class="iw-hint">Numeric or alphanumeric token; must match what was extracted. Click <em>Suggest</em> to ask the library for the next free number in the prefix range.</span>
                     </div>
                     <div class="intake-field-row">
                         <label for="iwRevInput">Revision</label>
@@ -33070,6 +33099,13 @@
                             <label><input type="radio" name="iwMode" value="new-revision-of-existing-part" ${s.intakeMode === 'new-revision-of-existing-part' ? 'checked' : ''}> New revision of an existing part</label>
                         </div>
                     </div>
+                    <div class="intake-field-row">
+                        <label class="intake-model-only-row" style="display:flex;align-items:center;gap:6px;font-weight:600;">
+                            <input type="checkbox" id="iwModelOnly" ${s.modelOnly ? 'checked' : ''}>
+                            Model only — no drawing yet (SLDPRT-only intake)
+                        </label>
+                        <span class="iw-hint">When checked, the wizard skips the drawing-required gate and writes only the part metadata + an intake stub profile. The stub keeps inspection disabled until a real profile is authored against a future drawing.</span>
+                    </div>
                 `);
                 footer.innerHTML = `
                     <button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel</button>
@@ -33078,10 +33114,38 @@
                     </div>
                 `;
                 document.getElementById('iwCancelBtn').addEventListener('click', close);
+                document.getElementById('iwSuggestPnBtn').addEventListener('click', async () => {
+                    const cur = document.getElementById('iwPnInput').value.trim();
+                    // Prefix selection: use the first 4 chars of current input
+                    // when they look numeric, else fall back to 1030 (the
+                    // most-used parts series). Operator can edit afterwards.
+                    let prefix = '1030';
+                    const m = cur.match(/^(\d{2,5})/);
+                    if (m) prefix = m[1].slice(0, 4);
+                    s.numberSuggestLoading = true;
+                    try {
+                        const r = await fetch(`/api/library/numbering/next?kind=part&prefix=${encodeURIComponent(prefix)}`);
+                        if (!r.ok) {
+                            const detail = await r.json().catch(() => ({})).then(d => d?.detail || `HTTP ${r.status}`);
+                            setBanner('warn', `Numbering lookup failed: ${detail}`);
+                            render(); return;
+                        }
+                        const data = await r.json();
+                        document.getElementById('iwPnInput').value = data.suggestion;
+                        setBanner('info', `Suggested next part number in ${data.prefix}xxx: ${data.suggestion} (${data.scannedCount} existing tokens scanned).`);
+                        render();
+                    } catch (e) {
+                        setBanner('warn', `Numbering lookup failed: ${e.message}`);
+                        render();
+                    } finally {
+                        s.numberSuggestLoading = false;
+                    }
+                });
                 document.getElementById('iwNextBtn').addEventListener('click', () => {
                     const pn = document.getElementById('iwPnInput').value.trim();
                     const rev = document.getElementById('iwRevInput').value.trim();
                     const mode = document.querySelector('input[name="iwMode"]:checked')?.value || 'brand-new-part';
+                    const modelOnly = document.getElementById('iwModelOnly').checked;
                     if (!pn) { setBanner('warn', 'Part number is required.'); render(); return; }
                     if (!/^rev[A-Za-z0-9]+$/.test(rev)) {
                         setBanner('warn', 'Revision must match the pattern rev<alnum>, e.g. revA / revB / revC1. No underscores or dashes.');
@@ -33090,6 +33154,7 @@
                     s.partNumber  = pn;
                     s.revision    = rev;
                     s.intakeMode  = mode;
+                    s.modelOnly   = modelOnly;
                     // Pull whatever the bridge extraction success path
                     // cached for this partNumber so the operator sees
                     // pre-filled metadata on Step 2 instead of blanks.
@@ -33138,22 +33203,28 @@
                 const rows = [];
                 rows.push(['Part number',           _esc(s.partNumber),                       false]);
                 rows.push(['Revision',              _esc(s.revision),                         false]);
-                rows.push(['Intake mode',           _esc(s.intakeMode),                       false]);
-                rows.push(['Root drawing map',      sd.rootDrawingMapPresent ? 'Present (just extracted)' : 'MISSING — run Re-extract Drawing first', !sd.rootDrawingMapPresent]);
+                rows.push(['Intake mode',           _esc(s.intakeMode) + (s.modelOnly ? '  (MODEL ONLY)' : ''), false]);
+                // Drawing rows: in model-only mode the drawing is
+                // intentionally absent, so "MISSING" is not a defect --
+                // skip the row entirely + label the state. In standard
+                // mode the row stays as the loud red gate it always was.
+                if (!s.modelOnly) {
+                    rows.push(['Root drawing map',      sd.rootDrawingMapPresent ? 'Present (just extracted)' : 'MISSING — run Re-extract Drawing first', !sd.rootDrawingMapPresent]);
+                }
                 rows.push(['Bridge part package',   _esc(s.partPackageId || sd.lastBridgePartPackageId || 'MISSING — run Re-extract Part first'), !(s.partPackageId || sd.lastBridgePartPackageId)]);
-                // Captured drawing-extraction metadata. None of these come
-                // from the backend (drawing extraction has no on-disk
-                // sidecar) -- they are populated from the bridge IIFE's
-                // success-path cache. Surface them so the operator can see
-                // that the intake_manifest will carry real provenance.
-                if (s.drawingPackageId) {
-                    rows.push(['Drawing package',          _esc(s.drawingPackageId),                    false]);
-                }
-                if (s.drawingSheetCount != null) {
-                    rows.push(['Drawing sheets / views',   `${s.drawingSheetCount} sheet(s), ${s.drawingViewCount ?? '?'} view(s)`,  false]);
-                }
-                if (s.drawingSourceDocPath) {
-                    rows.push(['Drawing source path',      _esc(s.drawingSourceDocPath),                false]);
+                // Captured drawing-extraction metadata. Skipped in
+                // model-only mode because the wizard will not write
+                // anything that references it.
+                if (!s.modelOnly) {
+                    if (s.drawingPackageId) {
+                        rows.push(['Drawing package',          _esc(s.drawingPackageId),                    false]);
+                    }
+                    if (s.drawingSheetCount != null) {
+                        rows.push(['Drawing sheets / views',   `${s.drawingSheetCount} sheet(s), ${s.drawingViewCount ?? '?'} view(s)`,  false]);
+                    }
+                    if (s.drawingSourceDocPath) {
+                        rows.push(['Drawing source path',      _esc(s.drawingSourceDocPath),                false]);
+                    }
                 }
                 if (s.partFeatureCount != null) {
                     rows.push(['Part features',            String(s.partFeatureCount),                  false]);
@@ -33169,6 +33240,7 @@
                     const conflict = existingRevs.includes(s.revision);
                     rows.push(['Existing revisions', existingRevs.join(', ') + (conflict ? '  ⚠ your revision exists' : ''), conflict]);
                 }
+                body.insertAdjacentHTML('beforeend', _modelOnlyHeaderHtml());
                 let tableHtml = '<table class="intake-source-table"><tbody>';
                 for (const [k, v, missing] of rows) {
                     tableHtml += `<tr><td class="iw-label">${k}</td><td class="iw-value${missing ? ' iw-missing' : ''}">${v}</td></tr>`;
@@ -33181,12 +33253,13 @@
                         <input type="text" id="iwPartPkgInput" value="${_esc(s.partPackageId)}" placeholder="64-char sha256 from the bridge part-extraction response">
                         <span class="iw-hint">Auto-filled from <code>_bridge_imports/part/${_esc(s.partNumber)}/_latest.txt</code> when available.</span>
                     </div>
+                ` + (s.modelOnly ? '' : `
                     <div class="intake-field-row">
                         <label for="iwDrawingPkgInput">Drawing package ID (optional)</label>
                         <input type="text" id="iwDrawingPkgInput" value="${_esc(s.drawingPackageId)}" placeholder="paste from the drawing-extraction success toast if you captured it">
                         <span class="iw-hint">Not auto-detectable — drawing extraction installs to root and discards the staging zip. Leave blank if not captured; the intake_manifest will record an empty drawingPackageId.</span>
                     </div>
-                `);
+                `));
                 footer.innerHTML = `
                     <button class="btn btn-secondary" id="iwBackBtn" type="button">← Back</button>
                     <div class="iw-footer-right">
@@ -33198,7 +33271,10 @@
                 document.getElementById('iwCancelBtn').addEventListener('click', close);
                 document.getElementById('iwNextBtn').addEventListener('click', () => {
                     s.partPackageId    = document.getElementById('iwPartPkgInput').value.trim();
-                    s.drawingPackageId = document.getElementById('iwDrawingPkgInput').value.trim();
+                    // In model-only mode the drawing-package input is not
+                    // rendered; preserve whatever was already in state.
+                    const drawingPkgEl = document.getElementById('iwDrawingPkgInput');
+                    if (drawingPkgEl) s.drawingPackageId = drawingPkgEl.value.trim();
                     if (!s.partPackageId) {
                         setBanner('warn', 'Part package ID is required (run Re-extract Part from SOLIDWORKS first).');
                         render(); return;
@@ -33363,6 +33439,17 @@
                             ${committed.length} file${committed.length !== 1 ? 's' : ''} written.
                         </div>
                     `);
+                    if (s.modelOnly) {
+                        body.insertAdjacentHTML('beforeend', `
+                            <div class="intake-banner warn">
+                                <strong>MODEL ONLY · INSPECTION INCOMPLETE</strong> —
+                                an intake stub was written so the part is discoverable
+                                in the picker, but inspection is disabled. Add a real
+                                drawing + author a real inspection profile to enable
+                                the Inspect button.
+                            </div>
+                        `);
+                    }
                     body.insertAdjacentHTML('beforeend', `
                         <div class="intake-summary-section">
                             <h4>Target path</h4>
@@ -33435,6 +33522,7 @@
                 if (s.drawingViewCount  != null)   out.drawingViewCount            = s.drawingViewCount;
                 if (s.partFeatureCount  != null)   out.partFeatureCount            = s.partFeatureCount;
                 if (s.partActiveConfiguration)     out.partActiveConfiguration     = s.partActiveConfiguration;
+                if (s.modelOnly)                   out.modelOnly                   = true;
                 if (s.overwriteInput === s.revision) out.overwriteConfirmed = s.revision;
                 return out;
             }

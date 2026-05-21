@@ -2051,6 +2051,92 @@ def _intake_sanitize_revision(rev: str) -> str:
     return rev if INTAKE_REV_RE.match(rev) else ""
 
 
+# Filename-stem suffixes the numbering scanner strips before recording a
+# token as "used" -- so 1030024_view_front.png contributes 1030024, not
+# 1030024_view_front. List is intentionally exhaustive: a new suffix
+# leaking through would falsely show a number as available when it is
+# already attached to a real library entry.
+_INTAKE_NUMBERING_STRIP_SUFFIXES = (
+    "_drawing_map", "_drawing", "_highlight_boxes", "_inspection_profile",
+    "_feature_colors", "_dimension_descriptions",
+    "_view_front", "_view_top", "_view_right", "_view_isometric",
+    "_colored", "_assembly",
+)
+
+
+def _intake_used_part_numbers(library_dir: Path) -> set:
+    """All part / assembly number tokens currently in use anywhere in the
+    library. Union of:
+
+      1. Root-level file stems (any extension: .json / .STL / .pdf /
+         .glb / .png / etc.), with the known suffix list above stripped
+         so visual-asset / map / profile filenames roll up to their
+         owning part number.
+      2. parts/{pn}/ subdirectory names -- catches parts that have a
+         per-revision folder but no root profile yet (the model-only
+         intake path leaves it in exactly this state).
+      3. assemblies/{id}_assembly.json stems (existing convention).
+
+    A part number that collides with an assembly is detected in either
+    direction because the scan is union-of-all-locations regardless of
+    `kind`. The Numbering Wizard uses the result to suggest the next
+    available number; `kind` only narrows the candidate prefix range
+    the caller supplies."""
+    used: set = set()
+
+    if library_dir.exists() and library_dir.is_dir():
+        for f in library_dir.iterdir():
+            if not f.is_file():
+                continue
+            stem = f.stem
+            for sfx in _INTAKE_NUMBERING_STRIP_SUFFIXES:
+                if stem.endswith(sfx):
+                    stem = stem[: -len(sfx)]
+                    break
+            if stem:
+                used.add(stem)
+
+    parts_dir = library_dir / "parts"
+    if parts_dir.exists() and parts_dir.is_dir():
+        for p in parts_dir.iterdir():
+            if p.is_dir():
+                used.add(p.name)
+
+    assemblies_dir = library_dir / "assemblies"
+    if assemblies_dir.exists() and assemblies_dir.is_dir():
+        for f in assemblies_dir.glob("*_assembly.json"):
+            used.add(f.stem.replace("_assembly", ""))
+
+    return used
+
+
+def _intake_next_part_number(library_dir: Path, prefix: str = "1030") -> str:
+    """First `<prefix><N>` token not present anywhere in the library.
+
+    Width is derived from prefix length so the project's 7-character
+    convention holds and the iteration STOPS at the width boundary --
+    i.e. prefix '1030' (4 chars) iterates 1030001..1030999 (999
+    candidates), prefix '60003' (5 chars) iterates 6000301..6000399
+    (99 candidates), prefix '6000' iterates 6000001..6000999. This
+    matters because the candidate scanner must not silently roll past
+    the implied width and start emitting 8-character tokens that
+    violate the convention. Raises ValueError when the range is
+    exhausted; the endpoint converts that to a 409 so the operator
+    sees a clean 'this range is full' message instead of a stack
+    trace."""
+    used = _intake_used_part_numbers(library_dir)
+    width = max(1, 7 - len(prefix))
+    max_n = 10 ** width  # exclusive upper bound -- enforces width boundary
+    for i in range(1, max_n):
+        candidate = f"{prefix}{str(i).zfill(width)}"
+        if candidate not in used:
+            return candidate
+    raise ValueError(
+        f"No available numbers in {prefix}xxx range "
+        f"({max_n - 1} candidates exhausted)"
+    )
+
+
 def _intake_part_sidecar_partjson_path(library_dir: Path, pn: str, package_id: str) -> Path:
     """parts/.../part/part.json INSIDE the bridge sidecar package."""
     return library_dir / "_bridge_imports" / "part" / pn / package_id / "part" / "part.json"
@@ -2620,6 +2706,50 @@ class IntakeRequestBody(BaseModel):
     partFeatureCount:          Optional[int] = None
     partActiveConfiguration:   Optional[str] = None
     overwriteConfirmed:        Optional[str] = None           # must equal revision to allow overwrite
+
+
+@app.get("/api/library/numbering/next")
+async def library_numbering_next(
+    kind:   str = Query("part",   description="'part' or 'assembly'."),
+    prefix: str = Query("1030",   description="Numeric prefix; e.g. '1030' for parts in the 1030xxx series, '6000' for assemblies in the 6000xxx series."),
+):
+    """Suggest the next available part/assembly number in a prefix range.
+
+    The scan is union-of-all-locations: root files (any extension, with
+    suffix-stripping so 1030024_view_front.png rolls up to 1030024),
+    parts/{pn}/ subdirectory names, and assemblies/{id}_assembly.json
+    stems. A part number that collides with an assembly is detected in
+    either direction. `kind` only narrows the prefix the caller wants
+    to suggest from; it does not narrow what counts as 'taken'.
+
+    Returns:
+      {
+        "kind":         "part" | "assembly",
+        "prefix":       "1030",
+        "suggestion":   "1030025",
+        "scannedCount": <int>,
+        "library":      "<path>"
+      }
+    """
+    if kind not in ("part", "assembly"):
+        raise HTTPException(status_code=400,
+                            detail=f"unknown kind: {kind!r}; must be 'part' or 'assembly'")
+    if not prefix or not prefix.isdigit():
+        raise HTTPException(status_code=400,
+                            detail=f"invalid prefix: {prefix!r}; must be digits only")
+    library_dir = library_path()
+    used = _intake_used_part_numbers(library_dir)
+    try:
+        suggestion = _intake_next_part_number(library_dir, prefix=prefix)
+    except ValueError as ex:
+        raise HTTPException(status_code=409, detail=str(ex))
+    return {
+        "kind":         kind,
+        "prefix":       prefix,
+        "suggestion":   suggestion,
+        "scannedCount": len(used),
+        "library":      str(library_dir),
+    }
 
 
 @app.get("/api/library/revisions/{partNumber}")

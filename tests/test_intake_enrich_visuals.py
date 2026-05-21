@@ -191,6 +191,130 @@ def test_endpoint_404_when_sidecar_missing(enrich_library: dict):
     assert "sidecar not found" in r.json()["detail"].lower()
 
 
+def test_endpoint_resolves_sourcepath_from_manifest_when_partjson_lacks_it(tmp_path: Path,
+                                                                            monkeypatch: pytest.MonkeyPatch):
+    """Regression for the live Rev B failure: real bridge sidecars
+    store the SLDPRT path in manifest.json sourceDocument.path, NOT
+    in part/part.json. Endpoint must fall back to manifest.json when
+    part.json carries no source-path field. Mirrors the actual shape
+    observed in 400S_Sorted_Library/_bridge_imports/part/1030034/.../
+    manifest.json sourceDocument: {path, fileSize, swModifiedAt,
+    sourceHash, documentType, configurationName}."""
+    library = tmp_path / "real_shape_lib"
+    library.mkdir()
+    sldprt = tmp_path / "Vintage Plane Rev B.SLDPRT"
+    sldprt.write_bytes(b"FAKE SLDPRT")
+    pkg_id = "c3e726312c764eb4af2408038ca831e2fb4505860843d3b7e3c913c06877cb2f"
+    pkg_root = library / "_bridge_imports" / "part" / "1030034" / pkg_id
+    (pkg_root / "part").mkdir(parents=True)
+    # part/part.json mirrors the REAL bridge-add-in shape: no source
+    # path fields at all -- just metadata + features.
+    (pkg_root / "part" / "part.json").write_text(json.dumps({
+        "schemaVersion":       "1.0",
+        "units":               "in",
+        "documentType":        "part",
+        "activeConfiguration": "Default",
+        "customProperties":    {},
+        "featureTree":         {},
+    }), encoding="utf-8")
+    # manifest.json carries sourceDocument.path -- the canonical
+    # placement the bridge add-in uses.
+    (pkg_root / "manifest.json").write_text(json.dumps({
+        "schemaVersion":  "1.0",
+        "packageId":      pkg_id,
+        "kind":           "part",
+        "swVersion":      "SW2024 SP01",
+        "extractor":      "bridge-addin",
+        "sourceDocument": {
+            "path":              str(sldprt),
+            "fileSize":          769287,
+            "documentType":      "part",
+            "configurationName": "Default",
+        },
+        "extractedAt": "2026-05-23T15:00:00Z",
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    monkeypatch.setattr(server, "assembly_profiles", {}, raising=False)
+    monkeypatch.setattr(server, "inspector", None)
+    monkeypatch.setattr(server, "_solidworks_extractor_exe_path", lambda: r"C:\fake\extractor.exe")
+    monkeypatch.setattr(server, "_export_formats_exe_path",       lambda: r"C:\fake\formats.exe")
+
+    # Bridge cross-check must succeed -- mock activeDoc to match
+    # manifest sourceDocument.path.
+    async def _fake_status_ok(self):
+        m = MagicMock()
+        m.active_doc = MagicMock(type="Part", title=sldprt.name, path=str(sldprt))
+        return m
+    monkeypatch.setattr(server.BridgeClient, "status", _fake_status_ok)
+
+    # Mock subprocess to produce one visual so the endpoint returns 200.
+    def _fake_run(argv, timeout_s=180.0):
+        if argv[0].endswith("extractor.exe"):
+            out_dir = Path(argv[argv.index("--output") + 1]).parent
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "Vintage Plane Rev B_colored.glb").write_bytes(b"GLB")
+            return {"argv": list(argv), "rc": 0, "stdout": "", "stderr": "", "timedOut": False}
+        return {"argv": list(argv), "rc": 0, "stdout": "", "stderr": "", "timedOut": False}
+    monkeypatch.setattr(server, "_intake_enrich_run_subprocess_sync", _fake_run)
+
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/enrich-visuals",
+                    json={"partNumber": "1030034", "partPackageId": pkg_id})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # The load-bearing assertion: sourcePath was resolved (not 409)
+    # AND it came from manifest.json's sourceDocument.path.
+    assert body["sourcePath"] == str(sldprt)
+    assert "1030034_colored.glb" in body["filesAdded"]
+
+
+def test_endpoint_part_json_sourcepath_wins_over_manifest(tmp_path: Path,
+                                                           monkeypatch: pytest.MonkeyPatch):
+    """Precedence check: when both part.json AND manifest.json carry a
+    source path, part.json's value takes precedence so a hand-edited
+    override can redirect the enrichment."""
+    library = tmp_path / "precedence_lib"
+    library.mkdir()
+    sldprt_override = tmp_path / "Override.SLDPRT"
+    sldprt_override.write_bytes(b"OVERRIDE")
+    sldprt_manifest = tmp_path / "FromManifest.SLDPRT"
+    sldprt_manifest.write_bytes(b"FROM_MANIFEST")
+    pkg_id = "precedencepkg"
+    pkg_root = library / "_bridge_imports" / "part" / "1030034" / pkg_id
+    (pkg_root / "part").mkdir(parents=True)
+    (pkg_root / "part" / "part.json").write_text(json.dumps({
+        "sourcePath": str(sldprt_override),
+    }), encoding="utf-8")
+    (pkg_root / "manifest.json").write_text(json.dumps({
+        "sourceDocument": {"path": str(sldprt_manifest)},
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    monkeypatch.setattr(server, "assembly_profiles", {}, raising=False)
+    monkeypatch.setattr(server, "inspector", None)
+    monkeypatch.setattr(server, "_solidworks_extractor_exe_path", lambda: r"C:\fake\extractor.exe")
+    monkeypatch.setattr(server, "_export_formats_exe_path",       lambda: r"C:\fake\formats.exe")
+
+    async def _fake_status_match_override(self):
+        m = MagicMock()
+        m.active_doc = MagicMock(type="Part", title=sldprt_override.name, path=str(sldprt_override))
+        return m
+    monkeypatch.setattr(server.BridgeClient, "status", _fake_status_match_override)
+    monkeypatch.setattr(server, "_intake_enrich_run_subprocess_sync",
+                        lambda argv, timeout_s=180.0: {"argv": list(argv), "rc": 0, "stdout": "", "stderr": "", "timedOut": False})
+
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/enrich-visuals",
+                    json={"partNumber": "1030034", "partPackageId": pkg_id})
+    # Should succeed only because activeDoc matches the OVERRIDE path;
+    # if precedence flipped, the cross-check would 409 against the
+    # manifest path which activeDoc does NOT match.
+    assert r.status_code in (200, 500), r.text  # 500 OK here -- subprocess produced nothing; precedence is the real assertion
+    assert r.json()["sourcePath"] == str(sldprt_override), \
+        "part.json sourcePath must win over manifest.json sourceDocument.path"
+
+
 def test_endpoint_409_when_sourcepath_missing_on_disk(enrich_library: dict,
                                                       monkeypatch: pytest.MonkeyPatch):
     """sidecar's sourcePath references a file that has been moved or

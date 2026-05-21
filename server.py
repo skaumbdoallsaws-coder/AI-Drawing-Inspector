@@ -3292,7 +3292,20 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
             detail=f"Bridge sidecar not found at {_intake_relpath(library_dir, pkg_root)}",
         )
 
-    # Resolve sourcePath from the sidecar's part.json.
+    # Resolve sourcePath. Two real-world sources observed in the wild:
+    #
+    #   1. sidecar's part/part.json -- legacy/hand-authored shape, may
+    #      carry sourcePath / SourcePath / filePath / path at top level
+    #      or inside an identity sub-block.
+    #   2. sidecar's manifest.json sourceDocument.path -- the bridge
+    #      add-in's canonical placement (observed in every shipped
+    #      bridge sidecar; the field tested live against
+    #      1030034/Vintage Plane Rev B).
+    #
+    # part.json takes precedence so a hand-edited override wins; if it
+    # carries no source-path field, we fall back to manifest.json. Hard
+    # fail only when BOTH come up empty -- error message names BOTH
+    # locations so the operator knows where to look.
     part_json = _intake_part_sidecar_partjson_path(library_dir, safe_pn, pkg_id)
     if not part_json.exists():
         raise HTTPException(
@@ -3307,17 +3320,39 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
     if isinstance(part_doc, dict):
         identity = part_doc.get("identity") or part_doc.get("Identity") or {}
         for key in ("sourcePath", "SourcePath", "filePath", "path"):
-            if isinstance(part_doc.get(key), str):
+            if isinstance(part_doc.get(key), str) and part_doc[key].strip():
                 source_path_raw = part_doc[key]
                 break
-            if isinstance(identity, dict) and isinstance(identity.get(key), str):
+            if isinstance(identity, dict) and isinstance(identity.get(key), str) and identity[key].strip():
                 source_path_raw = identity[key]
                 break
+    if not source_path_raw:
+        # Fallback: package manifest.json -> sourceDocument.{path,filePath}
+        manifest_path = _intake_part_sidecar_manifest_path(library_dir, safe_pn, pkg_id)
+        if manifest_path.exists():
+            try:
+                manifest_doc = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+            except Exception:
+                manifest_doc = None
+            if isinstance(manifest_doc, dict):
+                src_doc = manifest_doc.get("sourceDocument") or {}
+                if isinstance(src_doc, dict):
+                    for key in ("path", "filePath", "sourcePath", "SourcePath"):
+                        v = src_doc.get(key)
+                        if isinstance(v, str) and v.strip():
+                            source_path_raw = v
+                            break
     source_path_raw = (source_path_raw or "").strip()
     if not source_path_raw:
         raise HTTPException(
             status_code=409,
-            detail="Could not resolve sourcePath from sidecar part.json. The extractor needs the original SLDPRT path to know what to enrich.",
+            detail=(
+                "Could not resolve sourcePath from sidecar. Looked in "
+                f"{_intake_relpath(library_dir, part_json)} "
+                "(keys: sourcePath / SourcePath / filePath / path, optionally under identity) "
+                "and in manifest.json (sourceDocument.path / .filePath). "
+                "The extractor needs the original SLDPRT path to know what to enrich."
+            ),
         )
     source_path = Path(source_path_raw)
     if not source_path.exists() or not source_path.is_file():

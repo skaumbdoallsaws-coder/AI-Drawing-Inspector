@@ -996,6 +996,37 @@ def _inspectorpkg_cli_path() -> Optional[str]:
     return candidate if (candidate and Path(candidate).exists()) else None
 
 
+# Old SolidWorksExtractor + ExportSolidWorksFormats binaries used by
+# the Library-Intake visual-enrichment endpoint to produce the visual
+# assets the bridge add-in does NOT emit (GLB, view PNGs, feature-color
+# map, STL). Live in the AI-tool repo root, NOT inside this worktree.
+# Override paths via env when on a different dev-machine layout.
+_DEFAULT_SOLIDWORKS_EXTRACTOR_EXE = (
+    r"C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\Projects\AI-tool"
+    r"\SolidWorksExtractor\bin\Release\SolidWorksExtractor.exe"
+)
+_DEFAULT_EXPORT_FORMATS_EXE = (
+    r"C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\Projects\AI-tool"
+    r"\scripts\ExportSolidWorksFormats.exe"
+)
+
+
+def _solidworks_extractor_exe_path() -> Optional[str]:
+    """Path to the OLD SolidWorksExtractor.exe (--part-glb + --views).
+    Returns None if neither the env var nor the default points at an
+    existing file. The enrich-visuals endpoint surfaces None as a
+    clean 500 instead of a stack trace."""
+    candidate = os.environ.get("SOLIDWORKS_EXTRACTOR_EXE") or _DEFAULT_SOLIDWORKS_EXTRACTOR_EXE
+    return candidate if (candidate and Path(candidate).exists()) else None
+
+
+def _export_formats_exe_path() -> Optional[str]:
+    """Path to scripts/ExportSolidWorksFormats.exe (STL exporter).
+    Same env-override pattern as SOLIDWORKS_EXTRACTOR_EXE."""
+    candidate = os.environ.get("EXPORT_FORMATS_EXE") or _DEFAULT_EXPORT_FORMATS_EXE
+    return candidate if (candidate and Path(candidate).exists()) else None
+
+
 class RequestExtractionBody(BaseModel):
     """POST /api/request-extraction body. Field names mirror the bridge
     JSON exactly so request flows are easy to trace end-to-end."""
@@ -2243,6 +2274,78 @@ def _intake_visual_assets_in_sidecar(library_dir: Path, pn: str, package_id: str
     return found
 
 
+# Suffix patterns the visual-asset rename pass recognises. Maps each
+# trailing pattern to the canonical form the wizard's whitelist
+# expects. The OLD SolidWorksExtractor names outputs from
+# GetDeterministicPartNumber() -- which falls back to the SLDPRT
+# filename stem when no PART_NUMBER custom property is set -- so
+# unrenamed outputs like "Vintage Plane_view_front.png" would never be
+# picked up by the wizard's {pn}_view_front.png scan. Renaming here is
+# the bridge between the operator's chosen library PN and whatever the
+# SLDPRT happened to be called on disk.
+_INTAKE_VISUAL_SUFFIX_PATTERNS = (
+    "_view_front.png",
+    "_view_top.png",
+    "_view_right.png",
+    "_view_isometric.png",
+    "_colored.glb",
+    "_feature_colors.json",
+)
+
+
+def _intake_rename_visuals_to_pn(work_dir: Path, target_pn: str) -> List[Path]:
+    """Rename every visual-asset file in `work_dir` so its stem starts
+    with `target_pn`. Returns the list of resulting paths (renamed and
+    already-correct alike). STL receives special handling because its
+    only suffix is the extension itself, not an underscore-prefixed
+    pattern."""
+    out: List[Path] = []
+    if not work_dir.exists():
+        return out
+    for f in list(work_dir.iterdir()):
+        if not f.is_file():
+            continue
+        name = f.name
+        # Pattern-based suffix rename (view PNGs, GLB, feature_colors).
+        matched_suffix = None
+        for sfx in _INTAKE_VISUAL_SUFFIX_PATTERNS:
+            if name.endswith(sfx):
+                matched_suffix = sfx
+                break
+        if matched_suffix is not None:
+            new_name = f"{target_pn}{matched_suffix}"
+            if new_name == name:
+                out.append(f)
+            else:
+                new_path = work_dir / new_name
+                try:
+                    if new_path.exists():
+                        new_path.unlink()
+                    f.rename(new_path)
+                    out.append(new_path)
+                except Exception:
+                    logger.warning("visual-asset rename failed %s -> %s", name, new_name)
+            continue
+        # STL (case-preserving). ExportSolidWorksFormats writes .STL;
+        # the wizard whitelist already accepts both cases.
+        lower = name.lower()
+        if lower.endswith(".stl"):
+            ext = ".STL" if name.endswith(".STL") else ".stl"
+            new_name = f"{target_pn}{ext}"
+            if new_name == name:
+                out.append(f)
+            else:
+                new_path = work_dir / new_name
+                try:
+                    if new_path.exists():
+                        new_path.unlink()
+                    f.rename(new_path)
+                    out.append(new_path)
+                except Exception:
+                    logger.warning("visual-asset rename failed %s -> %s", name, new_name)
+    return out
+
+
 def _intake_part_sidecar_manifest_path(library_dir: Path, pn: str, package_id: str) -> Path:
     """manifest.json at the package root inside the sidecar."""
     return library_dir / "_bridge_imports" / "part" / pn / package_id / "manifest.json"
@@ -3047,6 +3150,367 @@ async def library_intake_promote(body: IntakeRequestBody):
     if not result.get("success", False):
         return JSONResponse(status_code=500, content=result)
     return result
+
+
+# Separate single-flight lock for visual enrichment. Does NOT share
+# _library_intake_lock because enrichment and promote can be useful
+# back-to-back: operator enriches sidecar -> immediately re-promotes
+# revA with overwriteConfirmed to pick up the new visuals. The two
+# operations don't share the same target paths (enrichment writes
+# into _bridge_imports/...; promote reads from there and writes
+# parts/{pn}/rev{X}/...), but two concurrent enrichments would race
+# the same sidecar dir.
+_library_intake_enrich_lock = asyncio.Lock()
+
+
+class IntakeEnrichVisualsBody(BaseModel):
+    """POST body for /api/library/intake/enrich-visuals.
+
+    The endpoint extracts the visual assets (GLB + view PNGs +
+    feature_colors + STL) the bridge add-in does NOT emit, using the
+    OLD repo-root SolidWorksExtractor.exe + ExportSolidWorksFormats.exe,
+    then drops the results into the bridge sidecar so the next wizard
+    promote picks them up via the existing copy-if-not-exists path."""
+    partNumber:    str
+    partPackageId: str
+
+
+def _intake_enrich_run_subprocess_sync(argv: list, timeout_s: float = 180.0) -> dict:
+    """Sync subprocess runner used from the async endpoint via
+    asyncio.to_thread. Captures rc + stdout + stderr (truncated) so the
+    response carries enough info for the operator to diagnose a failure
+    without the operator having to dig through server logs."""
+    import subprocess
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
+        return {
+            "argv":     argv,
+            "rc":       proc.returncode,
+            "stdout":   (proc.stdout or "")[-2000:],
+            "stderr":   (proc.stderr or "")[-2000:],
+            "timedOut": False,
+        }
+    except subprocess.TimeoutExpired as ex:
+        return {
+            "argv":     argv,
+            "rc":       -1,
+            "stdout":   (ex.stdout or "")[-2000:] if hasattr(ex, "stdout") and ex.stdout else "",
+            "stderr":   f"timeout after {timeout_s}s",
+            "timedOut": True,
+        }
+    except FileNotFoundError as ex:
+        return {
+            "argv":     argv,
+            "rc":       -1,
+            "stdout":   "",
+            "stderr":   f"binary not found: {ex}",
+            "timedOut": False,
+        }
+    except Exception as ex:
+        return {
+            "argv":     argv,
+            "rc":       -1,
+            "stdout":   "",
+            "stderr":   f"subprocess invoke failed: {type(ex).__name__}: {ex}",
+            "timedOut": False,
+        }
+
+
+@app.post("/api/library/intake/enrich-visuals")
+async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
+    """Visual-asset enrichment for a previously-extracted SLDPRT.
+
+    Runs the OLD SolidWorksExtractor.exe (--part-glb + view PNGs +
+    feature_colors.json) AND ExportSolidWorksFormats.exe (STL) against
+    the active SOLIDWORKS document, renames outputs from whatever the
+    OLD extractor named them to {pn}_*, then drops the renamed files
+    into the bridge sidecar's part/ subdirectory.
+
+    The wizard's existing copy-if-not-exists logic
+    (_intake_visual_assets_in_sidecar) picks them up automatically on
+    the next promote. Operator re-promotes revA with
+    overwriteConfirmed='revA' to flow the visuals into the per-rev
+    archive.
+
+    Safety
+    ------
+      - partNumber sanitised; partPackageId required.
+      - Sidecar must exist (404 otherwise).
+      - Sidecar's part.json must declare a sourcePath that points at
+        a readable .SLDPRT file (409 otherwise -- "did the operator
+        move the file?").
+      - Bridge cross-check: /api/bridge/status activeDoc.path MUST
+        equal the sidecar sourcePath (409 with explicit hint
+        otherwise). Prevents the disaster case where the operator
+        runs enrichment with a different doc active and gets visuals
+        for the wrong part.
+      - Single-flight via _library_intake_enrich_lock so two
+        concurrent enrichments cannot race the same sidecar dir.
+
+    Performance
+    -----------
+    Subprocess invocations run inside asyncio.to_thread so the event
+    loop is not blocked while the OLD extractor takes screenshots.
+    Per-binary timeout is 180s. Total wall-clock for the typical part
+    is ~30-60s.
+
+    Returns
+    -------
+    {
+      "success":       <bool>,
+      "partNumber":    "1030034",
+      "partPackageId": "<sha256>",
+      "sourcePath":    "<sldprt path>",
+      "filesAdded":    ["1030034_view_front.png", "1030034_colored.glb", ...],
+      "filesSkipped":  ["1030034_view_isometric.png"],   # if the binary failed to produce it
+      "extractorRun":  { argv, rc, stdout, stderr, timedOut },
+      "stlRun":        { argv, rc, stdout, stderr, timedOut },
+      "warnings":      [{ code, message }],
+    }
+    """
+    safe_pn = sanitize_part_number(body.partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    pkg_id = (body.partPackageId or "").strip()
+    if not pkg_id:
+        raise HTTPException(status_code=400, detail="partPackageId is required")
+
+    # Lock-busy check short-circuits BEFORE the bridge round-trip so a
+    # concurrent enrich attempt fails fast without holding up the SW
+    # connection.
+    if _library_intake_enrich_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="Another visual-enrichment run is in progress; one at a time.",
+        )
+
+    library_dir = library_path()
+    pkg_root = library_dir / "_bridge_imports" / "part" / safe_pn / pkg_id
+    if not pkg_root.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Bridge sidecar not found at {_intake_relpath(library_dir, pkg_root)}",
+        )
+
+    # Resolve sourcePath from the sidecar's part.json.
+    part_json = _intake_part_sidecar_partjson_path(library_dir, safe_pn, pkg_id)
+    if not part_json.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sidecar part.json missing at {_intake_relpath(library_dir, part_json)}",
+        )
+    try:
+        part_doc = json.loads(part_json.read_text(encoding="utf-8-sig"))
+    except Exception as ex:
+        raise HTTPException(status_code=409, detail=f"Sidecar part.json unparseable: {ex}")
+    source_path_raw = ""
+    if isinstance(part_doc, dict):
+        identity = part_doc.get("identity") or part_doc.get("Identity") or {}
+        for key in ("sourcePath", "SourcePath", "filePath", "path"):
+            if isinstance(part_doc.get(key), str):
+                source_path_raw = part_doc[key]
+                break
+            if isinstance(identity, dict) and isinstance(identity.get(key), str):
+                source_path_raw = identity[key]
+                break
+    source_path_raw = (source_path_raw or "").strip()
+    if not source_path_raw:
+        raise HTTPException(
+            status_code=409,
+            detail="Could not resolve sourcePath from sidecar part.json. The extractor needs the original SLDPRT path to know what to enrich.",
+        )
+    source_path = Path(source_path_raw)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Sidecar references sourcePath '{source_path_raw}' but it does not exist on disk. "
+                "Has the SLDPRT been moved or renamed?"
+            ),
+        )
+
+    # Bridge cross-check: activeDoc.path MUST equal sourcePath. Stops
+    # the disaster case of enriching the wrong file because the
+    # operator switched docs in SOLIDWORKS between extraction + enrich.
+    try:
+        bridge_client = BridgeClient()
+        bridge_status = await bridge_client.status()
+    except Exception as ex:
+        raise HTTPException(status_code=503, detail=f"Could not reach SOLIDWORKS bridge: {ex}")
+    if bridge_status is None:
+        raise HTTPException(
+            status_code=503,
+            detail="SOLIDWORKS bridge unavailable. Open SOLIDWORKS with the InspectorPro add-in enabled.",
+        )
+    if not getattr(bridge_status, "active_doc", None):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"SOLIDWORKS has no active document. Open '{source_path}' in SOLIDWORKS, then retry."
+            ),
+        )
+    active_path = str(bridge_status.active_doc.path or "").strip()
+    if active_path.lower() != str(source_path).lower():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Bridge active document path does not match sidecar sourcePath. "
+                f"activeDoc: {active_path!r}; expected: {str(source_path)!r}. "
+                "Open the matching SLDPRT in SOLIDWORKS, then retry."
+            ),
+        )
+
+    # Locate the two binaries; either missing is a hard 500 with a
+    # remediation hint pointing at the env-override variables.
+    extractor_exe = _solidworks_extractor_exe_path()
+    if not extractor_exe:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"SolidWorksExtractor.exe not found. Default: {_DEFAULT_SOLIDWORKS_EXTRACTOR_EXE}. "
+                "Set SOLIDWORKS_EXTRACTOR_EXE env var to override."
+            ),
+        )
+    formats_exe = _export_formats_exe_path()
+    if not formats_exe:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"ExportSolidWorksFormats.exe not found. Default: {_DEFAULT_EXPORT_FORMATS_EXE}. "
+                "Set EXPORT_FORMATS_EXE env var to override."
+            ),
+        )
+
+    async with _library_intake_enrich_lock:
+        # Subprocess work happens in a thread so the event loop stays
+        # responsive. Each binary gets its own temp output dir to
+        # avoid filename collisions between the two runs.
+        import tempfile
+        warnings: List[Dict[str, str]] = []
+        files_added: List[str] = []
+        files_skipped: List[str] = []
+
+        def _sync_enrich() -> dict:
+            extractor_tmp = Path(tempfile.mkdtemp(prefix="iw-enrich-glb-"))
+            formats_tmp   = Path(tempfile.mkdtemp(prefix="iw-enrich-stl-"))
+            try:
+                # OLD extractor produces a part.json next to the visuals;
+                # we point its --output at a junk path inside the temp dir
+                # so the visuals land there too (the extractor writes
+                # views + GLB to the SAME directory as --output).
+                stem = source_path.stem
+                json_out = extractor_tmp / f"{stem}.json"
+                extractor_argv = [
+                    extractor_exe,
+                    str(source_path),
+                    "--output", str(json_out),
+                    "--part-glb",
+                    "--views",
+                ]
+                extractor_run = _intake_enrich_run_subprocess_sync(extractor_argv, timeout_s=180.0)
+
+                # ExportSolidWorksFormats CLI: <part.sldprt> <output-dir>
+                formats_argv = [formats_exe, str(source_path), str(formats_tmp)]
+                stl_run = _intake_enrich_run_subprocess_sync(formats_argv, timeout_s=120.0)
+
+                # Rename + collect from BOTH temp dirs so per-part-pn
+                # outputs land with canonical {pn}_* names regardless
+                # of what the OLD extractor decided to name them.
+                renamed_extractor = _intake_rename_visuals_to_pn(extractor_tmp, safe_pn)
+                renamed_formats   = _intake_rename_visuals_to_pn(formats_tmp,   safe_pn)
+
+                # Sidecar target directory: drop into part/ so the
+                # wizard's existing _intake_visual_assets_in_sidecar
+                # scan picks them up on the next promote.
+                target_dir = pkg_root / "part"
+                target_dir.mkdir(parents=True, exist_ok=True)
+
+                copied = []
+                expected_visual_names = set(_intake_visual_asset_filenames(safe_pn))
+                for src in renamed_extractor + renamed_formats:
+                    if src.name not in expected_visual_names:
+                        # Stray non-visual file the rename pass left
+                        # untouched (e.g. the OLD extractor's .json or
+                        # the formats binary's .stp / .STEP). Skip.
+                        continue
+                    tgt = target_dir / src.name
+                    if tgt.exists():
+                        # Sidecar already had this visual from a prior
+                        # enrichment. Overwrite -- the operator clicked
+                        # Enrich again, presumably wanting fresh bytes.
+                        try: tgt.unlink()
+                        except Exception: pass
+                    try:
+                        shutil.copy2(src, tgt)
+                        copied.append(src.name)
+                    except Exception as ex:
+                        warnings.append({
+                            "code":    "copy_failed",
+                            "message": f"failed to copy {src.name} into sidecar: {ex}",
+                        })
+
+                # Compute which expected visuals are STILL missing
+                # post-run. STL filenames are case-insensitive (the
+                # whitelist deliberately accepts both `.stl` and `.STL`
+                # because case-preservation varies across Windows
+                # filesystems); collapse to a single canonical form
+                # before the missing-set diff so a `.STL` produced run
+                # is not falsely reported as missing `.stl`.
+                def _canonical_visual(n: str) -> str:
+                    if n.lower().endswith(".stl"):
+                        return n.lower().rsplit(".", 1)[0] + ".stl"
+                    return n
+                produced_canonical = {_canonical_visual(p.name) for p in renamed_extractor + renamed_formats}
+                missing = sorted({
+                    n for n in expected_visual_names
+                    if _canonical_visual(n) not in produced_canonical
+                })
+
+                return {
+                    "extractorRun": extractor_run,
+                    "stlRun":       stl_run,
+                    "filesAdded":   copied,
+                    "filesMissing": missing,
+                }
+            finally:
+                # Best-effort temp cleanup; if SOLIDWORKS still holds a
+                # handle on something this can fail silently.
+                shutil.rmtree(extractor_tmp, ignore_errors=True)
+                shutil.rmtree(formats_tmp,   ignore_errors=True)
+
+        result = await asyncio.to_thread(_sync_enrich)
+
+    extractor_run = result["extractorRun"]
+    stl_run       = result["stlRun"]
+    files_added   = result["filesAdded"]
+    files_missing = result["filesMissing"]
+
+    # Heuristic for the overall success flag: at least one expected
+    # visual landed in the sidecar. If BOTH binaries failed and zero
+    # files were produced, surface as 500 with the captured run logs
+    # so the operator can diagnose without server-log access.
+    success = len(files_added) > 0
+
+    if files_missing:
+        warnings.append({
+            "code":    "incomplete_extraction",
+            "message": f"OLD extractor did not produce: {', '.join(files_missing)}",
+        })
+
+    response = {
+        "success":       success,
+        "partNumber":    safe_pn,
+        "partPackageId": pkg_id,
+        "sourcePath":    str(source_path),
+        "filesAdded":    files_added,
+        "filesMissing":  files_missing,
+        "extractorRun":  extractor_run,
+        "stlRun":        stl_run,
+        "warnings":      warnings,
+    }
+    if not success:
+        return JSONResponse(status_code=500, content=response)
+    return response
 
 
 # ---------------------------------------------------------------------------

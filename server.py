@@ -2960,15 +2960,25 @@ def _profile_builder_prompt(context: dict, instructions: Optional[str]) -> str:
         "operatorInstructions": instructions or "",
     }
     return (
-        "You are drafting an InspectorPro inspection profile for a manufacturing part.\n"
-        "Return ONLY valid JSON. Do not include markdown.\n\n"
+        "You are the InspectorPro Profile Builder. Given promoted part metadata and drawing-map context, "
+        "draft an inspection profile for human review.\n\n"
+        "Output a single valid JSON object only. Do not include markdown or prose.\n\n"
         "Required JSON shape:\n"
         "{\n"
         '  "part_number": "<part number>",\n'
         '  "part_name": "<short product name>",\n'
         '  "part_description": "<plain-language manufacturing description>",\n'
         '  "features": [\n'
-        '    {"name": "<feature group>", "type": "<feature type>", "count": <integer>, "spatial_description": "<where it appears in the drawing/views>"}\n'
+        "    {\n"
+        '      "name": "<short physical-feature label>",\n'
+        '      "type": "<e.g. revolved | hole_pattern | counterbore | slot_pattern | planar_face | thread | cylindrical_surface>",\n'
+        '      "count": <integer; physical instance count>,\n'
+        '      "spatial_description": "<where this feature appears in the drawing/views and how a reviewer can recognize it>",\n'
+        '      "inspection_reason": "<why this feature warrants inspection>",\n'
+        '      "evidence": ["<traceable plain-English source>", "..."],\n'
+        '      "uncertainty": "low|medium|high",\n'
+        '      "review_notes": "<include when uncertainty is medium or high>"\n'
+        "    }\n"
         "  ],\n"
         '  "view_expectations": {\n'
         '    "front_or_plan": "<expected drawing content>",\n'
@@ -2977,14 +2987,164 @@ def _profile_builder_prompt(context: dict, instructions: Optional[str]) -> str:
         '    "isometric": "<expected drawing content>",\n'
         '    "section_views": "<expected drawing content>",\n'
         '    "detail_views": "<expected drawing content>"\n'
-        "  }\n"
+        "  },\n"
+        '  "review_notes": [\n'
+        '    "<profile-level items the human reviewer should confirm before applying>"\n'
+        "  ]\n"
         "}\n\n"
-        "Rules:\n"
-        "- This is a draft profile for human review, not final QC authority.\n"
-        "- Group repeated features into logical feature groups with counts.\n"
-        "- Use only supplied CAD/drawing context. If uncertain, be conservative.\n"
-        "- Do not invent tolerances, materials, supplier requirements, or criticality not supported by the context.\n"
-        "- Do not include source/status/inspectionReady fields; applying the draft makes it a real profile.\n\n"
+        "RULES:\n"
+        "1. A feature is a physical or functional thing on the part: flange body, hole pattern, "
+        "counterbore set, thread, slot pattern, planar mating face, register, shaft journal, etc.\n\n"
+        "2. Dimensions, GD&T frames, surface-finish callouts, notes, section views, and detail views "
+        "are evidence attached to features. Do not turn every dimension into its own feature row.\n\n"
+        "3. count = physical instance count. Six bolt holes means count: 6. One flange body means "
+        "count: 1. Do not use count to mean number of dimensions or callouts.\n\n"
+        "4. evidence[] entries should be plain-English source references a reviewer can find, such as:\n"
+        '   "front view: \u00d875 outer diameter dimension"\n'
+        '   "section view A-A: 12 mm overall thickness"\n'
+        '   "front view: parallelism 0.05 to datum A on mating face"\n'
+        '   "general note: BREAK ALL SHARP EDGES, DEBURR"\n'
+        '   "part feature tree: HoleWzd counterbore feature"\n\n'
+        "5. inspection_reason is mandatory. Explain why the feature warrants inspection, usually "
+        "because of fit, mating function, assembly correctness, or drawing control. Avoid generic "
+        "language like \"to ensure quality.\"\n\n"
+        "6. uncertainty:\n"
+        "   low = directly supported by supplied context\n"
+        "   medium = inferred from convention or unstated function\n"
+        "   high = weakly supported; operator must verify before relying on this entry\n\n"
+        "7. review_notes is required when uncertainty is medium or high. State what is ambiguous and "
+        "what the reviewer should confirm.\n\n"
+        "8. Do not claim criticality, tolerance bands, material, supplier capability, process "
+        "capability, or function unless supported by the supplied context. If a function is inferred, "
+        "mark uncertainty medium/high and explain the assumption.\n\n"
+        "9. Whole-part notes such as deburr, break sharp edges, and general finish notes should "
+        "attach as evidence to the relevant body/surface feature or profile-level review_notes. "
+        "They should not become standalone feature rows.\n\n"
+        "10. Do not include source/status/inspectionReady fields; applying the draft makes it a real profile.\n\n"
+        "EXAMPLE 1: Revolved mounting flange\n\n"
+        "Context: Front view + section view A-A. Front view shows \u00d875 OD, \u00d825 central bore, "
+        "six \u00d86.5 holes on a \u00d860 bolt circle with callout \"6X \u00d86.5\". Section A-A shows "
+        "12 mm overall thickness and \u00d811 x 4 deep counterbore on each bolt-circle hole. No GD&T "
+        "and no functional notes.\n\n"
+        "Bad output:\n"
+        "{\n"
+        '  "features": [\n'
+        '    {"name": "Outer Diameter", "type": "dimension"},\n'
+        '    {"name": "Inner Diameter", "type": "dimension"},\n'
+        '    {"name": "Overall Thickness", "type": "dimension"},\n'
+        '    {"name": "Bolt Circle Diameter", "type": "dimension"},\n'
+        '    {"name": "Bolt Hole Diameter", "type": "dimension"},\n'
+        '    {"name": "Counterbore Diameter", "type": "dimension"},\n'
+        '    {"name": "Counterbore Depth", "type": "dimension"}\n'
+        "  ]\n"
+        "}\n\n"
+        "Good output:\n"
+        "{\n"
+        '  "features": [\n'
+        "    {\n"
+        '      "name": "Mounting flange body",\n'
+        '      "type": "revolved",\n'
+        '      "count": 1,\n'
+        '      "spatial_description": "Main circular flange body visible in front view and section view A-A.",\n'
+        '      "inspection_reason": "Defines the part envelope and central through-bore used for mating/clearance.",\n'
+        '      "evidence": [\n'
+        '        "front view: \u00d875 outer diameter dimension",\n'
+        '        "front view: \u00d825 central bore dimension",\n'
+        '        "section view A-A: 12 mm overall thickness"\n'
+        "      ],\n"
+        '      "uncertainty": "low"\n'
+        "    },\n"
+        "    {\n"
+        '      "name": "Bolt-circle clearance holes",\n'
+        '      "type": "hole_pattern",\n'
+        '      "count": 6,\n'
+        '      "spatial_description": "Six equally spaced holes on the bolt circle in the front view.",\n'
+        '      "inspection_reason": "Pattern controls bolted assembly fit. Inspect count, hole diameter, and bolt-circle location.",\n'
+        '      "evidence": [\n'
+        '        "front view: \u00d860 bolt-circle dimension",\n'
+        '        "front view: 6X \u00d86.5 hole callout"\n'
+        "      ],\n"
+        '      "uncertainty": "low"\n'
+        "    },\n"
+        "    {\n"
+        '      "name": "Bolt-hole counterbores",\n'
+        '      "type": "counterbore",\n'
+        '      "count": 6,\n'
+        '      "spatial_description": "Counterbores shown on bolt-circle holes in section view A-A.",\n'
+        '      "inspection_reason": "Controls fastener head seating/recess geometry.",\n'
+        '      "evidence": [\n'
+        '        "section view A-A: \u00d811 x 4 deep counterbore on bolt-circle hole"\n'
+        "      ],\n"
+        '      "uncertainty": "medium",\n'
+        '      "review_notes": "Drawing does not explicitly state whether the counterbore is critical. Reviewer should confirm inspection priority before treating it as critical."\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "EXAMPLE 2: Machined bracket with slots, holes, and GD&T\n\n"
+        "Context: Rectangular bracket, 120 x 80 x 8 mm. Title block material 6061-T6. Two parallel "
+        "12 x 30 slots on the top face. Four \u00d84 through-holes in a 40 x 30 rectangular pattern. "
+        "1 x 45 chamfer on top edge. R2 fillet under small boss. GD&T frame on mating face: "
+        "parallelism 0.05 to datum A. General note: BREAK ALL SHARP EDGES, DEBURR.\n\n"
+        "Bad output:\n"
+        "{\n"
+        '  "features": [\n'
+        '    {"name": "Slot Length", "type": "dimension"},\n'
+        '    {"name": "Slot Width", "type": "dimension"},\n'
+        '    {"name": "Hole \u00d8", "type": "dimension"},\n'
+        '    {"name": "Hole Pitch X", "type": "dimension"},\n'
+        '    {"name": "Hole Pitch Y", "type": "dimension"},\n'
+        '    {"name": "Top Chamfer 1x45", "type": "chamfer"},\n'
+        '    {"name": "Boss Fillet R2", "type": "fillet"},\n'
+        '    {"name": "Parallelism 0.05 A", "type": "gdt"},\n'
+        '    {"name": "Deburr Note", "type": "note"}\n'
+        "  ]\n"
+        "}\n\n"
+        "Good output:\n"
+        "{\n"
+        '  "features": [\n'
+        "    {\n"
+        '      "name": "Mounting slots",\n'
+        '      "type": "slot_pattern",\n'
+        '      "count": 2,\n'
+        '      "spatial_description": "Two parallel slots visible on the top/front view.",\n'
+        '      "inspection_reason": "Slot size controls fastener clearance; slot spacing controls mating alignment.",\n'
+        '      "evidence": [\n'
+        '        "front view: 12 x 30 slot dimension",\n'
+        '        "front view: slot-pair centerline pitch dimension"\n'
+        "      ],\n"
+        '      "uncertainty": "low"\n'
+        "    },\n"
+        "    {\n"
+        '      "name": "Through-hole pattern",\n'
+        '      "type": "hole_pattern",\n'
+        '      "count": 4,\n'
+        '      "spatial_description": "Four through-holes in a rectangular pattern.",\n'
+        '      "inspection_reason": "Inspect count, hole diameter, and pattern pitch to confirm drawing conformance.",\n'
+        '      "evidence": [\n'
+        '        "front view: 4X \u00d84 hole callout",\n'
+        '        "front view: 40 x 30 pattern pitch"\n'
+        "      ],\n"
+        '      "uncertainty": "medium",\n'
+        "      \"review_notes\": \"Drawing does not name the holes' function. Do not assume fastener, locating, or strain-relief use until confirmed.\"\n"
+        "    },\n"
+        "    {\n"
+        '      "name": "Bracket body and mating face",\n'
+        '      "type": "planar_face",\n'
+        '      "count": 1,\n'
+        '      "spatial_description": "Main rectangular body and controlled mating face.",\n'
+        '      "inspection_reason": "GD&T frame applies to the mating face; parallelism to datum A controls assembly fit.",\n'
+        '      "evidence": [\n'
+        '        "front view: parallelism 0.05 to datum A on mating face",\n'
+        '        "front view: 1 x 45 chamfer on top edge",\n'
+        '        "right view: R2 fillet under boss",\n'
+        '        "general note: BREAK ALL SHARP EDGES, DEBURR",\n'
+        '        "title block: material 6061-T6"\n'
+        "      ],\n"
+        '      "uncertainty": "low"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "Now generate the inspection profile for the supplied part. Output JSON only.\n\n"
         "--- CONTEXT JSON ---\n"
         f"{json.dumps(payload, indent=2)}"
     )
@@ -3018,6 +3178,10 @@ def _normalize_profile_builder_draft(profile: dict, pn: str) -> dict:
         "features": [],
         "view_expectations": profile.get("view_expectations") if isinstance(profile.get("view_expectations"), dict) else {},
     }
+    if isinstance(profile.get("review_notes"), list):
+        out["review_notes"] = [str(v) for v in profile.get("review_notes", []) if v is not None]
+    elif isinstance(profile.get("review_notes"), str) and profile.get("review_notes").strip():
+        out["review_notes"] = [profile.get("review_notes").strip()]
 
     raw_features = profile.get("features")
     if isinstance(raw_features, dict):
@@ -3034,12 +3198,24 @@ def _normalize_profile_builder_draft(profile: dict, pn: str) -> dict:
             count = int(feat.get("count", 1))
         except Exception:
             count = 1
-        out["features"].append({
+        normalized_feature = {
             "name": name,
             "type": ftype,
             "count": max(1, count),
             "spatial_description": str(feat.get("spatial_description") or feat.get("description") or "").strip(),
-        })
+        }
+        if feat.get("inspection_reason"):
+            normalized_feature["inspection_reason"] = str(feat.get("inspection_reason")).strip()
+        if isinstance(feat.get("evidence"), list):
+            normalized_feature["evidence"] = [str(v) for v in feat.get("evidence", []) if v is not None]
+        elif isinstance(feat.get("evidence"), str) and feat.get("evidence").strip():
+            normalized_feature["evidence"] = [feat.get("evidence").strip()]
+        uncertainty = str(feat.get("uncertainty") or "").strip().lower()
+        if uncertainty in {"low", "medium", "high"}:
+            normalized_feature["uncertainty"] = uncertainty
+        if feat.get("review_notes"):
+            normalized_feature["review_notes"] = str(feat.get("review_notes")).strip()
+        out["features"].append(normalized_feature)
 
     if not out["features"]:
         raise ValueError("profile must include at least one feature")

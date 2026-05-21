@@ -34,12 +34,19 @@ def _draft_profile(pn: str = "1099999") -> dict:
                 "type": "Extrude",
                 "count": 1,
                 "spatial_description": "Primary envelope visible in front and side views.",
+                "inspection_reason": "Defines the main part envelope.",
+                "evidence": ["front view: main body outline"],
+                "uncertainty": "low",
             },
             {
                 "name": "Mounting holes",
                 "type": "Hole",
                 "count": 4,
                 "spatial_description": "Repeated circular holes called out by drawing dimensions.",
+                "inspection_reason": "Controls bolted assembly fit.",
+                "evidence": ["front view: repeated hole callout"],
+                "uncertainty": "medium",
+                "review_notes": "Confirm whether holes are clearance or locating features.",
             },
         ],
         "view_expectations": {
@@ -47,6 +54,7 @@ def _draft_profile(pn: str = "1099999") -> dict:
             "side_or_right": "Show the part thickness.",
             "top": "Confirm the hole layout.",
         },
+        "review_notes": ["Confirm generated profile before applying."],
     }
 
 
@@ -149,9 +157,32 @@ def test_profile_builder_generate_uses_context_and_returns_validated_draft(
     assert body["model"] == "fake-model"
     assert body["draftProfile"]["part_number"] == "1099999"
     assert len(body["draftProfile"]["features"]) == 2
+    assert body["draftProfile"]["features"][0]["inspection_reason"] == "Defines the main part envelope."
+    assert body["draftProfile"]["features"][1]["evidence"] == ["front view: repeated hole callout"]
+    assert body["draftProfile"]["features"][1]["uncertainty"] == "medium"
+    assert body["draftProfile"]["features"][1]["review_notes"] == "Confirm whether holes are clearance or locating features."
+    assert body["draftProfile"]["review_notes"] == ["Confirm generated profile before applying."]
     assert body["validationIssues"] == []
     assert seen["context"]["partSummary"]["featureCount"] == 3
     assert seen["instructions"] == "Focus on holes."
+
+
+def test_profile_builder_prompt_contains_few_shot_dimension_grouping_guidance(profile_builder_library: Path):
+    context = server._profile_builder_context(profile_builder_library, "1099999", "revA")
+    prompt = server._profile_builder_prompt(context, "Focus on holes.")
+    for marker in [
+        "Do not turn every dimension into its own feature row.",
+        "count = physical instance count",
+        "EXAMPLE 1: Revolved mounting flange",
+        "EXAMPLE 2: Machined bracket with slots, holes, and GD&T",
+        '"Outer Diameter", "type": "dimension"',
+        '"Mounting flange body"',
+        '"inspection_reason"',
+        '"evidence"',
+        '"uncertainty"',
+        "Focus on holes.",
+    ]:
+        assert marker in prompt
 
 
 def test_profile_builder_generate_blocks_when_sources_missing(profile_builder_library: Path):
@@ -194,6 +225,9 @@ def test_profile_builder_apply_replaces_stub_and_writes_revision_copy(profile_bu
     rev_profile = json.loads((profile_builder_library / "parts" / "1099999" / "revA" / "1099999_inspection_profile.json").read_text())
     assert root_profile["part_name"] == "Builder draft 1099999"
     assert rev_profile["features"][1]["count"] == 4
+    assert rev_profile["features"][1]["inspection_reason"] == "Controls bolted assembly fit."
+    assert rev_profile["features"][1]["uncertainty"] == "medium"
+    assert rev_profile["review_notes"] == ["Confirm generated profile before applying."]
     assert "source" not in root_profile
     assert root_profile["features"]
 

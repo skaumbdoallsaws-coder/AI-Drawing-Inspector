@@ -2742,6 +2742,12 @@ async def library_intake_promote(body: IntakeRequestBody):
 
 PROFILE_BUILDER_MODEL_DEFAULT = "claude-sonnet-4-5-20250929"
 PROFILE_BUILDER_AUTHOR        = "profile-builder@1.0.0"
+PROFILE_BUILDER_MATERIAL_TERMS = {
+    "aluminum", "aluminium", "steel", "stainless", "cast iron", "iron",
+    "brass", "bronze", "copper", "plastic", "nylon", "abs", "pla",
+    "polycarbonate", "delrin", "acetal", "titanium", "inconel",
+    "6061-t6", "7075-t6",
+}
 
 
 class ProfileBuilderGenerateBody(BaseModel):
@@ -2801,9 +2807,45 @@ def _profile_builder_profile_kind(data: Optional[dict]) -> str:
     return "real"
 
 
+def _profile_builder_material_info(part_data: Optional[dict]) -> dict:
+    def _material_result(value: str, source: str) -> dict:
+        text = (value or "").strip()
+        lowered = text.lower()
+        specified = bool(text) and not any(marker in lowered for marker in (
+            "not specified", "<not specified>", "unspecified", "unknown", "none",
+        ))
+        return {
+            "status": "specified" if specified else "not_specified",
+            "value": text if specified else "",
+            "raw": text,
+            "source": source,
+        }
+
+    if not isinstance(part_data, dict):
+        return {"status": "unknown", "value": "", "raw": "", "source": ""}
+
+    props = part_data.get("customProperties")
+    if isinstance(props, dict):
+        global_props = props.get("global")
+        if isinstance(global_props, dict):
+            for key, value in global_props.items():
+                if "material" in str(key).lower() and str(value or "").strip():
+                    return _material_result(str(value), f"customProperties.global.{key}")
+
+    for feat in part_data.get("featureTree", []) if isinstance(part_data.get("featureTree"), list) else []:
+        if not isinstance(feat, dict):
+            continue
+        if str(feat.get("type") or "").lower() == "materialfolder":
+            name = str(feat.get("name") or "")
+            value = re.sub(r"^\s*Material\s*", "", name, flags=re.IGNORECASE).strip()
+            return _material_result(value, "featureTree.MaterialFolder")
+
+    return {"status": "unknown", "value": "", "raw": "", "source": ""}
+
+
 def _profile_builder_part_summary(part_data: Optional[dict]) -> dict:
     if not isinstance(part_data, dict):
-        return {"featureCount": 0, "features": [], "featureTypes": {}}
+        return {"featureCount": 0, "features": [], "featureTypes": {}, "material": _profile_builder_material_info(part_data)}
 
     raw_features: List[dict] = []
     if isinstance(part_data.get("featureTree"), list):
@@ -2843,6 +2885,7 @@ def _profile_builder_part_summary(part_data: Optional[dict]) -> dict:
         "activeConfiguration": part_data.get("activeConfiguration"),
         "units": part_data.get("units"),
         "boundingBox": part_data.get("boundingBox", {}),
+        "material": _profile_builder_material_info(part_data),
         "massProperties": {
             "mass_kg": ((part_data.get("massProperties") or {}).get("mass_kg")),
             "volumeMm3": ((part_data.get("massProperties") or {}).get("volumeMm3")),
@@ -3025,10 +3068,13 @@ def _profile_builder_prompt(context: dict, instructions: Optional[str]) -> str:
         "10. Do not claim criticality, tolerance bands, material, supplier capability, process "
         "capability, or function unless supported by the supplied context. If a function is inferred, "
         "mark uncertainty medium/high and explain the assumption.\n\n"
-        "11. Whole-part notes such as deburr, break sharp edges, and general finish notes should "
+        "11. If partSummary.material.status is not \"specified\", do not name a material family "
+        "(aluminum, steel, plastic, etc.) anywhere in the profile. Say only in profile-level "
+        "review_notes that material is not specified in the supplied context.\n\n"
+        "12. Whole-part notes such as deburr, break sharp edges, and general finish notes should "
         "attach as evidence to the relevant body/surface feature or profile-level review_notes. "
         "They should not become standalone feature rows.\n\n"
-        "12. Do not include source/status/inspectionReady fields; applying the draft makes it a real profile.\n\n"
+        "13. Do not include source/status/inspectionReady fields; applying the draft makes it a real profile.\n\n"
         "EXAMPLE 1: Revolved mounting flange\n\n"
         "Context: Front view + section view A-A. Front view shows \u00d875 OD, \u00d825 central bore, "
         "six \u00d86.5 holes on a \u00d860 bolt circle with callout \"6X \u00d86.5\". Section A-A shows "
@@ -3092,7 +3138,9 @@ def _profile_builder_prompt(context: dict, instructions: Optional[str]) -> str:
         "Context: Rectangular bracket, 120 x 80 x 8 mm. Title block material 6061-T6. Two parallel "
         "12 x 30 slots on the top face. Four \u00d84 through-holes in a 40 x 30 rectangular pattern. "
         "1 x 45 chamfer on top edge. R2 fillet under small boss. GD&T frame on mating face: "
-        "parallelism 0.05 to datum A. General note: BREAK ALL SHARP EDGES, DEBURR.\n\n"
+        "parallelism 0.05 to datum A. General note: BREAK ALL SHARP EDGES, DEBURR. This example "
+        "uses material only because the context explicitly states 6061-T6; do not infer material "
+        "when supplied context says material is not specified.\n\n"
         "Bad output:\n"
         "{\n"
         '  "features": [\n'
@@ -3230,6 +3278,51 @@ def _normalize_profile_builder_draft(profile: dict, pn: str) -> dict:
     return out
 
 
+def _profile_builder_text_values(value: Any) -> List[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        out: List[str] = []
+        for item in value:
+            out.extend(_profile_builder_text_values(item))
+        return out
+    if isinstance(value, dict):
+        out: List[str] = []
+        for item in value.values():
+            out.extend(_profile_builder_text_values(item))
+        return out
+    return []
+
+
+def _profile_builder_contextual_validation_issues(profile: dict, context: dict) -> List[dict]:
+    issues: List[dict] = []
+    material = ((context.get("partSummary") or {}).get("material") or {})
+    material_status = str(material.get("status") or "unknown")
+    if material_status == "specified":
+        return issues
+
+    text = "\n".join(_profile_builder_text_values(profile)).lower()
+    found = []
+    for term in sorted(PROFILE_BUILDER_MATERIAL_TERMS, key=len, reverse=True):
+        pattern = r"(?<![a-z0-9])" + re.escape(term.lower()) + r"(?![a-z0-9])"
+        if re.search(pattern, text):
+            found.append(term)
+
+    if found:
+        raw = str(material.get("raw") or material.get("value") or material_status)
+        issues.append({
+            "feature_name": "<profile>",
+            "feature_type": "material_claim",
+            "issue": (
+                "Profile names unsupported material(s) "
+                f"{', '.join(sorted(found))} but source material is {raw!r}. "
+                "Remove the material claim or add source evidence before applying."
+            ),
+            "severity": "error",
+        })
+    return issues
+
+
 def _generate_profile_builder_draft(context: dict, instructions: Optional[str], model: Optional[str]) -> Tuple[dict, str]:
     try:
         import anthropic
@@ -3326,7 +3419,7 @@ async def profile_builder_generate(body: ProfileBuilderGenerateBody):
         logger.error("profile_builder.generate failed pn=%s msg=%s", safe_pn, ex)
         raise HTTPException(status_code=500, detail=f"Profile Builder failed: {ex}")
 
-    issues = validate_profile(draft)
+    issues = validate_profile(draft) + _profile_builder_contextual_validation_issues(draft, context)
     return {
         "success": True,
         "partNumber": safe_pn,
@@ -3353,11 +3446,14 @@ async def profile_builder_apply(body: ProfileBuilderApplyBody):
     if safe_rev and (rev_dir is None or not rev_dir.exists()):
         raise HTTPException(status_code=404, detail=f"Revision {safe_rev} does not exist for part {safe_pn}")
 
+    library_dir = library_path()
+    context = _profile_builder_context(library_dir, safe_pn, safe_rev)
+
     try:
         profile = _normalize_profile_builder_draft(body.profile, safe_pn)
     except Exception as ex:
         raise HTTPException(status_code=400, detail=f"Invalid profile draft: {ex}")
-    issues = validate_profile(profile)
+    issues = validate_profile(profile) + _profile_builder_contextual_validation_issues(profile, context)
     hard_errors = [i for i in issues if i.get("severity") == "error"]
     if hard_errors:
         return JSONResponse(status_code=422, content={
@@ -3367,7 +3463,6 @@ async def profile_builder_apply(body: ProfileBuilderApplyBody):
             "validationIssues": issues,
         })
 
-    library_dir = library_path()
     root_profile = library_dir / f"{safe_pn}_inspection_profile.json"
     existing = _profile_builder_load_json(root_profile)
     existing_kind = _profile_builder_profile_kind(existing)

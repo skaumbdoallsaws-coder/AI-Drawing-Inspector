@@ -67,6 +67,7 @@ def _seed_profile_builder_library(library: Path, pn: str = "1099999") -> None:
         "activeConfiguration": "Default",
         "units": "mm",
         "featureTree": [
+            {"name": "Material <not specified>", "type": "MaterialFolder", "suppressedInActive": False},
             {"name": "Boss-Extrude1", "type": "Extrusion", "suppressedInActive": False},
             {"name": "Cut-Extrude1", "type": "ICE", "suppressedInActive": False},
             {"name": "Hole Wizard1", "type": "HoleWzd", "suppressedInActive": False},
@@ -126,6 +127,8 @@ def test_profile_builder_context_reports_ready_with_revision_sources(profile_bui
     assert body["revision"] == "revA"
     assert body["existingProfile"]["kind"] == "stub"
     assert body["partSummary"]["featureCount"] == 3
+    assert body["partSummary"]["material"]["status"] == "not_specified"
+    assert body["partSummary"]["material"]["raw"] == "<not specified>"
     assert body["drawingSummary"]["sheetCount"] == 1
     assert body["drawingSummary"]["viewCount"] == 1
     assert body["drawingSummary"]["dimensions"][0]["text"] == "<MOD-DIAM>10.00"
@@ -176,6 +179,8 @@ def test_profile_builder_prompt_contains_few_shot_dimension_grouping_guidance(pr
         "Count must not contradict the supplied context.",
         "Do not create feature rows for envelope/thickness/position dimensions by themselves.",
         "prefer a profile-level review_notes item instead of a new inspectable feature",
+        "If partSummary.material.status is not \"specified\"",
+        "do not infer material when supplied context says material is not specified",
         "EXAMPLE 1: Revolved mounting flange",
         "EXAMPLE 2: Machined bracket with slots, holes, and GD&T",
         '"Outer Diameter", "type": "dimension"',
@@ -186,6 +191,42 @@ def test_profile_builder_prompt_contains_few_shot_dimension_grouping_guidance(pr
         "Focus on holes.",
     ]:
         assert marker in prompt
+
+
+def test_profile_builder_generate_flags_unsupported_material_claim(
+    profile_builder_library: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_generate(context, instructions, model):
+        draft = _draft_profile("1099999")
+        draft["part_description"] = "Aluminum mounting bracket generated from promoted context."
+        return draft, "fake-model"
+
+    monkeypatch.setattr(server, "_generate_profile_builder_draft", fake_generate)
+    client = TestClient(server.app)
+    r = client.post("/api/profile-builder/generate", json={
+        "partNumber": "1099999",
+        "revision": "revA",
+        "model": "fake-model",
+    })
+    assert r.status_code == 200, r.text
+    issues = r.json()["validationIssues"]
+    assert any(i["severity"] == "error" and "unsupported material" in i["issue"] for i in issues)
+
+
+def test_profile_builder_apply_blocks_unsupported_material_claim(profile_builder_library: Path):
+    profile = _draft_profile("1099999")
+    profile["part_description"] = "Steel mounting bracket generated from promoted context."
+    client = TestClient(server.app)
+    r = client.post("/api/profile-builder/apply", json={
+        "partNumber": "1099999",
+        "revision": "revA",
+        "profile": profile,
+    })
+    assert r.status_code == 422, r.text
+    body = r.json()
+    assert body["error"] == "profile_validation_failed"
+    assert any("unsupported material" in i["issue"] for i in body["validationIssues"])
 
 
 def test_profile_builder_generate_blocks_when_sources_missing(profile_builder_library: Path):

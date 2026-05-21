@@ -243,6 +243,54 @@ def test_bridge_extract_uses_resolved_library_dir():
         "bridge no longer pins library_root to the resolved LIBRARY_DIR"
 
 
+def test_bridge_button_handles_brand_new_part_without_selected_pn():
+    """Regression for the brand-new-part extraction deadlock: the
+    bridge "Extract Part from SOLIDWORKS" button used to gate on
+    state.partNumber, which blocked the model-only intake flow because
+    a brand-new SLDPRT has no library entry yet. The fix enables the
+    button + relabels it + adds a numbering+confirm+extract+wizard-
+    prefill path.
+
+    Static check only: confirms the renderButton + onReextractClick
+    code paths exist in the served HTML. Full behavioural coverage
+    would need a real browser harness."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+
+    # 1. renderButton enables the button when activeDoc=Part + no state.partNumber
+    assert "currentActiveDocKind === 'Part' && !hasPn" in html, \
+        "renderButton no-pn-Part branch missing"
+    # 2. Relabel
+    assert "Extract New Part from SOLIDWORKS" in html, \
+        "Extract New Part label missing"
+    # 3. Numbering endpoint is referenced from the click handler
+    assert "/api/library/numbering/next?kind=part&prefix=1030" in html, \
+        "numbering fetch URL missing from bridge click handler"
+    # 4. POST request-part-extraction still used (unchanged endpoint)
+    assert "/api/request-part-extraction" in html, \
+        "request-part-extraction endpoint reference lost"
+    # 5. After success, wizard is opened prefilled
+    assert "window._openIntakeWizard({" in html, \
+        "post-extraction wizard-prefill hook missing"
+    # 6. Prefill payload has the expected shape
+    assert "modelOnly:     true" in html, \
+        "wizard prefill missing modelOnly=true"
+    assert "intakeMode:    'brand-new-part'" in html, \
+        "wizard prefill missing brand-new-part intakeMode"
+    assert "revision:      'revA'" in html, \
+        "wizard prefill missing revA"
+    # 7. open(prefill) accepts and merges the prefill object
+    assert "function open(prefill)" in html, \
+        "wizard open() signature did not gain the prefill parameter"
+    assert "PREFILLABLE" in html, \
+        "wizard prefill allowlist missing -- arbitrary keys could pollute state"
+    # 8. Drawing flow still gates on selected pn (the no-pn-Part branch
+    # is Part-specific; Drawing falls through to the existing
+    # !hasPn -> disabled path).
+    assert "btn.disabled = !hasPn;" in html, \
+        "Drawing path no longer requires a selected part number"
+
+
 def test_wizard_model_only_and_numbering_ui_present():
     """Stabilization extension: the wizard JS must expose the model-only
     checkbox + the suggest-next-number button + the MODEL ONLY header

@@ -32429,13 +32429,24 @@
                 btn.textContent = cfg.buttonText;
                 // Phase C fix: Assembly does NOT require a selected part
                 // profile — the id is inferred from the active doc path on
-                // click. Drawing/Part still gate on a selected profile
-                // because their library layout assumes a curated part_number
-                // matches a known profile.
+                // click. Drawing still gates on a selected profile because
+                // its library layout assumes a curated part_number matches
+                // a known root drawing-map file.
+                // Brand-new model-only Part path: when the bridge has an
+                // active SLDPRT but no part is selected in the picker, the
+                // button enables AND relabels. Click flow asks the
+                // numbering endpoint for a suggestion, confirms with the
+                // operator, runs the extraction, then opens the Library
+                // Intake Wizard prefilled with modelOnly=true.
                 if (currentActiveDocKind === 'Assembly') {
                     btn.disabled = false;
                     btn.title = cfg.buttonText +
                         ' (identifier auto-detected from the active document path).';
+                } else if (currentActiveDocKind === 'Part' && !hasPn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Extract New Part from SOLIDWORKS';
+                    btn.title = 'No part selected — a part number will be suggested + the Library Intake Wizard ' +
+                                'will open prefilled for a model-only (SLDPRT-only) intake.';
                 } else {
                     btn.disabled = !hasPn;
                     btn.title = hasPn
@@ -32511,6 +32522,39 @@
                     return;
                 }
                 let pn = (typeof state !== 'undefined' && state) ? state.partNumber : null;
+                // Brand-new model-only Part flow: bridge has an active
+                // SLDPRT but the picker has no part selected. Ask the
+                // numbering endpoint for a suggestion, confirm with the
+                // operator, then proceed with the suggested PN. After a
+                // successful extraction, open the Library Intake Wizard
+                // prefilled with modelOnly=true so the operator lands
+                // straight in the promote flow.
+                let isNewPartFlow = false;
+                if (!pn && currentActiveDocKind === 'Part') {
+                    try {
+                        const rNum = await fetch('/api/library/numbering/next?kind=part&prefix=1030');
+                        if (!rNum.ok) {
+                            const d = await rNum.json().catch(() => ({}));
+                            if (window._toast) window._toast(
+                                'Could not suggest a part number: ' + (d.detail || rNum.statusText),
+                                'error');
+                            return;
+                        }
+                        const suggestion = (await rNum.json()).suggestion;
+                        const okNew = window.confirm(
+                            'Use suggested part number ' + suggestion + ' for this new SOLIDWORKS part?\n\n' +
+                            'The bridge will extract the SLDPRT now. The Library Intake Wizard will then ' +
+                            'open prefilled for a MODEL ONLY intake (no drawing); inspection will remain ' +
+                            'disabled until a real profile is authored.'
+                        );
+                        if (!okNew) return;
+                        pn = suggestion;
+                        isNewPartFlow = true;
+                    } catch (e) {
+                        if (window._toast) window._toast('Numbering lookup failed: ' + (e && e.message ? e.message : String(e)), 'error');
+                        return;
+                    }
+                }
                 // Phase C fix: assemblies do not require a selected part
                 // profile. Infer the id from activeDoc.path so a Crossbrace
                 // assembly under 400S_Sorted_Library/assemblies/6000302/ can
@@ -32527,8 +32571,14 @@
                         'warning');
                     return;
                 }
-                const ok = window.confirm(cfg.confirmText(pn, currentActiveDoc));
-                if (!ok) return;
+                // The new-part flow already confirmed above with operator-
+                // facing copy that names the suggested PN explicitly; skip
+                // the second generic confirm so the operator isn't asked
+                // twice.
+                if (!isNewPartFlow) {
+                    const ok = window.confirm(cfg.confirmText(pn, currentActiveDoc));
+                    if (!ok) return;
+                }
 
                 inFlight = true;
                 btn.disabled = true;
@@ -32623,6 +32673,23 @@
                     // Success path: kind-aware toast + per-kind post-success hook.
                     if (window._toast) window._toast(cfg.successToast(pn, data), 'success');
                     await cfg.postSuccess(pn);
+
+                    // Brand-new model-only Part flow: open the Library
+                    // Intake Wizard prefilled so the operator lands
+                    // straight in the promote sequence. The wizard
+                    // open() helper accepts an optional prefill object
+                    // that overrides the empty-state defaults.
+                    if (isNewPartFlow && typeof window._openIntakeWizard === 'function') {
+                        try {
+                            window._openIntakeWizard({
+                                partNumber:    pn,
+                                revision:      'revA',
+                                intakeMode:    'brand-new-part',
+                                modelOnly:     true,
+                                partPackageId: (data && data.packageId) || '',
+                            });
+                        } catch (_) { /* prefill is best-effort -- operator can open wizard manually */ }
+                    }
                 } catch (e) {
                     if (window._toast) window._toast(
                         'Extraction request failed: ' + (e && e.message ? e.message : String(e)),
@@ -33013,8 +33080,27 @@
                 }
             }
 
-            function open() {
+            function open(prefill) {
                 s = _emptyState();
+                // Optional prefill — used by the bridge IIFE's brand-new
+                // model-only flow to land the operator at Step 1 with
+                // partNumber / revision / intakeMode / modelOnly /
+                // partPackageId already set. The operator can still
+                // review and edit before clicking Next. Only known state
+                // keys are accepted so a stray prefill key cannot
+                // pollute the state shape.
+                if (prefill && typeof prefill === 'object') {
+                    const PREFILLABLE = [
+                        'partNumber', 'revision', 'intakeMode', 'modelOnly',
+                        'drawingPackageId', 'partPackageId',
+                        'drawingSourceDocPath', 'partSourceDocPath',
+                        'drawingSheetCount', 'drawingViewCount',
+                        'partFeatureCount', 'partActiveConfiguration',
+                    ];
+                    for (const k of PREFILLABLE) {
+                        if (Object.prototype.hasOwnProperty.call(prefill, k)) s[k] = prefill[k];
+                    }
+                }
                 panel.removeAttribute('hidden');
                 render();
             }

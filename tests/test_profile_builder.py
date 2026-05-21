@@ -173,6 +173,9 @@ def test_profile_builder_prompt_contains_few_shot_dimension_grouping_guidance(pr
     for marker in [
         "Do not turn every dimension into its own feature row.",
         "count = physical instance count",
+        "Count must not contradict the supplied context.",
+        "Do not create feature rows for envelope/thickness/position dimensions by themselves.",
+        "prefer a profile-level review_notes item instead of a new inspectable feature",
         "EXAMPLE 1: Revolved mounting flange",
         "EXAMPLE 2: Machined bracket with slots, holes, and GD&T",
         '"Outer Diameter", "type": "dimension"',

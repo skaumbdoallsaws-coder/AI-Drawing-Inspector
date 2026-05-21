@@ -7371,6 +7371,7 @@
             box-shadow: 0 0 0 1px var(--focus-ring);
         }
         .intake-field-row .iw-hint { font-size: 10px; color: var(--text-muted); }
+        .intake-field-row .iw-inline-btn { align-self: flex-start; padding: 3px 8px; font-size: 10px; }
         .intake-mode-radios { display: flex; flex-direction: column; gap: 6px; }
         .intake-mode-radios label { display: flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; color: var(--text-primary); }
         .intake-existing-rev-list {
@@ -33047,6 +33048,7 @@
                     previewLoading:           false,
                     previewResult:            null,
                     overwriteInput:           '',
+                    packageIdChangeAcknowledged: false,
                     promoteLoading:           false,
                     promoteResult:            null,
                     bannerKind:               '',  // 'info' | 'warn' | 'success' | '' (no banner)
@@ -33264,10 +33266,31 @@
                     const data = await r.json();
                     s.sourceData = data;
                     s.sourceLoading = false;
-                    // Auto-fill from the response. Operator can override on
-                    // the same panel before clicking Next.
-                    if (!s.partPackageId && data.lastBridgePartPackageId) {
-                        s.partPackageId = data.lastBridgePartPackageId;
+                    // Auto-fill partPackageId. Priority:
+                    //   (1) explicit operator override already in state
+                    //   (2) for an EXISTING revision: that revision's
+                    //       own intake_manifest.sourcePart.packageId.
+                    //       Cross-wiring revA with revB's package was
+                    //       the 1030034 overwrite bug -- _latest.txt
+                    //       may point at a sibling revision.
+                    //   (3) brand-new revision OR no existing manifest
+                    //       package: fall back to
+                    //       _bridge_imports/_latest.txt (most recent
+                    //       extraction, regardless of which rev it was).
+                    // Operator can override via the input field on
+                    // Step 2 OR click "Use latest extraction" to opt
+                    // back into the _latest.txt source explicitly.
+                    if (!s.partPackageId) {
+                        const existingRev = (data.revisions || []).find(rv => rv.name === s.revision);
+                        const existingManifestPkg = existingRev
+                            && existingRev.intakeManifest
+                            && existingRev.intakeManifest.sourcePart
+                            && existingRev.intakeManifest.sourcePart.packageId;
+                        if (existingManifestPkg) {
+                            s.partPackageId = existingManifestPkg;
+                        } else if (data.lastBridgePartPackageId) {
+                            s.partPackageId = data.lastBridgePartPackageId;
+                        }
                     }
                     render();
                 } catch (e) {
@@ -33333,11 +33356,42 @@
                 }
                 tableHtml += '</tbody></table>';
                 body.insertAdjacentHTML('beforeend', tableHtml);
+                // Decide what hint to show under the partPackageId input.
+                // If we are overwriting an existing revision and its
+                // manifest packageId differs from _latest, surface BOTH
+                // values so the operator does not silently re-promote
+                // the wrong source. _latest.txt may point at a sibling
+                // rev (the 1030034 RevA/RevB cross-wire bug).
+                const _sd2 = s.sourceData || {};
+                const _existingRev2 = (_sd2.revisions || []).find(rv => rv.name === s.revision);
+                const _existingManifestPkg = _existingRev2
+                    && _existingRev2.intakeManifest
+                    && _existingRev2.intakeManifest.sourcePart
+                    && _existingRev2.intakeManifest.sourcePart.packageId
+                    ? String(_existingRev2.intakeManifest.sourcePart.packageId)
+                    : '';
+                const _latestPkg = _sd2.lastBridgePartPackageId
+                    ? String(_sd2.lastBridgePartPackageId)
+                    : '';
+                let _pkgHintHtml;
+                if (_existingManifestPkg) {
+                    if (_latestPkg && _latestPkg !== _existingManifestPkg) {
+                        _pkgHintHtml = `Default = this revision's existing package <code>${_esc(_existingManifestPkg.slice(0,16))}…</code>. Latest bridge extraction is a <strong>different</strong> package <code>${_esc(_latestPkg.slice(0,16))}…</code> — only use that if you mean to repackage this revision.`;
+                    } else {
+                        _pkgHintHtml = `Default = this revision's existing package <code>${_esc(_existingManifestPkg.slice(0,16))}…</code>.`;
+                    }
+                } else {
+                    _pkgHintHtml = `Auto-filled from <code>_bridge_imports/part/${_esc(s.partNumber)}/_latest.txt</code> when available.`;
+                }
+                const _showUseLatestBtn = !!(_latestPkg && _latestPkg !== s.partPackageId);
+                const _showUseExistingBtn = !!(_existingManifestPkg && _existingManifestPkg !== s.partPackageId);
                 body.insertAdjacentHTML('beforeend', `
                     <div class="intake-field-row">
                         <label for="iwPartPkgInput">Part package ID (override)</label>
                         <input type="text" id="iwPartPkgInput" value="${_esc(s.partPackageId)}" placeholder="64-char sha256 from the bridge part-extraction response">
-                        <span class="iw-hint">Auto-filled from <code>_bridge_imports/part/${_esc(s.partNumber)}/_latest.txt</code> when available.</span>
+                        ${_showUseExistingBtn ? `<button type="button" id="iwUseExistingPkgBtn" class="btn btn-secondary iw-inline-btn">Use existing (${_esc(_existingManifestPkg.slice(0,12))}…)</button>` : ''}
+                        ${_showUseLatestBtn ? `<button type="button" id="iwUseLatestPkgBtn" class="btn btn-secondary iw-inline-btn">Use latest extraction (${_esc(_latestPkg.slice(0,12))}…)</button>` : ''}
+                        <span class="iw-hint">${_pkgHintHtml}</span>
                     </div>
                 ` + (s.modelOnly ? '' : `
                     <div class="intake-field-row">
@@ -33355,8 +33409,36 @@
                 `;
                 document.getElementById('iwBackBtn').addEventListener('click', () => go(1));
                 document.getElementById('iwCancelBtn').addEventListener('click', close);
+                const _useLatestBtn = document.getElementById('iwUseLatestPkgBtn');
+                if (_useLatestBtn) {
+                    _useLatestBtn.addEventListener('click', () => {
+                        // Explicit opt-in to repackaging with _latest.txt.
+                        // Set the input value AND flag the acknowledgement so
+                        // the promote backend's package-id-change gate accepts
+                        // the swap. Operator can still re-type the value.
+                        s.partPackageId = _latestPkg;
+                        s.packageIdChangeAcknowledged = true;
+                        render();
+                    });
+                }
+                const _useExistingBtn = document.getElementById('iwUseExistingPkgBtn');
+                if (_useExistingBtn) {
+                    _useExistingBtn.addEventListener('click', () => {
+                        s.partPackageId = _existingManifestPkg;
+                        s.packageIdChangeAcknowledged = false;
+                        render();
+                    });
+                }
                 document.getElementById('iwNextBtn').addEventListener('click', () => {
-                    s.partPackageId    = document.getElementById('iwPartPkgInput').value.trim();
+                    const _typed = document.getElementById('iwPartPkgInput').value.trim();
+                    // If operator manually retyped a package id that differs
+                    // from the existing-rev manifest default, treat that as
+                    // an implicit acknowledgement that they intend to repack
+                    // -- otherwise the backend would 409 their typed input.
+                    if (_existingManifestPkg && _typed && _typed !== _existingManifestPkg) {
+                        s.packageIdChangeAcknowledged = true;
+                    }
+                    s.partPackageId    = _typed;
                     // In model-only mode the drawing-package input is not
                     // rendered; preserve whatever was already in state.
                     const drawingPkgEl = document.getElementById('iwDrawingPkgInput');
@@ -33430,15 +33512,27 @@
                 body.insertAdjacentHTML('beforeend', `<p style="font-size:11px;color:var(--text-muted);margin:4px 0;"><strong>Nothing has been written yet.</strong> Review and click Promote to commit.</p>`);
                 body.insertAdjacentHTML('beforeend', _renderActionsTable(pr.actions));
                 const canPromote = !!pr.planValid;
+                const hasPkgChangeError = (pr.errors || []).some(e => e.code === 'package_id_changed_for_existing_revision');
                 footer.innerHTML = `
                     <button class="btn btn-secondary" id="iwBackBtn" type="button">← Back</button>
                     <div class="iw-footer-right">
                         <button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel intake</button>
+                        ${hasPkgChangeError ? `<button class="btn btn-secondary" id="iwAckPkgChangeBtn" type="button" title="Confirm you intend to replace the package for this existing revision. Managed visual assets from the prior package will be removed.">Acknowledge package change &amp; re-preview</button>` : ''}
                         <button class="btn btn-primary"   id="iwPromoteBtn" type="button" ${canPromote ? '' : 'disabled'}>Promote →</button>
                     </div>
                 `;
                 document.getElementById('iwBackBtn').addEventListener('click', () => go(2));
                 document.getElementById('iwCancelBtn').addEventListener('click', close);
+                const ackBtn = document.getElementById('iwAckPkgChangeBtn');
+                if (ackBtn) {
+                    ackBtn.addEventListener('click', () => {
+                        s.packageIdChangeAcknowledged = true;
+                        clearBanner();
+                        s.previewLoading = true; s.previewResult = null;
+                        go(3);
+                        _loadPreview();
+                    });
+                }
                 if (canPromote) {
                     document.getElementById('iwPromoteBtn').addEventListener('click', () => {
                         s.promoteLoading = true; s.promoteResult = null;
@@ -33610,6 +33704,7 @@
                 if (s.partActiveConfiguration)     out.partActiveConfiguration     = s.partActiveConfiguration;
                 if (s.modelOnly)                   out.modelOnly                   = true;
                 if (s.overwriteInput === s.revision) out.overwriteConfirmed = s.revision;
+                if (s.packageIdChangeAcknowledged) out.packageIdChangeAcknowledged = true;
                 return out;
             }
             async function _refreshProfilesInSession() {

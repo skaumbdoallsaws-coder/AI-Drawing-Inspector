@@ -2351,6 +2351,36 @@ def _intake_part_sidecar_manifest_path(library_dir: Path, pn: str, package_id: s
     return library_dir / "_bridge_imports" / "part" / pn / package_id / "manifest.json"
 
 
+def _intake_existing_revision_package_id(library_dir: Path, pn: str, revision: str) -> Optional[str]:
+    """If parts/{pn}/rev{X}/intake_manifest.json exists and records a
+    sourcePart.packageId, return it. Returns None when the manifest is
+    missing or unreadable.
+
+    Used by both:
+      - the package-id-change gate in _compute_intake_plan (an
+        existing revision must keep using the same package unless the
+        operator explicitly acknowledges the change), and
+      - the wizard's Step 2 auto-fill default (an existing revision
+        defaults to its own previously-recorded packageId, NOT to
+        _bridge_imports/_latest.txt which may point at a sibling
+        revision and silently cross-wire the wrong content)."""
+    rev_dir = library_dir / "parts" / pn / revision
+    manifest_path = rev_dir / "intake_manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    sp = manifest.get("sourcePart")
+    if isinstance(sp, dict) and isinstance(sp.get("packageId"), str):
+        v = sp["packageId"].strip()
+        return v or None
+    return None
+
+
 def _intake_real_profile_present(library_dir: Path, pn: str) -> bool:
     """§5.7 row 3 protection: true iff library root has a
     {pn}_inspection_profile.json that is NOT an intake stub. When true,
@@ -2534,6 +2564,39 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
         return {"planValid": False, "partNumber": safe_pn, "revision": safe_rev,
                 "intakeMode": body.intakeMode, "targetRevisionPath": target_rel,
                 "actions": [], "warnings": warnings, "errors": errors}
+
+    # ── Package-ID-change-for-existing-revision gate. When the
+    # operator is re-promoting an existing revision but with a
+    # different partPackageId than the one the rev's intake_manifest
+    # already records, the per-rev's existing wizard-managed visual
+    # assets correspond to the OLD package's part.json/extraction.
+    # Silently keeping them while overwriting part.json with the new
+    # package's content would leave the revision internally
+    # inconsistent. Block unless the operator explicitly
+    # acknowledges -- the acknowledge flag triggers a delete-before-
+    # copy on managed visuals in _execute_intake_plan.
+    if rev_dir_exists:
+        existing_pkg = _intake_existing_revision_package_id(library_dir, safe_pn, safe_rev)
+        if existing_pkg and existing_pkg != body.partPackageId \
+           and not bool(getattr(body, "packageIdChangeAcknowledged", False)):
+            errors.append({
+                "code": "package_id_changed_for_existing_revision",
+                "message": (
+                    f"The provided partPackageId does NOT match the package this revision "
+                    f"was previously promoted from.\n"
+                    f"  existing (per intake_manifest.sourcePart.packageId): {existing_pkg}\n"
+                    f"  provided:                                           {body.partPackageId}\n"
+                    "Either:\n"
+                    f"  (a) change partPackageId back to {existing_pkg} to keep the revision "
+                    "on its original package, OR\n"
+                    "  (b) re-post with packageIdChangeAcknowledged=true to repackage the "
+                    "revision against the new package (existing managed visual assets in "
+                    "the per-rev archive will be deleted and replaced)."
+                ),
+            })
+            return {"planValid": False, "partNumber": safe_pn, "revision": safe_rev,
+                    "intakeMode": body.intakeMode, "targetRevisionPath": target_rel,
+                    "actions": [], "warnings": warnings, "errors": errors}
 
     # ── Real-profile-at-root protection (§5.7 row 3). When a real
     # profile exists at root, the wizard does NOT write a stub anywhere
@@ -2750,7 +2813,20 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
         return {**plan, "success": False, "executed": [],
                 "errors": [{"code": "source_read_failed", "message": f"failed to read source files: {ex}"}]}
 
-    # Read optional package manifest for richer intake_manifest fields.
+    # Rehydrate missing source metadata from the SIDECAR for the
+    # package the request references. Two sources, in priority order:
+    #
+    #   (a) part/part.json  -- top-level activeConfiguration + a
+    #       featureTree list (feature count = len(featureTree))
+    #   (b) manifest.json   -- sourceDocument.{path, filePath,
+    #       configurationName}; legacy top-level
+    #       featureCount/activeConfiguration kept as a defensive
+    #       fallback for older sidecar shapes.
+    #
+    # part_doc is already parsed below for the stub name/description.
+    # We re-parse here (cheap; sidecar JSON is small) so the
+    # rehydration pass owns its own try/except and never depends on a
+    # later parse succeeding.
     sidecar_manifest_path = _intake_part_sidecar_manifest_path(library_dir, safe_pn, body.partPackageId)
     sidecar_manifest = None
     if sidecar_manifest_path.exists():
@@ -2758,22 +2834,58 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
             sidecar_manifest = json.loads(sidecar_manifest_path.read_text(encoding="utf-8-sig"))
         except Exception:
             sidecar_manifest = None
+    sidecar_part_doc = None
+    try:
+        sidecar_part_doc = json.loads(part_json_bytes.decode("utf-8-sig"))
+    except Exception:
+        sidecar_part_doc = None
 
-    # Try to enrich feature count / config from the sidecar if the wizard
-    # did not pass them in the request body.
     part_feature_count = body.partFeatureCount
     part_active_cfg    = body.partActiveConfiguration
-    if (part_feature_count is None or not part_active_cfg) and isinstance(sidecar_manifest, dict):
+    part_src_doc_path  = body.partSourceDocPath
+
+    # part.json rehydration
+    if isinstance(sidecar_part_doc, dict):
+        if part_feature_count is None:
+            ft = sidecar_part_doc.get("featureTree")
+            if isinstance(ft, list):
+                part_feature_count = len(ft)
+            elif isinstance(ft, dict):
+                # Some extractor versions wrap the list in a {items: [...]}
+                # or {features: [...]} container.
+                for k in ("items", "features"):
+                    v = ft.get(k)
+                    if isinstance(v, list):
+                        part_feature_count = len(v)
+                        break
+        if not part_active_cfg:
+            ac = sidecar_part_doc.get("activeConfiguration")
+            if isinstance(ac, str) and ac.strip():
+                part_active_cfg = ac
+
+    # manifest.json rehydration (canonical shipped-bridge shape +
+    # backward-compat for older top-level fields).
+    if isinstance(sidecar_manifest, dict):
+        src_doc = sidecar_manifest.get("sourceDocument")
+        if isinstance(src_doc, dict):
+            if not part_src_doc_path:
+                for key in ("path", "filePath", "sourcePath", "SourcePath"):
+                    v = src_doc.get(key)
+                    if isinstance(v, str) and v.strip():
+                        part_src_doc_path = v
+                        break
+            if not part_active_cfg:
+                cn = src_doc.get("configurationName")
+                if isinstance(cn, str) and cn.strip():
+                    part_active_cfg = cn
+        # Legacy top-level fallbacks (older sidecar versions wrote
+        # featureCount + activeConfiguration at manifest root).
         if part_feature_count is None and isinstance(sidecar_manifest.get("featureCount"), int):
             part_feature_count = sidecar_manifest.get("featureCount")
         if not part_active_cfg and isinstance(sidecar_manifest.get("activeConfiguration"), str):
             part_active_cfg = sidecar_manifest.get("activeConfiguration")
-    # Same enrichment for source doc paths
-    part_src_doc_path = body.partSourceDocPath
-    if not part_src_doc_path and isinstance(sidecar_manifest, dict):
-        sdp = sidecar_manifest.get("sourceDocPath")
-        if isinstance(sdp, str):
-            part_src_doc_path = sdp
+        if not part_src_doc_path and isinstance(sidecar_manifest.get("sourceDocPath"), str):
+            part_src_doc_path = sidecar_manifest.get("sourceDocPath")
 
     # Build the manifest content using the same files list the plan
     # reported. Doing this AFTER we know the source bytes are real.
@@ -2841,6 +2953,18 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
     parts_root = library_dir / "parts" / safe_pn
     parts_root.mkdir(parents=True, exist_ok=True)
 
+    # Snapshot the existing rev's package id BEFORE the OVERWRITE path
+    # rewrites intake_manifest.json. After that rewrite, the manifest's
+    # sourcePart.packageId reflects the NEW package, so the
+    # repackage-in-progress check below would always look like a
+    # no-op (existing == provided). Captured here so the
+    # delete-stale-managed-visuals pass downstream sees the TRUE prior
+    # package id.
+    existing_pkg_before_overwrite: Optional[str] = (
+        _intake_existing_revision_package_id(library_dir, safe_pn, safe_rev)
+        if rev_dir_exists else None
+    )
+
     if not rev_dir_exists:
         partial = library_dir / "parts" / safe_pn / f"{safe_rev}.partial"
         if partial.exists():
@@ -2906,6 +3030,42 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
     # visual assets). Failures are logged in `executed` but do not
     # fail the promote -- visual assets are presentational; the
     # canonical archive (part.json + manifest) is already committed.
+    #
+    # Package-ID-change-for-existing-rev exception: when the operator
+    # acknowledged a package change (per the gate in
+    # _compute_intake_plan), the existing per-rev's wizard-managed
+    # visual files refer to the OLD package and must be removed so the
+    # new package's visuals can take their place. Files OUTSIDE the
+    # managed whitelist (curated operator drops, custom STLs, etc.)
+    # are still preserved.
+    package_change_ack = bool(getattr(body, "packageIdChangeAcknowledged", False))
+    # Use the pre-OVERWRITE snapshot -- by this point intake_manifest.json
+    # already carries the NEW packageId, so re-reading it would mask the
+    # change.
+    existing_pkg_for_rev = existing_pkg_before_overwrite
+    repackage_in_progress = (
+        rev_dir_exists
+        and package_change_ack
+        and existing_pkg_for_rev
+        and existing_pkg_for_rev != body.partPackageId
+    )
+    if repackage_in_progress:
+        # Delete stale managed visuals so copy-if-not-exists effectively
+        # becomes copy-from-new-package. The wizard whitelist is the
+        # exhaustive list of file shapes the wizard treats as managed;
+        # anything else in the per-rev dir is untouched.
+        for fn in _intake_visual_asset_filenames(safe_pn):
+            stale = rev_dir / fn
+            if stale.exists():
+                try:
+                    stale.unlink()
+                    _record("UPDATE", stale, True,
+                            detail="deleted stale visual from prior package "
+                                   "(packageIdChangeAcknowledged=true)")
+                except Exception as ex:
+                    _record("UPDATE", stale, False,
+                            detail=f"could not delete stale visual: {ex}")
+
     visual_src_paths = _intake_visual_assets_in_sidecar(library_dir, safe_pn, body.partPackageId)
     for vp in visual_src_paths:
         tgt = rev_dir / vp.name
@@ -2999,6 +3159,17 @@ class IntakeRequestBody(BaseModel):
     # real inspection profile can be authored without a drawing
     # describing what to inspect.
     modelOnly:                 bool = False
+    # When re-promoting an existing revision, the wizard normally
+    # blocks the request if the supplied partPackageId differs from
+    # the package ID recorded in that revision's intake_manifest --
+    # otherwise the wizard would cross-wire one revision's part.json
+    # / metadata with another's, and the existing per-rev visual
+    # assets (from the OLD package) would mismatch the new part.json.
+    # Setting this flag opts in to the change: the existing
+    # wizard-managed visual files in the per-rev are DELETED before
+    # the new package's visuals are copied in, so the rev ends up
+    # consistent with the package the operator chose.
+    packageIdChangeAcknowledged: bool = False
 
 
 @app.get("/api/library/numbering/next")

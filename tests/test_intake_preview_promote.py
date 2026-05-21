@@ -724,3 +724,229 @@ def test_promote_single_flight_lock_returns_409_when_busy(intake_library: Path,
     finally:
         server._library_intake_lock.release()
         loop.close()
+
+
+# ── Wizard overwrite bug (1030034 RevA/RevB cross-wire) ───────────────
+
+
+def _make_real_bridge_manifest(pn: str, package_id: str,
+                                source_doc_path: str,
+                                configuration: str = "Default") -> dict:
+    """The REAL shipped bridge writes a top-level `sourceDocument` dict
+    (path / filePath / configurationName / fileSize / swModifiedAt /
+    documentType). This helper models that shape so the rehydration
+    tests catch regressions against the actual on-disk layout, not the
+    legacy/synthetic shape used by _make_sidecar_manifest."""
+    return {
+        "schemaVersion":  "1.0",
+        "packageId":      package_id,
+        "partNumber":     pn,
+        "kind":           "part",
+        "sourceDocument": {
+            "path":              source_doc_path,
+            "filePath":          source_doc_path,
+            "configurationName": configuration,
+            "fileSize":          12345,
+            "documentType":      "Part",
+        },
+    }
+
+
+def _make_real_bridge_part_json(pn: str, configuration: str = "Default",
+                                feature_count: int = 7) -> dict:
+    """REAL bridge part.json: top-level activeConfiguration and a
+    featureTree list. `featureCount` is computed as len(featureTree)."""
+    return {
+        "schemaVersion":       "1.0",
+        "units":               "inch",
+        "documentType":        "Part",
+        "activeConfiguration": configuration,
+        "featureTree":         [{"id": f"f{i}", "type": "feature"} for i in range(feature_count)],
+    }
+
+
+def _seed_real_shape_sidecar(library: Path, pn: str, package_id: str,
+                              source_doc_path: str,
+                              configuration: str = "Default",
+                              feature_count: int = 7) -> None:
+    sidecar = library / "_bridge_imports" / "part" / pn / package_id
+    (sidecar / "part").mkdir(parents=True)
+    (sidecar / "part" / "part.json").write_text(
+        json.dumps(_make_real_bridge_part_json(pn, configuration, feature_count)),
+        encoding="utf-8")
+    (sidecar / "manifest.json").write_text(
+        json.dumps(_make_real_bridge_manifest(pn, package_id, source_doc_path, configuration)),
+        encoding="utf-8")
+
+
+def test_library_revisions_endpoint_exposes_existing_rev_package_id(intake_library: Path):
+    """The wizard frontend defaults Step 2 partPackageId from each
+    revision's own intake_manifest.sourcePart.packageId (not _latest).
+    The /api/library/revisions endpoint must surface that nested field
+    so the frontend can read it without a second round-trip."""
+    # Promote revA and revB with two different package IDs
+    pn = "1099999"
+    revA_pkg = "deadbeef0002"   # the default from the fixture
+    revB_pkg = "feedface0099"
+    # Seed a 2nd sidecar (real-shape) for revB
+    _seed_real_shape_sidecar(intake_library, pn, revB_pkg,
+                             source_doc_path=f"C:\\dev\\{pn}-RevB.SLDPRT",
+                             configuration="Default", feature_count=11)
+
+    client = TestClient(server.app)
+    r1 = client.post("/api/library/intake/promote",
+                     json=_default_body(revision="revA", part_package_id=revA_pkg))
+    assert r1.status_code == 200, r1.text
+    r2 = client.post("/api/library/intake/promote",
+                     json=_default_body(revision="revB", part_package_id=revB_pkg))
+    assert r2.status_code == 200, r2.text
+
+    rv = client.get(f"/api/library/revisions/{pn}")
+    assert rv.status_code == 200, rv.text
+    data = rv.json()
+    by_name = {r["name"]: r for r in data["revisions"]}
+    # Each rev exposes intakeManifest.sourcePart.packageId distinctly
+    assert by_name["revA"]["intakeManifest"]["sourcePart"]["packageId"] == revA_pkg
+    assert by_name["revB"]["intakeManifest"]["sourcePart"]["packageId"] == revB_pkg
+    # Critical: even though _latest.txt points wherever the LAST bridge
+    # extraction landed, each revision's manifest holds its own truth.
+    # The frontend uses intakeManifest.sourcePart.packageId as the
+    # default for an existing revision rather than lastBridgePartPackageId.
+    assert by_name["revA"]["intakeManifest"]["sourcePart"]["packageId"] \
+        != by_name["revB"]["intakeManifest"]["sourcePart"]["packageId"]
+
+
+def test_promote_blocks_package_id_change_for_existing_rev_without_ack(intake_library: Path):
+    """The 1030034 cross-wire bug: re-promoting revA must not silently
+    swap in a different package (e.g. the one _latest.txt points at).
+    Without packageIdChangeAcknowledged=true, the promote returns 409
+    with error code 'package_id_changed_for_existing_revision' and
+    leaves the existing revision untouched."""
+    pn = "1099999"
+    revA_pkg = "deadbeef0002"
+    wrong_pkg = "00ff00ff00ff"
+    # First promote revA with the correct package
+    client = TestClient(server.app)
+    r1 = client.post("/api/library/intake/promote",
+                     json=_default_body(revision="revA", part_package_id=revA_pkg))
+    assert r1.status_code == 200, r1.text
+    rev_dir = intake_library / "parts" / pn / "revA"
+    manifest_before = (rev_dir / "intake_manifest.json").read_bytes()
+
+    # Seed a real-shape sidecar for the WRONG package (mimics
+    # _latest.txt pointing at a fresh bridge extraction of a sibling
+    # rev) so the body's partPackageId resolves to an existing sidecar.
+    _seed_real_shape_sidecar(intake_library, pn, wrong_pkg,
+                             source_doc_path=f"C:\\dev\\{pn}-WRONG.SLDPRT")
+
+    # Re-promote revA with the WRONG package + overwriteConfirmed but
+    # WITHOUT packageIdChangeAcknowledged. Must 409.
+    body = _default_body(revision="revA", part_package_id=wrong_pkg,
+                         overwrite_confirmed="revA")
+    r2 = client.post("/api/library/intake/promote", json=body)
+    assert r2.status_code == 409, r2.text
+    payload = r2.json()
+    codes = [e["code"] for e in payload.get("errors", [])]
+    assert "package_id_changed_for_existing_revision" in codes, codes
+    # Detail message names both package IDs so the operator sees what's
+    # being swapped (frontend renders this in the wizard error list).
+    msg = next(e["message"] for e in payload["errors"]
+               if e["code"] == "package_id_changed_for_existing_revision")
+    assert revA_pkg in msg
+    assert wrong_pkg in msg
+    # Existing manifest untouched -- blocked promote must not write
+    assert (rev_dir / "intake_manifest.json").read_bytes() == manifest_before
+
+
+def test_promote_rehydrates_missing_part_metadata_from_real_bridge_sidecar(intake_library: Path):
+    """When the wizard body omits partFeatureCount /
+    partActiveConfiguration / partSourceDocPath (e.g. the operator
+    opens the wizard fresh after a server restart and the
+    window._lastBridgeExtractions cache is empty), the promote
+    backend must rehydrate from the REAL bridge sidecar shape:
+      - part.json -> top-level activeConfiguration, len(featureTree)
+      - manifest.json -> sourceDocument.path / configurationName"""
+    pn = "1099999"
+    real_pkg = "abc123def456"
+    # Replace the synthetic sidecar with the real bridge shape
+    (intake_library / "_bridge_imports" / "part" / pn / "deadbeef0002").mkdir(parents=True, exist_ok=True)
+    _seed_real_shape_sidecar(intake_library, pn, real_pkg,
+                             source_doc_path=r"C:\cad\real-bridge\Mounting Plate.SLDPRT",
+                             configuration="HighDetail", feature_count=42)
+
+    # Send a body with ONLY the package IDs -- no part metadata at all.
+    body = _default_body(part_package_id=real_pkg)
+    # Strip the part-metadata fields _default_body normally provides
+    body.pop("partSourceDocPath", None)
+    body.pop("partFeatureCount", None)
+    body.pop("partActiveConfiguration", None)
+
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/promote", json=body)
+    assert r.status_code == 200, r.text
+
+    manifest = json.loads(
+        (intake_library / "parts" / pn / "revA" / "intake_manifest.json").read_text(encoding="utf-8")
+    )
+    sp = manifest["sourcePart"]
+    # All three fields backfilled from the real bridge sidecar
+    assert sp["packageId"]           == real_pkg
+    assert sp["featureCount"]        == 42, sp
+    assert sp["activeConfiguration"] == "HighDetail", sp
+    assert sp["sourceDocPath"]       == r"C:\cad\real-bridge\Mounting Plate.SLDPRT", sp
+
+
+def test_promote_with_acknowledged_package_change_deletes_stale_managed_visuals(intake_library: Path):
+    """When operator acknowledges a package swap for an existing
+    revision, the wizard's managed visual whitelist files (the old
+    package's GLB / view PNGs / feature_colors / STL) must be deleted
+    so the new package's visuals can take their place. Curated,
+    non-managed files in the per-rev dir stay put."""
+    pn = "1099999"
+    revA_pkg = "deadbeef0002"
+    new_pkg  = "facefacefac3"
+
+    # Promote revA with the original package + seed visual assets in
+    # the per-rev archive so we have something stale to remove later.
+    _seed_visual_assets(intake_library / "_bridge_imports" / "part" / pn / revA_pkg, pn)
+    client = TestClient(server.app)
+    r1 = client.post("/api/library/intake/promote",
+                     json=_default_body(revision="revA", part_package_id=revA_pkg))
+    assert r1.status_code == 200, r1.text
+    rev_dir = intake_library / "parts" / pn / "revA"
+    stale_glb = rev_dir / f"{pn}_colored.glb"
+    stale_iso = rev_dir / f"{pn}_view_isometric.png"
+    assert stale_glb.exists()
+    assert stale_iso.exists()
+    stale_glb_bytes = stale_glb.read_bytes()
+
+    # Drop a curated, NON-managed file the wizard must preserve
+    curated = rev_dir / "operator_notes.txt"
+    curated.write_text("hand-edited inspection notes -- do not lose", encoding="utf-8")
+
+    # Seed the NEW package sidecar with different visual bytes
+    new_pkg_root = intake_library / "_bridge_imports" / "part" / pn / new_pkg
+    _seed_real_shape_sidecar(intake_library, pn, new_pkg,
+                             source_doc_path=f"C:\\dev\\{pn}-RevA-repack.SLDPRT")
+    # Distinct visual asset content so we can prove the swap
+    (new_pkg_root / "part" / f"{pn}_colored.glb").write_bytes(b"NEW_PKG_GLB_BYTES")
+    (new_pkg_root / "part" / f"{pn}_view_isometric.png").write_bytes(b"\x89PNG\r\n\x1a\nNEW")
+
+    # Re-promote revA with the NEW package + overwriteConfirmed + ack
+    body = _default_body(revision="revA", part_package_id=new_pkg,
+                         overwrite_confirmed="revA")
+    body["packageIdChangeAcknowledged"] = True
+    r2 = client.post("/api/library/intake/promote", json=body)
+    assert r2.status_code == 200, r2.text
+
+    # Managed visuals replaced (not preserved)
+    assert stale_glb.exists()  # file present again but with NEW bytes
+    assert stale_glb.read_bytes() == b"NEW_PKG_GLB_BYTES", \
+        "stale GLB from old package should have been deleted, then replaced from new pkg"
+    assert stale_iso.read_bytes() == b"\x89PNG\r\n\x1a\nNEW", \
+        "stale isometric PNG from old package should have been replaced"
+    # Non-managed curated file untouched
+    assert curated.read_text(encoding="utf-8").startswith("hand-edited")
+    # Manifest reflects the new package
+    manifest = json.loads((rev_dir / "intake_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["sourcePart"]["packageId"] == new_pkg

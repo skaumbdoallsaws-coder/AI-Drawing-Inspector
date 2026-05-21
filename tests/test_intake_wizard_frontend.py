@@ -344,3 +344,45 @@ def test_wizard_metadata_capture_helpers_present():
         'out.partActiveConfiguration',
     ]:
         assert marker in html, f"wizard metadata wiring regressed: {marker!r}"
+
+
+def test_wizard_enrich_visuals_button_wiring_present():
+    """The Library Intake Wizard exposes an "Enrich visuals" button in
+    Step 3 (Preview) for model-only intakes whose preview lacks visual
+    asset rows. The handler POSTs /api/library/intake/enrich-visuals
+    with {partNumber, partPackageId}, shows a running state, renders a
+    success summary (filesAdded + filesMissing + warnings), and
+    re-runs the preview so the action table reflects the new sidecar
+    contents. Static-check the wiring -- behavioural coverage for the
+    endpoint itself is in tests/test_intake_enrich_visuals.py."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        # State fields the handler manipulates
+        'enrichLoading:            false',
+        'enrichResult:             null',
+        # Handler function name + endpoint URL
+        'async function _runEnrichVisuals',
+        '/api/library/intake/enrich-visuals',
+        # Required body keys
+        'partNumber:    s.partNumber',
+        'partPackageId: s.partPackageId',
+        # Summary renderer surfaces filesAdded + filesMissing + warnings
+        'function _renderEnrichSummary',
+        'er.filesAdded',
+        'er.filesMissing',
+        'er.warnings',
+        # Step 3 button DOM ID + label
+        'id="iwEnrichBtn"',
+        '>Enrich visuals',
+        # Re-runs preview on success so the action table refreshes
+        'await _loadPreview()',
+        # Hide-when-visuals-already-present logic (avoids redundant click)
+        'hasVisualActions',
+        # Only surfaces for model-only intakes with a package id
+        's.modelOnly && s.partPackageId',
+        # Stale-result cleanup when operator changes package id and
+        # re-advances from Step 2.
+        's.enrichResult = null',
+    ]:
+        assert marker in html, f"enrich-visuals wiring regressed: {marker!r}"

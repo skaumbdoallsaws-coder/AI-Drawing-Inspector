@@ -33049,6 +33049,8 @@
                     previewResult:            null,
                     overwriteInput:           '',
                     packageIdChangeAcknowledged: false,
+                    enrichLoading:            false,
+                    enrichResult:             null,
                     promoteLoading:           false,
                     promoteResult:            null,
                     bannerKind:               '',  // 'info' | 'warn' | 'success' | '' (no banner)
@@ -33448,6 +33450,11 @@
                         render(); return;
                     }
                     clearBanner();
+                    // Drop stale enrichment summary -- the operator may
+                    // have changed partPackageId between visits, in
+                    // which case the prior enrich result describes a
+                    // different sidecar.
+                    s.enrichResult = null;
                     s.previewLoading = true; s.previewResult = null;
                     go(3);
                     _loadPreview();
@@ -33480,6 +33487,92 @@
                     render();
                 }
             }
+            // Run the visual-enrichment endpoint and, on success,
+            // refresh the preview so the action table shows the GLB /
+            // view PNG / STL rows the next promote would copy. The
+            // endpoint takes 30-60s because it spawns the OLD
+            // SolidWorksExtractor + ExportSolidWorksFormats binaries
+            // against the active SOLIDWORKS document; the UI shows a
+            // spinner during the run and a summary panel afterwards.
+            async function _runEnrichVisuals() {
+                if (!s.partNumber || !s.partPackageId) {
+                    setBanner('warn', 'Enrich visuals needs both part number and part package ID.');
+                    return;
+                }
+                s.enrichLoading = true;
+                s.enrichResult  = null;
+                render();
+                try {
+                    const r = await fetch('/api/library/intake/enrich-visuals', {
+                        method:  'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body:    JSON.stringify({
+                            partNumber:    s.partNumber,
+                            partPackageId: s.partPackageId,
+                        }),
+                    });
+                    let payload = null;
+                    try { payload = await r.json(); } catch (_) { payload = null; }
+                    s.enrichLoading = false;
+                    s.enrichResult  = payload || { success: false, error: `HTTP ${r.status}` };
+                    s.enrichResult._httpStatus = r.status;
+                    // On success the sidecar now carries new visuals --
+                    // re-run preview so the action table reflects what
+                    // will land on the next promote. The summary panel
+                    // remains visible above the refreshed preview.
+                    if (s.enrichResult.success) {
+                        s.previewLoading = true;
+                        s.previewResult  = null;
+                        render();
+                        await _loadPreview();
+                    } else {
+                        render();
+                    }
+                } catch (e) {
+                    s.enrichLoading = false;
+                    s.enrichResult  = { success: false, error: e.message };
+                    render();
+                }
+            }
+            function _renderEnrichSummary() {
+                if (s.enrichLoading) {
+                    return `<div class="intake-banner info">Enriching visuals — running SolidWorksExtractor + ExportSolidWorksFormats against the active SOLIDWORKS document. This typically takes 30-60 seconds.</div>`;
+                }
+                const er = s.enrichResult;
+                if (!er) return '';
+                if (!er.success) {
+                    // Non-2xx OR success=false on 500. FastAPI HTTPException
+                    // surfaces in `detail`; the endpoint's 500 body uses
+                    // the same response shape as success.
+                    const detail = er.detail || er.error || 'Enrichment failed';
+                    const extractorStderr = (er.extractorRun && er.extractorRun.stderr) || '';
+                    const stlStderr       = (er.stlRun       && er.stlRun.stderr)       || '';
+                    return `<div class="intake-banner warn">
+                        <strong>Enrich visuals failed.</strong> ${_esc(typeof detail === 'string' ? detail : JSON.stringify(detail))}
+                        ${extractorStderr ? `<div style="font-family:monospace;font-size:10px;margin-top:4px;white-space:pre-wrap;">SolidWorksExtractor: ${_esc(extractorStderr.slice(-400))}</div>` : ''}
+                        ${stlStderr ? `<div style="font-family:monospace;font-size:10px;margin-top:4px;white-space:pre-wrap;">ExportSolidWorksFormats: ${_esc(stlStderr.slice(-400))}</div>` : ''}
+                    </div>`;
+                }
+                const added   = Array.isArray(er.filesAdded)   ? er.filesAdded   : [];
+                const missing = Array.isArray(er.filesMissing) ? er.filesMissing : [];
+                const warns   = Array.isArray(er.warnings)     ? er.warnings     : [];
+                // STL-only failure is a warning, not a failure -- the
+                // GLB + view PNGs are still useful. The server already
+                // emits this as a warning (`incomplete_extraction`).
+                const missingHtml = missing.length
+                    ? `<div style="margin-top:4px;color:var(--text-muted);font-size:11px;">Not produced (the GLB + views are still copied): ${missing.map(f => `<code>${_esc(f)}</code>`).join(' ')}</div>`
+                    : '';
+                const warnsHtml = warns.length
+                    ? `<ul class="intake-warning-list" style="margin-top:4px;">${warns.map(w => `<li><strong>${_esc(w.code || 'warn')}:</strong> ${_esc(w.message || '')}</li>`).join('')}</ul>`
+                    : '';
+                return `<div class="intake-banner success">
+                    <strong>Visuals enriched.</strong> Added ${added.length} file${added.length === 1 ? '' : 's'} to the sidecar at <code>${_esc(er.partPackageId || '')}</code>.
+                    ${added.length ? `<div style="margin-top:4px;font-size:11px;">${added.map(f => `<code>${_esc(f)}</code>`).join(' ')}</div>` : ''}
+                    ${missingHtml}
+                    ${warnsHtml}
+                    <div style="margin-top:4px;color:var(--text-muted);font-size:11px;">Preview refreshed — review the action table below before clicking Promote.</div>
+                </div>`;
+            }
             function _renderActionsTable(actions) {
                 if (!actions?.length) return '<p style="font-size:11px;color:var(--text-muted);">(no actions)</p>';
                 let html = '<table class="intake-action-table"><thead><tr><th>Kind</th><th>Path</th><th>Size</th></tr></thead><tbody>';
@@ -33494,6 +33587,11 @@
                 return html;
             }
             function renderStep3() {
+                // Enrich-visuals summary / spinner sits ABOVE the
+                // preview block so the operator sees the run status
+                // even while the preview is reloading.
+                const enrichSummaryHtml = _renderEnrichSummary();
+                if (enrichSummaryHtml) body.insertAdjacentHTML('beforeend', enrichSummaryHtml);
                 if (s.previewLoading) {
                     body.insertAdjacentHTML('beforeend', `<div class="intake-promote-spinner">Computing preview…</div>`);
                     footer.innerHTML = `<button class="btn btn-secondary" id="iwBackBtn" type="button">← Back</button><div class="iw-footer-right"><button class="btn btn-primary" disabled>Promote →</button></div>`;
@@ -33513,12 +33611,30 @@
                 body.insertAdjacentHTML('beforeend', _renderActionsTable(pr.actions));
                 const canPromote = !!pr.planValid;
                 const hasPkgChangeError = (pr.errors || []).some(e => e.code === 'package_id_changed_for_existing_revision');
+                // Detect whether the preview already has visual-asset
+                // CREATE rows. The wizard's managed visual whitelist is
+                // {pn}_colored.glb / *_view_*.png / *_feature_colors.json /
+                // *.stl. If none appear and modelOnly+partPackageId are
+                // set, surface the Enrich button so the operator can
+                // hydrate the sidecar without leaving the wizard.
+                const _visualAssetRe = /(_colored\.glb|_view_(front|top|right|isometric)\.png|_feature_colors\.json|\.stl|\.STL)$/;
+                const hasVisualActions = (pr.actions || []).some(a =>
+                    a && typeof a.path === 'string' && _visualAssetRe.test(a.path)
+                );
+                // Enrichment makes sense for model-only intakes (bridge
+                // SLDPRT-only path does not emit visuals). Hide when the
+                // preview already shows visual rows -- nothing to add.
+                const showEnrich = !!(s.modelOnly && s.partPackageId && !hasVisualActions);
+                const enrichBtnLabel = s.enrichResult && s.enrichResult.success
+                    ? 'Re-run enrich visuals'
+                    : 'Enrich visuals';
                 footer.innerHTML = `
                     <button class="btn btn-secondary" id="iwBackBtn" type="button">← Back</button>
                     <div class="iw-footer-right">
                         <button class="btn btn-secondary" id="iwCancelBtn" type="button">Cancel intake</button>
+                        ${showEnrich ? `<button class="btn btn-secondary" id="iwEnrichBtn" type="button" ${s.enrichLoading ? 'disabled' : ''} title="Runs SolidWorksExtractor + ExportSolidWorksFormats against the active SOLIDWORKS document and drops the GLB / view PNGs / STL into the bridge sidecar. The preview refreshes automatically on success.">${_esc(enrichBtnLabel)}${s.enrichLoading ? '…' : ''}</button>` : ''}
                         ${hasPkgChangeError ? `<button class="btn btn-secondary" id="iwAckPkgChangeBtn" type="button" title="Confirm you intend to replace the package for this existing revision. Managed visual assets from the prior package will be removed.">Acknowledge package change &amp; re-preview</button>` : ''}
-                        <button class="btn btn-primary"   id="iwPromoteBtn" type="button" ${canPromote ? '' : 'disabled'}>Promote →</button>
+                        <button class="btn btn-primary"   id="iwPromoteBtn" type="button" ${canPromote && !s.enrichLoading ? '' : 'disabled'}>Promote →</button>
                     </div>
                 `;
                 document.getElementById('iwBackBtn').addEventListener('click', () => go(2));
@@ -33532,6 +33648,10 @@
                         go(3);
                         _loadPreview();
                     });
+                }
+                const enrichBtn = document.getElementById('iwEnrichBtn');
+                if (enrichBtn) {
+                    enrichBtn.addEventListener('click', () => { _runEnrichVisuals(); });
                 }
                 if (canPromote) {
                     document.getElementById('iwPromoteBtn').addEventListener('click', () => {

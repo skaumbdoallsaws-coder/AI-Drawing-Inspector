@@ -3868,6 +3868,191 @@ def _semantic_regions_list_for_context(pn: Optional[str],
     return out
 
 
+def _semantic_regions_target_from_context(ctx: Optional[Dict[str, Any]]) -> tuple[Optional[Path], Optional[str], Optional[str]]:
+    """Resolve the library / part / revision triple for semantic-region
+    highlighting from the flattened agent context. Returns (None, None,
+    None) when the context is incomplete. Never raises: chat highlighting
+    should degrade to the existing feature-highlighting path."""
+    if not ctx:
+        return None, None, None
+    safe_pn = sanitize_part_number(ctx.get("part_number"))
+    if not safe_pn:
+        return None, None, None
+    library_dir = library_path()
+    safe_rev: Optional[str] = None
+    ctx_rev = ctx.get("revision")
+    if isinstance(ctx_rev, str) and ctx_rev.strip():
+        try:
+            safe_rev = _semantic_regions_resolve_rev(library_dir, safe_pn, ctx_rev)
+        except HTTPException:
+            safe_rev = None
+    if not safe_rev:
+        safe_rev = _semantic_regions_pick_latest_rev(library_dir, safe_pn)
+    if not safe_rev:
+        return None, None, None
+    return library_dir, safe_pn, safe_rev
+
+
+def _available_feature_ids_from_context(ctx: Optional[Dict[str, Any]]) -> set[str]:
+    ids: set[str] = set()
+    if not ctx:
+        return ids
+    for feat in ctx.get("available_cad_features", []):
+        if isinstance(feat, dict):
+            fid = feat.get("cad_feature_id")
+            if isinstance(fid, str) and fid:
+                ids.add(fid)
+    return ids
+
+
+def _semantic_region_highlight_targets(
+    ctx: Optional[Dict[str, Any]],
+    phrases: List[str],
+) -> tuple[List[str], List[Dict[str, Any]]]:
+    """Resolve semantic-region phrases into viewer-ready CAD feature IDs
+    plus region metadata. Used by both marker parsing and native tool-call
+    repair so model output format differences cannot break highlighting."""
+    clean_phrases = [str(p).strip() for p in phrases if str(p or "").strip()]
+    if not clean_phrases:
+        return [], []
+    library_dir, safe_pn, safe_rev = _semantic_regions_target_from_context(ctx)
+    if not library_dir or not safe_pn or not safe_rev:
+        return [], []
+
+    resolved = _semantic_resolve_phrases(library_dir, safe_pn, safe_rev, clean_phrases)
+    available_ids = _available_feature_ids_from_context(ctx)
+    feature_ids: List[str] = []
+    region_payloads: List[Dict[str, Any]] = []
+    seen_regions: set[str] = set()
+    for r in resolved:
+        if r.regionId not in seen_regions:
+            region_payloads.append({
+                **r.to_dict(),
+                "partNumber": safe_pn,
+                "revision":   safe_rev,
+            })
+            seen_regions.add(r.regionId)
+        for fid in r.cadFeatureIds:
+            if available_ids and fid not in available_ids:
+                continue
+            if fid not in feature_ids:
+                feature_ids.append(fid)
+    return feature_ids, region_payloads
+
+
+def _semantic_scan_norm(value: str) -> str:
+    return re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
+
+
+def _semantic_region_phrases_in_text(ctx: Optional[Dict[str, Any]], text: str) -> List[str]:
+    """Return known semantic-region labels / aliases / IDs mentioned in
+    free text. Falls back to the full text so the resolver's own
+    substring rules can still catch phrases like 'show me the top wing'."""
+    if not ctx or not text:
+        return []
+    msg_norm = f" {_semantic_scan_norm(text)} "
+    candidates: List[str] = []
+    if " tail " in msg_norm:
+        candidates.append("tail")
+    for r in _semantic_regions_list_for_context(ctx.get("part_number"), ctx.get("revision")):
+        for phrase in [r.get("regionId", ""), r.get("label", ""), *r.get("aliases", [])]:
+            phrase_norm = _semantic_scan_norm(phrase)
+            if len(phrase_norm) >= 4 and f" {phrase_norm} " in msg_norm and phrase not in candidates:
+                candidates.append(str(phrase))
+    if not candidates:
+        candidates.append(text)
+    return candidates
+
+
+_DIRECT_SEMANTIC_HIGHLIGHT_RE = re.compile(
+    r'\b(highlight|focus|locate|point out|select)\b',
+    re.IGNORECASE,
+)
+_DIRECT_SEMANTIC_HIGHLIGHT_BLOCKERS_RE = re.compile(
+    r'\b(why|how|explain|compare|difference|differences|changed|tell me about|what is|what are)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_direct_semantic_highlight_request(message: str) -> bool:
+    """True for explicit UI-only commands such as 'highlight the top wing'.
+    Mixed analytical questions still go to the model."""
+    msg = str(message or "").strip()
+    if not msg:
+        return False
+    if not _DIRECT_SEMANTIC_HIGHLIGHT_RE.search(msg):
+        return False
+    return _DIRECT_SEMANTIC_HIGHLIGHT_BLOCKERS_RE.search(msg) is None
+
+
+def _merge_feature_ids_into_tool_calls(tool_calls: List[Dict[str, Any]], feature_ids: List[str]) -> None:
+    """Append feature IDs to a native highlight_features tool call, or
+    create one if none exists. Mutates tool_calls in place."""
+    clean_ids = [fid for fid in feature_ids if fid]
+    if not clean_ids:
+        return
+    for tc in tool_calls:
+        if tc.get("name") == "highlight_features":
+            args = tc.setdefault("args", {})
+            existing = args.get("feature_ids", [])
+            if not isinstance(existing, list):
+                existing = [existing] if existing else []
+            for fid in clean_ids:
+                if fid not in existing:
+                    existing.append(fid)
+            args["feature_ids"] = existing
+            return
+    tool_calls.append({"name": "highlight_features", "args": {"feature_ids": clean_ids}})
+
+
+def _resolve_semantic_regions_in_highlight_tool_calls(
+    tool_calls: List[Dict[str, Any]],
+    ctx: Optional[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Repair native highlight_features calls when the model passes a
+    semantic label/regionId (e.g. 'top_wing') instead of a CAD feature
+    ID. Valid feature IDs are preserved; semantic tokens are expanded
+    to the region's cadFeatureIds."""
+    available_ids = _available_feature_ids_from_context(ctx)
+    region_payloads: List[Dict[str, Any]] = []
+    seen_regions: set[str] = set()
+
+    for tc in tool_calls:
+        if tc.get("name") != "highlight_features":
+            continue
+        args = tc.setdefault("args", {})
+        raw_ids = args.get("feature_ids", [])
+        if not isinstance(raw_ids, list):
+            raw_ids = [raw_ids] if raw_ids else []
+        repaired: List[str] = []
+        for raw in raw_ids:
+            token = str(raw or "").strip()
+            if not token:
+                continue
+            if token in available_ids:
+                if token not in repaired:
+                    repaired.append(token)
+                continue
+            semantic_ids, semantic_regions = _semantic_region_highlight_targets(ctx, [token])
+            if semantic_ids:
+                for fid in semantic_ids:
+                    if fid not in repaired:
+                        repaired.append(fid)
+                for reg in semantic_regions:
+                    rid = reg.get("regionId")
+                    if rid and rid not in seen_regions:
+                        region_payloads.append(reg)
+                        seen_regions.add(rid)
+            else:
+                # Preserve legacy native-tool behavior for unknown tokens:
+                # the frontend may still know how to handle them, and if it
+                # does not, the no-op is harmless.
+                if token not in repaired:
+                    repaired.append(token)
+        args["feature_ids"] = repaired
+    return tool_calls, region_payloads
+
+
 def _semantic_regions_resolve_rev(library_dir: Path, pn: str, revision: str) -> str:
     """Accept either 'A' or 'revA' from the request and return the
     on-disk revision directory name ('revA'). Errors with 400 when
@@ -8044,6 +8229,7 @@ The semantic region map groups raw CAD features into user-facing groups ("top wi
 - The resolver expands each region to the right GLB nodes AND the underlying CAD feature IDs, so the 3D viewer lights up automatically. You do NOT need to also emit HIGHLIGHT_FEATURES for the same region.
 - Refer to the region by its label in your text ("the top wing"), not by regionId.
 - HIGHLIGHT_REGIONS goes on its own line at the end, same convention as HIGHLIGHT_FEATURES.
+- For direct commands like "highlight the top wing", keep the spoken answer short and do not infer function, aerodynamic intent, revision changes, or design rationale unless that information is explicitly present in the context.
 
 FEATURE COUNTING:
 When the user asks "how many features" on a part, there are two valid counts:
@@ -9788,6 +9974,37 @@ async def agent_chat(request: AgentChatRequest):
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
 
+        # Deterministic fast path for simple region-highlight commands.
+        # This avoids relying on the model to obey marker syntax for
+        # requests like "highlight the top wing" and prevents unsupported
+        # explanatory prose from being fabricated for a pure UI action.
+        if request.agent_type == "deviation-analyst" and _is_direct_semantic_highlight_request(request.message):
+            phrases = _semantic_region_phrases_in_text(ctx, request.message)
+            feature_ids, region_payloads = _semantic_region_highlight_targets(ctx, phrases)
+            if feature_ids:
+                raw_calls = [{"name": "highlight_features", "args": {"feature_ids": feature_ids}}]
+                guarded, warnings = apply_tool_guardrails(raw_calls, request.agent_type, "semantic_region_direct")
+                labels = [
+                    str(r.get("label") or r.get("regionId"))
+                    for r in region_payloads
+                    if r.get("label") or r.get("regionId")
+                ]
+                if any(_semantic_scan_norm(p) == "tail" for p in phrases):
+                    label_text = "Tail"
+                else:
+                    label_text = ", ".join(labels) if labels else "the selected region"
+                result = {
+                    "response":           f"Highlighted {label_text}.",
+                    "highlight_features": feature_ids,
+                    "highlight_regions":  region_payloads,
+                    "tool_calls":         guarded,
+                    "tool_source":        "semantic_region_direct",
+                    "tool_call_count":    len(guarded),
+                }
+                if warnings:
+                    result["tool_guardrail_warnings"] = warnings
+                return result
+
         # Enrich with proximity — Sage only, first 2 selected parts
         if request.agent_type == 'deviation-analyst':
             selected = ctx.get("selected_parts", [])
@@ -10288,51 +10505,28 @@ async def agent_chat(request: AgentChatRequest):
         hr_match = re.search(r'^HIGHLIGHT_REGIONS:\s*(.+)$', response_text, re.MULTILINE)
         if hr_match:
             raw_phrases = [p.strip() for p in hr_match.group(1).split(",") if p.strip()]
-            ctx_pn = (ctx or {}).get("part_number") if ctx else None
-            if ctx_pn and raw_phrases:
-                safe_ctx_pn = sanitize_part_number(ctx_pn)
-                if safe_ctx_pn:
-                    ctx_rev = (ctx or {}).get("revision") if ctx else None
-                    library_dir = library_path()
-                    safe_rev: Optional[str] = None
-                    if isinstance(ctx_rev, str) and ctx_rev.strip():
-                        try:
-                            safe_rev = _semantic_regions_resolve_rev(
-                                library_dir, safe_ctx_pn, ctx_rev)
-                        except HTTPException:
-                            safe_rev = None
-                    if not safe_rev:
-                        safe_rev = _semantic_regions_pick_latest_rev(
-                            library_dir, safe_ctx_pn)
-                    if safe_rev:
-                        resolved = _semantic_resolve_phrases(
-                            library_dir, safe_ctx_pn, safe_rev, raw_phrases)
-                        # Fold each resolved region's cadFeatureIds into the
-                        # existing highlight_features list. The frontend tool
-                        # registry only consumes highlight_features, so this
-                        # is what actually makes the 3D viewer glow. We keep
-                        # highlight_regions populated as metadata for the
-                        # future Sage CAD bridge and any UI that wants to
-                        # surface region-level info (label, aliases, etc.).
-                        # Validate against available_feature_ids when the
-                        # context provides them so semantic_regions drift
-                        # against feature_colors can't ship stale IDs.
-                        region_available_ids: set = set()
-                        if ctx:
-                            for feat in ctx.get("available_cad_features", []):
-                                region_available_ids.add(feat.get("cad_feature_id", ""))
-                        for r in resolved:
-                            highlight_regions.append({
-                                **r.to_dict(),
-                                "partNumber": safe_ctx_pn,
-                                "revision":   safe_rev,
-                            })
-                            for fid in r.cadFeatureIds:
-                                if region_available_ids and fid not in region_available_ids:
-                                    continue
-                                if fid not in highlight_features:
-                                    highlight_features.append(fid)
+            region_feature_ids, region_payloads = _semantic_region_highlight_targets(ctx, raw_phrases)
+            highlight_regions.extend(region_payloads)
+            for fid in region_feature_ids:
+                if fid not in highlight_features:
+                    highlight_features.append(fid)
             response_text = re.sub(r'^HIGHLIGHT_REGIONS:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
+        # Native <tool_calls> can still contain semantic labels in a
+        # highlight_features call (observed in browser smoke:
+        # feature_ids:["top_wing"]). Repair those to real cad_feature_ids
+        # and merge marker-derived highlights into the native calls, because
+        # the native path takes precedence over legacy marker fields later.
+        if native_tool_calls:
+            native_tool_calls, native_region_payloads = _resolve_semantic_regions_in_highlight_tool_calls(native_tool_calls, ctx)
+            seen_region_ids = {r.get("regionId") for r in highlight_regions}
+            for reg in native_region_payloads:
+                rid = reg.get("regionId")
+                if rid and rid not in seen_region_ids:
+                    highlight_regions.append(reg)
+                    seen_region_ids.add(rid)
+            if highlight_features:
+                _merge_feature_ids_into_tool_calls(native_tool_calls, highlight_features)
 
         # Extract compare features marker (dual-view part revision comparison)
         compare_features = []

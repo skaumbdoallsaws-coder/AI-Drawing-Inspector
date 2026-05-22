@@ -44,6 +44,12 @@ MATCH_KINDS = (
     "regionId_substring",
 )
 
+_TAIL_AGGREGATE_REGION_IDS = (
+    "tail_horizontal_stabilizer",
+    "tail_vertical_stabilizer",
+    "tail_other",
+)
+
 
 @dataclass
 class ResolvedRegion:
@@ -240,6 +246,22 @@ def resolve_regions_for_phrases(
     out: List[ResolvedRegion] = []
     seen_region_ids = set()
     for p in phrases or []:
+        if _normalize(p) in {"tail", "the tail", "tail section", "tail assembly"}:
+            doc = _load_regions_doc(library_dir, pn, revision)
+            regions = doc.get("regions") if isinstance(doc, dict) else None
+            if isinstance(regions, list):
+                by_id = {
+                    str(r.get("regionId") or ""): r
+                    for r in regions
+                    if isinstance(r, dict)
+                }
+                for rid in _TAIL_AGGREGATE_REGION_IDS:
+                    if rid in seen_region_ids or rid not in by_id:
+                        continue
+                    out.append(_region_to_resolved(by_id[rid], "alias", matched_alias="tail"))
+                    seen_region_ids.add(rid)
+            continue
+
         hit = resolve_region_for_phrase(library_dir, pn, revision, p)
         if hit is None:
             continue

@@ -159,12 +159,30 @@ def _rule_top_wing(np_: Dict[str, float], frame: AxisFrame) -> RuleResult:
 
 
 def _rule_lower_wing(np_: Dict[str, float], frame: AxisFrame) -> RuleResult:
-    # Low on the vertical axis AND wide on the lateral axis.
+    # Low on the vertical axis, in the main wing station, AND either:
+    #   - wide across the center panel, or
+    #   - a shorter outboard wing-tip/end-cap surface.
+    # The second case catches lower-wing rounded ends that are modeled
+    # as separate Surface-Revolve / Mirror operations rather than one
+    # continuous full-span surface.
     vertical_mid = 0.5 * (frame.vertical_min + frame.vertical_max)
     low_threshold = vertical_mid - 0.3 * frame.vertical_range
     if np_["vertical_centroid"] > low_threshold:
         return None
-    if np_["lateral_extent"] < 0.5 * frame.lateral_range:
+
+    if frame.length_range <= 0:
+        return None
+    length_norm = (np_["length_centroid"] - frame.length_min) / frame.length_range
+    if length_norm < 0.55 or length_norm > 0.85:
+        return None
+
+    lateral_mid = 0.5 * (frame.lateral_min + frame.lateral_max)
+    is_wide_center = np_["lateral_extent"] >= 0.5 * frame.lateral_range
+    is_outboard_tip = (
+        np_["lateral_extent"] >= 0.09 * frame.lateral_range
+        and abs(np_["lateral_centroid"] - lateral_mid) >= 0.25 * frame.lateral_range
+    )
+    if not (is_wide_center or is_outboard_tip):
         return None
     return ("lower_wing", "high")
 

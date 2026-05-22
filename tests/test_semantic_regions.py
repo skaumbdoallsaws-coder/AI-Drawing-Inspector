@@ -275,10 +275,12 @@ def test_classify_top_and_lower_wings(aircraft_library: Path):
     summary = inspect_glb(glb)
     frame = detect_axis_frame(summary)
     by_name = {n.name: n for n in summary.nodes}
-    top    = classify_node_aircraft(by_name["planarsurface_top_wing"], frame)
-    lower  = classify_node_aircraft(by_name["extrurefsurface_lower_wing"], frame)
-    assert top   == ("top_wing", "high")
-    assert lower == ("lower_wing", "high")
+    top           = classify_node_aircraft(by_name["planarsurface_top_wing"], frame)
+    lower_center  = classify_node_aircraft(by_name["extrurefsurface_lower_wing"], frame)
+    lower_wingtip = classify_node_aircraft(by_name["revolvrefsurf_lower_wingtip_p"], frame)
+    assert top           == ("top_wing", "high")
+    assert lower_center  == ("lower_wing", "high")
+    assert lower_wingtip == ("lower_wing", "high")
 
 
 def test_classify_tail_horizontal_and_vertical(aircraft_library: Path):
@@ -346,6 +348,10 @@ def test_build_draft_regions_aircraft_assigns_every_node(aircraft_library: Path)
     }
     missing = expected_subset - region_ids
     assert not missing, f"missing expected regions: {missing}"
+    lower_wing = next(r for r in doc["regions"] if r["regionId"] == "lower_wing")
+    assert "extrurefsurface_lower_wing" in lower_wing["glbNodes"]
+    assert "revolvrefsurf_lower_wingtip_p" in lower_wing["glbNodes"], \
+        "lower wing semantic region must include separate rounded end-cap surfaces"
     # Every region carries the required keys -- the original 1.0.0
     # contract, the 1.1.0 CAD-edit orchestration scaffolding, and
     # the 1.2.0 CAD-edit planning placeholders.
@@ -1060,6 +1066,23 @@ def test_resolve_regions_for_phrases_dedupes_same_region(aircraft_library_with_d
         f"expected dedupe to top_wing + propeller in order, got {region_ids}"
 
 
+def test_resolve_regions_for_plain_tail_returns_tail_aggregate(
+    aircraft_library_with_draft: Path,
+):
+    """Plain 'tail' is user-facing shorthand for the whole tail area,
+    not just the first stabilizer whose alias substring happens to
+    match. Keep fuselage_candidate out because that bucket can include
+    long body skin meshes and over-highlight the airplane body."""
+    out = resolve_regions_for_phrases(
+        aircraft_library_with_draft, "1030099", "revA", ["tail"])
+    region_ids = [r.regionId for r in out]
+    assert region_ids == [
+        "tail_horizontal_stabilizer",
+        "tail_vertical_stabilizer",
+    ]
+    assert all(r.matchedAlias == "tail" for r in out)
+
+
 # ---------------------------------------------------------------------------
 # HTTP /resolve endpoint
 # ---------------------------------------------------------------------------
@@ -1317,6 +1340,116 @@ def test_HIGHLIGHT_FEATURES_plus_HIGHLIGHT_REGIONS_unions_distinct(
     # Order: HIGHLIGHT_FEATURES parsed first, region-derived appended after.
     assert hf.index("revolution_revolve1") < hf.index("planarsurface_top_wing"), \
         f"expected HIGHLIGHT_FEATURES entries before region-derived entries, got {hf}"
+
+
+def test_direct_semantic_highlight_request_bypasses_model(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Browser smoke regression: 'highlight the top wing' should not
+    depend on the LLM emitting a marker. The server can resolve the
+    region deterministically and return a highlight_features tool call
+    with the real cad_feature_id."""
+    msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "highlight the top wing",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert msgs.last_kwargs is None, "direct semantic highlight should not call Anthropic"
+    assert body["tool_source"] == "semantic_region_direct"
+    assert body["response"] == "Highlighted Top wing."
+    assert body["tool_calls"] == [{
+        "name": "highlight_features",
+        "args": {"feature_ids": ["planarsurface_top_wing"]},
+    }]
+    assert any(reg.get("regionId") == "top_wing" for reg in body["highlight_regions"])
+
+
+def test_direct_tail_highlight_request_returns_tail_aggregate(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Plain 'tail' in a direct highlight command should include the
+    stabilizers and the connector/fuselage-candidate bucket, not just
+    the first stabilizer resolved by substring."""
+    msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "highlight the tail",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert msgs.last_kwargs is None
+    assert body["response"] == "Highlighted Tail."
+    region_ids = [r["regionId"] for r in body["highlight_regions"]]
+    assert region_ids == [
+        "tail_horizontal_stabilizer",
+        "tail_vertical_stabilizer",
+    ]
+    ids = body["tool_calls"][0]["args"]["feature_ids"]
+    assert "netblend_horiz_stab_p" in ids
+    assert "netblend_vert_stab" in ids
+    assert "pline_split_line1" not in ids
+
+
+def test_native_highlight_features_semantic_region_token_resolves(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Production regression from 1030034 Rev B: the model emitted a
+    native highlight_features call with feature_ids:['top_wing'].
+    'top_wing' is a semantic region, not a GLB feature id, so the
+    backend must expand it before the frontend sees the tool call."""
+    _stub_anthropic_response(monkeypatch,
+        "The top wing is selected.\n"
+        "<tool_calls>\n"
+        "[{\"name\":\"highlight_features\",\"args\":{\"feature_ids\":[\"top_wing\"]}}]\n"
+        "</tool_calls>"
+    )
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "tell me about the top wing",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tool_source"] == "native"
+    assert body["tool_calls"] == [{
+        "name": "highlight_features",
+        "args": {"feature_ids": ["planarsurface_top_wing"]},
+    }]
+    assert "top_wing" not in body["tool_calls"][0]["args"]["feature_ids"]
+    assert any(reg.get("regionId") == "top_wing" for reg in body["highlight_regions"])
+
+
+def test_native_tool_calls_merge_marker_region_features(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Native tool calls take precedence over legacy marker fields. If
+    the model emits both, marker-derived semantic features still need
+    to be folded into the native highlight_features call."""
+    _stub_anthropic_response(monkeypatch,
+        "Highlighting both.\n"
+        "HIGHLIGHT_REGIONS: top wing\n"
+        "<tool_calls>\n"
+        "[{\"name\":\"highlight_features\",\"args\":{\"feature_ids\":[\"revolution_revolve1\"]}}]\n"
+        "</tool_calls>"
+    )
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "show the propeller and explain top wing",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    ids = body["tool_calls"][0]["args"]["feature_ids"]
+    assert ids == ["revolution_revolve1", "planarsurface_top_wing"]
+    assert any(reg.get("regionId") == "top_wing" for reg in body["highlight_regions"])
 
 
 def test_AVAILABLE_SEMANTIC_REGIONS_section_injected_into_context(

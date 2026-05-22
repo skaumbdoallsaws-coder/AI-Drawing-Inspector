@@ -1143,6 +1143,7 @@ def test_GET_cad_handoff_endpoint_returns_solidworks_targets(aircraft_library_wi
     assert body["matched"] is True
     assert body["handoffVersion"] == "semantic-region-cad-handoff-1.0"
     assert body["region"]["regionId"] == "top_wing"
+    assert [r["regionId"] for r in body["regions"]] == ["top_wing"]
     assert "planarsurface_top_wing" in body["solidWorksTargets"]["glbNodes"]
     assert "planarsurface_top_wing" in body["solidWorksTargets"]["cadFeatureIds"]
     assert "Planarsurface Top Wing" in body["solidWorksTargets"]["sourceFeatures"]
@@ -1163,6 +1164,25 @@ def test_GET_cad_handoff_endpoint_includes_placement_scaffold(aircraft_library_w
     assert region["placementCapabilities"] == ["reference_only"]
     assert region["placementSurfaces"] == []
     assert region["requiresReview"] is True
+
+
+def test_GET_cad_handoff_endpoint_aggregates_tail_regions(aircraft_library_with_draft: Path):
+    """The CAD handoff must mirror HIGHLIGHT_REGIONS aggregation:
+    asking for "tail" should hand off both stabilizers, not just the
+    first region returned by the single-hit resolver."""
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/cad-handoff",
+                   params={"revision": "A", "phrase": "tail"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    region_ids = [reg["regionId"] for reg in body["regions"]]
+    assert region_ids == [
+        "tail_horizontal_stabilizer",
+        "tail_vertical_stabilizer",
+    ]
+    assert "netblend_horiz_stab_p" in body["solidWorksTargets"]["cadFeatureIds"]
+    assert "netblend_vert_stab" in body["solidWorksTargets"]["cadFeatureIds"]
+    assert body["operationPolicy"]["canEdit"] is False
 
 
 def test_GET_cad_handoff_endpoint_404_when_no_match(aircraft_library_with_draft: Path):

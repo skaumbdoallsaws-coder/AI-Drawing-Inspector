@@ -4450,8 +4450,11 @@ async def part_semantic_regions_cad_handoff(
         raise HTTPException(status_code=400, detail="phrase query parameter is required")
 
     library_dir = library_path()
-    hit = _semantic_resolve_phrase(library_dir, safe_pn, safe_rev, phrase)
-    if hit is None:
+    # Use the multi-region resolver, not the single-hit resolver, so
+    # aggregate phrases like "tail" produce both horizontal + vertical
+    # stabilizer targets. This mirrors HIGHLIGHT_REGIONS behavior.
+    hits = _semantic_resolve_phrases(library_dir, safe_pn, safe_rev, [phrase])
+    if not hits:
         return JSONResponse(status_code=404, content={
             "matched":    False,
             "partNumber": safe_pn,
@@ -4468,20 +4471,52 @@ async def part_semantic_regions_cad_handoff(
             status_code=500,
             detail=f"Corrupt semantic-regions JSON at {doc_path}: {ex}",
         )
-    region_doc: Dict[str, Any] = {}
-    for region in doc.get("regions") or []:
-        if isinstance(region, dict) and region.get("regionId") == hit.regionId:
-            region_doc = region
-            break
+    region_docs: Dict[str, Dict[str, Any]] = {
+        str(region.get("regionId") or ""): region
+        for region in (doc.get("regions") or [])
+        if isinstance(region, dict)
+    }
 
-    placement_capabilities = region_doc.get("placementCapabilities")
-    if not isinstance(placement_capabilities, list):
-        placement_capabilities = ["reference_only"]
-    placement_surfaces = region_doc.get("placementSurfaces")
-    if not isinstance(placement_surfaces, list):
-        placement_surfaces = []
-    edit_readiness = str(region_doc.get("editReadiness") or "not_ready")
-    requires_review = bool(region_doc.get("requiresReview", True))
+    def _handoff_region_payload(hit) -> Dict[str, Any]:
+        region_doc = region_docs.get(hit.regionId, {})
+        placement_capabilities = region_doc.get("placementCapabilities")
+        if not isinstance(placement_capabilities, list):
+            placement_capabilities = ["reference_only"]
+        placement_surfaces = region_doc.get("placementSurfaces")
+        if not isinstance(placement_surfaces, list):
+            placement_surfaces = []
+        return {
+            **hit.to_dict(),
+            "editReadiness":         str(region_doc.get("editReadiness") or "not_ready"),
+            "requiresReview":        bool(region_doc.get("requiresReview", True)),
+            "placementCapabilities": placement_capabilities,
+            "placementSurfaces":     placement_surfaces,
+        }
+
+    region_payloads = [_handoff_region_payload(hit) for hit in hits]
+    cad_feature_ids: List[str] = []
+    source_features: List[str] = []
+    glb_nodes: List[str] = []
+    for hit in hits:
+        for fid in hit.cadFeatureIds:
+            if fid not in cad_feature_ids:
+                cad_feature_ids.append(fid)
+        for src in hit.sourceFeatures:
+            if src not in source_features:
+                source_features.append(src)
+        for node in hit.glbNodes:
+            if node not in glb_nodes:
+                glb_nodes.append(node)
+
+    edit_readiness_values = [str(r.get("editReadiness") or "not_ready") for r in region_payloads]
+    edit_readiness = edit_readiness_values[0] if len(set(edit_readiness_values)) == 1 else "mixed"
+    requires_review = any(bool(r.get("requiresReview", True)) for r in region_payloads)
+    allowed_actions: List[str] = []
+    for r in region_payloads:
+        caps = r.get("placementCapabilities") or ["reference_only"]
+        for action in caps:
+            if isinstance(action, str) and action not in allowed_actions:
+                allowed_actions.append(action)
 
     # Honest gate: semantic regions can identify CAD targets today, but
     # controlled SolidWorks edit execution is not implemented in this app.
@@ -4498,23 +4533,18 @@ async def part_semantic_regions_cad_handoff(
         "partNumber":     safe_pn,
         "revision":       safe_rev,
         "phrase":         phrase,
-        "region": {
-            **hit.to_dict(),
-            "editReadiness":         edit_readiness,
-            "requiresReview":        requires_review,
-            "placementCapabilities": placement_capabilities,
-            "placementSurfaces":     placement_surfaces,
-        },
+        "region":         region_payloads[0],
+        "regions":        region_payloads,
         "solidWorksTargets": {
-            "cadFeatureIds":  list(hit.cadFeatureIds),
-            "sourceFeatures": list(hit.sourceFeatures),
-            "glbNodes":       list(hit.glbNodes),
+            "cadFeatureIds":  cad_feature_ids,
+            "sourceFeatures": source_features,
+            "glbNodes":       glb_nodes,
         },
         "operationPolicy": {
             "canEdit":        can_edit,
             "editReadiness":  edit_readiness,
             "requiresReview": requires_review,
-            "allowedActions": placement_capabilities,
+            "allowedActions": allowed_actions or ["reference_only"],
             "blockedReason":  blocked_reason,
         },
     }

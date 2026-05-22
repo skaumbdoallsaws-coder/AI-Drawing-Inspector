@@ -8601,6 +8601,11 @@
             featureMeshMap: null,          // { cad_feature_id: [mesh, mesh, ...] }
             featureColorMap: null,         // Parsed _feature_colors.json
             featureHighlightActive: false, // True when any feature is color-revealed
+            activeRevision: null,          // Active revision for the normal 3D Model tab
+                                           // (e.g. 'A', 'B'). null = no revisioned variants
+                                           // available -> legacy /api/part-glb behavior.
+                                           // Compare tab uses partDiffState.activeRevA / B
+                                           // independently.
             _threeCameraAnimId: null, // Feature #122: camera transition animation frame
             _assyCameraAnimId: null,  // Fly-to-part animation frame for assembly viewer
             _pendingFlyTarget: null,  // Deferred fly-to part numbers (when GLB not loaded yet)
@@ -9487,6 +9492,7 @@
             state.featureMeshMap = null;
             state.featureColorMap = null;
             state.featureHighlightActive = false;
+            state.activeRevision = null;
             state._rawPartData = null;
             state._rawPartDataFetching = false;
             state._rawPartDataCallbacks = [];
@@ -9506,9 +9512,12 @@
             // Load full profile details for agent pre-inspection context
             loadProfileDetails(pn);
 
-            // Load feature color map eagerly (for Sage context even before 3D tab is opened)
+            // Load feature color map eagerly (for Sage context even before 3D tab is opened).
+            // Uses _normalTabFeaturesUrl so it follows the active revision once
+            // /api/part-revisions resolves below; on first load activeRevision is
+            // still null and the legacy revA-fallback path serves the data.
             const fetchFeatPN = pn;
-            fetch(`/api/part-features/${encodeURIComponent(fetchFeatPN)}`)
+            fetch(_normalTabFeaturesUrl(fetchFeatPN))
                 .then(r => r.ok ? r.json() : null)
                 .then(data => { if (state.partNumber === fetchFeatPN) state.featureColorMap = data; })
                 .catch(() => { if (state.partNumber === fetchFeatPN) state.featureColorMap = null; });
@@ -9520,6 +9529,10 @@
                     if (data && state.partNumber === pn) {
                         partDiffState.revisions = data.revisions || [];
                         partDiffState.available = partDiffState.revisions.length >= 2;
+                        // Seed the normal-tab active revision from the same fetch
+                        // so the dropdown and downstream loaders don't have to
+                        // refetch. Compare-tab activeRevA/B stay independent.
+                        _initNormalTabActiveRevision();
                         // Pre-fetch diff for default revision pair (first vs last)
                         if (partDiffState.available) {
                             partDiffState.activeRevA = partDiffState.revisions[0];
@@ -22692,7 +22705,42 @@
             if (partDiffState.activeSubtab === 'compare' && partDiffState.available) {
                 _renderPartCompareSubtab(wrapper);
             } else {
-                // Normal 3D model viewer
+                // Normal 3D model viewer.
+                // Revision selector: shown when the part has 2+ revisions on
+                // disk so the user can switch which GLB / feature-color map
+                // / semantic-region draft is active. Single-rev parts skip
+                // the bar entirely so non-revisioned library entries are
+                // visually identical to before this feature. The Compare
+                // subtab has its OWN selectors (partCompareRevASelect /
+                // partCompareRevBSelect) and is unaffected by this control.
+                const revs = (partDiffState && partDiffState.revisions) || [];
+                if (revs.length >= 2) {
+                    _initNormalTabActiveRevision();
+                    const revBar = document.createElement('div');
+                    revBar.id = 'normalTabRevisionBar';
+                    revBar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg-panel);font-size:11px;color:var(--text-secondary);';
+                    const label = document.createElement('span');
+                    label.textContent = 'Revision:';
+                    revBar.appendChild(label);
+                    const select = document.createElement('select');
+                    select.id = 'normalTabRevisionSelect';
+                    select.style.cssText = 'background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:3px 8px;font-size:11px;cursor:pointer;';
+                    revs.forEach(rev => {
+                        const opt = document.createElement('option');
+                        opt.value = rev;
+                        opt.textContent = 'Rev ' + rev;
+                        if (rev === state.activeRevision) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                    select.addEventListener('change', () => {
+                        const nextRev = select.value;
+                        if (nextRev === state.activeRevision) return;
+                        _switchNormalTabRevision(nextRev);
+                    });
+                    revBar.appendChild(select);
+                    wrapper.appendChild(revBar);
+                }
+
                 const container = document.createElement('div');
                 container.id = 'three-container';
                 container.style.cssText = 'flex:1;position:relative;background:var(--bg-main);min-height:0;';
@@ -24976,16 +25024,19 @@
             // Load feature color map (for Sage context) â€” guarded against part switch
             if (state.partNumber) {
                 const fetchPN = state.partNumber;
-                fetch(`/api/part-features/${encodeURIComponent(fetchPN)}`)
+                const fetchRev = state.activeRevision;
+                fetch(_normalTabFeaturesUrl(fetchPN))
                     .then(r => r.ok ? r.json() : null)
                     .then(data => {
-                        // Only apply if the part hasn't changed during the async fetch
-                        if (state.partNumber === fetchPN) {
+                        // Apply only if neither the part NOR the revision changed
+                        // during the async fetch -- otherwise we'd attach stale
+                        // feature colors to a different on-screen GLB.
+                        if (state.partNumber === fetchPN && state.activeRevision === fetchRev) {
                             state.featureColorMap = data;
                         }
                     })
                     .catch(() => {
-                        if (state.partNumber === fetchPN) {
+                        if (state.partNumber === fetchPN && state.activeRevision === fetchRev) {
                             state.featureColorMap = null;
                         }
                     });
@@ -25060,12 +25111,100 @@
             state.featureHighlightActive = false;
         }
 
+        // Build the per-revision GLB URL for the normal 3D Model tab.
+        // Uses /api/part-glb-rev/{pn}?revision=X when the part has
+        // revisions (state.activeRevision set), else falls back to
+        // the legacy /api/part-glb/{pn} so non-revisioned library
+        // entries keep working unchanged.
+        function _normalTabPartGlbUrl(pn) {
+            if (state.activeRevision) {
+                return `/api/part-glb-rev/${encodeURIComponent(pn)}`
+                     + `?revision=${encodeURIComponent(state.activeRevision)}`;
+            }
+            return `/api/part-glb/${encodeURIComponent(pn)}`;
+        }
+        // Same pattern for the per-feature color JSON. When a rev is
+        // selected the resolver must point at the matching rev folder
+        // so feature IDs stay in lockstep with the loaded GLB.
+        function _normalTabFeaturesUrl(pn) {
+            if (state.activeRevision) {
+                return `/api/part-features/${encodeURIComponent(pn)}`
+                     + `?revision=${encodeURIComponent(state.activeRevision)}`;
+            }
+            return `/api/part-features/${encodeURIComponent(pn)}`;
+        }
+        // Pre-fetch the active 3D-tab revision from partDiffState. Called
+        // after /api/part-revisions resolves. Picks the alphabetically-
+        // first revision (typically 'A') when nothing is set; preserves
+        // an already-active selection so a user-driven change is not
+        // overridden by a downstream re-fetch.
+        function _initNormalTabActiveRevision() {
+            const revs = (partDiffState && partDiffState.revisions) || [];
+            if (!revs.length) {
+                state.activeRevision = null;
+                return;
+            }
+            if (!state.activeRevision || !revs.includes(state.activeRevision)) {
+                state.activeRevision = revs[0];
+            }
+        }
+
+        // Switch the normal 3D tab to a different revision. Clears the
+        // loaded GLB / feature map so the next render runs through the
+        // real load path (which now picks revision-aware URLs), then
+        // re-fetches the matching feature colors and asks the tab to
+        // redraw. Does NOT touch partDiffState.activeRevA / B so the
+        // Compare subtab keeps its own state.
+        function _switchNormalTabRevision(nextRev) {
+            const revs = (partDiffState && partDiffState.revisions) || [];
+            if (!revs.includes(nextRev)) return;
+            state.activeRevision = nextRev;
+            // Force the 3D load path to treat the next render as a fresh
+            // part. threeLoadedPart === state.partNumber is what the tab
+            // renderer checks to decide whether to recreate the scene.
+            state.threeLoadedPart = null;
+            state.threeMesh = null;
+            state.threePartGlbScene = null;
+            state.threePartGlbAvailable = null;
+            state.threeStlAvailable = null;
+            state.featureMeshMap = null;
+            state.featureColorMap = null;
+            state.featureHighlightActive = false;
+            // Fetch the new feature color map up front so it is ready
+            // when Sage receives the next agent message (the chat path
+            // reads state.featureColorMap synchronously when building
+            // attachments). Guarded against another switch happening
+            // mid-fetch.
+            const fetchPN = state.partNumber;
+            const fetchRev = nextRev;
+            if (fetchPN) {
+                fetch(_normalTabFeaturesUrl(fetchPN))
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (state.partNumber === fetchPN && state.activeRevision === fetchRev) {
+                            state.featureColorMap = data;
+                        }
+                    })
+                    .catch(() => {
+                        if (state.partNumber === fetchPN && state.activeRevision === fetchRev) {
+                            state.featureColorMap = null;
+                        }
+                    });
+            }
+            // Re-render the 3D Model tab if it is the active surface so
+            // the new dropdown selection becomes visible immediately.
+            if (state.activeTab === '3dmodel'
+                && (partDiffState && partDiffState.activeSubtab !== 'compare')) {
+                switchTab('3dmodel');
+            }
+        }
+
         async function _loadPartModel(scene, camera, controls, container) {
             const pn = state.partNumber;
             // Try GLB first â€” load directly, fall back to STL on error
             const loader = new THREE.GLTFLoader();
             loader.load(
-                `/api/part-glb/${encodeURIComponent(pn)}`,
+                _normalTabPartGlbUrl(pn),
                 function onLoad(gltf) {
                     const li = document.getElementById('three-loading');
                     if (li) li.remove();
@@ -25873,6 +26012,7 @@
             state.featureMeshMap = null;
             state.featureColorMap = null;
             state.featureHighlightActive = false;
+            state.activeRevision = null;
             // Destroy part compare viewers on reset
             if (typeof _destroyPartDiffViewers === 'function') _destroyPartDiffViewers();
             state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
@@ -28060,6 +28200,11 @@
                     part_name: state.partName || null,
                     feature_count: state.featureCount ?? null,
                     profile_loaded: !!state.profileData,
+                    // Active revision the normal 3D Model tab is showing.
+                    // Sage uses this to load the matching semantic-region
+                    // draft and resolve HIGHLIGHT_REGIONS against the
+                    // visible GLB instead of always defaulting to revA.
+                    revision: state.activeRevision || null,
                 };
                 if (!state.results && state.profileData) {
                     att.part.profile_features = (state.profileData.features || []).map(f => ({

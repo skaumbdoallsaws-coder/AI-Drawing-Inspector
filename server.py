@@ -5279,18 +5279,51 @@ async def get_part_glb(part_number: str):
 
 
 @app.get("/api/part-features/{part_number}")
-async def get_part_features(part_number: str):
-    """Serve the feature color map JSON for a part, or 404 if not available."""
+async def get_part_features(part_number: str, revision: Optional[str] = Query(None)):
+    """Serve the feature color map JSON for a part, or 404 if not available.
+
+    When `revision` is provided (accepts either 'A' or 'revA'), load that
+    revision's feature_colors.json so the normal 3D Model tab can stay in
+    lockstep with whichever GLB is on screen. When omitted the legacy
+    revA-preferred behavior is preserved so non-revisioned callers keep
+    working unchanged."""
     safe_pn = re.sub(r'[^\w\-]', '', part_number)
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
 
-    # For revisioned parts, prefer parts/{pn}/revA/ to avoid stale root-level assets
-    rev_json = _resolve_part_asset(safe_pn, "revA", f"{safe_pn}_feature_colors.json")
-    root_json = library_path() / f"{safe_pn}_feature_colors.json"
-    json_path = rev_json if rev_json is not None else root_json
-    if not json_path.exists():
-        raise HTTPException(status_code=404, detail=f"No feature color data for part '{part_number}'")
+    # Resolve which revision dir to look at. Accept either 'A' or 'revA'
+    # from the query so the frontend doesn't have to normalize. Reject
+    # inputs whose alphanumeric suffix (after stripping any 'rev'
+    # prefix) is empty so gibberish like '!!!' returns 400, not 404.
+    target_rev = "revA"
+    if revision is not None:
+        rev_cand = revision.strip()
+        if rev_cand.lower().startswith("rev"):
+            rev_suffix = rev_cand[3:]
+        else:
+            rev_suffix = rev_cand
+        rev_suffix = re.sub(r'[^\w]', '', rev_suffix)
+        if not rev_suffix:
+            raise HTTPException(status_code=400, detail="Invalid revision")
+        target_rev = "rev" + rev_suffix
+
+    rev_json = _resolve_part_asset(safe_pn, target_rev, f"{safe_pn}_feature_colors.json")
+    # Root-level fallback only applies when no revision was explicitly
+    # requested -- an explicit revision must point at that revision's
+    # file or 404, otherwise we'd silently serve stale revA data when
+    # the operator asked for revB.
+    if rev_json is None and revision is None:
+        root_json = library_path() / f"{safe_pn}_feature_colors.json"
+        json_path = root_json if root_json.exists() else None
+    else:
+        json_path = rev_json
+
+    if json_path is None or not json_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No feature color data for part '{part_number}'"
+                   + (f" revision '{revision}'" if revision else ""),
+        )
 
     with open(json_path, "r", encoding="utf-8-sig") as f:
         data = json.load(f)
@@ -8720,6 +8753,13 @@ def normalize_agent_context(ctx: dict) -> dict:
         # Part
         flat.setdefault("part_number", part.get("part_number"))
         flat.setdefault("part_name", part.get("part_name"))
+        # Active revision selected on the normal 3D Model tab. Flatten
+        # so the HIGHLIGHT_REGIONS marker parser and any other
+        # revision-aware path (semantic regions, future per-rev
+        # findings) resolve against the visible model, not always
+        # revA. Accepts either 'A' or 'revA' from the frontend.
+        if part.get("revision"):
+            flat.setdefault("revision", part["revision"])
         if part.get("profile_features"):
             flat.setdefault("profile_features", part["profile_features"])
         if part.get("description"):

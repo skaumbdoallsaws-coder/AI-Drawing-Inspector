@@ -30,11 +30,15 @@ if str(REPO_ROOT) not in sys.path:
 import server  # noqa: E402
 from ai_inspector.semantic_regions import (
     EDIT_READINESS_VALUES,
+    MATCH_KINDS,
     PLACEMENT_CAPABILITIES,
     PLACEMENT_SURFACE_ROLES,
     PLACEMENT_SURFACE_TYPES,
+    ResolvedRegion,
     SCHEMA_VERSION,
     build_draft_regions,
+    resolve_region_for_phrase,
+    resolve_regions_for_phrases,
     semantic_regions_path,
     write_semantic_regions,
 )
@@ -926,3 +930,434 @@ def test_live_1030034_revB_produces_expected_aircraft_regions(tmp_path: Path):
     # Match the inspector's node count from the design pass (29).
     assert doc["summary"]["totalNodes"] == 29, \
         f"expected 29 nodes in 1030034 revB GLB, got {doc['summary']['totalNodes']}"
+
+
+# ---------------------------------------------------------------------------
+# Phrase resolver
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def aircraft_library_with_draft(aircraft_library: Path) -> Path:
+    """Same fixture as aircraft_library, but with the draft regions
+    file already persisted on disk so the resolver has something to
+    read against."""
+    pn, rev = "1030099", "revA"
+    doc = build_draft_regions(aircraft_library, pn, rev)
+    write_semantic_regions(aircraft_library, pn, rev, doc)
+    return aircraft_library
+
+
+def test_resolver_top_wing_resolves_to_regionId(aircraft_library_with_draft: Path):
+    """Per spec test #1: 'top wing' resolves to regionId top_wing.
+
+    Normalization collapses 'top_wing' and 'top wing' to the same
+    string, so the regionId-exact pass fires first (before the
+    label pass). The matchKind reflects WHICH lookup hit, not the
+    surface form -- both 'top wing' and 'top_wing' route to
+    matchKind='regionId' because the normalized region id matches
+    the normalized phrase. Either way the caller gets the same
+    region back."""
+    hit = resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA", "top wing")
+    assert hit is not None, "phrase 'top wing' must resolve"
+    assert hit.regionId == "top_wing"
+    assert hit.label    == "Top wing"
+    assert hit.matchKind == "regionId", \
+        f"expected regionId match (normalization collapses 'top_wing' == 'top wing'); got {hit.matchKind}"
+    assert hit.matchedAlias is None
+    assert hit.matchKind in MATCH_KINDS
+
+
+def test_resolver_alias_upper_wing_resolves(aircraft_library_with_draft: Path):
+    """Per spec test #2: aliases like 'upper wing' resolve to the
+    canonical region. LABELS map declares 'upper wing' as a top_wing
+    alias, so this is the alias-exact path."""
+    hit = resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA", "upper wing")
+    assert hit is not None, "alias 'upper wing' must resolve"
+    assert hit.regionId    == "top_wing"
+    assert hit.matchKind   == "alias"
+    assert hit.matchedAlias == "upper wing"
+
+
+def test_resolver_returns_visualTargets_and_cadFeatureIds(aircraft_library_with_draft: Path):
+    """Per spec test #3: returned highlight IDs include the GLB node
+    names for the matched region. Synthetic fixture top_wing contains
+    planarsurface_top_wing + extrurefsurface_top_wing_root (both
+    qualify under the wing rule due to their lateral extent)."""
+    hit = resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA", "top wing")
+    assert hit is not None
+    assert hit.glbNodes, "glbNodes must not be empty for top_wing"
+    # The synthetic fixture's top_wing region groups the planar top
+    # surface (the wide-span body the heuristic catches). cad ids
+    # mirror glb node names because the fixture sets cad_feature_id
+    # equal to glb_node_name.
+    assert "planarsurface_top_wing" in hit.glbNodes
+    assert hit.cadFeatureIds, "cadFeatureIds must not be empty when feature_colors maps"
+    assert "planarsurface_top_wing" in hit.cadFeatureIds
+
+
+def test_resolver_unknown_phrase_falls_back_cleanly(aircraft_library_with_draft: Path):
+    """Per spec test #4: an unknown phrase returns None rather than
+    crashing OR fuzzy-matching into an unrelated region. Highlight
+    pipeline can treat None as 'nothing to highlight via semantic
+    regions; let other paths take over.'"""
+    assert resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA",
+        "completely made up part name xyzzy") is None
+    # Also confirm graceful behavior on edge inputs
+    assert resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA", "") is None
+    assert resolve_region_for_phrase(  # type: ignore[arg-type]
+        aircraft_library_with_draft, "1030099", "revA", None) is None
+
+
+def test_resolver_handles_underscore_phrase(aircraft_library_with_draft: Path):
+    """User OR Sage may emit either 'top wing' or 'top_wing' -- both
+    must resolve. Whitespace / underscore / hyphen all normalize to
+    a single space before matching."""
+    hit_underscore = resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA", "top_wing")
+    hit_hyphen     = resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA", "top-wing")
+    hit_caps       = resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA", "TOP WING")
+    assert hit_underscore is not None and hit_underscore.regionId == "top_wing"
+    assert hit_hyphen     is not None and hit_hyphen.regionId     == "top_wing"
+    assert hit_caps       is not None and hit_caps.regionId       == "top_wing"
+
+
+def test_resolver_substring_match_on_longer_phrase(aircraft_library_with_draft: Path):
+    """A natural-language phrase ('show me the upper wing') should
+    still resolve via substring match against the 'upper wing' alias."""
+    hit = resolve_region_for_phrase(
+        aircraft_library_with_draft, "1030099", "revA",
+        "show me the upper wing")
+    assert hit is not None
+    assert hit.regionId  == "top_wing"
+    assert hit.matchKind in ("alias", "alias_substring")
+
+
+def test_resolver_returns_none_when_draft_file_missing(aircraft_library: Path):
+    """No draft file on disk yet -> resolver must return None silently
+    so the highlight pipeline falls back to other paths instead of
+    crashing."""
+    # aircraft_library fixture does NOT write the draft file.
+    assert resolve_region_for_phrase(
+        aircraft_library, "1030099", "revA", "top wing") is None
+
+
+def test_resolve_regions_for_phrases_dedupes_same_region(aircraft_library_with_draft: Path):
+    """Multiple phrases pointing at the same region collapse to a
+    single ResolvedRegion in the output, preserving first-occurrence
+    order across distinct hits."""
+    out = resolve_regions_for_phrases(
+        aircraft_library_with_draft, "1030099", "revA",
+        ["top wing", "upper wing", "main upper wing", "propeller"])
+    region_ids = [r.regionId for r in out]
+    assert region_ids == ["top_wing", "propeller"], \
+        f"expected dedupe to top_wing + propeller in order, got {region_ids}"
+
+
+# ---------------------------------------------------------------------------
+# HTTP /resolve endpoint
+# ---------------------------------------------------------------------------
+
+def test_GET_resolve_endpoint_returns_match(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/resolve",
+                   params={"revision": "A", "phrase": "top wing"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["matched"]       is True
+    assert body["regionId"]      == "top_wing"
+    assert body["matchKind"]     == "regionId"
+    assert "planarsurface_top_wing" in body["glbNodes"]
+    assert "planarsurface_top_wing" in body["cadFeatureIds"]
+
+
+def test_GET_resolve_endpoint_404_when_no_match(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/resolve",
+                   params={"revision": "A", "phrase": "xyzzy"})
+    assert r.status_code == 404
+    body = r.json()
+    assert body["matched"] is False
+    assert "xyzzy" in body["detail"]
+
+
+def test_GET_resolve_endpoint_400_when_phrase_blank(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/resolve",
+                   params={"revision": "A", "phrase": "   "})
+    assert r.status_code == 400
+
+
+def test_GET_resolve_endpoint_404_when_draft_missing(aircraft_library: Path):
+    """No draft on disk -> 404 (not 500); body says matched=false."""
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/resolve",
+                   params={"revision": "A", "phrase": "top wing"})
+    assert r.status_code == 404
+    assert r.json()["matched"] is False
+
+
+# ---------------------------------------------------------------------------
+# Existing HIGHLIGHT_FEATURES behavior preserved
+# ---------------------------------------------------------------------------
+
+def test_existing_highlight_features_parser_unchanged():
+    """Regression guard: the HIGHLIGHT_FEATURES regex + fuzzy fallback
+    block must still be intact and reachable. We assert the literal
+    strings the agent loop depends on, NOT the marker presence (which
+    is exercised by the broader agent suite). If someone renames the
+    marker or removes the fuzzy fallback this test fires."""
+    import inspect
+    src = inspect.getsource(server)
+    # Marker regex
+    assert "HIGHLIGHT_FEATURES?:" in src, \
+        "HIGHLIGHT_FEATURES marker regex must remain in server.py"
+    # Fuzzy fallback identifiers
+    assert "available_cad_features" in src, \
+        "HIGHLIGHT_FEATURES still validates against ctx.available_cad_features"
+    # The new HIGHLIGHT_REGIONS marker exists alongside, NOT replacing
+    assert "HIGHLIGHT_REGIONS:" in src, \
+        "HIGHLIGHT_REGIONS marker must be wired in server.py"
+    # And the response payload carries the new field name (defensive --
+    # frontend pass-through depends on this exact key).
+    assert '"highlight_regions"' in src or "highlight_regions" in src
+
+
+# ---------------------------------------------------------------------------
+# Integration: HIGHLIGHT_REGIONS folds resolved cadFeatureIds into the
+# existing highlight_features pipeline so the existing frontend tool
+# registry (which only consumes highlight_features) actually lights up
+# the 3D viewer. Drives /api/agent/chat end-to-end with a stubbed
+# Anthropic client so we exercise the real marker parser + the canonical
+# build_tool_calls_from_result reduction.
+# ---------------------------------------------------------------------------
+
+class _StubBlock:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class _StubResponse:
+    def __init__(self, text: str):
+        self.content = [_StubBlock(text)]
+        # build_tool_calls_from_result + telemetry both probe a small
+        # set of attributes; expose the defaults the real Messages
+        # response uses so nothing downstream raises AttributeError.
+        self.usage         = None
+        self.stop_reason   = "end_turn"
+        self.stop_sequence = None
+        self.model         = "stub"
+
+
+class _StubMessages:
+    def __init__(self, text: str):
+        self._text = text
+        self.last_kwargs = None
+
+    def create(self, **kwargs):
+        self.last_kwargs = kwargs
+        return _StubResponse(self._text)
+
+
+class _StubAnthropic:
+    """Drop-in replacement for anthropic.Anthropic used by /api/agent/chat.
+    Whatever text the test passes via _stub_anthropic_response() is what
+    the marker parser will see -- the regex + resolver + dedupe path is
+    exercised for real."""
+    def __init__(self, *args, **kwargs):
+        self.messages = _StubAnthropic._messages_for_test
+
+
+def _stub_anthropic_response(monkeypatch: pytest.MonkeyPatch, response_text: str) -> _StubMessages:
+    import anthropic
+    msgs = _StubMessages(response_text)
+    _StubAnthropic._messages_for_test = msgs  # type: ignore[attr-defined]
+    monkeypatch.setattr(anthropic, "Anthropic", _StubAnthropic)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-stub-key-not-real")
+    return msgs
+
+
+def _inspection_ctx_with_features(pn: str, revision: str) -> dict:
+    """Build a minimal inspection_context dict that lets the marker
+    parser validate HIGHLIGHT_FEATURES against available_cad_features.
+    The IDs mirror the synthetic aircraft fixture's mesh names so a
+    region's cadFeatureIds resolve to real entries."""
+    feature_ids = [n for n, *_ in _aircraft_fixture()]
+    return {
+        "part_number": pn,
+        "revision":    revision,
+        "available_cad_features": [
+            {"cad_feature_id": fid, "display_label": fid, "type": fid.split("_", 1)[0],
+             "color_name": "blue", "face_count": 1}
+            for fid in feature_ids
+        ],
+    }
+
+
+def test_HIGHLIGHT_REGIONS_folds_cadFeatureIds_into_highlight_features(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Per reviewer spec: when Sage emits HIGHLIGHT_REGIONS: top wing,
+    the resolver returns the top_wing region; its cadFeatureIds
+    (planarsurface_top_wing, extrurefsurface_top_wing_root) MUST end
+    up in result.highlight_features so the existing frontend tool
+    registry actually highlights the 3D model. The highlight_regions
+    metadata is also present for the future CAD bridge."""
+    _stub_anthropic_response(monkeypatch,
+        "The top wing extends across the full span.\n"
+        "HIGHLIGHT_REGIONS: top wing\n"
+    )
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "show me the top wing",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Metadata pass-through: regions present
+    assert "highlight_regions" in body, body
+    assert any(reg.get("regionId") == "top_wing" for reg in body["highlight_regions"])
+    # Integration fold: cadFeatureIds appear in the feature highlight list
+    # that the existing tool pipeline actually consumes.
+    assert "highlight_features" in body, \
+        "HIGHLIGHT_REGIONS must fold region cadFeatureIds into highlight_features"
+    assert "planarsurface_top_wing" in body["highlight_features"]
+
+
+def test_HIGHLIGHT_FEATURES_alone_still_works(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Regression: the original HIGHLIGHT_FEATURES marker (no
+    HIGHLIGHT_REGIONS) keeps producing highlight_features exactly as
+    before, and does NOT produce a stray highlight_regions field."""
+    _stub_anthropic_response(monkeypatch,
+        "Here is the propeller revolve.\n"
+        "HIGHLIGHT_FEATURES: revolution_revolve1\n"
+    )
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "show me the propeller revolve",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body.get("highlight_features") == ["revolution_revolve1"]
+    assert "highlight_regions" not in body, \
+        "no HIGHLIGHT_REGIONS in response -> no highlight_regions field"
+
+
+def test_HIGHLIGHT_FEATURES_plus_HIGHLIGHT_REGIONS_dedupes(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """When Sage emits BOTH markers AND there is overlap (the explicit
+    feature ID is also one of the region's cadFeatureIds), the final
+    highlight_features list must dedupe -- not contain
+    planarsurface_top_wing twice. The top_wing region in the synthetic
+    fixture happens to contain exactly one cadFeatureId
+    (planarsurface_top_wing) because the wing rule's lateral-span gate
+    only catches the wide planar surface; this means HIGHLIGHT_FEATURES
+    and HIGHLIGHT_REGIONS overlap fully on this entry and the test can
+    assert the deduped list IS [planarsurface_top_wing]."""
+    _stub_anthropic_response(monkeypatch,
+        "Highlighting the planar top surface and the wider top wing.\n"
+        "HIGHLIGHT_FEATURES: planarsurface_top_wing\n"
+        "HIGHLIGHT_REGIONS: top wing\n"
+    )
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "show me the top wing surfaces",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    hf = body.get("highlight_features", [])
+    # Dedupe: planarsurface_top_wing must appear EXACTLY once.
+    assert hf.count("planarsurface_top_wing") == 1, \
+        f"expected planarsurface_top_wing to appear once after dedupe, got {hf}"
+    # Region metadata still attached.
+    assert any(reg.get("regionId") == "top_wing"
+               for reg in body.get("highlight_regions", []))
+
+
+def test_HIGHLIGHT_FEATURES_plus_HIGHLIGHT_REGIONS_unions_distinct(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """When the two markers contribute DISJOINT features, the final
+    highlight_features list is the union with original-order preserved
+    (HIGHLIGHT_FEATURES entries first, then region-derived entries).
+    HIGHLIGHT_FEATURES: revolution_revolve1 (propeller, not in any
+    wing region). HIGHLIGHT_REGIONS: top wing -> adds
+    planarsurface_top_wing. Result: both must appear, both exactly
+    once, propeller first."""
+    _stub_anthropic_response(monkeypatch,
+        "Highlighting the propeller revolve and the top wing.\n"
+        "HIGHLIGHT_FEATURES: revolution_revolve1\n"
+        "HIGHLIGHT_REGIONS: top wing\n"
+    )
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "show me the propeller and the top wing",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    hf = body.get("highlight_features", [])
+    assert hf.count("revolution_revolve1") == 1
+    assert hf.count("planarsurface_top_wing") == 1
+    # Order: HIGHLIGHT_FEATURES parsed first, region-derived appended after.
+    assert hf.index("revolution_revolve1") < hf.index("planarsurface_top_wing"), \
+        f"expected HIGHLIGHT_FEATURES entries before region-derived entries, got {hf}"
+
+
+def test_AVAILABLE_SEMANTIC_REGIONS_section_injected_into_context(
+    aircraft_library_with_draft: Path
+):
+    """When a semantic-regions draft exists for the active part/rev,
+    _build_context_message must inject an AVAILABLE SEMANTIC REGIONS
+    section so Sage knows what phrases it can emit. The section
+    lists regionId + label + aliases and the HIGHLIGHT_REGIONS
+    marker instruction."""
+    ctx_msg = server._build_context_message({
+        "part_number": "1030099",
+        "revision":    "revA",
+    })
+    assert "AVAILABLE SEMANTIC REGIONS" in ctx_msg, ctx_msg
+    assert "HIGHLIGHT_REGIONS:" in ctx_msg
+    # Top wing region from the synthetic fixture must be present.
+    assert "top_wing" in ctx_msg
+    # Aliases are surfaced so the model can use natural phrases.
+    assert "upper wing" in ctx_msg
+
+
+def test_AVAILABLE_SEMANTIC_REGIONS_section_absent_when_no_draft(
+    aircraft_library: Path
+):
+    """No draft file on disk -> the AVAILABLE SEMANTIC REGIONS block
+    must not appear (silent skip, never crash). Keeps the prompt
+    short when there is nothing useful to add."""
+    ctx_msg = server._build_context_message({
+        "part_number": "1030099",
+        "revision":    "revA",
+    })
+    assert "AVAILABLE SEMANTIC REGIONS" not in ctx_msg
+
+
+def test_SAGE_prompt_documents_HIGHLIGHT_REGIONS_marker():
+    """The deviation-analyst system prompt must teach the model about
+    HIGHLIGHT_REGIONS so it actually emits the marker in production.
+    Without this, the resolver path is dead code."""
+    prompt = server.AGENT_PROMPTS.get("deviation-analyst", "")
+    assert "HIGHLIGHT_REGIONS" in prompt, \
+        "deviation-analyst prompt must mention HIGHLIGHT_REGIONS"
+    assert "semantic region" in prompt.lower(), \
+        "prompt should explain what a semantic region is"

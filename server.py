@@ -3785,6 +3785,8 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
 from ai_inspector.semantic_regions import (
     SCHEMA_VERSION as _SEMANTIC_REGIONS_SCHEMA_VERSION,
     build_draft_regions as _build_semantic_regions_draft,
+    resolve_region_for_phrase as _semantic_resolve_phrase,
+    resolve_regions_for_phrases as _semantic_resolve_phrases,
     semantic_regions_path as _semantic_regions_path,
     write_semantic_regions as _write_semantic_regions,
 )
@@ -3792,6 +3794,78 @@ from ai_inspector.semantic_regions import (
 
 class _SemanticRegionsDraftBody(BaseModel):
     revision: str
+
+
+def _semantic_regions_pick_latest_rev(library_dir: Path, pn: str) -> Optional[str]:
+    """Return the alphabetically-last rev*/ directory under parts/{pn}/
+    that actually has a {pn}_semantic_regions.json draft. None when no
+    draft exists for any revision. Shared by the context builder and
+    the HIGHLIGHT_REGIONS marker parser so both pick the same rev when
+    the caller doesn't specify one."""
+    safe_pn = sanitize_part_number(pn)
+    if not safe_pn:
+        return None
+    parts_dir = library_dir / "parts" / safe_pn
+    if not parts_dir.exists() or not parts_dir.is_dir():
+        return None
+    candidates = sorted([
+        d.name for d in parts_dir.iterdir()
+        if d.is_dir() and d.name.startswith("rev")
+        and (d / f"{safe_pn}_semantic_regions.json").exists()
+    ])
+    return candidates[-1] if candidates else None
+
+
+def _semantic_regions_list_for_context(pn: Optional[str],
+                                       revision: Optional[str]) -> List[Dict[str, Any]]:
+    """Return a slim list of available regions for the agent context:
+    [{regionId, label, aliases, confidence, reviewed}, ...]. Empty
+    list when no draft exists. Never raises -- a missing/malformed
+    file silently yields []. Used by _build_context_message to
+    inject AVAILABLE SEMANTIC REGIONS so Sage knows what phrases
+    HIGHLIGHT_REGIONS can resolve."""
+    if not pn:
+        return []
+    safe_pn = sanitize_part_number(pn)
+    if not safe_pn:
+        return []
+    library_dir = library_path()
+    safe_rev: Optional[str] = None
+    if isinstance(revision, str) and revision.strip():
+        try:
+            safe_rev = _semantic_regions_resolve_rev(library_dir, safe_pn, revision)
+        except HTTPException:
+            safe_rev = None
+    if not safe_rev:
+        safe_rev = _semantic_regions_pick_latest_rev(library_dir, safe_pn)
+    if not safe_rev:
+        return []
+    p = _semantic_regions_path(library_dir, safe_pn, safe_rev)
+    if not p.exists():
+        return []
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return []
+    regions = doc.get("regions") if isinstance(doc, dict) else None
+    if not isinstance(regions, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for r in regions:
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("regionId")
+        if not isinstance(rid, str) or not rid:
+            continue
+        aliases = r.get("aliases") if isinstance(r.get("aliases"), list) else []
+        out.append({
+            "regionId":   rid,
+            "label":      str(r.get("label") or ""),
+            "aliases":    [str(a) for a in aliases if isinstance(a, str)],
+            "confidence": str(r.get("confidence") or "low"),
+            "reviewed":   bool(r.get("reviewed", False)),
+        })
+    return out
 
 
 def _semantic_regions_resolve_rev(library_dir: Path, pn: str, revision: str) -> str:
@@ -3890,6 +3964,57 @@ async def part_semantic_regions_draft(partNumber: str, body: _SemanticRegionsDra
         "regions":        doc["regions"],
         "summary":        doc["summary"],
         "axisFrame":      doc["axisFrame"],
+    }
+
+
+@app.get("/api/part-semantic-regions/{partNumber}/resolve")
+async def part_semantic_regions_resolve(
+    partNumber: str,
+    revision:   str = Query(...),
+    phrase:     str = Query(..., description="User phrase to resolve, e.g. 'top wing' or 'upper wing'."),
+):
+    """Resolve a user phrase ('top wing', 'show me the tail') to a
+    semantic region's visual + CAD targets.
+
+    Lookup priority (first match wins): exact regionId / label /
+    alias, then bidirectional substring on label / alias / regionId
+    for >=4-char tokens. Returns 404 with `matched: false` when no
+    region matches OR the draft file is missing -- callers can fall
+    back to other highlight paths without breaking.
+
+    Pure read path: does NOT mutate the regions file, does NOT touch
+    HIGHLIGHT_FEATURES / CAD edits. The future Sage CAD bridge uses
+    `cadFeatureIds` to consume stable SolidWorks identifiers; the
+    3D viewer uses `glbNodes` to drive the highlight glow."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+
+    if not phrase or not phrase.strip():
+        raise HTTPException(status_code=400, detail="phrase query parameter is required")
+
+    library_dir = library_path()
+    hit = _semantic_resolve_phrase(library_dir, safe_pn, safe_rev, phrase)
+    if hit is None:
+        return JSONResponse(status_code=404, content={
+            "matched":    False,
+            "partNumber": safe_pn,
+            "revision":   safe_rev,
+            "phrase":     phrase,
+            "detail":     (
+                f"No semantic region matched {phrase!r}. The draft may not "
+                f"exist yet (POST /api/part-semantic-regions/{safe_pn}/draft "
+                "to generate one) or the phrase did not match any regionId / "
+                "label / alias."
+            ),
+        })
+    return {
+        "matched":    True,
+        "partNumber": safe_pn,
+        "revision":   safe_rev,
+        "phrase":     phrase,
+        **hit.to_dict(),
     }
 
 
@@ -7878,6 +8003,15 @@ When AVAILABLE CAD FEATURES data is present in context, you can highlight specif
 - The 3D model starts gray. Your HIGHLIGHT_FEATURES command reveals the feature's assigned color.
 - Always put HIGHLIGHT_FEATURES on its own line at the end of your response, same as HIGHLIGHT_PARTS.
 
+SEMANTIC REGION HIGHLIGHTING (preferred when AVAILABLE SEMANTIC REGIONS is present):
+The semantic region map groups raw CAD features into user-facing groups ("top wing", "tail", "propeller"). When the user speaks in those terms, emit HIGHLIGHT_REGIONS: instead of guessing at individual feature IDs.
+- Example: user asks "show me the top wing" → emit HIGHLIGHT_REGIONS: top wing
+- Multiple regions on one line: HIGHLIGHT_REGIONS: top wing, tail
+- Phrases match the region's label, any of its aliases, or its regionId (case + space + underscore + hyphen all normalize the same way).
+- The resolver expands each region to the right GLB nodes AND the underlying CAD feature IDs, so the 3D viewer lights up automatically. You do NOT need to also emit HIGHLIGHT_FEATURES for the same region.
+- Refer to the region by its label in your text ("the top wing"), not by regionId.
+- HIGHLIGHT_REGIONS goes on its own line at the end, same convention as HIGHLIGHT_FEATURES.
+
 FEATURE COUNTING:
 When the user asks "how many features" on a part, there are two valid counts:
 - GEOMETRIC COUNT: The total number of individual geometric elements (e.g., 2 cam holes + 5 mounting holes + 8 fillets = 15 features). Use the inspection profile data which lists instance counts per feature type. This is what engineers typically mean and should be your DEFAULT answer.
@@ -8914,6 +9048,35 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         cf_lines.append("Use color names in text (e.g. \"the green holes\"), not feature IDs.")
         cf_lines.append("The 3D model starts gray \u2014 your highlight reveals the feature's color.")
         parts.append("\n".join(cf_lines))
+
+    # Semantic regions: user-facing groupings ("top wing", "tail") that
+    # resolve to bundles of CAD features + GLB nodes. When present,
+    # prefer these over raw feature IDs because the phrasing matches
+    # how people actually talk about the part.
+    available_regions = _semantic_regions_list_for_context(
+        inspection_context.get("part_number"),
+        inspection_context.get("revision"),
+    )
+    if available_regions:
+        sr_lines = ["AVAILABLE SEMANTIC REGIONS ON THIS PART (preferred over raw feature IDs when the user speaks in these terms):"]
+        for r in available_regions:
+            rid = r["regionId"]
+            label = r["label"] or rid
+            aliases = r["aliases"]
+            tags = []
+            if r["reviewed"]:
+                tags.append("curated")
+            else:
+                tags.append(f"draft/{r['confidence']}")
+            tag_str = f" [{', '.join(tags)}]" if tags else ""
+            if aliases:
+                sr_lines.append(f"- {label} (regionId: {rid}; aliases: {', '.join(aliases)}){tag_str}")
+            else:
+                sr_lines.append(f"- {label} (regionId: {rid}){tag_str}")
+        sr_lines.append("To highlight a region, include a line: HIGHLIGHT_REGIONS: top wing, tail")
+        sr_lines.append("Phrases match label, any alias, or regionId (case + space + underscore + hyphen normalize).")
+        sr_lines.append("The resolver expands each region to its GLB nodes + CAD feature IDs automatically \u2014 do not also emit HIGHLIGHT_FEATURES for the same region.")
+        parts.append("\n".join(sr_lines))
 
     # ── ASSEMBLY ──
     available_parts = inspection_context.get("available_parts", [])
@@ -10070,6 +10233,67 @@ async def agent_chat(request: AgentChatRequest):
                 highlight_features = raw_features
             response_text = re.sub(r'^HIGHLIGHT_FEATURES?:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
 
+        # Extract semantic-region highlight marker. Independent of the
+        # HIGHLIGHT_FEATURES path above -- new marker name so the existing
+        # cad_feature_id pipeline is literally untouched. Each phrase
+        # resolves to a region in the persisted {pn}_semantic_regions.json;
+        # matched regions carry the visualTargets.glbNodes the 3D viewer
+        # highlights and the cadTargets.cadFeatureIds the future Sage CAD
+        # bridge will consume. Silently drops when:
+        #   - no part_number in ctx
+        #   - no semantic_regions draft exists for the resolved revision
+        #   - phrase doesn't match any regionId / label / alias
+        # so the rest of the response continues without breakage.
+        highlight_regions: List[Dict[str, Any]] = []
+        hr_match = re.search(r'^HIGHLIGHT_REGIONS:\s*(.+)$', response_text, re.MULTILINE)
+        if hr_match:
+            raw_phrases = [p.strip() for p in hr_match.group(1).split(",") if p.strip()]
+            ctx_pn = (ctx or {}).get("part_number") if ctx else None
+            if ctx_pn and raw_phrases:
+                safe_ctx_pn = sanitize_part_number(ctx_pn)
+                if safe_ctx_pn:
+                    ctx_rev = (ctx or {}).get("revision") if ctx else None
+                    library_dir = library_path()
+                    safe_rev: Optional[str] = None
+                    if isinstance(ctx_rev, str) and ctx_rev.strip():
+                        try:
+                            safe_rev = _semantic_regions_resolve_rev(
+                                library_dir, safe_ctx_pn, ctx_rev)
+                        except HTTPException:
+                            safe_rev = None
+                    if not safe_rev:
+                        safe_rev = _semantic_regions_pick_latest_rev(
+                            library_dir, safe_ctx_pn)
+                    if safe_rev:
+                        resolved = _semantic_resolve_phrases(
+                            library_dir, safe_ctx_pn, safe_rev, raw_phrases)
+                        # Fold each resolved region's cadFeatureIds into the
+                        # existing highlight_features list. The frontend tool
+                        # registry only consumes highlight_features, so this
+                        # is what actually makes the 3D viewer glow. We keep
+                        # highlight_regions populated as metadata for the
+                        # future Sage CAD bridge and any UI that wants to
+                        # surface region-level info (label, aliases, etc.).
+                        # Validate against available_feature_ids when the
+                        # context provides them so semantic_regions drift
+                        # against feature_colors can't ship stale IDs.
+                        region_available_ids: set = set()
+                        if ctx:
+                            for feat in ctx.get("available_cad_features", []):
+                                region_available_ids.add(feat.get("cad_feature_id", ""))
+                        for r in resolved:
+                            highlight_regions.append({
+                                **r.to_dict(),
+                                "partNumber": safe_ctx_pn,
+                                "revision":   safe_rev,
+                            })
+                            for fid in r.cadFeatureIds:
+                                if region_available_ids and fid not in region_available_ids:
+                                    continue
+                                if fid not in highlight_features:
+                                    highlight_features.append(fid)
+            response_text = re.sub(r'^HIGHLIGHT_REGIONS:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
+
         # Extract compare features marker (dual-view part revision comparison)
         compare_features = []
         cf_match = re.search(r'^COMPARE_FEATURES:\s*(.+)$', response_text, re.MULTILINE)
@@ -10287,6 +10511,8 @@ async def agent_chat(request: AgentChatRequest):
             result["highlight_views"] = highlight_views
         if highlight_features:
             result["highlight_features"] = highlight_features
+        if highlight_regions:
+            result["highlight_regions"] = highlight_regions
         if compare_features:
             result["compare_features"] = compare_features
         if compare_parts:

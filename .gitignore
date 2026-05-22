@@ -63,3 +63,8 @@ runtime_logs/
 pilot_diagnostics/
 # Raw packages copied in from the SOLIDWORKS bridge before sidecar install
 400S_Sorted_Library/_bridge_imports/
+
+# .NET build output -- SolidWorksExtractor.csproj writes bin/Debug/,
+# bin/Release/, obj/ on every `dotnet build`. Should never be tracked.
+SolidWorksExtractor/bin/
+SolidWorksExtractor/obj/

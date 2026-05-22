@@ -23,15 +23,25 @@ from .builder import (
     semantic_regions_path,
     write_semantic_regions,
 )
+from .resolver import (
+    MATCH_KINDS,
+    ResolvedRegion,
+    resolve_region_for_phrase,
+    resolve_regions_for_phrases,
+)
 
 __all__ = [
     "EDIT_READINESS_VALUES",
+    "MATCH_KINDS",
     "PLACEMENT_CAPABILITIES",
     "PLACEMENT_SURFACE_ROLES",
     "PLACEMENT_SURFACE_TYPES",
+    "ResolvedRegion",
     "SCHEMA_VERSION",
     "SEMANTIC_REGIONS_FILENAME",
     "build_draft_regions",
+    "resolve_region_for_phrase",
+    "resolve_regions_for_phrases",
     "semantic_regions_path",
     "write_semantic_regions",
 ]

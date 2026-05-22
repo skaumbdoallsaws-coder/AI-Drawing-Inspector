@@ -22795,12 +22795,23 @@
             drafting: false,
             error: null,
             pendingHighlightIds: [],
+            nodeCatalog: {},      // glbNode -> { cadFeatureId, sourceFeature, regionId }
+            nodeOrder: [],        // stable node order for "move node here" selectors
             mountKey: 0,          // increments per render to invalidate stale closures
         };
 
-        function _regionsCuratorFeaturesForRegion(region) {
+        function _regionsCuratorNodesForRegion(region) {
             const visual = (region && region.visualTargets) || {};
-            const nodes  = Array.isArray(visual.glbNodes) ? visual.glbNodes : (region.glbNodes || []);
+            const raw = Array.isArray(visual.glbNodes) ? visual.glbNodes : (region.glbNodes || []);
+            const out = [];
+            for (const node of raw || []) {
+                if (typeof node === 'string' && node && !out.includes(node)) out.push(node);
+            }
+            return out;
+        }
+
+        function _regionsCuratorFeaturesForRegion(region) {
+            const nodes = _regionsCuratorNodesForRegion(region);
             // The feature-mesh map is keyed by GLB node name; the cad
             // feature IDs match too on parts produced by SolidWorksExtractor.
             // Combine both into a deduped highlight set so the viewer lights
@@ -22811,6 +22822,70 @@
                 if (typeof id === 'string' && id && !out.includes(id)) out.push(id);
             }
             return out;
+        }
+
+        function _regionsCuratorRefreshNodeCatalog() {
+            const catalog = {};
+            const order = [];
+            for (const region of regionsCuratorState.regions || []) {
+                const nodes = _regionsCuratorNodesForRegion(region);
+                const cadTargets = region.cadTargets || {};
+                const cadIds = Array.isArray(cadTargets.cadFeatureIds) ? cadTargets.cadFeatureIds : [];
+                const src = Array.isArray(cadTargets.sourceFeatures)
+                    ? cadTargets.sourceFeatures
+                    : (Array.isArray(region.sourceFeatures) ? region.sourceFeatures : []);
+                nodes.forEach((node, idx) => {
+                    if (!catalog[node]) order.push(node);
+                    catalog[node] = {
+                        cadFeatureId: cadIds[idx] || node,
+                        sourceFeature: src[idx] || cadIds[idx] || node,
+                        regionId: region.regionId,
+                    };
+                });
+            }
+            regionsCuratorState.nodeCatalog = catalog;
+            regionsCuratorState.nodeOrder = order;
+        }
+
+        function _regionsCuratorSetRegionNodes(region, nodes) {
+            if (!region) return;
+            const cleanNodes = [];
+            for (const node of nodes || []) {
+                if (typeof node === 'string' && node && !cleanNodes.includes(node)) cleanNodes.push(node);
+            }
+            region.glbNodes = cleanNodes.slice();
+            if (!region.visualTargets || typeof region.visualTargets !== 'object') region.visualTargets = {};
+            region.visualTargets.glbNodes = cleanNodes.slice();
+
+            if (!region.cadTargets || typeof region.cadTargets !== 'object') region.cadTargets = {};
+            const cadIds = [];
+            const srcFeatures = [];
+            cleanNodes.forEach(node => {
+                const meta = regionsCuratorState.nodeCatalog[node] || {};
+                const cadId = meta.cadFeatureId || node;
+                const src = meta.sourceFeature || cadId;
+                if (cadId && !cadIds.includes(cadId)) cadIds.push(cadId);
+                if (src && !srcFeatures.includes(src)) srcFeatures.push(src);
+            });
+            region.cadTargets.cadFeatureIds = cadIds;
+            region.cadTargets.sourceFeatures = srcFeatures.slice();
+            region.sourceFeatures = srcFeatures.slice();
+        }
+
+        function _regionsCuratorMoveNodeToRegion(node, targetRegionId) {
+            if (!node || !targetRegionId) return;
+            const target = (regionsCuratorState.regions || []).find(r => r.regionId === targetRegionId);
+            if (!target) return;
+
+            for (const region of regionsCuratorState.regions || []) {
+                let nodes = _regionsCuratorNodesForRegion(region).filter(n => n !== node);
+                if (region.regionId === targetRegionId) nodes = [...nodes, node];
+                _regionsCuratorSetRegionNodes(region, nodes);
+            }
+            _regionsCuratorRefreshNodeCatalog();
+            regionsCuratorState.dirty = true;
+            _regionsCuratorPreviewRegion(target);
+            _renderRegionsCuratorListIfMounted();
         }
 
         function _regionsCuratorApplyHighlightIds(ids) {
@@ -22872,6 +22947,7 @@
                 regionsCuratorState.doc = doc;
                 // Deep-clone via JSON so edits don't mutate the cached doc.
                 regionsCuratorState.regions = JSON.parse(JSON.stringify(doc.regions || []));
+                _regionsCuratorRefreshNodeCatalog();
             } catch (err) {
                 regionsCuratorState.error = `Failed to load semantic regions: ${err && err.message || err}`;
             } finally {
@@ -23171,6 +23247,62 @@
                     aliasInput.addEventListener('focus', () => _regionsCuratorPreviewRegion(region));
                     aliasRow.appendChild(aliasInput);
                     card.appendChild(aliasRow);
+
+                    // Node membership preview + move control. Moving a node
+                    // removes it from its current region before adding it here
+                    // so the backend's no-duplicate invariant stays intact.
+                    const nodes = _regionsCuratorNodesForRegion(region);
+                    const nodeWrap = document.createElement('div');
+                    nodeWrap.className = 'regions-curator-node-membership';
+                    nodeWrap.style.cssText = 'margin:6px 0 5px;';
+
+                    const nodeTitle = document.createElement('div');
+                    nodeTitle.style.cssText = 'font-size:10px;color:var(--text-secondary);margin-bottom:4px;';
+                    nodeTitle.textContent = 'GLB / CAD nodes';
+                    nodeWrap.appendChild(nodeTitle);
+
+                    const chipWrap = document.createElement('div');
+                    chipWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px;';
+                    nodes.slice(0, 8).forEach(node => {
+                        const chip = document.createElement('span');
+                        chip.className = 'regions-curator-node-chip';
+                        chip.title = node;
+                        chip.style.cssText = 'max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;font-size:9px;padding:2px 5px;border:1px solid var(--border);border-radius:9px;color:var(--text-secondary);background:var(--bg-input);';
+                        chip.textContent = node;
+                        chipWrap.appendChild(chip);
+                    });
+                    if (nodes.length > 8) {
+                        const more = document.createElement('span');
+                        more.style.cssText = 'font-size:9px;color:var(--text-secondary);padding:2px 0;';
+                        more.textContent = `+${nodes.length - 8} more`;
+                        chipWrap.appendChild(more);
+                    }
+                    nodeWrap.appendChild(chipWrap);
+
+                    const moveSelect = document.createElement('select');
+                    moveSelect.className = 'regions-curator-node-move-select';
+                    moveSelect.style.cssText = 'width:100%;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:10px;';
+                    const defaultOpt = document.createElement('option');
+                    defaultOpt.value = '';
+                    defaultOpt.textContent = 'Move node here...';
+                    moveSelect.appendChild(defaultOpt);
+                    const available = (regionsCuratorState.nodeOrder || []).filter(node => !nodes.includes(node));
+                    available.forEach(node => {
+                        const meta = regionsCuratorState.nodeCatalog[node] || {};
+                        const opt = document.createElement('option');
+                        opt.value = node;
+                        opt.textContent = (meta.sourceFeature && meta.sourceFeature !== node)
+                            ? `${meta.sourceFeature} (${node})`
+                            : node;
+                        moveSelect.appendChild(opt);
+                    });
+                    moveSelect.disabled = available.length === 0;
+                    moveSelect.addEventListener('change', () => {
+                        if (!moveSelect.value) return;
+                        _regionsCuratorMoveNodeToRegion(moveSelect.value, region.regionId);
+                    });
+                    nodeWrap.appendChild(moveSelect);
+                    card.appendChild(nodeWrap);
 
                     // Reviewed (lock) checkbox
                     const reviewedRow = document.createElement('label');

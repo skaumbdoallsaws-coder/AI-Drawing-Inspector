@@ -189,6 +189,44 @@ def test_PUT_canonicalises_top_level_metadata_from_url(aircraft_library_with_dra
     assert persisted["schemaVersion"]  # filled from server default
 
 
+def test_PUT_allows_operator_moving_glb_node_between_regions(aircraft_library_with_draft: Path):
+    """The curator's main correction action is moving one GLB/CAD node
+    from an incorrect semantic region into the correct one. This must
+    pass validation as long as the node exists and is not duplicated."""
+    pn, rev = "1030099", "revA"
+    client = TestClient(server.app)
+    doc = client.get(f"/api/part-semantic-regions/{pn}", params={"revision": rev}).json()
+
+    top = next(r for r in doc["regions"] if r["regionId"] == "top_wing")
+    lower = next(r for r in doc["regions"] if r["regionId"] == "lower_wing")
+    moved = lower["visualTargets"]["glbNodes"][0]
+
+    lower["visualTargets"]["glbNodes"] = [
+        n for n in lower["visualTargets"]["glbNodes"] if n != moved
+    ]
+    lower["glbNodes"] = list(lower["visualTargets"]["glbNodes"])
+    lower["cadTargets"]["cadFeatureIds"] = [
+        n for n in lower["cadTargets"]["cadFeatureIds"] if n != moved
+    ]
+
+    top["visualTargets"]["glbNodes"] = list(top["visualTargets"]["glbNodes"]) + [moved]
+    top["glbNodes"] = list(top["visualTargets"]["glbNodes"])
+    top["cadTargets"]["cadFeatureIds"] = list(top["cadTargets"]["cadFeatureIds"]) + [moved]
+
+    r = client.put(
+        f"/api/part-semantic-regions/{pn}",
+        params={"revision": rev},
+        json={"regions": doc["regions"]},
+    )
+    assert r.status_code == 200, r.text
+
+    persisted = _read_persisted(aircraft_library_with_draft, pn, rev)
+    top_after = next(r for r in persisted["regions"] if r["regionId"] == "top_wing")
+    lower_after = next(r for r in persisted["regions"] if r["regionId"] == "lower_wing")
+    assert moved in top_after["visualTargets"]["glbNodes"]
+    assert moved not in lower_after["visualTargets"]["glbNodes"]
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -409,15 +447,22 @@ def test_served_html_contains_regions_curator_markers():
         "regionsCuratorDirtyBadge",
         # Curator state + lifecycle helpers
         "regionsCuratorState",
+        "nodeCatalog",
+        "nodeOrder",
         "_regionsCuratorLoad",
         "_regionsCuratorSave",
         "_regionsCuratorRedraft",
+        "_regionsCuratorMoveNodeToRegion",
+        "_regionsCuratorSetRegionNodes",
+        "_regionsCuratorRefreshNodeCatalog",
         "_regionsCuratorSelectRegion",
         "_renderRegionsCuratorListIfMounted",
         # Edit-field class hooks (kept stable for later e2e tests)
         "regions-curator-card",
         "regions-curator-label-input",
         "regions-curator-aliases-input",
+        "regions-curator-node-membership",
+        "regions-curator-node-move-select",
         "regions-curator-reviewed-checkbox",
     ]:
         assert marker in html, f"missing regions-curator marker: {marker!r}"

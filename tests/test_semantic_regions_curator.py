@@ -412,6 +412,7 @@ def test_existing_GET_and_POST_routes_still_registered():
         ("/api/part-semantic-regions/{partNumber}",          "PUT"),
         ("/api/part-semantic-regions/{partNumber}/draft",    "POST"),
         ("/api/part-semantic-regions/{partNumber}/resolve",  "GET"),
+        ("/api/part-semantic-regions/{partNumber}/cad-handoff", "GET"),
     ]
     for path, method in required:
         assert any(p == path and method in methods for p, methods in paths_methods), \

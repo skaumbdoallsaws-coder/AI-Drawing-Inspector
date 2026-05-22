@@ -1127,6 +1127,53 @@ def test_GET_resolve_endpoint_404_when_draft_missing(aircraft_library: Path):
 
 
 # ---------------------------------------------------------------------------
+# HTTP /cad-handoff endpoint
+# ---------------------------------------------------------------------------
+
+def test_GET_cad_handoff_endpoint_returns_solidworks_targets(aircraft_library_with_draft: Path):
+    """Bridge-facing payload: a semantic phrase resolves to the exact
+    GLB nodes + cadFeatureIds + SolidWorks-visible source feature names
+    Sage-in-SOLIDWORKS will need. It remains explicitly read-only until
+    an edit executor exists."""
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/cad-handoff",
+                   params={"revision": "A", "phrase": "top wing"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["matched"] is True
+    assert body["handoffVersion"] == "semantic-region-cad-handoff-1.0"
+    assert body["region"]["regionId"] == "top_wing"
+    assert "planarsurface_top_wing" in body["solidWorksTargets"]["glbNodes"]
+    assert "planarsurface_top_wing" in body["solidWorksTargets"]["cadFeatureIds"]
+    assert "Planarsurface Top Wing" in body["solidWorksTargets"]["sourceFeatures"]
+    assert body["operationPolicy"]["canEdit"] is False
+    assert "not implemented yet" in body["operationPolicy"]["blockedReason"]
+
+
+def test_GET_cad_handoff_endpoint_includes_placement_scaffold(aircraft_library_with_draft: Path):
+    """The payload carries the future edit-planning fields even when the
+    MVP defaults are honest reference-only values."""
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/cad-handoff",
+                   params={"revision": "A", "phrase": "upper wing"})
+    assert r.status_code == 200, r.text
+    region = r.json()["region"]
+    assert region["regionId"] == "top_wing"
+    assert region["editReadiness"] == "not_ready"
+    assert region["placementCapabilities"] == ["reference_only"]
+    assert region["placementSurfaces"] == []
+    assert region["requiresReview"] is True
+
+
+def test_GET_cad_handoff_endpoint_404_when_no_match(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/cad-handoff",
+                   params={"revision": "A", "phrase": "xyzzy"})
+    assert r.status_code == 404
+    assert r.json()["matched"] is False
+
+
+# ---------------------------------------------------------------------------
 # Existing HIGHLIGHT_FEATURES behavior preserved
 # ---------------------------------------------------------------------------
 

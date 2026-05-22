@@ -4426,6 +4426,100 @@ async def part_semantic_regions_resolve(
     }
 
 
+@app.get("/api/part-semantic-regions/{partNumber}/cad-handoff")
+async def part_semantic_regions_cad_handoff(
+    partNumber: str,
+    revision:   str = Query(...),
+    phrase:     str = Query(..., description="User phrase to resolve for SolidWorks/Sage handoff."),
+):
+    """Build the read-only CAD handoff payload for a semantic phrase.
+
+    This is the bridge-facing shape Sage-in-SOLIDWORKS can consume:
+    user phrase -> semantic region -> GLB nodes -> stable cadFeatureIds
+    -> SolidWorks-visible source feature names.
+
+    Deliberately no CAD edits here. The response includes an explicit
+    `operationPolicy.canEdit=false` until placementSurfaces /
+    placementCapabilities are populated and a separate SolidWorks edit
+    execution endpoint exists."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+    if not phrase or not phrase.strip():
+        raise HTTPException(status_code=400, detail="phrase query parameter is required")
+
+    library_dir = library_path()
+    hit = _semantic_resolve_phrase(library_dir, safe_pn, safe_rev, phrase)
+    if hit is None:
+        return JSONResponse(status_code=404, content={
+            "matched":    False,
+            "partNumber": safe_pn,
+            "revision":   safe_rev,
+            "phrase":     phrase,
+            "detail":     f"No semantic region matched {phrase!r}.",
+        })
+
+    doc_path = _semantic_regions_path(library_dir, safe_pn, safe_rev)
+    try:
+        doc = json.loads(doc_path.read_text(encoding="utf-8-sig"))
+    except Exception as ex:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Corrupt semantic-regions JSON at {doc_path}: {ex}",
+        )
+    region_doc: Dict[str, Any] = {}
+    for region in doc.get("regions") or []:
+        if isinstance(region, dict) and region.get("regionId") == hit.regionId:
+            region_doc = region
+            break
+
+    placement_capabilities = region_doc.get("placementCapabilities")
+    if not isinstance(placement_capabilities, list):
+        placement_capabilities = ["reference_only"]
+    placement_surfaces = region_doc.get("placementSurfaces")
+    if not isinstance(placement_surfaces, list):
+        placement_surfaces = []
+    edit_readiness = str(region_doc.get("editReadiness") or "not_ready")
+    requires_review = bool(region_doc.get("requiresReview", True))
+
+    # Honest gate: semantic regions can identify CAD targets today, but
+    # controlled SolidWorks edit execution is not implemented in this app.
+    can_edit = False
+    blocked_reason = (
+        "Semantic region resolved to SolidWorks feature targets, but CAD edit "
+        "execution is not implemented yet. Use this payload as reference-only "
+        "handoff for Sage/SOLIDWORKS."
+    )
+
+    return {
+        "matched":        True,
+        "handoffVersion": "semantic-region-cad-handoff-1.0",
+        "partNumber":     safe_pn,
+        "revision":       safe_rev,
+        "phrase":         phrase,
+        "region": {
+            **hit.to_dict(),
+            "editReadiness":         edit_readiness,
+            "requiresReview":        requires_review,
+            "placementCapabilities": placement_capabilities,
+            "placementSurfaces":     placement_surfaces,
+        },
+        "solidWorksTargets": {
+            "cadFeatureIds":  list(hit.cadFeatureIds),
+            "sourceFeatures": list(hit.sourceFeatures),
+            "glbNodes":       list(hit.glbNodes),
+        },
+        "operationPolicy": {
+            "canEdit":        can_edit,
+            "editReadiness":  edit_readiness,
+            "requiresReview": requires_review,
+            "allowedActions": placement_capabilities,
+            "blockedReason":  blocked_reason,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Profile Builder MVP
 # ---------------------------------------------------------------------------

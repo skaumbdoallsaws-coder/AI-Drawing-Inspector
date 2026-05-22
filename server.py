@@ -4152,6 +4152,229 @@ async def part_semantic_regions_draft(partNumber: str, body: _SemanticRegionsDra
     }
 
 
+class _SemanticRegionsPutBody(BaseModel):
+    """Operator-edited semantic regions submitted from the curator UI.
+
+    The body is a partial document: `regions` is required, the other
+    fields are optional metadata that round-trip back to disk. Keep
+    the contract loose so future schema additions (placementSurfaces,
+    placementCapabilities, etc.) flow through verbatim without code
+    changes on the read/write boundary."""
+    regions:        List[Dict[str, Any]]
+    partNumber:     Optional[str] = None
+    revision:       Optional[str] = None
+    schemaVersion:  Optional[str] = None
+    axisFrame:      Optional[Dict[str, Any]] = None
+    summary:        Optional[Dict[str, Any]] = None
+    notes:          Optional[str] = None
+
+
+def _semantic_regions_glb_node_names(library_dir: Path, pn: str, revision: str) -> set:
+    """Authoritative set of glbNode names for a part rev. Reads the
+    colored GLB via the shared inspect_glb helper so PUT validation
+    and the heuristic builder agree on what 'exists'. Returns an
+    empty set when the GLB is missing -- caller decides whether to
+    treat that as a 404 or just an empty validation set."""
+    glb_path = _resolve_part_asset(pn, revision, f"{pn}_colored.glb")
+    if glb_path is None or not glb_path.exists():
+        return set()
+    try:
+        from ai_inspector.semantic_regions.glb_inspect import inspect_glb
+        summary = inspect_glb(glb_path)
+    except Exception:
+        return set()
+    return {n.name for n in summary.nodes if n.name}
+
+
+def _semantic_regions_cad_feature_ids(library_dir: Path, pn: str, revision: str) -> set:
+    """Authoritative set of cad_feature_id values for a part rev,
+    pulled from the same feature_colors.json the heuristic builder
+    reads. Empty set means the file is missing -- callers should
+    skip cadFeatureId validation rather than blanket-reject."""
+    fc_path = _resolve_part_asset(pn, revision, f"{pn}_feature_colors.json")
+    if fc_path is None or not fc_path.exists():
+        return set()
+    try:
+        data = json.loads(fc_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return set()
+    out: set = set()
+    for feat in (data.get("features") or []) if isinstance(data, dict) else []:
+        if isinstance(feat, dict):
+            fid = feat.get("cad_feature_id") or feat.get("cadFeatureId")
+            if isinstance(fid, str) and fid:
+                out.add(fid)
+    return out
+
+
+def _semantic_regions_validate_put_body(
+    body_regions: List[Dict[str, Any]],
+    valid_glb_nodes: set,
+    valid_cad_feature_ids: set,
+) -> List[str]:
+    """Return a list of human-readable error strings. Empty list = OK.
+    Pure: never raises, never writes. Caller decides whether to 400.
+
+    Validates the three operator-meaningful invariants:
+      1. Every submitted glbNode exists in the current GLB.
+      2. No glbNode appears in more than one region.
+      3. Every submitted cadFeatureId exists in feature_colors.json
+         (skipped when feature_colors.json is missing -- empty set
+         marker so we don't blanket-reject parts without it).
+    Region structural fields (label, aliases, reviewed, confidence)
+    are NOT validated -- the curator is intentionally permissive
+    so the operator can fix typos without server pushback."""
+    errors: List[str] = []
+    seen_glb: Dict[str, str] = {}  # glb_node -> first region_id that claimed it
+
+    for idx, region in enumerate(body_regions):
+        if not isinstance(region, dict):
+            errors.append(f"regions[{idx}] must be an object")
+            continue
+        region_id = str(region.get("regionId") or f"<unnamed:{idx}>")
+
+        # Resolve glbNodes from either visualTargets.glbNodes (1.0.x+
+        # canonical) or the legacy top-level glbNodes field for back
+        # compat with very old drafts.
+        visual_targets = region.get("visualTargets") or {}
+        glb_nodes = visual_targets.get("glbNodes")
+        if not isinstance(glb_nodes, list):
+            glb_nodes = region.get("glbNodes") or []
+        if not isinstance(glb_nodes, list):
+            errors.append(f"regions[{idx}] ({region_id}): glbNodes must be a list")
+            continue
+
+        for node in glb_nodes:
+            if not isinstance(node, str) or not node:
+                continue
+            if valid_glb_nodes and node not in valid_glb_nodes:
+                errors.append(
+                    f"regions[{idx}] ({region_id}): glbNode {node!r} "
+                    f"does not exist in the current revision GLB"
+                )
+                continue
+            prior = seen_glb.get(node)
+            if prior is not None and prior != region_id:
+                errors.append(
+                    f"glbNode {node!r} appears in both {prior!r} and {region_id!r}; "
+                    f"each node may belong to at most one region"
+                )
+                continue
+            seen_glb[node] = region_id
+
+        # cadFeatureId validation -- skip when feature_colors.json
+        # is missing so parts without it don't blanket-fail.
+        cad_targets = region.get("cadTargets") or {}
+        cad_ids = cad_targets.get("cadFeatureIds")
+        if not isinstance(cad_ids, list):
+            cad_ids = []
+        if valid_cad_feature_ids:
+            for cid in cad_ids:
+                if not isinstance(cid, str) or not cid:
+                    continue
+                if cid not in valid_cad_feature_ids:
+                    errors.append(
+                        f"regions[{idx}] ({region_id}): cadFeatureId {cid!r} "
+                        f"does not exist in feature_colors.json"
+                    )
+    return errors
+
+
+@app.put("/api/part-semantic-regions/{partNumber}")
+async def part_semantic_regions_put(
+    partNumber: str,
+    body:       _SemanticRegionsPutBody,
+    revision:   str = Query(...),
+):
+    """Persist an operator-edited semantic-regions document.
+
+    Validates that:
+      - partNumber + revision match URL vs body (when the body carries
+        them) so the curator can't accidentally overwrite a different
+        rev's file
+      - every submitted glbNode exists in the current revision GLB
+      - no glbNode appears in more than one region (operator
+        responsibility -- merges/splits must produce a partition)
+      - every submitted cadFeatureId exists in feature_colors.json
+        (skipped when that file is missing so non-colored parts
+        still round-trip)
+
+    Schema-preserving: every field in each submitted region dict and
+    every top-level field in the body flows through to disk untouched.
+    Future scaffolding (placementSurfaces, placementCapabilities,
+    editReadiness, requiresReview, ...) does not need server changes
+    to round-trip.
+
+    Atomic: reuses write_semantic_regions which writes to a .tmp file
+    and replaces. A failed validation never touches the on-disk file."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+
+    if body.partNumber and sanitize_part_number(body.partNumber) != safe_pn:
+        raise HTTPException(
+            status_code=400,
+            detail=f"body.partNumber {body.partNumber!r} does not match URL part {partNumber!r}",
+        )
+    if body.revision:
+        body_safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision)
+        if body_safe_rev != safe_rev:
+            raise HTTPException(
+                status_code=400,
+                detail=f"body.revision {body.revision!r} does not match URL revision {revision!r}",
+            )
+
+    library_dir = library_path()
+    valid_glb_nodes = _semantic_regions_glb_node_names(library_dir, safe_pn, safe_rev)
+    if not valid_glb_nodes:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Cannot validate semantic regions for {safe_pn} {safe_rev}: "
+                "colored GLB is missing. Run Enrich Visuals (or re-extract the "
+                "part) so the colored GLB lands in the revision archive first."
+            ),
+        )
+    valid_cad_ids = _semantic_regions_cad_feature_ids(library_dir, safe_pn, safe_rev)
+
+    errors = _semantic_regions_validate_put_body(body.regions, valid_glb_nodes, valid_cad_ids)
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "semantic_regions validation failed", "errors": errors},
+        )
+
+    # Preserve top-level metadata from the body verbatim, fill in the
+    # canonical fields from the URL so the persisted file is always
+    # self-describing even if the frontend forgets to send them.
+    doc: Dict[str, Any] = {
+        "schemaVersion": body.schemaVersion or _SEMANTIC_REGIONS_SCHEMA_VERSION,
+        "partNumber":    safe_pn,
+        "revision":      safe_rev,
+    }
+    if body.axisFrame is not None:
+        doc["axisFrame"] = body.axisFrame
+    if body.summary is not None:
+        doc["summary"] = body.summary
+    if body.notes is not None:
+        doc["notes"] = body.notes
+    # Regions are passed through unchanged so any 1.3.0+ fields (and
+    # any unknown future fields the operator/UI starts sending) reach
+    # disk without a server-side allowlist gate.
+    doc["regions"] = body.regions
+
+    out_path = _write_semantic_regions(library_dir, safe_pn, safe_rev, doc)
+    return {
+        "ok":            True,
+        "partNumber":    safe_pn,
+        "revision":      safe_rev,
+        "schemaVersion": doc["schemaVersion"],
+        "regionCount":   len(body.regions),
+        "outputPath":    str(out_path),
+    }
+
+
 @app.get("/api/part-semantic-regions/{partNumber}/resolve")
 async def part_semantic_regions_resolve(
     partNumber: str,

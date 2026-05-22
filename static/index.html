@@ -3170,24 +3170,22 @@
             z-index: 10;
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 6px 8px;
-            background: var(--overlay-bg);
-            border: 1px solid var(--overlay-border);
-            border-radius: 8px;
-            backdrop-filter: blur(6px);
+            gap: 8px;
+            padding: 0;
+            background: transparent;
+            border: 0;
+            border-radius: 0;
+            backdrop-filter: none;
             pointer-events: auto;
-            box-shadow:
-                inset 0 1px 0 var(--border-soft),
-                0 8px 18px var(--shadow-color);
+            box-shadow: none;
             color: var(--text-primary);
         }
         .three-toolbar button {
             background: transparent;
             color: var(--text-secondary);
             border: 1px solid transparent;
-            border-radius: 6px;
-            padding: 5px 10px;
+            border-radius: 3px;
+            padding: 4px 5px;
             font-size: 11px;
             font-family: inherit;
             cursor: pointer;
@@ -3197,12 +3195,12 @@
             box-shadow: none;
         }
         .three-toolbar button:hover {
-            background: linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.028) 100%);
+            background: rgba(255,255,255,0.08);
             color: var(--text-primary);
-            border-color: rgba(79,195,247,0.22);
+            border-color: rgba(255,255,255,0.12);
         }
         .three-toolbar button:active {
-            background: linear-gradient(180deg, rgba(79,195,247,0.18) 0%, rgba(79,195,247,0.075) 100%);
+            background: rgba(79,195,247,0.16);
             color: #fff;
         }
         .three-toolbar .tb-separator {
@@ -3216,19 +3214,17 @@
             align-items: center;
             justify-content: center;
             gap: 6px;
-            min-height: 34px;
-            min-width: 34px;
+            min-height: 30px;
+            min-width: 30px;
         }
         .three-toolbar-btn.icon-only {
-            padding: 5px 7px;
+            padding: 3px 4px;
         }
         .three-toolbar-btn.active {
-            background: linear-gradient(180deg, rgba(79,195,247,0.2) 0%, rgba(79,195,247,0.08) 100%);
-            border-color: rgba(79,195,247,0.28);
+            background: rgba(79,195,247,0.14);
+            border-color: rgba(79,195,247,0.18);
             color: var(--text-primary);
-            box-shadow:
-                inset 0 1px 0 rgba(255,255,255,0.035),
-                0 0 0 1px rgba(79,195,247,0.05);
+            box-shadow: none;
         }
         .three-toolbar-icon {
             width: 22px;
@@ -3255,15 +3251,14 @@
             -webkit-user-drag: none;
         }
         .three-toolbar-btn.view-palette-trigger {
-            min-width: 42px;
-            padding: 4px 6px;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.022));
-            border-color: rgba(255,255,255,0.07);
+            min-width: 38px;
+            padding: 3px 5px;
+            background: transparent;
+            border-color: transparent;
         }
         .three-toolbar-btn.view-palette-trigger.active {
-            background: linear-gradient(180deg, rgba(79,195,247,0.22), rgba(79,195,247,0.08));
-            border-color: rgba(79,195,247,0.3);
+            background: rgba(79,195,247,0.14);
+            border-color: rgba(79,195,247,0.18);
         }
         .three-toolbar-caret {
             color: #8ea0b6;
@@ -6579,6 +6574,16 @@
             background: var(--bg-hover);
             color: var(--text-primary);
         }
+        :root[data-theme="light"] .global-toolbar-icon {
+            /*
+               Blend the PNG icon interiors into the light ribbon so the
+               white fills read like SolidWorks toolbar chrome instead of
+               floating white stickers. The blue outlines remain visible.
+            */
+            mix-blend-mode: multiply;
+            opacity: 0.92;
+            filter: saturate(0.92) brightness(0.98);
+        }
         :root[data-theme="light"] #iconSave svg > rect[width="96"][height="96"],
         :root[data-theme="light"] #iconSettings svg > rect[width="96"][height="96"] {
             fill: transparent;
@@ -6629,16 +6634,14 @@
             color: var(--accent-strong);
         }
         :root[data-theme="light"] .three-toolbar-btn.view-palette-trigger {
-            background: linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
-            border-color: var(--border);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+            background: transparent;
+            border-color: transparent;
+            box-shadow: none;
         }
         :root[data-theme="light"] .three-toolbar-btn.view-palette-trigger.active {
-            background: linear-gradient(180deg, rgba(43,119,191,0.16), rgba(43,119,191,0.06));
-            border-color: rgba(43,119,191,0.3);
-            box-shadow:
-                inset 0 1px 0 rgba(255,255,255,0.75),
-                0 0 0 1px rgba(43,119,191,0.08);
+            background: rgba(43,119,191,0.12);
+            border-color: rgba(43,119,191,0.18);
+            box-shadow: none;
         }
         :root[data-theme="light"] .three-toolbar-popup .view-palette-item {
             background: linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
@@ -22687,14 +22690,24 @@
             if (partDiffState.available) {
                 const subtabBar = document.createElement('div');
                 subtabBar.className = 'assy-subtabs';
-                [{ id: '3dmodel', label: '3D Model' }, { id: 'compare', label: 'Compare' }].forEach(t => {
+                [
+                    { id: '3dmodel', label: '3D Model' },
+                    { id: 'compare', label: 'Compare' },
+                    { id: 'regions', label: 'Regions' },
+                ].forEach(t => {
                     const tab = document.createElement('div');
                     tab.className = 'assy-subtab' + (partDiffState.activeSubtab === t.id ? ' active' : '');
                     tab.textContent = t.label;
                     tab.addEventListener('click', () => {
                         if (partDiffState.activeSubtab === t.id) return;
+                        const prev = partDiffState.activeSubtab;
                         partDiffState.activeSubtab = t.id;
                         if (t.id === '3dmodel') _destroyPartDiffViewers();
+                        // Clear curator-applied highlights when leaving the Regions
+                        // sub-tab so the next view does not inherit them.
+                        if (prev === 'regions' && typeof clearFeatureHighlights === 'function') {
+                            clearFeatureHighlights();
+                        }
                         switchTab('3dmodel');
                     });
                     subtabBar.appendChild(tab);
@@ -22704,6 +22717,8 @@
 
             if (partDiffState.activeSubtab === 'compare' && partDiffState.available) {
                 _renderPartCompareSubtab(wrapper);
+            } else if (partDiffState.activeSubtab === 'regions' && partDiffState.available) {
+                _renderRegionsCuratorSubtab(wrapper);
             } else {
                 // Normal 3D model viewer.
                 // Revision selector: shown when the part has 2+ revisions on
@@ -22754,6 +22769,413 @@
             }
 
             viewportContent.appendChild(wrapper);
+        }
+
+        // ---------- Semantic Region Curator (MVP) ----------
+        //
+        // Lets operators review, rename, alias, and lock (reviewed=true)
+        // the heuristic semantic regions in {pn}_semantic_regions.json.
+        // Save is batched: the full document is PUT in one shot. Re-draft
+        // calls the existing POST /draft so heuristic regeneration still
+        // happens through the same code path. CAD editing is explicitly
+        // out of scope for this track -- this is curation only.
+        const regionsCuratorState = {
+            pn: null,
+            revision: null,
+            doc: null,            // last persisted doc as fetched
+            regions: [],          // mutable working copy
+            selectedRegionId: null,
+            dirty: false,
+            loading: false,
+            saving: false,
+            drafting: false,
+            error: null,
+            mountKey: 0,          // increments per render to invalidate stale closures
+        };
+
+        function _regionsCuratorFeaturesForRegion(region) {
+            const visual = (region && region.visualTargets) || {};
+            const nodes  = Array.isArray(visual.glbNodes) ? visual.glbNodes : (region.glbNodes || []);
+            // The feature-mesh map is keyed by GLB node name; the cad
+            // feature IDs match too on parts produced by SolidWorksExtractor.
+            // Combine both into a deduped highlight set so the viewer lights
+            // up regardless of which key the mesh map was built from.
+            const cad = ((region && region.cadTargets) || {}).cadFeatureIds || [];
+            const out = [];
+            for (const id of [...nodes, ...cad]) {
+                if (typeof id === 'string' && id && !out.includes(id)) out.push(id);
+            }
+            return out;
+        }
+
+        function _regionsCuratorSelectRegion(regionId) {
+            regionsCuratorState.selectedRegionId = regionId;
+            const region = regionsCuratorState.regions.find(r => r.regionId === regionId);
+            if (!region) {
+                if (typeof clearFeatureHighlights === 'function') clearFeatureHighlights();
+                return;
+            }
+            const ids = _regionsCuratorFeaturesForRegion(region);
+            if (typeof applyFeatureHighlight === 'function' && ids.length) {
+                applyFeatureHighlight(ids);
+            } else if (typeof clearFeatureHighlights === 'function') {
+                clearFeatureHighlights();
+            }
+            _renderRegionsCuratorListIfMounted();
+        }
+
+        async function _regionsCuratorLoad(pn, revision) {
+            regionsCuratorState.loading = true;
+            regionsCuratorState.error = null;
+            regionsCuratorState.dirty = false;
+            regionsCuratorState.pn = pn;
+            regionsCuratorState.revision = revision;
+            try {
+                const r = await fetch(
+                    `/api/part-semantic-regions/${encodeURIComponent(pn)}?revision=${encodeURIComponent(revision)}`
+                );
+                if (r.status === 404) {
+                    regionsCuratorState.doc = null;
+                    regionsCuratorState.regions = [];
+                    regionsCuratorState.error = 'No semantic regions draft yet. Click "Re-draft" to generate one.';
+                    return;
+                }
+                if (!r.ok) {
+                    regionsCuratorState.error = `Failed to load semantic regions (HTTP ${r.status}).`;
+                    return;
+                }
+                const doc = await r.json();
+                regionsCuratorState.doc = doc;
+                // Deep-clone via JSON so edits don't mutate the cached doc.
+                regionsCuratorState.regions = JSON.parse(JSON.stringify(doc.regions || []));
+            } catch (err) {
+                regionsCuratorState.error = `Failed to load semantic regions: ${err && err.message || err}`;
+            } finally {
+                regionsCuratorState.loading = false;
+            }
+        }
+
+        async function _regionsCuratorSave() {
+            if (!regionsCuratorState.pn || !regionsCuratorState.revision) return;
+            if (regionsCuratorState.saving) return;
+            regionsCuratorState.saving = true;
+            regionsCuratorState.error = null;
+            _renderRegionsCuratorListIfMounted();
+            try {
+                const body = {
+                    partNumber:    regionsCuratorState.pn,
+                    revision:      regionsCuratorState.revision,
+                    regions:       regionsCuratorState.regions,
+                };
+                // Preserve top-level metadata from the last fetched doc so
+                // axisFrame, summary, schemaVersion round-trip unchanged.
+                if (regionsCuratorState.doc) {
+                    if (regionsCuratorState.doc.schemaVersion) body.schemaVersion = regionsCuratorState.doc.schemaVersion;
+                    if (regionsCuratorState.doc.axisFrame)     body.axisFrame     = regionsCuratorState.doc.axisFrame;
+                    if (regionsCuratorState.doc.summary)       body.summary       = regionsCuratorState.doc.summary;
+                }
+                const r = await fetch(
+                    `/api/part-semantic-regions/${encodeURIComponent(regionsCuratorState.pn)}?revision=${encodeURIComponent(regionsCuratorState.revision)}`,
+                    {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    }
+                );
+                if (!r.ok) {
+                    const text = await r.text();
+                    regionsCuratorState.error = `Save failed (HTTP ${r.status}): ${text}`;
+                    return;
+                }
+                regionsCuratorState.dirty = false;
+                // Re-fetch to pick up any server-side canonicalization
+                // (schemaVersion fill, etc.) and prove the round-trip.
+                await _regionsCuratorLoad(regionsCuratorState.pn, regionsCuratorState.revision);
+            } catch (err) {
+                regionsCuratorState.error = `Save failed: ${err && err.message || err}`;
+            } finally {
+                regionsCuratorState.saving = false;
+                _renderRegionsCuratorListIfMounted();
+            }
+        }
+
+        async function _regionsCuratorRedraft() {
+            if (!regionsCuratorState.pn || !regionsCuratorState.revision) return;
+            if (regionsCuratorState.drafting) return;
+            regionsCuratorState.drafting = true;
+            regionsCuratorState.error = null;
+            _renderRegionsCuratorListIfMounted();
+            try {
+                const r = await fetch(
+                    `/api/part-semantic-regions/${encodeURIComponent(regionsCuratorState.pn)}/draft`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ revision: regionsCuratorState.revision }),
+                    }
+                );
+                if (!r.ok) {
+                    const text = await r.text();
+                    regionsCuratorState.error = `Re-draft failed (HTTP ${r.status}): ${text}`;
+                    return;
+                }
+                // Drop local edits -- the heuristic preserves reviewed=true
+                // regions verbatim so the lock semantics are server-side.
+                await _regionsCuratorLoad(regionsCuratorState.pn, regionsCuratorState.revision);
+            } catch (err) {
+                regionsCuratorState.error = `Re-draft failed: ${err && err.message || err}`;
+            } finally {
+                regionsCuratorState.drafting = false;
+                _renderRegionsCuratorListIfMounted();
+            }
+        }
+
+        // Re-renders only the left pane (region list) when state mutates
+        // mid-session. Right pane (3D viewer) stays mounted so the WebGL
+        // context isn't repeatedly destroyed.
+        function _renderRegionsCuratorListIfMounted() {
+            const list = document.getElementById('regionsCuratorList');
+            if (list && typeof list._render === 'function') list._render();
+        }
+
+        function _renderRegionsCuratorSubtab(container) {
+            const pn = state.partNumber;
+            const revision = state.activeRevision
+                || (partDiffState.revisions && partDiffState.revisions[0])
+                || 'A';
+            regionsCuratorState.mountKey++;
+            const myKey = regionsCuratorState.mountKey;
+
+            // Layout: toolbar on top, left list + right viewer below.
+            const root = document.createElement('div');
+            root.id = 'regionsCuratorRoot';
+            root.style.cssText = 'flex:1;display:flex;flex-direction:column;min-height:0;';
+
+            const toolbar = document.createElement('div');
+            toolbar.id = 'regionsCuratorToolbar';
+            toolbar.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg-panel);font-size:11px;color:var(--text-secondary);';
+
+            const revLabel = document.createElement('span');
+            revLabel.textContent = `Rev ${revision} — semantic regions`;
+            toolbar.appendChild(revLabel);
+
+            const spacer = document.createElement('span');
+            spacer.style.flex = '1';
+            toolbar.appendChild(spacer);
+
+            const dirtyBadge = document.createElement('span');
+            dirtyBadge.id = 'regionsCuratorDirtyBadge';
+            dirtyBadge.style.cssText = 'color:var(--accent);display:none;font-weight:600;';
+            dirtyBadge.textContent = 'Unsaved changes';
+            toolbar.appendChild(dirtyBadge);
+
+            const saveBtn = document.createElement('button');
+            saveBtn.id = 'regionsCuratorSaveBtn';
+            saveBtn.textContent = 'Save';
+            saveBtn.style.cssText = 'background:var(--accent);color:#fff;border:none;border-radius:3px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:600;';
+            saveBtn.addEventListener('click', () => _regionsCuratorSave());
+            toolbar.appendChild(saveBtn);
+
+            const redraftBtn = document.createElement('button');
+            redraftBtn.id = 'regionsCuratorRedraftBtn';
+            redraftBtn.textContent = 'Re-draft';
+            redraftBtn.title = 'Regenerate heuristic regions. reviewed=true regions are preserved.';
+            redraftBtn.style.cssText = 'background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:4px 12px;font-size:11px;cursor:pointer;';
+            redraftBtn.addEventListener('click', () => {
+                if (regionsCuratorState.dirty) {
+                    const ok = window.confirm('You have unsaved edits. Re-drafting will discard them. Continue?');
+                    if (!ok) return;
+                }
+                _regionsCuratorRedraft();
+            });
+            toolbar.appendChild(redraftBtn);
+
+            root.appendChild(toolbar);
+
+            const split = document.createElement('div');
+            split.style.cssText = 'flex:1;display:flex;min-height:0;';
+            root.appendChild(split);
+
+            // Left pane: region list + per-region editor.
+            const leftPane = document.createElement('div');
+            leftPane.id = 'regionsCuratorList';
+            leftPane.style.cssText = 'width:380px;max-width:45%;border-right:1px solid var(--border);overflow-y:auto;background:var(--bg-panel);';
+            split.appendChild(leftPane);
+
+            // Right pane: reuses the same 3D viewer container as the
+            // normal 3D Model sub-tab so highlights flow through the
+            // existing applyFeatureHighlight pipeline.
+            const rightPane = document.createElement('div');
+            rightPane.style.cssText = 'flex:1;position:relative;background:var(--bg-main);min-height:0;';
+            const threeContainer = document.createElement('div');
+            threeContainer.id = 'three-container';
+            threeContainer.style.cssText = 'width:100%;height:100%;position:relative;';
+            rightPane.appendChild(threeContainer);
+            split.appendChild(rightPane);
+
+            container.appendChild(root);
+
+            // Mount 3D viewer (reuses the normal-tab state).
+            if (state.threeLoadedPart === state.partNumber && state.threeStlAvailable === false) {
+                _show3DPlaceholder(threeContainer, 'No 3D model available for ' + state.partNumber);
+            } else {
+                _init3DScene(threeContainer);
+            }
+
+            // List renderer -- attached to leftPane so a single helper
+            // can refresh it after save / redraft / edit.
+            leftPane._render = function () {
+                if (regionsCuratorState.mountKey !== myKey) return;
+                const dirtyBadgeEl = document.getElementById('regionsCuratorDirtyBadge');
+                if (dirtyBadgeEl) dirtyBadgeEl.style.display = regionsCuratorState.dirty ? '' : 'none';
+                const saveBtnEl = document.getElementById('regionsCuratorSaveBtn');
+                if (saveBtnEl) {
+                    saveBtnEl.disabled = regionsCuratorState.saving || !regionsCuratorState.dirty;
+                    saveBtnEl.textContent = regionsCuratorState.saving ? 'Saving...' : 'Save';
+                }
+                const redraftBtnEl = document.getElementById('regionsCuratorRedraftBtn');
+                if (redraftBtnEl) {
+                    redraftBtnEl.disabled = regionsCuratorState.drafting;
+                    redraftBtnEl.textContent = regionsCuratorState.drafting ? 'Re-drafting...' : 'Re-draft';
+                }
+
+                leftPane.innerHTML = '';
+
+                if (regionsCuratorState.loading) {
+                    const loadingEl = document.createElement('div');
+                    loadingEl.style.cssText = 'padding:12px;color:var(--text-secondary);font-size:12px;';
+                    loadingEl.textContent = 'Loading semantic regions...';
+                    leftPane.appendChild(loadingEl);
+                    return;
+                }
+                if (regionsCuratorState.error) {
+                    const errEl = document.createElement('div');
+                    errEl.id = 'regionsCuratorError';
+                    errEl.style.cssText = 'padding:12px;color:var(--missing);font-size:12px;white-space:pre-wrap;';
+                    errEl.textContent = regionsCuratorState.error;
+                    leftPane.appendChild(errEl);
+                }
+                if (!regionsCuratorState.regions.length) {
+                    const empty = document.createElement('div');
+                    empty.style.cssText = 'padding:12px;color:var(--text-secondary);font-size:12px;';
+                    empty.textContent = 'No semantic regions yet. Click "Re-draft" to generate the heuristic seed.';
+                    leftPane.appendChild(empty);
+                    return;
+                }
+
+                for (const region of regionsCuratorState.regions) {
+                    const card = document.createElement('div');
+                    card.className = 'regions-curator-card';
+                    const isSelected = region.regionId === regionsCuratorState.selectedRegionId;
+                    card.style.cssText = 'padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:' + (isSelected ? 'var(--bg-input)' : 'transparent') + ';';
+                    card.dataset.regionId = region.regionId;
+                    card.addEventListener('click', (ev) => {
+                        // Don't reselect when clicking inside inputs / checkboxes.
+                        const t = ev.target;
+                        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON')) return;
+                        _regionsCuratorSelectRegion(region.regionId);
+                    });
+
+                    const headerRow = document.createElement('div');
+                    headerRow.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);margin-bottom:4px;';
+
+                    const idChip = document.createElement('span');
+                    idChip.style.cssText = 'font-family:monospace;font-size:10px;color:var(--text-secondary);';
+                    idChip.textContent = region.regionId;
+                    headerRow.appendChild(idChip);
+
+                    const conf = String(region.confidence || 'low');
+                    const confBadge = document.createElement('span');
+                    confBadge.style.cssText = 'padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;background:' + (
+                        conf === 'high' ? 'var(--present)' : conf === 'medium' ? 'var(--partial)' : 'var(--missing)'
+                    ) + ';color:#fff;';
+                    confBadge.textContent = conf;
+                    headerRow.appendChild(confBadge);
+
+                    const glbCount = ((region.visualTargets || {}).glbNodes || region.glbNodes || []).length;
+                    const cadCount = ((region.cadTargets || {}).cadFeatureIds || []).length;
+                    const srcCount = ((region.cadTargets || {}).sourceFeatures || region.sourceFeatures || []).length;
+                    const countsChip = document.createElement('span');
+                    countsChip.style.cssText = 'margin-left:auto;color:var(--text-secondary);font-size:10px;';
+                    countsChip.textContent = `${glbCount} nodes · ${cadCount} cad · ${srcCount} src`;
+                    headerRow.appendChild(countsChip);
+
+                    card.appendChild(headerRow);
+
+                    // Label input
+                    const labelRow = document.createElement('div');
+                    labelRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
+                    const labelInput = document.createElement('input');
+                    labelInput.type = 'text';
+                    labelInput.value = region.label || '';
+                    labelInput.placeholder = 'Label';
+                    labelInput.className = 'regions-curator-label-input';
+                    labelInput.style.cssText = 'flex:1;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:12px;';
+                    labelInput.addEventListener('change', () => {
+                        if (region.label !== labelInput.value) {
+                            region.label = labelInput.value;
+                            regionsCuratorState.dirty = true;
+                            _renderRegionsCuratorListIfMounted();
+                        }
+                    });
+                    labelRow.appendChild(labelInput);
+                    card.appendChild(labelRow);
+
+                    // Aliases input (comma-separated)
+                    const aliasRow = document.createElement('div');
+                    aliasRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
+                    const aliasLbl = document.createElement('span');
+                    aliasLbl.style.cssText = 'font-size:10px;color:var(--text-secondary);min-width:48px;';
+                    aliasLbl.textContent = 'Aliases:';
+                    aliasRow.appendChild(aliasLbl);
+                    const aliasInput = document.createElement('input');
+                    aliasInput.type = 'text';
+                    aliasInput.className = 'regions-curator-aliases-input';
+                    aliasInput.placeholder = 'comma-separated';
+                    aliasInput.value = (region.aliases || []).join(', ');
+                    aliasInput.style.cssText = 'flex:1;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:3px 6px;font-size:11px;';
+                    aliasInput.addEventListener('change', () => {
+                        const next = aliasInput.value.split(',').map(s => s.trim()).filter(Boolean);
+                        const prev = region.aliases || [];
+                        if (JSON.stringify(next) !== JSON.stringify(prev)) {
+                            region.aliases = next;
+                            regionsCuratorState.dirty = true;
+                            _renderRegionsCuratorListIfMounted();
+                        }
+                    });
+                    aliasRow.appendChild(aliasInput);
+                    card.appendChild(aliasRow);
+
+                    // Reviewed (lock) checkbox
+                    const reviewedRow = document.createElement('label');
+                    reviewedRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;';
+                    const reviewedCb = document.createElement('input');
+                    reviewedCb.type = 'checkbox';
+                    reviewedCb.className = 'regions-curator-reviewed-checkbox';
+                    reviewedCb.checked = !!region.reviewed;
+                    reviewedCb.addEventListener('change', () => {
+                        if (!!region.reviewed !== reviewedCb.checked) {
+                            region.reviewed = reviewedCb.checked;
+                            regionsCuratorState.dirty = true;
+                            _renderRegionsCuratorListIfMounted();
+                        }
+                    });
+                    reviewedRow.appendChild(reviewedCb);
+                    const reviewedLbl = document.createElement('span');
+                    reviewedLbl.textContent = 'Reviewed (lock — preserved on Re-draft)';
+                    reviewedRow.appendChild(reviewedLbl);
+                    card.appendChild(reviewedRow);
+
+                    leftPane.appendChild(card);
+                }
+            };
+
+            // Fire initial load + render. Loop is async but the
+            // render function shows a loading state synchronously.
+            leftPane._render();
+            _regionsCuratorLoad(pn, revision).then(() => {
+                if (regionsCuratorState.mountKey === myKey) leftPane._render();
+            });
         }
 
         function _renderPartCompareSubtab(container) {

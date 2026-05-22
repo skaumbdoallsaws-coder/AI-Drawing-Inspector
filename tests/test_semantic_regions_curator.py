@@ -523,6 +523,26 @@ def test_served_html_curator_select_uses_apply_feature_highlight():
         "_regionsCuratorSelectRegion must call applyFeatureHighlight"
 
 
+def test_served_html_feature_highlight_dims_non_targets_for_visibility():
+    """Semantic region highlights must be visible on surface-heavy
+    parts. The normal 3D highlight pipeline should make non-target
+    meshes translucent and use a fallback glow when a selected feature's
+    assigned color is too close to the neutral gray baseline."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        "_featureOrigOpacity",
+        "_featureOrigTransparent",
+        "_featureOrigDepthWrite",
+        "const fallbackGlow = new THREE.Color(0xffc400)",
+        "Math.sqrt(dr * dr + dg * dg + db * db) < 0.08",
+        "mesh.material.opacity = 0.18",
+        "mesh.material.transparent = true",
+        "mesh.material.depthWrite = false",
+    ]:
+        assert marker in html, f"feature highlight visibility marker missing: {marker!r}"
+
+
 def test_served_html_curator_replays_highlight_after_glb_load_and_input_focus():
     """Region highlighting must not depend on clicking empty card
     chrome. Operators naturally click the editable label/alias fields,

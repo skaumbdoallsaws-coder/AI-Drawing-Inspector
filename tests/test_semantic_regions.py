@@ -1333,7 +1333,7 @@ def test_HIGHLIGHT_FEATURES_alone_still_works(
     )
     client = TestClient(server.app)
     r = client.post("/api/agent/chat", json={
-        "message":            "show me the propeller revolve",
+        "message":            "tell me about the propeller revolve",
         "agent_type":         "deviation-analyst",
         "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
     })
@@ -1439,12 +1439,12 @@ def test_direct_tail_highlight_request_returns_tail_aggregate(
     aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """Plain 'tail' in a direct highlight command should include the
-    stabilizers and the connector/fuselage-candidate bucket, not just
-    the first stabilizer resolved by substring."""
+    stabilizers, not just the first stabilizer resolved by substring.
+    It should also fire for natural UI wording like 'show me the tail'."""
     msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
     client = TestClient(server.app)
     r = client.post("/api/agent/chat", json={
-        "message":            "highlight the tail",
+        "message":            "show me the tail",
         "agent_type":         "deviation-analyst",
         "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
     })
@@ -1461,6 +1461,58 @@ def test_direct_tail_highlight_request_returns_tail_aggregate(
     assert "netblend_horiz_stab_p" in ids
     assert "netblend_vert_stab" in ids
     assert "pline_split_line1" not in ids
+
+
+def test_direct_semantic_cad_target_question_bypasses_model_and_uses_handoff(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Questions like "what SolidWorks features are associated with the
+    top wing" must be answered from the semantic-region CAD handoff
+    instead of letting Claude infer from unrelated raw features."""
+    msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "For 1030099 Rev A, what SolidWorks features are associated with the top wing?",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert msgs.last_kwargs is None, "semantic CAD target query should not call Anthropic"
+    assert body["tool_source"] == "semantic_region_cad_handoff_direct"
+    assert "top_wing" in body["response"]
+    assert "Planarsurface Top Wing" in body["response"]
+    assert "planarsurface_top_wing" in body["response"]
+    assert body["highlight_features"] == ["planarsurface_top_wing"]
+    assert body["tool_calls"] == [{
+        "name": "highlight_features",
+        "args": {"feature_ids": ["planarsurface_top_wing"]},
+    }]
+    assert body["cad_handoff"]["solidWorksTargets"]["sourceFeatures"] == ["Planarsurface Top Wing"]
+    assert any(reg.get("regionId") == "top_wing" for reg in body["highlight_regions"])
+
+
+def test_direct_semantic_edit_request_refuses_edit_but_returns_targets(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Edit-like requests should remain honest: InspectorPro cannot
+    modify SolidWorks yet, but it can identify the exact semantic-region
+    handoff targets for Sage/SOLIDWORKS."""
+    msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "Can you make the top wing 2 inches thicker?",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert msgs.last_kwargs is None, "semantic edit handoff should not call Anthropic"
+    assert body["tool_source"] == "semantic_region_cad_handoff_direct"
+    assert "cannot modify" in body["response"].lower()
+    assert "Planarsurface Top Wing" in body["response"]
+    assert body["highlight_features"] == ["planarsurface_top_wing"]
+    assert body["cad_handoff"]["operationPolicy"]["canEdit"] is False
 
 
 def test_native_highlight_features_semantic_region_token_resolves(
@@ -1537,6 +1589,10 @@ def test_AVAILABLE_SEMANTIC_REGIONS_section_injected_into_context(
     assert "top_wing" in ctx_msg
     # Aliases are surfaced so the model can use natural phrases.
     assert "upper wing" in ctx_msg
+    # CAD handoff targets are surfaced so Sage does not guess feature
+    # membership from the raw feature list.
+    assert "SolidWorks features: Planarsurface Top Wing" in ctx_msg
+    assert "cadFeatureIds: planarsurface_top_wing" in ctx_msg
 
 
 def test_AVAILABLE_SEMANTIC_REGIONS_section_absent_when_no_draft(

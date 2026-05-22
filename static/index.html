@@ -25641,6 +25641,9 @@
                 }
                 // Save original feature color
                 child.userData._featureColor = child.material.color.clone();
+                child.userData._featureOrigOpacity = child.material.opacity;
+                child.userData._featureOrigTransparent = child.material.transparent;
+                child.userData._featureOrigDepthWrite = child.material.depthWrite;
                 child.userData._featureId = featureId;
                 // Override to gray
                 child.material.color.set(0x888888);
@@ -25670,19 +25673,35 @@
         function applyFeatureHighlight(featureIds) {
             if (!state.featureMeshMap) return;
             const highlightSet = new Set(featureIds);
+            const neutralGray = new THREE.Color(0x888888);
+            const fallbackGlow = new THREE.Color(0xffc400);
             for (const [featId, meshes] of Object.entries(state.featureMeshMap)) {
                 meshes.forEach(mesh => {
                     if (highlightSet.has(featId)) {
-                        mesh.material.color.copy(mesh.userData._featureColor);
-                        mesh.material.emissive.copy(mesh.userData._featureColor);
-                        mesh.material.emissiveIntensity = 0.3;
+                        const highlightColor = (mesh.userData._featureColor || fallbackGlow).clone();
+                        // Some extractor-assigned feature colors are near the neutral
+                        // gray baseline. Use a visible fallback so "highlight" never
+                        // becomes indistinguishable from the dimmed model.
+                        const dr = highlightColor.r - neutralGray.r;
+                        const dg = highlightColor.g - neutralGray.g;
+                        const db = highlightColor.b - neutralGray.b;
+                        if (Math.sqrt(dr * dr + dg * dg + db * db) < 0.08) {
+                            highlightColor.copy(fallbackGlow);
+                        }
+                        mesh.material.color.copy(highlightColor);
+                        mesh.material.emissive.copy(highlightColor);
+                        mesh.material.emissiveIntensity = 0.55;
+                        mesh.material.opacity = mesh.userData._featureOrigOpacity ?? 1;
+                        mesh.material.transparent = mesh.userData._featureOrigTransparent ?? false;
+                        mesh.material.depthWrite = mesh.userData._featureOrigDepthWrite ?? true;
                     } else {
                         mesh.material.color.set(0x888888);
                         mesh.material.emissive.set(0x000000);
                         mesh.material.emissiveIntensity = 0;
+                        mesh.material.opacity = 0.18;
+                        mesh.material.transparent = true;
+                        mesh.material.depthWrite = false;
                     }
-                    mesh.material.opacity = 1;
-                    mesh.material.transparent = false;
                     mesh.material.needsUpdate = true;
                 });
             }
@@ -25696,8 +25715,9 @@
                     mesh.material.color.set(0x888888);
                     mesh.material.emissive.set(0x000000);
                     mesh.material.emissiveIntensity = 0;
-                    mesh.material.opacity = 1;
-                    mesh.material.transparent = false;
+                    mesh.material.opacity = mesh.userData._featureOrigOpacity ?? 1;
+                    mesh.material.transparent = mesh.userData._featureOrigTransparent ?? false;
+                    mesh.material.depthWrite = mesh.userData._featureOrigDepthWrite ?? true;
                     mesh.material.needsUpdate = true;
                 });
             }

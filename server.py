@@ -3858,10 +3858,15 @@ def _semantic_regions_list_for_context(pn: Optional[str],
         if not isinstance(rid, str) or not rid:
             continue
         aliases = r.get("aliases") if isinstance(r.get("aliases"), list) else []
+        cad_targets = r.get("cadTargets") if isinstance(r.get("cadTargets"), dict) else {}
+        cad_ids = cad_targets.get("cadFeatureIds") if isinstance(cad_targets.get("cadFeatureIds"), list) else []
+        src_feats = cad_targets.get("sourceFeatures") if isinstance(cad_targets.get("sourceFeatures"), list) else []
         out.append({
             "regionId":   rid,
             "label":      str(r.get("label") or ""),
             "aliases":    [str(a) for a in aliases if isinstance(a, str)],
+            "cadFeatureIds":  [str(x) for x in cad_ids if isinstance(x, str)],
+            "sourceFeatures": [str(x) for x in src_feats if isinstance(x, str)],
             "confidence": str(r.get("confidence") or "low"),
             "reviewed":   bool(r.get("reviewed", False)),
         })
@@ -3965,7 +3970,7 @@ def _semantic_region_phrases_in_text(ctx: Optional[Dict[str, Any]], text: str) -
 
 
 _DIRECT_SEMANTIC_HIGHLIGHT_RE = re.compile(
-    r'\b(highlight|focus|locate|point out|select)\b',
+    r'\b(show|display|highlight|focus|locate|point out|select)\b',
     re.IGNORECASE,
 )
 _DIRECT_SEMANTIC_HIGHLIGHT_BLOCKERS_RE = re.compile(
@@ -3983,6 +3988,119 @@ def _is_direct_semantic_highlight_request(message: str) -> bool:
     if not _DIRECT_SEMANTIC_HIGHLIGHT_RE.search(msg):
         return False
     return _DIRECT_SEMANTIC_HIGHLIGHT_BLOCKERS_RE.search(msg) is None
+
+
+_SEMANTIC_CAD_TARGET_QUERY_RE = re.compile(
+    r'\b('
+    r'solidworks\s+features?|cad\s+targets?|cad\s+feature\s+ids?|'
+    r'source\s+features?|features?\s+associated|associated\s+features?|'
+    r'identify\s+(?:the\s+)?(?:cad\s+)?targets?|'
+    r'need\s+to\s+modify|would\s+.*\bmodify|'
+    r'make|change|edit|increase|decrease|thicker|thinner|thin|thick'
+    r')\b',
+    re.IGNORECASE,
+)
+
+
+def _is_semantic_cad_target_request(message: str) -> bool:
+    """True when Sage should answer from the semantic-region CAD handoff
+    instead of letting the LLM infer feature membership."""
+    msg = str(message or "").strip()
+    if not msg:
+        return False
+    return _SEMANTIC_CAD_TARGET_QUERY_RE.search(msg) is not None
+
+
+_SEMANTIC_EDIT_INTENT_RE = re.compile(
+    r'\b(make|change|edit|modify|increase|decrease|thicker|thinner|thin|thick)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_semantic_edit_intent(message: str) -> bool:
+    return _SEMANTIC_EDIT_INTENT_RE.search(str(message or "")) is not None
+
+
+def _semantic_region_handoff_payload_from_context(
+    ctx: Optional[Dict[str, Any]],
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    """Resolve the first semantic region phrase in a user message into
+    the same read-only CAD handoff payload exposed by the public
+    /cad-handoff endpoint. This is intentionally deterministic: when
+    the user asks "what SolidWorks features are associated with the top
+    wing?", Sage should answer from curated semantic-region data, not
+    from a model guess over raw CAD features."""
+    library_dir, safe_pn, safe_rev = _semantic_regions_target_from_context(ctx)
+    if not library_dir or not safe_pn or not safe_rev:
+        return None
+    for phrase in _semantic_region_phrases_in_text(ctx, message):
+        payload = _semantic_region_cad_handoff_payload(library_dir, safe_pn, safe_rev, phrase)
+        if payload:
+            return payload
+    return None
+
+
+def _semantic_region_cad_handoff_chat_result(
+    payload: Dict[str, Any],
+    message: str,
+    agent_type: str,
+) -> Dict[str, Any]:
+    targets = payload.get("solidWorksTargets") if isinstance(payload.get("solidWorksTargets"), dict) else {}
+    feature_ids = [
+        str(fid) for fid in (targets.get("cadFeatureIds") or [])
+        if isinstance(fid, str) and fid
+    ]
+    source_features = [
+        str(src) for src in (targets.get("sourceFeatures") or [])
+        if isinstance(src, str) and src
+    ]
+    regions = payload.get("regions") if isinstance(payload.get("regions"), list) else []
+    region_ids = [
+        str(r.get("regionId")) for r in regions
+        if isinstance(r, dict) and r.get("regionId")
+    ]
+    labels = [
+        str(r.get("label") or r.get("regionId")) for r in regions
+        if isinstance(r, dict) and (r.get("label") or r.get("regionId"))
+    ]
+    region_label = " + ".join(labels) if labels else str(payload.get("phrase") or "that region")
+
+    if source_features and feature_ids:
+        target_text = ", ".join(f"{src} ({fid})" for src, fid in zip(source_features, feature_ids))
+    elif source_features:
+        target_text = ", ".join(source_features)
+    elif feature_ids:
+        target_text = ", ".join(feature_ids)
+    else:
+        target_text = "no CAD feature targets are currently mapped"
+
+    if _is_semantic_edit_intent(message):
+        response = (
+            f"I cannot modify the SolidWorks model from InspectorPro yet. "
+            f"{region_label} resolves to region(s) {', '.join(region_ids) or 'unknown'} "
+            f"with SolidWorks target(s): {target_text}. Use these as the read-only handoff targets."
+        )
+    else:
+        response = (
+            f"{region_label} resolves to region(s) {', '.join(region_ids) or 'unknown'}. "
+            f"SolidWorks target(s): {target_text}."
+        )
+
+    raw_calls = [{"name": "highlight_features", "args": {"feature_ids": feature_ids}}] if feature_ids else []
+    guarded, warnings = apply_tool_guardrails(raw_calls, agent_type, "semantic_region_cad_handoff_direct")
+    result = {
+        "response":           response,
+        "highlight_features": feature_ids,
+        "highlight_regions":  regions,
+        "cad_handoff":        payload,
+        "tool_calls":         guarded,
+        "tool_source":        "semantic_region_cad_handoff_direct",
+        "tool_call_count":    len(guarded),
+    }
+    if warnings:
+        result["tool_guardrail_warnings"] = warnings
+    return result
 
 
 def _merge_feature_ids_into_tool_calls(tool_calls: List[Dict[str, Any]], feature_ids: List[str]) -> None:
@@ -4426,43 +4544,19 @@ async def part_semantic_regions_resolve(
     }
 
 
-@app.get("/api/part-semantic-regions/{partNumber}/cad-handoff")
-async def part_semantic_regions_cad_handoff(
-    partNumber: str,
-    revision:   str = Query(...),
-    phrase:     str = Query(..., description="User phrase to resolve for SolidWorks/Sage handoff."),
-):
-    """Build the read-only CAD handoff payload for a semantic phrase.
+def _semantic_region_cad_handoff_payload(
+    library_dir: Path,
+    safe_pn: str,
+    safe_rev: str,
+    phrase: str,
+) -> Optional[Dict[str, Any]]:
+    """Return the read-only CAD handoff payload for one semantic phrase.
 
-    This is the bridge-facing shape Sage-in-SOLIDWORKS can consume:
-    user phrase -> semantic region -> GLB nodes -> stable cadFeatureIds
-    -> SolidWorks-visible source feature names.
-
-    Deliberately no CAD edits here. The response includes an explicit
-    `operationPolicy.canEdit=false` until placementSurfaces /
-    placementCapabilities are populated and a separate SolidWorks edit
-    execution endpoint exists."""
-    safe_pn = sanitize_part_number(partNumber)
-    if not safe_pn:
-        raise HTTPException(status_code=400, detail="Invalid part number")
-    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
-    if not phrase or not phrase.strip():
-        raise HTTPException(status_code=400, detail="phrase query parameter is required")
-
-    library_dir = library_path()
-    # Use the multi-region resolver, not the single-hit resolver, so
-    # aggregate phrases like "tail" produce both horizontal + vertical
-    # stabilizer targets. This mirrors HIGHLIGHT_REGIONS behavior.
+    Pure resolver wrapper used by both the HTTP endpoint and Sage's
+    deterministic pre-LLM path. Returns None when no region matches."""
     hits = _semantic_resolve_phrases(library_dir, safe_pn, safe_rev, [phrase])
     if not hits:
-        return JSONResponse(status_code=404, content={
-            "matched":    False,
-            "partNumber": safe_pn,
-            "revision":   safe_rev,
-            "phrase":     phrase,
-            "detail":     f"No semantic region matched {phrase!r}.",
-        })
-
+        return None
     doc_path = _semantic_regions_path(library_dir, safe_pn, safe_rev)
     try:
         doc = json.loads(doc_path.read_text(encoding="utf-8-sig"))
@@ -4548,6 +4642,41 @@ async def part_semantic_regions_cad_handoff(
             "blockedReason":  blocked_reason,
         },
     }
+
+
+@app.get("/api/part-semantic-regions/{partNumber}/cad-handoff")
+async def part_semantic_regions_cad_handoff(
+    partNumber: str,
+    revision:   str = Query(...),
+    phrase:     str = Query(..., description="User phrase to resolve for SolidWorks/Sage handoff."),
+):
+    """Build the read-only CAD handoff payload for a semantic phrase.
+
+    This is the bridge-facing shape Sage-in-SOLIDWORKS can consume:
+    user phrase -> semantic region -> GLB nodes -> stable cadFeatureIds
+    -> SolidWorks-visible source feature names.
+
+    Deliberately no CAD edits here. The response includes an explicit
+    `operationPolicy.canEdit=false` until placementSurfaces /
+    placementCapabilities are populated and a separate SolidWorks edit
+    execution endpoint exists."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+    if not phrase or not phrase.strip():
+        raise HTTPException(status_code=400, detail="phrase query parameter is required")
+
+    payload = _semantic_region_cad_handoff_payload(library_path(), safe_pn, safe_rev, phrase)
+    if payload is None:
+        return JSONResponse(status_code=404, content={
+            "matched":    False,
+            "partNumber": safe_pn,
+            "revision":   safe_rev,
+            "phrase":     phrase,
+            "detail":     f"No semantic region matched {phrase!r}.",
+        })
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -9643,10 +9772,21 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
                 tags.append(f"draft/{r['confidence']}")
             tag_str = f" [{', '.join(tags)}]" if tags else ""
             if aliases:
-                sr_lines.append(f"- {label} (regionId: {rid}; aliases: {', '.join(aliases)}){tag_str}")
+                base_line = f"- {label} (regionId: {rid}; aliases: {', '.join(aliases)}){tag_str}"
             else:
-                sr_lines.append(f"- {label} (regionId: {rid}){tag_str}")
+                base_line = f"- {label} (regionId: {rid}){tag_str}"
+            src = r.get("sourceFeatures") or []
+            cad = r.get("cadFeatureIds") or []
+            target_bits = []
+            if src:
+                target_bits.append("SolidWorks features: " + ", ".join(str(x) for x in src[:8]))
+            if cad:
+                target_bits.append("cadFeatureIds: " + ", ".join(str(x) for x in cad[:8]))
+            if target_bits:
+                base_line += " — " + "; ".join(target_bits)
+            sr_lines.append(base_line)
         sr_lines.append("To highlight a region, include a line: HIGHLIGHT_REGIONS: top wing, tail")
+        sr_lines.append("When asked which SolidWorks features/CAD targets belong to a semantic region, answer from the listed SolidWorks features/cadFeatureIds only; do not infer from unrelated raw features.")
         sr_lines.append("Phrases match label, any alias, or regionId (case + space + underscore + hyphen normalize).")
         sr_lines.append("The resolver expands each region to its GLB nodes + CAD feature IDs automatically \u2014 do not also emit HIGHLIGHT_FEATURES for the same region.")
         parts.append("\n".join(sr_lines))
@@ -10320,6 +10460,19 @@ async def agent_chat(request: AgentChatRequest):
         raw_ctx = request.inspection_context or request.context or {}
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
+
+        # Deterministic fast path for semantic-region CAD target questions
+        # and edit-intent handoff questions. These are not open-ended LLM
+        # reasoning tasks: the authoritative answer is the curated
+        # semantic-region map for the currently visible revision.
+        if request.agent_type == "deviation-analyst" and _is_semantic_cad_target_request(request.message):
+            handoff_payload = _semantic_region_handoff_payload_from_context(ctx, request.message)
+            if handoff_payload:
+                return _semantic_region_cad_handoff_chat_result(
+                    handoff_payload,
+                    request.message,
+                    request.agent_type,
+                )
 
         # Deterministic fast path for simple region-highlight commands.
         # This avoids relying on the model to obey marker syntax for

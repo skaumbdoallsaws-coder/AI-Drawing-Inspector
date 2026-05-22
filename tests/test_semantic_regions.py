@@ -174,11 +174,20 @@ def aircraft_library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     rev_dir = library / "parts" / pn / rev
     rev_dir.mkdir(parents=True)
     _write_synthetic_glb(rev_dir / f"{pn}_colored.glb", _aircraft_fixture())
-    # Minimal feature_colors.json so sourceFeatures populates
+    # Minimal feature_colors.json so sourceFeatures populates. Use the
+    # REAL snake_case schema the SolidWorksExtractor writes
+    # (glb_node_name + sw_name + cad_feature_id) -- not the camelCase
+    # variant -- so the loader is tested against on-disk reality.
     (rev_dir / f"{pn}_feature_colors.json").write_text(json.dumps({
         "partNumber": pn,
         "features": [
-            {"cadFeatureId": n, "swName": n.replace("_", " ").title()}
+            {
+                "cad_feature_id": n,
+                "glb_node_name":  n,
+                "sw_name":        n.replace("_", " ").title(),
+                "type":           n.split("_", 1)[0],
+                "display_label":  n.replace("_", " ").title(),
+            }
             for n, *_ in _aircraft_fixture()
         ],
     }), encoding="utf-8")
@@ -343,17 +352,125 @@ def test_build_draft_regions_aircraft_assigns_every_node(aircraft_library: Path)
                   "requiresReview", "editReadiness",
                   "visualTargets", "cadTargets", "editableParameters",
                   # 1.2.0 placement scaffolding
-                  "placementSurfaces", "placementCapabilities"):
+                  "placementSurfaces", "placementCapabilities",
+                  # 1.3.0 traceability
+                  "unmappedGlbNodes"):
             assert k in r, f"region {r.get('regionId')!r} missing {k}"
         assert r["reviewed"] is False, "new drafts must always start unreviewed"
         assert r["confidence"] in ("low", "medium", "high")
 
 
 def test_build_draft_regions_sourceFeatures_populated_from_feature_colors(aircraft_library: Path):
+    """Test #1: region.sourceFeatures populates from feature_colors.json
+    via the glb_node_name lookup. The fixture writes sw_name as the
+    Title Case form of the glb_node_name, so we can assert the exact
+    transformation flowed through."""
     doc = build_draft_regions(aircraft_library, "1030099", "revA")
     propeller = next(r for r in doc["regions"] if r["regionId"] == "propeller")
-    # feature_colors fixture mapped cadFeatureId -> Title Case version
-    assert any("Revolve1" in s for s in propeller["sourceFeatures"])
+    # Every propeller glbNode resolves to a sw_name
+    assert len(propeller["sourceFeatures"]) == len(propeller["glbNodes"]), \
+        (f"every propeller glbNode should resolve to a sw_name; "
+         f"got {propeller['sourceFeatures']} for {propeller['glbNodes']}")
+    # feature_colors fixture wrote sw_name = Title(glb_node_name.replace('_',' '))
+    # so revolution_revolve1 -> "Revolution Revolve1"
+    assert "Revolution Revolve1" in propeller["sourceFeatures"]
+    # The region must have NO unmapped nodes when the sidecar is complete
+    assert propeller["unmappedGlbNodes"] == []
+
+
+def test_build_draft_regions_cadTargets_mirrors_sourceFeatures(aircraft_library: Path):
+    """Test #2: cadTargets.sourceFeatures must mirror the resolved
+    SW feature names AND cadTargets.cadFeatureIds carries the stable
+    SolidWorks identifiers (cad_feature_id) for the future Sage bridge."""
+    doc = build_draft_regions(aircraft_library, "1030099", "revA")
+    for r in doc["regions"]:
+        ct = r["cadTargets"]
+        assert ct["sourceFeatures"] == r["sourceFeatures"], \
+            f"{r['regionId']} cadTargets.sourceFeatures must mirror top-level sourceFeatures"
+        # cadFeatureIds carries the stable CAD identifiers. The
+        # fixture sets cad_feature_id == glb_node_name, so for any
+        # mapped node we should see the node name in cadFeatureIds.
+        mapped_count = len(r["glbNodes"]) - len(r["unmappedGlbNodes"])
+        assert len(ct["cadFeatureIds"]) == mapped_count, \
+            (f"{r['regionId']} cadTargets.cadFeatureIds length should match "
+             f"the count of MAPPED glbNodes (got {len(ct['cadFeatureIds'])} "
+             f"for {mapped_count} mapped of {len(r['glbNodes'])} total)")
+        # And every cadFeatureId in the region should be one of the
+        # region's mapped glbNodes (in this fixture they're equal).
+        mapped_glb = [n for n in r["glbNodes"] if n not in set(r["unmappedGlbNodes"])]
+        assert ct["cadFeatureIds"] == mapped_glb, \
+            (f"{r['regionId']} cadFeatureIds drift from mapped glbNodes: "
+             f"{ct['cadFeatureIds']} vs {mapped_glb}")
+
+
+def test_build_draft_regions_unmapped_nodes_do_not_crash(aircraft_library: Path):
+    """Test #3: a glbNode with no feature_colors mapping must not
+    crash the builder. The node still appears in glbNodes /
+    visualTargets.glbNodes (so the UI can highlight it) and is
+    reported in unmappedGlbNodes with a review note in `notes`."""
+    # Remove the feature_colors entry for the propeller's revolve,
+    # mirroring the real-world case where the bridge sidecar gets
+    # out of sync with the GLB.
+    pn, rev = "1030099", "revA"
+    fcp = aircraft_library / "parts" / pn / rev / f"{pn}_feature_colors.json"
+    doc = json.loads(fcp.read_text(encoding="utf-8"))
+    doc["features"] = [f for f in doc["features"]
+                       if f.get("glb_node_name") != "revolution_revolve1"]
+    fcp.write_text(json.dumps(doc), encoding="utf-8")
+
+    out = build_draft_regions(aircraft_library, pn, rev)
+    propeller = next(r for r in out["regions"] if r["regionId"] == "propeller")
+    # Node still listed for highlighting
+    assert "revolution_revolve1" in propeller["glbNodes"]
+    assert "revolution_revolve1" in propeller["visualTargets"]["glbNodes"]
+    # And reported as unmapped
+    assert "revolution_revolve1" in propeller["unmappedGlbNodes"]
+    # SourceFeatures shrank by exactly one (the unmapped node)
+    assert len(propeller["sourceFeatures"]) == len(propeller["glbNodes"]) - 1
+    # Notes carries the review pointer
+    assert "unmappedGlbNodes" in propeller["notes"], \
+        f"notes should hint at the unmapped nodes; got {propeller['notes']!r}"
+
+
+def test_build_draft_regions_curator_sourceFeatures_not_clobbered(aircraft_library: Path):
+    """Test #4: when a curator has marked a region reviewed=true and
+    populated sourceFeatures by hand, re-drafting must NOT replace
+    those values with the auto-resolved sw_names from feature_colors.
+    The preservation path copies reviewed regions verbatim before the
+    builder touches them."""
+    pn, rev = "1030099", "revA"
+    # First draft creates the file
+    doc1 = build_draft_regions(aircraft_library, pn, rev)
+    write_semantic_regions(aircraft_library, pn, rev, doc1)
+    # Curator manually rewrites the propeller's sourceFeatures with
+    # human-friendly labels that DON'T match the auto-resolution
+    out = semantic_regions_path(aircraft_library, pn, rev)
+    existing = json.loads(out.read_text(encoding="utf-8"))
+    for r in existing["regions"]:
+        if r["regionId"] == "propeller":
+            r["reviewed"] = True
+            r["sourceFeatures"] = [
+                "Curator: spinner cap",
+                "Curator: leading blade",
+                "Curator: blade pattern",
+            ]
+            r["cadTargets"]["sourceFeatures"] = list(r["sourceFeatures"])
+            r["cadTargets"]["cadFeatureIds"]  = ["CURATED_FACE_001", "CURATED_FACE_002"]
+            break
+    out.write_text(json.dumps(existing), encoding="utf-8")
+
+    # Re-draft -- propeller must come back UNCHANGED
+    doc2 = build_draft_regions(aircraft_library, pn, rev)
+    propeller = next(r for r in doc2["regions"] if r["regionId"] == "propeller")
+    assert propeller["reviewed"] is True
+    assert propeller["sourceFeatures"] == [
+        "Curator: spinner cap",
+        "Curator: leading blade",
+        "Curator: blade pattern",
+    ], "curator sourceFeatures must not be replaced by auto-resolution"
+    assert propeller["cadTargets"]["sourceFeatures"] == propeller["sourceFeatures"]
+    assert propeller["cadTargets"]["cadFeatureIds"]  == ["CURATED_FACE_001", "CURATED_FACE_002"], \
+        "curator-set cadFeatureIds must survive re-draft"
 
 
 def test_build_draft_regions_schema_1_1_0_cad_orchestration_fields(aircraft_library: Path):

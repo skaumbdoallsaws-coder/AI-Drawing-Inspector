@@ -23,7 +23,7 @@ Output document:
       "regions":         [ {Region}, ... ]
     }
 
-Each region (schema 1.2.0):
+Each region (schema 1.3.0):
 
     {
       "regionId":      "top_wing",
@@ -39,7 +39,9 @@ Each region (schema 1.2.0):
         "glbNodes": [...]              # mirrors region.glbNodes
       },
       "cadTargets": {
-        "sourceFeatures":   [...],     # MVP: == region.sourceFeatures
+        "sourceFeatures":   [...],     # SW-visible feature names (sw_name)
+        "cadFeatureIds":    [...],     # stable SolidWorks identifiers (cad_feature_id);
+                                       # schema 1.3.0+, populated from feature_colors.json
         "upstreamFeatures": [],        # MVP: empty; needs dep extractor
         "sketches":         [],        # MVP: empty; needs dep extractor
         "planes":           [],        # MVP: empty; needs dep extractor
@@ -77,7 +79,11 @@ Each region (schema 1.2.0):
       # sketch_on_face, extruded_boss, extruded_cut, hole_wizard_pattern.
       "placementCapabilities": ["reference_only"],
 
-      "source":        "ai_inspector.semantic_regions.builder/1.2.0-mvp",
+      "unmappedGlbNodes": [],          # schema 1.3.0+: glbNodes that
+                                       # had no feature_colors mapping;
+                                       # surfaced in notes too
+
+      "source":        "ai_inspector.semantic_regions.builder/1.3.0-mvp",
       "notes":         "AI-proposed grouping; operator should verify."
     }
 """
@@ -101,13 +107,13 @@ from .rules import (
 )
 
 
-SCHEMA_VERSION = "part-semantic-regions-1.2.0"
+SCHEMA_VERSION = "part-semantic-regions-1.3.0"
 SEMANTIC_REGIONS_FILENAME = "{pn}_semantic_regions.json"
 
 # Pinned source string so an operator can grep for AI-generated regions
 # vs operator-curated ones (the curator tool will overwrite this string
 # when it locks a region).
-_DEFAULT_REGION_SOURCE = "ai_inspector.semantic_regions.builder/1.2.0-mvp"
+_DEFAULT_REGION_SOURCE = "ai_inspector.semantic_regions.builder/1.3.0-mvp"
 
 # Allowed values for region.editReadiness. The MVP only ever emits
 # "not_ready" because we lack sketch/plane/dimension/parameter data
@@ -169,15 +175,33 @@ def _intake_manifest_path(library_dir: Path, pn: str, revision: str) -> Path:
 # SolidWorks feature names via the feature_colors.json sidecar.
 # ---------------------------------------------------------------------------
 
-def _load_node_to_source_feature(library_dir: Path, pn: str, revision: str) -> Dict[str, str]:
-    """Return cad_feature_id -> swName lookup.
+def _load_node_to_source_feature(library_dir: Path, pn: str, revision: str) -> Dict[str, Dict[str, str]]:
+    """Return glb_node_name -> {sw_name, cad_feature_id} lookup.
 
-    SolidWorksExtractor writes {pn}_feature_colors.json as
-    `{"partNumber": ..., "features": [{cadFeatureId, swName, ...}]}`.
-    The GLB nodes are named by cadFeatureId, so this maps GLB node ->
-    raw 'Boundary-Surface3' style feature name. Falls back to {} if
-    the sidecar is missing or malformed; the builder still produces
-    a valid output, just without sourceFeatures populated."""
+    SolidWorksExtractor writes {pn}_feature_colors.json with snake_case
+    keys:
+        {"partNumber": ...,
+         "features": [
+           {"cad_feature_id": "netblend_boundary_surface3",
+            "sw_name":        "Boundary-Surface3",
+            "type":           "netblend",
+            "display_label":  "Boundary-Surface3",
+            "color":          "#...",
+            "glb_node_name":  "netblend_boundary_surface3"}, ...]}
+
+    This loader keys on `glb_node_name` because that is the field the
+    extractor pins as the bridge between rendered geometry and CAD
+    metadata. For 1030034 it happens to equal `cad_feature_id`, but
+    that equivalence is a coincidence of the current GenerateFeatureId
+    implementation -- future schemas may diverge them.
+
+    Also accepts camelCase keys (cadFeatureId / swName / glbNodeName /
+    glbNode) as a defensive fallback in case a downstream writer
+    emits a stylised variant.
+
+    Returns {} when the sidecar is missing or unparseable -- the
+    builder still produces a valid output, just with sourceFeatures
+    empty for every region."""
     fcp = _feature_colors_path(library_dir, pn, revision)
     if not fcp.exists():
         return {}
@@ -185,17 +209,39 @@ def _load_node_to_source_feature(library_dir: Path, pn: str, revision: str) -> D
         doc = json.loads(fcp.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
-    out: Dict[str, str] = {}
+    out: Dict[str, Dict[str, str]] = {}
     feats = doc.get("features") if isinstance(doc, dict) else None
     if not isinstance(feats, list):
         return out
     for f in feats:
         if not isinstance(f, dict):
             continue
-        cid = f.get("cadFeatureId") or f.get("CadFeatureId") or f.get("id")
-        sw  = f.get("swName")       or f.get("SwName")        or f.get("name")
-        if isinstance(cid, str) and isinstance(sw, str) and cid.strip() and sw.strip():
-            out[cid.strip()] = sw.strip()
+        # glb_node_name is the explicit pointer to the GLB node; if
+        # absent (older sidecar versions did not write it) we fall
+        # back to cad_feature_id, which equals the node name under
+        # current GenerateFeatureId rules.
+        glb_node = (f.get("glb_node_name")
+                    or f.get("glbNodeName")
+                    or f.get("glbNode")
+                    or f.get("cad_feature_id")
+                    or f.get("cadFeatureId"))
+        sw_name = (f.get("sw_name")
+                   or f.get("swName")
+                   or f.get("name"))
+        cad_id  = (f.get("cad_feature_id")
+                   or f.get("cadFeatureId")
+                   or f.get("id"))
+        if not (isinstance(glb_node, str) and glb_node.strip()):
+            continue
+        # sw_name is the most useful field for a human operator; if
+        # missing fall back to display_label or cad_feature_id so the
+        # caller always has SOMETHING to surface.
+        if not (isinstance(sw_name, str) and sw_name.strip()):
+            sw_name = (f.get("display_label") or cad_id or "")
+        out[glb_node.strip()] = {
+            "sw_name":        (sw_name or "").strip(),
+            "cad_feature_id": (cad_id or "").strip(),
+        }
     return out
 
 
@@ -264,12 +310,26 @@ def _upgrade_region_to_1_2_0(region: Dict[str, Any]) -> None:
     region.setdefault("placementCapabilities", ["reference_only"])
 
 
+def _upgrade_region_to_1_3_0(region: Dict[str, Any]) -> None:
+    """Schema 1.2.0 -> 1.3.0: seed CAD-side traceability fields
+    (cadTargets.cadFeatureIds, unmappedGlbNodes). Idempotent.
+
+    Does NOT auto-populate cadFeatureIds from existing glbNodes --
+    that mapping is only known when the feature_colors sidecar is
+    present, which is the build-time path's job. Preserved-curator
+    regions get an empty list and the curator can fill it in."""
+    ct = region.setdefault("cadTargets", {})
+    ct.setdefault("cadFeatureIds", [])
+    region.setdefault("unmappedGlbNodes", [])
+
+
 def _upgrade_region_to_current(region: Dict[str, Any]) -> None:
     """Apply every schema upgrade in order. Each step is idempotent
     and only seeds missing fields, so a region already at the latest
     schema passes through unmodified."""
     _upgrade_region_to_1_1_0(region)
     _upgrade_region_to_1_2_0(region)
+    _upgrade_region_to_1_3_0(region)
 
 
 def _node_names_locked_by_reviewed(reviewed: List[Dict[str, Any]]) -> set:
@@ -329,15 +389,42 @@ def _build_region(
     region_id: str,
     glb_nodes: List[GlbNode],
     confidence: str,
-    node_to_source: Dict[str, str],
+    node_to_source: Dict[str, Dict[str, str]],
 ) -> Dict[str, Any]:
     label, aliases = LABELS.get(region_id) or fallback_bucket_label(region_id)
     glb_node_names = [n.name for n in glb_nodes]
-    source_features = []
+
+    # Walk the region's GLB nodes once, looking each up in the
+    # feature_colors map. Build three parallel outputs:
+    #   - source_features (sw_name list, deduped, first-occurrence
+    #     order)  -- the operator-recognised SW labels
+    #   - cad_feature_ids (deduped, first-occurrence) -- the stable
+    #     SolidWorks API identifiers the future Sage CAD bridge
+    #     consumes
+    #   - unmapped_glb_nodes -- nodes that did NOT resolve through
+    #     the sidecar; reported as a separate field so the curator
+    #     can decide whether to drop them or supply manual mappings
+    source_features: List[str] = []
+    cad_feature_ids: List[str] = []
+    unmapped_glb_nodes: List[str] = []
+    _seen_sw, _seen_cid = set(), set()
     for nm in glb_node_names:
-        sw = node_to_source.get(nm)
-        if sw:
+        entry = node_to_source.get(nm)
+        if not entry:
+            unmapped_glb_nodes.append(nm)
+            continue
+        sw = entry.get("sw_name") or ""
+        cid = entry.get("cad_feature_id") or ""
+        if sw and sw not in _seen_sw:
             source_features.append(sw)
+            _seen_sw.add(sw)
+        if cid and cid not in _seen_cid:
+            cad_feature_ids.append(cid)
+            _seen_cid.add(cid)
+        # An entry present but with both fields empty still counts
+        # as mapped (the sidecar acknowledged the node) -- no
+        # unmapped_glb_nodes entry. This is intentional.
+
     # Per-region note that owns up to the uncertainty.
     if region_id == "uncategorized":
         notes = ("No spatial rule matched and the node names did not "
@@ -353,14 +440,20 @@ def _build_region(
                  "should split into semantic regions.")
     else:
         notes = "AI-proposed grouping; operator should verify."
+    # Tack on a review pointer when some GLB nodes did not resolve
+    # through the feature_colors sidecar. The structured field
+    # unmappedGlbNodes carries the data; the note carries the
+    # operator-facing hint.
+    if unmapped_glb_nodes:
+        notes = (notes + " " +
+                 f"Review: {len(unmapped_glb_nodes)} GLB node(s) lacked a "
+                 "feature_colors mapping; see unmappedGlbNodes.")
+
     # Forward-compat: the schema is the bridge to future SOLIDWORKS
     # Sage CAD-edit orchestration. visualTargets / cadTargets /
     # editableParameters / editReadiness / requiresReview are the
     # placeholders the dependency extractor + parameter extractor
-    # will fill in. The MVP populates visualTargets.glbNodes and
-    # cadTargets.sourceFeatures from what we know today and leaves
-    # the rest as empty lists with editReadiness="not_ready" --
-    # honest about the gap rather than synthesising fake handles.
+    # will fill in.
     return {
         "regionId":       region_id,
         "label":          label,
@@ -379,7 +472,12 @@ def _build_region(
             "glbNodes": list(glb_node_names),
         },
         "cadTargets":     {
+            # sourceFeatures mirrors the top-level field; cadFeatureIds
+            # carries the stable SolidWorks identifiers the future
+            # Sage bridge consumes. Both populated from
+            # feature_colors.json (schema 1.3.0+).
             "sourceFeatures":   list(source_features),
+            "cadFeatureIds":    list(cad_feature_ids),
             "upstreamFeatures": [],
             "sketches":         [],
             "planes":           [],
@@ -387,14 +485,10 @@ def _build_region(
         },
         "editableParameters": [],
         # Schema 1.2.0 -- future CAD-edit PLANNING scaffolding ------
-        # placementSurfaces stays empty until the surface extractor
-        # ships; placementCapabilities defaults to ["reference_only"]
-        # because that is honestly what we can offer today (highlight
-        # the region, no controlled edits). The MVP intentionally
-        # does not promise sketch_on_face / extruded_* / hole_wizard_*
-        # until the dependency + parameter extractors are wired.
         "placementSurfaces":     [],
         "placementCapabilities": ["reference_only"],
+        # Schema 1.3.0 -- traceability gap reporting ---------------
+        "unmappedGlbNodes":  list(unmapped_glb_nodes),
         # -----------------------------------------------------------
         "source":         _DEFAULT_REGION_SOURCE,
         "notes":          notes,

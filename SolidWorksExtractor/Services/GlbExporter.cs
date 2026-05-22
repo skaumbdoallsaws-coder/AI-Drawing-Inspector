@@ -80,6 +80,56 @@ namespace SolidWorksExtractor.Services
             public uint[] Indices;      // triangle indices
             public float[] BoundsMin;   // [minX, minY, minZ]
             public float[] BoundsMax;   // [maxX, maxY, maxZ]
+            // True when this component's mesh was tessellated EXCLUSIVELY from
+            // sheet (surface) bodies. The GLB material is then written with
+            // doubleSided=true so thin surfaces are visible from both sides in
+            // three.js -- single-sided culling would hide half of every panel.
+            // Mixed solid+sheet components stay single-sided (the solid faces
+            // dominate visually).
+            public bool IsSheetBody;
+        }
+
+        // Cross-method helper return shape for "enumerate every visible body on
+        // a part, tagged with whether it's a sheet body". Replaces the legacy
+        // GetBodies2(swSolidBody, true) call sites that silently dropped every
+        // surface body -- a surface-modeled part (e.g. 1030034 Vintage Plane,
+        // built from NetBlend lofts) would produce an effectively empty GLB.
+        private struct TaggedBody
+        {
+            public IBody2 Body;
+            public bool   IsSheet;
+        }
+
+        /// <summary>
+        /// Enumerate both solid and sheet bodies on a part document, in
+        /// deterministic order (solids first, then sheets). Empty / null
+        /// returns from GetBodies2 are tolerated so a pure-surface part still
+        /// yields a body list instead of aborting at the legacy
+        /// "No solid bodies found" guard.
+        /// </summary>
+        private static List<TaggedBody> EnumerateVisibleBodies(IPartDoc partDoc)
+        {
+            var result = new List<TaggedBody>();
+            if (partDoc == null) return result;
+            AppendBodies(result, partDoc, swBodyType_e.swSolidBody, isSheet: false);
+            AppendBodies(result, partDoc, swBodyType_e.swSheetBody, isSheet: true);
+            return result;
+        }
+
+        private static void AppendBodies(List<TaggedBody> dest, IPartDoc partDoc, swBodyType_e bodyType, bool isSheet)
+        {
+            object raw;
+            try { raw = partDoc.GetBodies2((int)bodyType, true); }
+            catch { return; }
+            if (raw == null) return;
+            object[] arr = raw as object[];
+            if (arr == null || arr.Length == 0) return;
+            foreach (object o in arr)
+            {
+                IBody2 body = o as IBody2;
+                if (body != null)
+                    dest.Add(new TaggedBody { Body = body, IsSheet = isSheet });
+            }
         }
 
         private class BufferViewInfo
@@ -109,6 +159,12 @@ namespace SolidWorksExtractor.Services
             public List<uint> Indices = new List<uint>();
             public float[] BoundsMin;
             public float[] BoundsMax;
+            // True when ALL faces contributing to this feature mesh came from
+            // sheet bodies. Drives doubleSided=true in the GLB material so the
+            // panel is visible from both sides in three.js. Mixed solid+sheet
+            // features stay single-sided -- the solid hull dominates visually
+            // and double-siding it can darken interior shading.
+            public bool IsSheetBody;
         }
 
         /// <summary>
@@ -207,17 +263,16 @@ namespace SolidWorksExtractor.Services
             if (!Directory.Exists(outputFolder))
                 Directory.CreateDirectory(outputFolder);
 
-            // Get solid bodies
-            object bodiesObj = partDoc.GetBodies2((int)swBodyType_e.swSolidBody, true);
-            if (bodiesObj == null)
+            // Enumerate every visible body, tagged with whether each is a
+            // sheet (surface) body. The legacy code only pulled swSolidBody
+            // and silently dropped every surface body, which produced a near-
+            // empty GLB for surface-modeled parts (1030034 Vintage Plane:
+            // 10 mesh nodes for a model the engineer built almost entirely
+            // from NetBlend lofts + Surface-Trim).
+            var taggedBodies = EnumerateVisibleBodies(partDoc);
+            if (taggedBodies.Count == 0)
             {
-                Console.WriteLine("    Warning: No solid bodies found for per-feature GLB export");
-                return null;
-            }
-            object[] bodies = (object[])bodiesObj;
-            if (bodies.Length == 0)
-            {
-                Console.WriteLine("    Warning: Empty body array for per-feature GLB export");
+                Console.WriteLine("    Warning: No solid or sheet bodies found for per-feature GLB export");
                 return null;
             }
 
@@ -249,20 +304,26 @@ namespace SolidWorksExtractor.Services
             {
                 // Phase 1: Walk all faces on all bodies, group by owning feature name
                 // Key = feature Name (raw SolidWorks), Value = (IFeature ref, list of IFace2)
-                var featureFaces = new Dictionary<string, (IFeature Feature, List<IFace2> Faces)>(StringComparer.Ordinal);
+                // HasSolid/HasSheet track per-bucket origin so the final mesh
+                // can be marked doubleSided when every contributing face came
+                // from a sheet body.
+                var featureFaces = new Dictionary<string, (IFeature Feature, List<IFace2> Faces, bool HasSolid, bool HasSheet)>(StringComparer.Ordinal);
                 int totalFaces = 0;
+                int sheetBodyIndex = 0;  // 1-based counter, only advanced for sheet bodies
 
-                foreach (object bodyObj in bodies)
+                foreach (var tagged in taggedBodies)
                 {
-                    IBody2 body = (IBody2)bodyObj;
+                    IBody2 body = tagged.Body;
                     if (body == null) continue;
+                    bool isSheet = tagged.IsSheet;
+                    if (isSheet) sheetBodyIndex++;
 
                     IFace2 face = (IFace2)body.GetFirstFace();
                     while (face != null)
                     {
                         totalFaces++;
-                        string ownerName = "__unowned__";
                         IFeature ownerFeature = null;
+                        string ownerName = null;
 
                         try
                         {
@@ -270,17 +331,39 @@ namespace SolidWorksExtractor.Services
                             if (ownerFeature != null && !string.IsNullOrEmpty(ownerFeature.Name))
                                 ownerName = ownerFeature.Name;
                         }
-                        catch { /* unowned face → goes into __unowned__ bucket */ }
+                        catch { /* owner lookup failed -> handled by fallback below */ }
+
+                        if (ownerName == null)
+                        {
+                            // Sheet-body faces with no owner get a stable
+                            // per-body fallback name so each surface body
+                            // becomes its own GLB node (instead of all
+                            // ownerless faces collapsing into a single
+                            // __unowned__ bucket that spans every surface
+                            // body in the part). Solid-body unowned faces
+                            // keep the legacy __unowned__ bucket, which
+                            // _ExportPartFeatureGlb renames to "base_unowned".
+                            ownerName = isSheet
+                                ? $"surface_body_{sheetBodyIndex}"
+                                : "__unowned__";
+                        }
 
                         if (!featureFaces.ContainsKey(ownerName))
-                            featureFaces[ownerName] = (ownerFeature, new List<IFace2>());
-                        featureFaces[ownerName].Faces.Add(face);
+                            featureFaces[ownerName] = (ownerFeature, new List<IFace2>(), false, false);
+                        var entry = featureFaces[ownerName];
+                        entry.Faces.Add(face);
+                        if (isSheet) entry.HasSheet = true;
+                        else         entry.HasSolid = true;
+                        featureFaces[ownerName] = entry;
 
                         face = (IFace2)face.GetNextFace();
                     }
                 }
 
-                Console.WriteLine($"    Found {totalFaces} faces across {featureFaces.Count} features");
+                int sheetOnlyBuckets = 0;
+                foreach (var kv in featureFaces)
+                    if (kv.Value.HasSheet && !kv.Value.HasSolid) sheetOnlyBuckets++;
+                Console.WriteLine($"    Found {totalFaces} faces across {featureFaces.Count} features ({sheetOnlyBuckets} sheet-body groups)");
 
                 if (featureFaces.Count == 0)
                 {
@@ -326,6 +409,9 @@ namespace SolidWorksExtractor.Services
                     var entry = featureFaces[featureName];
                     IFeature swFeature = entry.Feature;
                     List<IFace2> faces = entry.Faces;
+                    // doubleSided is correct only when every face came from a
+                    // sheet body; mixed solid+sheet buckets keep single-sided.
+                    bool sheetOnlyBucket = entry.HasSheet && !entry.HasSolid;
 
                     // Generate cad_feature_id
                     string cadFeatureId;
@@ -334,6 +420,22 @@ namespace SolidWorksExtractor.Services
                     {
                         cadFeatureId = GenerateFeatureId(swFeature, seenIds);
                         try { swTypeName = swFeature.GetTypeName2() ?? "unknown"; } catch { }
+                    }
+                    else if (featureName.StartsWith("surface_body_", StringComparison.Ordinal))
+                    {
+                        // Sheet body fallback bucket -- the name is already
+                        // the final stable id, no "base_" prefix.
+                        cadFeatureId = featureName;
+                        if (seenIds.ContainsKey(cadFeatureId))
+                        {
+                            seenIds[cadFeatureId]++;
+                            cadFeatureId = cadFeatureId + "_" + seenIds[cadFeatureId];
+                        }
+                        else
+                        {
+                            seenIds[cadFeatureId] = 1;
+                        }
+                        swTypeName = "SurfaceBody";
                     }
                     else
                     {
@@ -386,7 +488,8 @@ namespace SolidWorksExtractor.Services
                         ColorB = cb,
                         ColorHex = cHex,
                         ColorName = cName,
-                        FaceCount = faces.Count
+                        FaceCount = faces.Count,
+                        IsSheetBody = sheetOnlyBucket
                     };
 
                     // Extract dimensional parameters for diff detection
@@ -624,7 +727,10 @@ namespace SolidWorksExtractor.Services
             }
             sb.Append("],");
 
-            // materials — PBR with per-feature color
+            // materials — PBR with per-feature color. Sheet-body-derived
+            // meshes are doubleSided so thin surfaces are visible from
+            // both sides in three.js (single-sided culling would hide
+            // half of every surface panel).
             sb.Append("\"materials\":[");
             for (int i = 0; i < N; i++)
             {
@@ -635,7 +741,9 @@ namespace SolidWorksExtractor.Services
                 sb.Append("{\"name\":\"").Append(EscapeJson(meshes[i].CadFeatureId)).Append("\",");
                 sb.Append("\"pbrMetallicRoughness\":{");
                 sb.Append("\"baseColorFactor\":[").Append(r).Append(",").Append(g).Append(",").Append(b).Append(",1.0],");
-                sb.Append("\"metallicFactor\":0.1,\"roughnessFactor\":0.7}}");
+                sb.Append("\"metallicFactor\":0.1,\"roughnessFactor\":0.7}");
+                if (meshes[i].IsSheetBody) sb.Append(",\"doubleSided\":true");
+                sb.Append("}");
             }
             sb.Append("],");
 
@@ -1156,14 +1264,12 @@ namespace SolidWorksExtractor.Services
             }
             catch { /* proceed without flat pattern handling */ }
 
-            object bodiesObj = partDoc.GetBodies2((int)swBodyType_e.swSolidBody, true);
-            if (bodiesObj == null)
-            {
-                if (needRestore) RestoreFlatPattern(flatPatternFeature, refDoc);
-                return null;
-            }
-            object[] bodies = (object[])bodiesObj;
-            if (bodies.Length == 0)
+            // Enumerate both solid and sheet bodies so surface-modeled parts
+            // (e.g. fairings, panels, sheet-metal-with-surfaces) contribute
+            // visible geometry to the assembly GLB. The legacy swSolidBody-
+            // only call dropped every surface body silently.
+            var taggedBodies = EnumerateVisibleBodies(partDoc);
+            if (taggedBodies.Count == 0)
             {
                 if (needRestore) RestoreFlatPattern(flatPatternFeature, refDoc);
                 return null;
@@ -1183,11 +1289,15 @@ namespace SolidWorksExtractor.Services
             var allNormals = new List<float>();
             var allIndices = new List<uint>();
             uint indexOffset = 0;
+            bool sawSolid = false;
+            bool sawSheet = false;
 
-            foreach (object bodyObj in bodies)
+            foreach (var tagged in taggedBodies)
             {
-                IBody2 body = (IBody2)bodyObj;
+                IBody2 body = tagged.Body;
                 if (body == null) continue;
+                if (tagged.IsSheet) sawSheet = true;
+                else                sawSolid = true;
 
                 // Get tessellation via per-face API (IFace2.GetTessTriangles)
                 IFace2 face = (IFace2)body.GetFirstFace();
@@ -1319,7 +1429,11 @@ namespace SolidWorksExtractor.Services
                 Normals = allNormals.ToArray(),
                 Indices = allIndices.ToArray(),
                 BoundsMin = new float[] { minX, minY, minZ },
-                BoundsMax = new float[] { maxX, maxY, maxZ }
+                BoundsMax = new float[] { maxX, maxY, maxZ },
+                // Mark doubleSided only when every contributing body was a
+                // sheet body. Mixed solid+sheet components stay single-sided
+                // (the solid hull dominates; double-siding it darkens shading).
+                IsSheetBody = sawSheet && !sawSolid
             };
         }
 
@@ -1473,7 +1587,9 @@ namespace SolidWorksExtractor.Services
             }
             sb.Append("],");
 
-            // materials — PBR with palette color
+            // materials — PBR with palette color. Sheet-body-only components
+            // (surface-modeled parts in the assembly) are doubleSided so thin
+            // surfaces are visible from both sides in three.js.
             sb.Append("\"materials\":[");
             for (int i = 0; i < N; i++)
             {
@@ -1485,7 +1601,9 @@ namespace SolidWorksExtractor.Services
                 sb.Append("{\"name\":\"").Append(EscapeJson(meshes[i].PartFilename)).Append("\",");
                 sb.Append("\"pbrMetallicRoughness\":{");
                 sb.Append("\"baseColorFactor\":[").Append(r).Append(",").Append(g).Append(",").Append(b).Append(",1.0],");
-                sb.Append("\"metallicFactor\":0.1,\"roughnessFactor\":0.7}}");
+                sb.Append("\"metallicFactor\":0.1,\"roughnessFactor\":0.7}");
+                if (meshes[i].IsSheetBody) sb.Append(",\"doubleSided\":true");
+                sb.Append("}");
             }
             sb.Append("],");
 

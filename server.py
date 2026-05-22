@@ -4852,11 +4852,17 @@ async def part_semantic_regions_cad_edit_handoff(
         })
 
     intent = _parse_cad_edit_intent(instruction)
-    # Operator/UI can override the heuristic action when they know
-    # better, but only with one of the recognized actions -- guessing
-    # at arbitrary action names would defeat the whole audit story.
-    if body.requestedAction and body.requestedAction in _CAD_EDIT_ALLOWED_ACTIONS:
-        intent = {**intent, "action": body.requestedAction}
+    parser_action = intent.get("action") or "unknown"
+    # Provenance tracking. Once edits become executable, audit logs
+    # will need to know whether the action came from the parser or
+    # from an explicit operator override -- a parser miss caught by
+    # a human is a very different failure mode from a human approving
+    # a wrong override.
+    requested_action_raw = body.requestedAction if isinstance(body.requestedAction, str) else None
+    override_honored = bool(requested_action_raw
+                             and requested_action_raw in _CAD_EDIT_ALLOWED_ACTIONS)
+    if override_honored:
+        intent = {**intent, "action": requested_action_raw}
     if body.parameters:
         merged_hints = dict(intent.get("parameterHints") or {})
         # Operator parameters win on conflict so a curated value beats
@@ -4865,6 +4871,22 @@ async def part_semantic_regions_cad_edit_handoff(
         for k, v in body.parameters.items():
             merged_hints[k] = v
         intent = {**intent, "parameterHints": merged_hints}
+
+    if override_honored:
+        intent_source = "operator_override"
+    elif body.parameters:
+        intent_source = "parser+operator_hints"
+    else:
+        intent_source = "parser"
+    intent = {
+        **intent,
+        "source":          intent_source,
+        "parserAction":    parser_action,
+        # Echo the operator-supplied requestedAction verbatim (even if
+        # it was NOT honored because it sat outside the enum) so audit
+        # logs preserve exactly what the caller asked for.
+        "requestedAction": requested_action_raw,
+    }
 
     regions = base_payload.get("regions") or []
     targets = base_payload.get("solidWorksTargets") or {}
@@ -4896,19 +4918,31 @@ async def part_semantic_regions_cad_edit_handoff(
     else:
         edit_readiness = "mixed"
 
+    multi_region = len(target_regions) > 1
     return {
-        "handoffVersion":  _CAD_EDIT_HANDOFF_VERSION,
-        "matched":         True,
-        "partNumber":      safe_pn,
-        "revision":        safe_rev,
-        "userInstruction": instruction,
-        "resolvedPhrase":  phrase,
-        "intent":          intent,
+        "handoffVersion":   _CAD_EDIT_HANDOFF_VERSION,
+        # Explicit enum so Sage-in-SOLIDWORKS does not have to infer the
+        # supported command surface from docs. When this set grows the
+        # handoffVersion bumps so a consumer can branch on contract version.
+        "supportedActions": list(_CAD_EDIT_ALLOWED_ACTIONS),
+        "matched":          True,
+        "partNumber":       safe_pn,
+        "revision":         safe_rev,
+        "userInstruction":  instruction,
+        "resolvedPhrase":   phrase,
+        "intent":           intent,
         "target": {
             "regions":        target_regions,
             "cadFeatureIds":  list(targets.get("cadFeatureIds") or []),
             "sourceFeatures": list(targets.get("sourceFeatures") or []),
             "glbNodes":       list(targets.get("glbNodes") or []),
+            # True when the resolved phrase aggregated to more than one
+            # semantic region (e.g. "tail" -> horizontal + vertical
+            # stabilizers). Multi-region edits are inherently riskier
+            # than single-region edits because one user phrase touches
+            # several physical features at once; the reviewer needs to
+            # see that explicitly before approving execution.
+            "multiRegion":    multi_region,
         },
         "placement": {
             "surfaces":      placement_surfaces,
@@ -4916,9 +4950,13 @@ async def part_semantic_regions_cad_edit_handoff(
             "editReadiness": edit_readiness,
         },
         "operationPolicy": {
-            "canEdit":              False,
-            "requiresHumanReview":  True,
-            "blockedReason":        "Placement surfaces and SolidWorks edit execution are not implemented yet.",
+            "canEdit":                    False,
+            "requiresHumanReview":        True,
+            # Mirror of target.multiRegion at the policy layer so a
+            # consumer can route on operationPolicy alone without
+            # cross-referencing target.
+            "multiRegionReviewRequired":  multi_region,
+            "blockedReason":              "Placement surfaces and SolidWorks edit execution are not implemented yet.",
         },
     }
 

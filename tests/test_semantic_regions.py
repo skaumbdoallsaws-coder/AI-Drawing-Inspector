@@ -1376,7 +1376,9 @@ def test_cad_edit_handoff_requestedAction_override_wins(
     """The operator/UI can override the heuristic action when it
     knows better. The override is restricted to the documented
     enum to keep the audit story intact (arbitrary action names
-    would defeat downstream review)."""
+    would defeat downstream review). The provenance fields prove
+    where the action came from: parserAction holds the parser's
+    verdict ('unknown') and source is 'operator_override'."""
     client = TestClient(server.app)
     r = client.post(_CAD_EDIT_HANDOFF_URL, json={
         "revision":        "A",
@@ -1386,7 +1388,10 @@ def test_cad_edit_handoff_requestedAction_override_wins(
     })
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["intent"]["action"] == "dimension_change"
+    assert body["intent"]["action"]          == "dimension_change"
+    assert body["intent"]["parserAction"]    == "unknown"
+    assert body["intent"]["requestedAction"] == "dimension_change"
+    assert body["intent"]["source"]          == "operator_override"
 
 
 def test_cad_edit_handoff_body_parameters_merge_into_hints(
@@ -1394,7 +1399,9 @@ def test_cad_edit_handoff_body_parameters_merge_into_hints(
 ):
     """Operator/UI parameters merge into parameterHints and win on
     conflict with the parser's best guess. This is how a curator-
-    refined value reaches the future executor unchanged."""
+    refined value reaches the future executor unchanged. With
+    parameters set but no requestedAction the provenance source is
+    'parser+operator_hints' (action chosen by parser, hints curated)."""
     client = TestClient(server.app)
     r = client.post(_CAD_EDIT_HANDOFF_URL, json={
         "revision":        "A",
@@ -1412,6 +1419,144 @@ def test_cad_edit_handoff_body_parameters_merge_into_hints(
     assert hints["dimension"] == "thickness"
     # Operator-only fields land in the merged hints verbatim.
     assert hints["axis"] == "thickness"
+    # Provenance: action came from parser, hints came from operator.
+    assert body["intent"]["source"]          == "parser+operator_hints"
+    assert body["intent"]["parserAction"]    == "dimension_change"
+    assert body["intent"]["requestedAction"] is None
+
+
+# ---------------------------------------------------------------------------
+# Contract hardening: supportedActions, intent provenance, multi-region
+# review flags. The hardening pass tightens the contract so Sage-in-
+# SOLIDWORKS does not have to infer supported commands or guess where
+# an action came from.
+# ---------------------------------------------------------------------------
+
+def test_cad_edit_handoff_response_includes_supportedActions(
+    aircraft_library_with_draft: Path,
+):
+    """The endpoint advertises its supported action enum explicitly so
+    downstream consumers can branch on contract version without
+    docs-reading. Adding a new action will require a handoffVersion
+    bump AND an update to this list (failing the test is the signal)."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["supportedActions"] == [
+        "dimension_change",
+        "hole_pattern",
+        "sketch_on_face",
+        "unknown",
+    ]
+    # The intent action must itself be one of the supported actions --
+    # this is the contract Sage-in-SOLIDWORKS relies on.
+    assert body["intent"]["action"] in body["supportedActions"]
+
+
+def test_cad_edit_handoff_parser_only_request_source_is_parser(
+    aircraft_library_with_draft: Path,
+):
+    """No requestedAction, no parameters -> the action came purely
+    from the heuristic parser. parserAction and the live action match;
+    requestedAction is null (operator did not supply one)."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["source"]          == "parser"
+    assert body["intent"]["action"]          == "dimension_change"
+    assert body["intent"]["parserAction"]    == "dimension_change"
+    assert body["intent"]["requestedAction"] is None
+
+
+def test_cad_edit_handoff_unhonored_requestedAction_falls_back_to_parser(
+    aircraft_library_with_draft: Path,
+):
+    """An operator-supplied requestedAction that is NOT in the
+    supported enum must NOT silently swap to a different action --
+    parser wins, requestedAction is preserved verbatim for audit so
+    operations can flag the bad input."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+        "requestedAction": "not_a_real_action",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["action"]          == "dimension_change"
+    assert body["intent"]["parserAction"]    == "dimension_change"
+    assert body["intent"]["requestedAction"] == "not_a_real_action"
+    # No parameters, override not honored -> still "parser".
+    assert body["intent"]["source"]          == "parser"
+
+
+def test_cad_edit_handoff_tail_request_marks_multiRegion_true(
+    aircraft_library_with_draft: Path,
+):
+    """A phrase that resolves to more than one semantic region (e.g.
+    'tail' -> horizontal + vertical stabilizers) MUST flag both
+    target.multiRegion and operationPolicy.multiRegionReviewRequired.
+    Multi-region edits are inherently riskier than single-region
+    edits and the future executor must require explicit confirmation."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "tail",
+        "userInstruction": "sketch on the tail surface",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["target"]["regions"]) >= 2
+    assert body["target"]["multiRegion"]                              is True
+    assert body["operationPolicy"]["multiRegionReviewRequired"]       is True
+
+
+def test_cad_edit_handoff_single_region_request_marks_multiRegion_false(
+    aircraft_library_with_draft: Path,
+):
+    """A phrase that resolves to exactly one region (e.g. 'top wing')
+    is the safe single-target case. Both multi-region flags must
+    be False so the future executor does not unnecessarily demand
+    a second confirmation step."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["target"]["regions"]) == 1
+    assert body["target"]["multiRegion"]                              is False
+    assert body["operationPolicy"]["multiRegionReviewRequired"]       is False
+
+
+def test_cad_edit_handoff_blank_userInstruction_returns_400(
+    aircraft_library_with_draft: Path,
+):
+    """Blank/whitespace-only userInstruction is rejected with 400.
+    The endpoint is for edit handoff specifically; pure target
+    resolution is served by the existing GET /cad-handoff."""
+    client = TestClient(server.app)
+    for instruction in ("", "   ", "\t\n  "):
+        r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+            "revision":        "A",
+            "phrase":          "top wing",
+            "userInstruction": instruction,
+        })
+        assert r.status_code == 400, \
+            f"expected 400 for blank userInstruction {instruction!r}, got {r.status_code}: {r.text}"
 
 
 # ---------------------------------------------------------------------------

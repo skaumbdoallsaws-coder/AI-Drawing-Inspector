@@ -1,0 +1,558 @@
+"""Tests for the Edit Session Log MVP.
+
+Covers:
+- POST /api/edit-sessions: create from a real cad-edit-handoff payload,
+  reject canEdit=true / stale handoffVersion / matched=false / missing
+  parts, dedupe duplicate open sessions with a warning
+- GET single + GET handoff-payload + GET list with filters
+- PATCH FSM: legal/illegal transitions, terminal locking, per-status
+  required co-fields (extraction packageId, promoted rev exists on
+  disk, comparison revA/revB pinned), immutable-field rejection,
+  noteToAppend append + terminal-note acceptance, atomic write on
+  failure, embedded handoff snapshot survives later regions edits
+
+The fixture reuses the synthetic aircraft library + the real
+POST /cad-edit-handoff endpoint so the captured handoffPayload is
+byte-for-byte the same shape operators will see in production.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Iterator
+
+import pytest
+from fastapi.testclient import TestClient
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import server  # noqa: E402
+from ai_inspector.semantic_regions import (
+    build_draft_regions,
+    semantic_regions_path,
+    write_semantic_regions,
+)
+
+# Reuse the synthetic GLB + feature_colors fixture from the broader
+# semantic_regions test module so the captured handoff payload has the
+# same shape operators see in production.
+sys.path.insert(0, str(REPO_ROOT / "tests"))
+import test_semantic_regions as _sr_tests  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+PN = "1030099"
+REV = "revA"
+
+
+@pytest.fixture
+def aircraft_library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    library = tmp_path / "lib"
+    rev_dir = library / "parts" / PN / REV
+    rev_dir.mkdir(parents=True)
+    _sr_tests._write_synthetic_glb(rev_dir / f"{PN}_colored.glb",
+                                   _sr_tests._aircraft_fixture())
+    (rev_dir / f"{PN}_feature_colors.json").write_text(json.dumps({
+        "partNumber": PN,
+        "features": [
+            {
+                "cad_feature_id": n,
+                "glb_node_name":  n,
+                "sw_name":        n.replace("_", " ").title(),
+                "type":           n.split("_", 1)[0],
+                "display_label":  n.replace("_", " ").title(),
+            }
+            for n, *_ in _sr_tests._aircraft_fixture()
+        ],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    yield library
+
+
+@pytest.fixture
+def aircraft_library_with_draft(aircraft_library: Path) -> Path:
+    doc = build_draft_regions(aircraft_library, PN, REV)
+    write_semantic_regions(aircraft_library, PN, REV, doc)
+    return aircraft_library
+
+
+def _capture_handoff_payload(
+    client: TestClient, phrase: str = "top wing",
+    instruction: str = "make the top wing 2 inches thicker",
+) -> dict:
+    """Hit the real POST /cad-edit-handoff endpoint and return its
+    response so the session test exercises the exact byte shape the
+    handoff layer emits in production."""
+    r = client.post(
+        f"/api/part-semantic-regions/{PN}/cad-edit-handoff",
+        json={"revision": REV, "phrase": phrase, "userInstruction": instruction},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _create_session(client: TestClient, handoff: dict, notes: str = "") -> dict:
+    body = {"handoffPayload": handoff}
+    if notes:
+        body["notes"] = notes
+    r = client.post("/api/edit-sessions", json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+# ---------------------------------------------------------------------------
+# Create: happy path + immutable identity derivation
+# ---------------------------------------------------------------------------
+
+def test_POST_create_session_happy_path(aircraft_library_with_draft: Path):
+    """Successful create returns a prepared session with a 26-char ULID,
+    the embedded handoff payload preserved verbatim, and a session file
+    on disk at the expected path."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    body = _create_session(client, handoff, notes="initial")
+    session = body["session"]
+
+    sid = session["sessionId"]
+    assert isinstance(sid, str) and len(sid) == 26
+    assert session["schemaVersion"]   == "edit-session-log-0.1"
+    assert session["status"]          == "prepared"
+    assert session["partNumber"]      == PN
+    assert session["sourceRevision"]  == REV
+    assert session["semanticPhrase"]  == "top wing"
+    assert session["requestedEdit"].startswith("make the top wing")
+    assert session["handoffVersion"]  == "semantic-region-cad-edit-handoff-0.1"
+    assert session["handoffPayload"]  == handoff
+    assert session["intent"]["action"] == "dimension_change"
+    assert session["intent"]["source"] == "parser"
+    assert session["target"]["regionIds"] == ["top_wing"]
+    assert session["target"]["multiRegion"] is False
+    assert session["createdAtUtc"]    == session["updatedAtUtc"]
+    assert session["notes"] and session["notes"][0]["text"] == "initial"
+
+    # File on disk at the expected path.
+    p = aircraft_library_with_draft / "_edit_sessions" / f"{sid}.json"
+    assert p.exists()
+
+
+def test_POST_create_session_returns_existing_on_duplicate_intent(
+    aircraft_library_with_draft: Path,
+):
+    """Duplicate-intent policy: second create with the same (pn, rev,
+    phrase, action) tuple returns the EXISTING session + a warning,
+    NOT a new file."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    first = _create_session(client, handoff)
+    first_id = first["session"]["sessionId"]
+
+    second = _create_session(client, handoff)
+    assert second["session"]["sessionId"] == first_id
+    assert "warning" in second
+    assert "already exists" in second["warning"]
+
+    # Only ONE file on disk for the intent.
+    sessions_dir = aircraft_library_with_draft / "_edit_sessions"
+    files = [f for f in sessions_dir.iterdir() if f.suffix == ".json"]
+    assert len(files) == 1
+
+
+def test_POST_create_session_dedupe_after_abandon_creates_new(
+    aircraft_library_with_draft: Path,
+):
+    """Once the prior session is abandoned (terminal), a follow-up
+    create for the same intent must produce a NEW session because the
+    duplicate gate only considers OPEN (non-terminal) sessions."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    first_id = _create_session(client, handoff)["session"]["sessionId"]
+    # Abandon the first.
+    r = client.patch(f"/api/edit-sessions/{first_id}",
+                     json={"status": "abandoned", "abandonReason": "test"})
+    assert r.status_code == 200, r.text
+
+    second_id = _create_session(client, handoff)["session"]["sessionId"]
+    assert second_id != first_id
+
+
+# ---------------------------------------------------------------------------
+# Create: validation
+# ---------------------------------------------------------------------------
+
+def test_POST_create_rejects_canEdit_true(aircraft_library_with_draft: Path):
+    """Defensive gate: MVP only accepts read-only handoffs. The error
+    message must mention executor implementation so operators know
+    this is a temporary limit, not a permanent reject."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    handoff["operationPolicy"]["canEdit"] = True
+    r = client.post("/api/edit-sessions", json={"handoffPayload": handoff})
+    assert r.status_code == 400, r.text
+    assert "edit execution is implemented" in r.text
+
+
+def test_POST_create_rejects_stale_handoffVersion(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    handoff["handoffVersion"] = "semantic-region-cad-edit-handoff-0.0.99"
+    r = client.post("/api/edit-sessions", json={"handoffPayload": handoff})
+    assert r.status_code == 400, r.text
+    assert "handoffVersion" in r.text
+
+
+def test_POST_create_rejects_matched_false(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    handoff["matched"] = False
+    r = client.post("/api/edit-sessions", json={"handoffPayload": handoff})
+    assert r.status_code == 400, r.text
+    assert "matched" in r.text
+
+
+def test_POST_create_rejects_missing_part_dir(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    handoff["partNumber"] = "9999999"
+    r = client.post("/api/edit-sessions", json={"handoffPayload": handoff})
+    assert r.status_code == 400, r.text
+
+
+# ---------------------------------------------------------------------------
+# GET single + handoff-payload + list filters
+# ---------------------------------------------------------------------------
+
+def test_GET_single_returns_full_doc(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    r = client.get(f"/api/edit-sessions/{sid}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sessionId"] == sid
+    assert body["handoffPayload"] == handoff
+
+
+def test_GET_single_404_when_missing(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    r = client.get("/api/edit-sessions/01HKZZZZZZZZZZZZZZZZZZZZZZ")
+    assert r.status_code == 404
+
+
+def test_GET_handoff_payload_returns_embedded_snapshot_only(
+    aircraft_library_with_draft: Path,
+):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    r = client.get(f"/api/edit-sessions/{sid}/handoff-payload")
+    assert r.status_code == 200, r.text
+    assert r.json() == handoff
+
+
+def test_GET_list_filters_by_partNumber_and_status_and_openOnly(
+    aircraft_library_with_draft: Path,
+):
+    client = TestClient(server.app)
+    # Two sessions on different revs/phrases so the dedupe doesn't
+    # collapse them.
+    h1 = _capture_handoff_payload(client, phrase="top wing")
+    h2 = _capture_handoff_payload(client, phrase="lower wing",
+                                  instruction="add 4 holes to the lower wing")
+    sid1 = _create_session(client, h1)["session"]["sessionId"]
+    sid2 = _create_session(client, h2)["session"]["sessionId"]
+    # Move sid2 to abandoned so we can prove openOnly excludes it.
+    client.patch(f"/api/edit-sessions/{sid2}",
+                 json={"status": "abandoned", "abandonReason": "test"})
+
+    all_listed = client.get("/api/edit-sessions").json()
+    assert all_listed["count"] == 2
+    listed_ids = {s["sessionId"] for s in all_listed["sessions"]}
+    assert listed_ids == {sid1, sid2}
+
+    open_only = client.get("/api/edit-sessions", params={"openOnly": "true"}).json()
+    assert open_only["count"] == 1
+    assert open_only["sessions"][0]["sessionId"] == sid1
+
+    by_status = client.get("/api/edit-sessions", params={"status": "abandoned"}).json()
+    assert by_status["count"] == 1
+    assert by_status["sessions"][0]["sessionId"] == sid2
+
+    by_pn = client.get("/api/edit-sessions", params={"partNumber": PN}).json()
+    assert by_pn["count"] == 2
+    by_rev = client.get("/api/edit-sessions", params={"sourceRevision": "A"}).json()
+    assert by_rev["count"] == 2
+
+
+def test_GET_list_rejects_unknown_status_filter(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    r = client.get("/api/edit-sessions", params={"status": "not_a_status"})
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# PATCH FSM
+# ---------------------------------------------------------------------------
+
+def test_PATCH_legal_transition_prepared_to_applied(
+    aircraft_library_with_draft: Path,
+):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    r = client.patch(f"/api/edit-sessions/{sid}", json={
+        "status":  "applied_in_solidworks",
+        "applied": {"appliedAtUtc": "2026-05-22T18:32:44.881Z",
+                    "appliedByUser": "skaumb"},
+    })
+    assert r.status_code == 200, r.text
+    session = r.json()["session"]
+    assert session["status"] == "applied_in_solidworks"
+    assert session["applied"]["appliedByUser"] == "skaumb"
+    assert session["updatedAtUtc"] != session["createdAtUtc"]
+
+
+def test_PATCH_illegal_transition_returns_409(aircraft_library_with_draft: Path):
+    """prepared -> compared skips four legal states. Must be rejected
+    with 409 + an explanatory message listing the allowed successors."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    r = client.patch(f"/api/edit-sessions/{sid}", json={"status": "compared"})
+    assert r.status_code == 409, r.text
+    assert "Illegal status transition" in r.text
+
+
+def test_PATCH_promoted_without_promotedRevision_rejected(
+    aircraft_library_with_draft: Path,
+):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    # Walk through legal transitions until we can attempt 'promoted'.
+    client.patch(f"/api/edit-sessions/{sid}", json={"status": "applied_in_solidworks"})
+    client.patch(f"/api/edit-sessions/{sid}", json={
+        "status":     "extracted",
+        "extraction": {"resultingPartPackageId": "pkg-xyz"},
+    })
+    client.patch(f"/api/edit-sessions/{sid}", json={"status": "linked_to_revision"})
+
+    r = client.patch(f"/api/edit-sessions/{sid}", json={"status": "promoted"})
+    assert r.status_code == 400, r.text
+    assert "promotion.promotedRevision" in r.text
+
+
+def test_PATCH_promoted_requires_existing_revision_dir(
+    aircraft_library_with_draft: Path,
+):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    for kw in (
+        {"status": "applied_in_solidworks"},
+        {"status": "extracted", "extraction": {"resultingPartPackageId": "pkg"}},
+        {"status": "linked_to_revision"},
+    ):
+        client.patch(f"/api/edit-sessions/{sid}", json=kw)
+
+    # Rev directory 'revZ' does not exist; PATCH must reject.
+    r = client.patch(f"/api/edit-sessions/{sid}", json={
+        "status":    "promoted",
+        "promotion": {"promotedRevision": "Z"},
+    })
+    assert r.status_code == 400, r.text
+    assert "does not exist on disk" in r.text
+
+
+def test_PATCH_promoted_then_compared_full_loop(
+    aircraft_library_with_draft: Path,
+):
+    """End-to-end happy path through prepared -> compared, including
+    creating the new revision directory the promotion will point at."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    # Create the post-edit revision directory the promotion will link to.
+    rev_b_dir = aircraft_library_with_draft / "parts" / PN / "revB"
+    rev_b_dir.mkdir(parents=True)
+    # Minimal GLB so the dir is not just an empty marker.
+    _sr_tests._write_synthetic_glb(
+        rev_b_dir / f"{PN}_colored.glb",
+        _sr_tests._aircraft_fixture(),
+    )
+
+    for kw in (
+        {"status": "applied_in_solidworks"},
+        {"status": "extracted", "extraction": {"resultingPartPackageId": "pkg-revb"}},
+        {"status": "linked_to_revision"},
+        {"status": "promoted", "promotion": {"promotedRevision": "B"}},
+    ):
+        r = client.patch(f"/api/edit-sessions/{sid}", json=kw)
+        assert r.status_code == 200, r.text
+
+    # comparison.revA must equal sourceRevision (revA); revB must equal promoted (revB).
+    bad = client.patch(f"/api/edit-sessions/{sid}", json={
+        "status":     "compared",
+        "comparison": {"revA": "B", "revB": "A"},
+    })
+    assert bad.status_code == 400
+    good = client.patch(f"/api/edit-sessions/{sid}", json={
+        "status":     "compared",
+        "comparison": {"revA": "revA", "revB": "revB"},
+    })
+    assert good.status_code == 200, good.text
+    final = good.json()["session"]
+    assert final["status"] == "compared"
+    assert final["promotion"]["promotedRevision"] == "revB"
+
+
+def test_PATCH_failed_requires_failureReason(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    client.patch(f"/api/edit-sessions/{sid}", json={"status": "applied_in_solidworks"})
+    r = client.patch(f"/api/edit-sessions/{sid}", json={"status": "failed"})
+    assert r.status_code == 400, r.text
+    assert "failureReason" in r.text
+
+    r2 = client.patch(f"/api/edit-sessions/{sid}", json={
+        "status":        "failed",
+        "failureReason": "SolidWorks rebuild failed: missing reference",
+    })
+    assert r2.status_code == 200, r2.text
+
+
+def test_PATCH_terminal_session_rejects_status_change_but_allows_note(
+    aircraft_library_with_draft: Path,
+):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    client.patch(f"/api/edit-sessions/{sid}",
+                 json={"status": "abandoned", "abandonReason": "test"})
+
+    # Status change rejected.
+    r = client.patch(f"/api/edit-sessions/{sid}", json={"status": "prepared"})
+    assert r.status_code == 409, r.text
+    assert "terminal" in r.text.lower()
+
+    # noteToAppend still accepted.
+    r2 = client.patch(f"/api/edit-sessions/{sid}", json={
+        "noteToAppend": "post-mortem: this was the wrong target region",
+        "byUser":       "skaumb",
+    })
+    assert r2.status_code == 200, r2.text
+    session = r2.json()["session"]
+    assert any("post-mortem" in n["text"] for n in session["notes"])
+    assert session["status"] == "abandoned"  # still terminal
+
+
+# ---------------------------------------------------------------------------
+# Immutable-field guard
+# ---------------------------------------------------------------------------
+
+def test_PATCH_rejects_immutable_field_mutation(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    for field, value in [
+        ("partNumber",    "9999999"),
+        ("sourceRevision","revQ"),
+        ("semanticPhrase","tail"),
+        ("handoffPayload",{"different": "doc"}),
+        ("target",        {"regionIds": []}),
+        ("intent",        {"action": "unknown"}),
+        ("sessionId",     "01HZZZZZZZZZZZZZZZZZZZZZZZ"),
+    ]:
+        r = client.patch(f"/api/edit-sessions/{sid}", json={field: value})
+        assert r.status_code == 400, f"expected 400 mutating {field!r}, got {r.status_code}: {r.text}"
+        assert "immutable" in r.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# noteToAppend semantics
+# ---------------------------------------------------------------------------
+
+def test_PATCH_noteToAppend_appends_with_timestamp_and_byUser(
+    aircraft_library_with_draft: Path,
+):
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff, notes="created")["session"]["sessionId"]
+
+    r1 = client.patch(f"/api/edit-sessions/{sid}", json={
+        "noteToAppend": "first follow-up",
+        "byUser":       "skaumb",
+    })
+    assert r1.status_code == 200, r1.text
+    r2 = client.patch(f"/api/edit-sessions/{sid}", json={
+        "noteToAppend": "second follow-up",
+    })
+    assert r2.status_code == 200, r2.text
+
+    session = client.get(f"/api/edit-sessions/{sid}").json()
+    notes = session["notes"]
+    assert [n["text"] for n in notes] == [
+        "created", "first follow-up", "second follow-up",
+    ]
+    assert notes[1]["byUser"] == "skaumb"
+    assert notes[2]["byUser"] is None
+    # Timestamps monotonically advance.
+    assert notes[0]["atUtc"] <= notes[1]["atUtc"] <= notes[2]["atUtc"]
+
+
+# ---------------------------------------------------------------------------
+# Atomicity + embedded snapshot durability
+# ---------------------------------------------------------------------------
+
+def test_failed_PATCH_leaves_no_tmp_file(aircraft_library_with_draft: Path):
+    """A validation-rejected PATCH must NOT leave a .tmp file on disk
+    AND must not modify the existing session contents."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    p = aircraft_library_with_draft / "_edit_sessions" / f"{sid}.json"
+    before = p.read_bytes()
+
+    # Illegal transition -> 409, no write should occur.
+    r = client.patch(f"/api/edit-sessions/{sid}", json={"status": "compared"})
+    assert r.status_code == 409, r.text
+
+    # Doc bytes unchanged + no .tmp left behind.
+    assert p.read_bytes() == before
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    assert not tmp.exists()
+
+
+def test_embedded_handoffPayload_survives_regions_file_edits(
+    aircraft_library_with_draft: Path,
+):
+    """Provenance contract: a curator editing {pn}_semantic_regions.json
+    AFTER session creation must NOT retroactively change what the
+    session log captured. The embedded handoffPayload is a snapshot."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    # Mutate the regions file: rename the top_wing label.
+    p = semantic_regions_path(aircraft_library_with_draft, PN, REV)
+    doc = json.loads(p.read_text(encoding="utf-8-sig"))
+    for r in doc["regions"]:
+        if r["regionId"] == "top_wing":
+            r["label"] = "OPERATOR-RENAMED"
+    write_semantic_regions(aircraft_library_with_draft, PN, REV, doc)
+
+    # Session's embedded payload still shows the ORIGINAL label.
+    persisted = client.get(f"/api/edit-sessions/{sid}").json()
+    target_regions = persisted["handoffPayload"]["target"]["regions"]
+    labels = [r.get("label") for r in target_regions]
+    assert "OPERATOR-RENAMED" not in labels, \
+        "embedded handoffPayload must NOT change when regions file is edited later"

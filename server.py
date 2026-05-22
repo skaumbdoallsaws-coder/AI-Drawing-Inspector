@@ -13,9 +13,11 @@ import base64
 import json
 import logging
 import math
+import secrets
 import shutil
 import sqlite3
 import threading
+import time
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -4994,6 +4996,668 @@ async def part_semantic_regions_cad_handoff(
             "detail":     f"No semantic region matched {phrase!r}.",
         })
     return payload
+
+
+# ===========================================================================
+# Edit Session Log (MVP)
+# ===========================================================================
+#
+# Tracks the lifecycle of a semantic CAD edit from approved intent (POST
+# /cad-edit-handoff) through manual SolidWorks application, bridge re-
+# extraction, promotion as a new revision, and final revision comparison.
+# Read-only audit log; this module never executes a CAD edit.
+#
+# Storage: one JSON file per session at:
+#   400S_Sorted_Library/_edit_sessions/{sessionId}.json
+# sessionId is a Crockford-base32 ULID (sortable, URL-safe, no dependency).
+#
+# Provenance contract: the embedded handoffPayload is captured verbatim
+# at creation time and is IMMUTABLE -- later curator edits to the regions
+# file must not retroactively change what the log "said" was targeted.
+
+_EDIT_SESSION_SCHEMA_VERSION = "edit-session-log-0.1"
+_EDIT_SESSION_FILENAME_RE    = re.compile(r"^[0-9A-Z]{26}\.json$")
+
+_EDIT_SESSION_STATUSES = (
+    "prepared",
+    "approved_for_solidworks",
+    "applied_in_solidworks",
+    "extracted",
+    "linked_to_revision",
+    "promoted",
+    "compared",
+    "abandoned",
+    "failed",
+)
+_EDIT_SESSION_TERMINAL = frozenset({"compared", "abandoned", "failed"})
+# Explicit FSM. Self-transitions (status == current) are no-ops in the
+# PATCH handler so a touch-only update with status echoed back works.
+_EDIT_SESSION_FSM: Dict[str, frozenset] = {
+    "prepared":                frozenset({"approved_for_solidworks", "applied_in_solidworks", "abandoned"}),
+    "approved_for_solidworks": frozenset({"applied_in_solidworks", "abandoned"}),
+    "applied_in_solidworks":   frozenset({"extracted", "failed", "abandoned"}),
+    "extracted":               frozenset({"linked_to_revision", "failed", "abandoned"}),
+    "linked_to_revision":      frozenset({"promoted", "abandoned"}),
+    "promoted":                frozenset({"compared", "abandoned"}),
+    "compared":                frozenset(),
+    "abandoned":               frozenset(),
+    "failed":                  frozenset(),
+}
+# Fields that are NEVER mutable after creation. PATCH bodies that try to
+# set any of these return 400 with a precise error message.
+_EDIT_SESSION_IMMUTABLE_FIELDS = frozenset({
+    "sessionId", "schemaVersion", "createdAtUtc",
+    "partNumber", "sourceRevision", "semanticPhrase", "requestedEdit",
+    "handoffVersion", "handoffRef", "handoffPayload",
+    "target", "intent",
+})
+
+# Crockford base32 alphabet (no I, L, O, U) -- ULID canonical encoding.
+_ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _ulid_encode(value: int, length: int) -> str:
+    out: List[str] = []
+    for _ in range(length):
+        out.append(_ULID_ALPHABET[value & 0x1F])
+        value >>= 5
+    return "".join(reversed(out))
+
+
+def _generate_ulid() -> str:
+    """Generate a Crockford-base32 ULID-style 26-char ID:
+    10 chars of millisecond timestamp + 16 chars of randomness.
+
+    No external dependency; produced IDs are URL-safe, monotonically
+    sortable by creation time, and effectively collision-free for
+    human-scale workloads (80 random bits per millisecond)."""
+    ts_ms = int(time.time() * 1000)
+    rand_bits = secrets.randbits(80)
+    return _ulid_encode(ts_ms, 10) + _ulid_encode(rand_bits, 16)
+
+
+def _iso_utc_now() -> str:
+    """ISO 8601 UTC timestamp with millisecond precision + 'Z' suffix.
+    Stable string form for audit log fields."""
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+
+
+def _edit_sessions_dir(library_dir: Path) -> Path:
+    return library_dir / "_edit_sessions"
+
+
+def _edit_session_path(library_dir: Path, session_id: str) -> Path:
+    return _edit_sessions_dir(library_dir) / f"{session_id}.json"
+
+
+def _sanitize_session_id(raw: str) -> Optional[str]:
+    """Reject path traversal / invalid IDs. Returns the canonical
+    uppercase ULID string or None when malformed."""
+    if not isinstance(raw, str):
+        return None
+    cand = raw.strip().upper()
+    if len(cand) != 26 or not all(c in _ULID_ALPHABET for c in cand):
+        return None
+    return cand
+
+
+def _load_edit_session(library_dir: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    p = _edit_session_path(library_dir, session_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+
+
+def _write_edit_session_atomic(library_dir: Path, session_id: str, doc: Dict[str, Any]) -> Path:
+    """Atomic write via .tmp + os.replace. Caller is responsible for
+    making sure `doc` is fully validated before calling -- a failed
+    validation NEVER reaches this function so a partial .tmp file
+    cannot be left behind."""
+    out_dir = _edit_sessions_dir(library_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{session_id}.json"
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    payload = json.dumps(doc, indent=2)
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(out_path)
+    return out_path
+
+
+def _list_edit_sessions(library_dir: Path) -> List[Dict[str, Any]]:
+    """Eager-load every session doc on disk. The MVP doesn't index;
+    if/when sessions grow beyond a few hundred we'll add a directory
+    listing pass + cached summaries."""
+    out_dir = _edit_sessions_dir(library_dir)
+    if not out_dir.exists() or not out_dir.is_dir():
+        return []
+    docs: List[Dict[str, Any]] = []
+    for f in out_dir.iterdir():
+        if not f.is_file() or not _EDIT_SESSION_FILENAME_RE.match(f.name):
+            continue
+        try:
+            doc = json.loads(f.read_text(encoding="utf-8-sig"))
+        except Exception:
+            continue
+        if isinstance(doc, dict):
+            docs.append(doc)
+    return docs
+
+
+def _summarize_edit_session(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim list-view summary. Avoids streaming embedded handoffPayload
+    blobs to the list endpoint."""
+    intent = doc.get("intent") or {}
+    return {
+        "sessionId":      doc.get("sessionId"),
+        "status":         doc.get("status"),
+        "partNumber":     doc.get("partNumber"),
+        "sourceRevision": doc.get("sourceRevision"),
+        "semanticPhrase": doc.get("semanticPhrase"),
+        "intentAction":   intent.get("action"),
+        "intentSource":   intent.get("source"),
+        "createdAtUtc":   doc.get("createdAtUtc"),
+        "updatedAtUtc":   doc.get("updatedAtUtc"),
+    }
+
+
+def _find_duplicate_open_edit_session(
+    library_dir:    Path,
+    part_number:    str,
+    source_rev:     str,
+    phrase:         str,
+    intent_action:  str,
+) -> Optional[Dict[str, Any]]:
+    """Return the FIRST open (non-terminal) session whose identity
+    tuple matches. MVP scans all sessions; switch to an index if
+    this gets hot. The dedupe key intentionally excludes parameter
+    hints -- two requests with different values for the same edit
+    intent are still considered the same active intent."""
+    for doc in _list_edit_sessions(library_dir):
+        if doc.get("status") in _EDIT_SESSION_TERMINAL:
+            continue
+        if doc.get("partNumber") != part_number:
+            continue
+        if doc.get("sourceRevision") != source_rev:
+            continue
+        if (doc.get("semanticPhrase") or "").strip() != phrase.strip():
+            continue
+        doc_action = ((doc.get("intent") or {}).get("action") or "").strip()
+        if doc_action != intent_action.strip():
+            continue
+        return doc
+    return None
+
+
+def _validate_handoff_payload_for_edit_session(handoff: Dict[str, Any]) -> None:
+    """Reject handoffs that the Edit Session Log MVP cannot record
+    safely. Raises HTTPException(400) on failure; pure validator."""
+    if not isinstance(handoff, dict):
+        raise HTTPException(status_code=400, detail="handoffPayload must be an object")
+    if handoff.get("handoffVersion") != _CAD_EDIT_HANDOFF_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"handoffPayload.handoffVersion must equal {_CAD_EDIT_HANDOFF_VERSION!r}; "
+                f"got {handoff.get('handoffVersion')!r}."
+            ),
+        )
+    if not handoff.get("matched"):
+        raise HTTPException(status_code=400, detail="handoffPayload.matched must be true")
+    op_policy = handoff.get("operationPolicy") or {}
+    if op_policy.get("canEdit") is True:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "handoffPayload.operationPolicy.canEdit=true is not yet supported. "
+                "The Edit Session Log MVP only accepts read-only handoffs until "
+                "edit execution is implemented and the session schema version "
+                "supports executable sessions."
+            ),
+        )
+    for key in ("partNumber", "revision"):
+        if not isinstance(handoff.get(key), str) or not handoff.get(key, "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail=f"handoffPayload.{key} is required and must be a non-empty string",
+            )
+
+
+class _EditSessionApproval(BaseModel):
+    reviewedBy:    Optional[str] = None
+    approvedAtUtc: Optional[str] = None
+
+
+class _EditSessionApplied(BaseModel):
+    appliedAtUtc:  Optional[str] = None
+    appliedByUser: Optional[str] = None
+    appliedNotes:  Optional[str] = None
+
+
+class _EditSessionExtraction(BaseModel):
+    resultingPartPackageId: Optional[str] = None
+    extractedAtUtc:         Optional[str] = None
+
+
+class _EditSessionPromotion(BaseModel):
+    promotedRevision:     Optional[str] = None
+    promotedManifestPath: Optional[str] = None
+    promotedAtUtc:        Optional[str] = None
+
+
+class _EditSessionComparison(BaseModel):
+    revA:          Optional[str] = None
+    revB:          Optional[str] = None
+    comparedAtUtc: Optional[str] = None
+
+
+class _EditSessionCreateBody(BaseModel):
+    handoffPayload: Dict[str, Any]
+    notes:          Optional[str] = None
+    byUser:         Optional[str] = None
+
+
+class _EditSessionPatchBody(BaseModel):
+    status:         Optional[str] = None
+    approval:       Optional[_EditSessionApproval]    = None
+    applied:        Optional[_EditSessionApplied]     = None
+    extraction:     Optional[_EditSessionExtraction]  = None
+    promotion:      Optional[_EditSessionPromotion]   = None
+    comparison:     Optional[_EditSessionComparison]  = None
+    abandonReason:  Optional[str] = None
+    failureReason:  Optional[str] = None
+    noteToAppend:   Optional[str] = None
+    byUser:         Optional[str] = None
+
+
+@app.post("/api/edit-sessions")
+async def create_edit_session(body: _EditSessionCreateBody):
+    """Create a new edit session from a cad-edit-handoff payload.
+
+    Identity (partNumber, sourceRevision, semanticPhrase, requestedEdit,
+    target, intent, handoffVersion) is derived from the embedded
+    handoffPayload -- the body intentionally cannot override them so
+    there's a single source of truth.
+
+    Duplicate-intent policy: if an open (non-terminal) session already
+    exists for the same (partNumber, sourceRevision, semanticPhrase,
+    intent.action) tuple, this endpoint returns the EXISTING session
+    with a `warning` field rather than creating a second file. Operators
+    who legitimately want a variant can abandon the existing session
+    first."""
+    handoff = body.handoffPayload
+    _validate_handoff_payload_for_edit_session(handoff)
+
+    raw_pn = handoff.get("partNumber") or ""
+    raw_rev = handoff.get("revision") or ""
+    safe_pn = sanitize_part_number(raw_pn)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail=f"Invalid partNumber {raw_pn!r}")
+    library_dir = library_path()
+    safe_rev = _semantic_regions_resolve_rev(library_dir, safe_pn, raw_rev)
+    rev_dir = library_dir / "parts" / safe_pn / safe_rev
+    if not rev_dir.exists() or not rev_dir.is_dir():
+        raise HTTPException(
+            status_code=400,
+            detail=f"parts/{safe_pn}/{safe_rev} does not exist on disk",
+        )
+
+    semantic_phrase = str(handoff.get("resolvedPhrase") or "").strip()
+    if not semantic_phrase:
+        raise HTTPException(status_code=400, detail="handoffPayload.resolvedPhrase is required")
+    requested_edit = str(handoff.get("userInstruction") or "").strip()
+    if not requested_edit:
+        raise HTTPException(status_code=400, detail="handoffPayload.userInstruction is required")
+
+    intent_block = dict(handoff.get("intent") or {})
+    target_block = dict(handoff.get("target") or {})
+    intent_action = str(intent_block.get("action") or "unknown")
+
+    duplicate = _find_duplicate_open_edit_session(
+        library_dir, safe_pn, safe_rev, semantic_phrase, intent_action,
+    )
+    if duplicate is not None:
+        return {
+            "session": duplicate,
+            "warning": (
+                f"An open session already exists for this exact intent "
+                f"({safe_pn} {safe_rev} phrase={semantic_phrase!r} "
+                f"action={intent_action!r}). Returning the existing session. "
+                f"Abandon it first if you want to track a new variant."
+            ),
+        }
+
+    now = _iso_utc_now()
+    session_id = _generate_ulid()
+    # Slim denormalized target snapshot -- regionIds + IDs only, not the
+    # full per-region dicts (those live in handoffPayload.target.regions
+    # for the audit trail).
+    target_snapshot = {
+        "regionIds":      [r.get("regionId") for r in (target_block.get("regions") or [])
+                           if isinstance(r, dict) and r.get("regionId")],
+        "cadFeatureIds":  list(target_block.get("cadFeatureIds")  or []),
+        "sourceFeatures": list(target_block.get("sourceFeatures") or []),
+        "multiRegion":    bool(target_block.get("multiRegion", False)),
+    }
+    intent_snapshot = {
+        "action":          intent_block.get("action"),
+        "parserAction":    intent_block.get("parserAction"),
+        "requestedAction": intent_block.get("requestedAction"),
+        "source":          intent_block.get("source"),
+        "confidence":      intent_block.get("confidence"),
+    }
+    handoff_ref = {
+        "partNumber":     safe_pn,
+        "sourceRevision": safe_rev,
+        "phrase":         semantic_phrase,
+        "capturedAtUtc":  now,
+    }
+    notes_arr: List[Dict[str, Any]] = []
+    if body.notes and body.notes.strip():
+        notes_arr.append({
+            "atUtc":  now,
+            "text":   body.notes.strip(),
+            "byUser": body.byUser,
+        })
+
+    doc: Dict[str, Any] = {
+        "sessionId":       session_id,
+        "schemaVersion":   _EDIT_SESSION_SCHEMA_VERSION,
+        "status":          "prepared",
+        "createdAtUtc":    now,
+        "updatedAtUtc":    now,
+        "partNumber":      safe_pn,
+        "sourceRevision":  safe_rev,
+        "semanticPhrase":  semantic_phrase,
+        "requestedEdit":   requested_edit,
+        "handoffVersion":  handoff.get("handoffVersion"),
+        "handoffRef":      handoff_ref,
+        "handoffPayload":  handoff,        # embedded snapshot, immutable
+        "target":          target_snapshot,
+        "intent":          intent_snapshot,
+        "approval":        None,
+        "applied":         None,
+        "extraction":      None,
+        "promotion":       None,
+        "comparison":      None,
+        "abandonReason":   None,
+        "failureReason":   None,
+        "notes":           notes_arr,
+    }
+    out_path = _write_edit_session_atomic(library_dir, session_id, doc)
+    return {
+        "session":    doc,
+        "outputPath": str(out_path),
+    }
+
+
+@app.get("/api/edit-sessions")
+async def list_edit_sessions(
+    partNumber:     Optional[str] = Query(None),
+    sourceRevision: Optional[str] = Query(None),
+    status:         Optional[str] = Query(None),
+    openOnly:       bool          = Query(False),
+):
+    """List edit sessions with optional filters. Returns slim
+    summaries (sessionId, status, identity fields, intent action +
+    source, timestamps) -- get the full doc via GET /{sessionId}."""
+    if status is not None and status not in _EDIT_SESSION_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {list(_EDIT_SESSION_STATUSES)}; got {status!r}",
+        )
+    library_dir = library_path()
+    docs = _list_edit_sessions(library_dir)
+    pn_filter: Optional[str] = None
+    if partNumber is not None:
+        pn_filter = sanitize_part_number(partNumber) or partNumber
+    rev_filter: Optional[str] = None
+    if sourceRevision is not None:
+        rev_cand = sourceRevision.strip()
+        if rev_cand and not rev_cand.lower().startswith("rev"):
+            rev_cand = "rev" + rev_cand
+        rev_filter = rev_cand or None
+    out: List[Dict[str, Any]] = []
+    for doc in docs:
+        if pn_filter and doc.get("partNumber") != pn_filter:
+            continue
+        if rev_filter and doc.get("sourceRevision") != rev_filter:
+            continue
+        if status and doc.get("status") != status:
+            continue
+        if openOnly and doc.get("status") in _EDIT_SESSION_TERMINAL:
+            continue
+        out.append(_summarize_edit_session(doc))
+    # Newest first by createdAtUtc so the freshest work surfaces.
+    out.sort(key=lambda d: d.get("createdAtUtc") or "", reverse=True)
+    return {"sessions": out, "count": len(out)}
+
+
+@app.get("/api/edit-sessions/{sessionId}")
+async def get_edit_session(sessionId: str):
+    safe_id = _sanitize_session_id(sessionId)
+    if safe_id is None:
+        raise HTTPException(status_code=400, detail="Invalid sessionId")
+    doc = _load_edit_session(library_path(), safe_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"No edit session {safe_id}")
+    return doc
+
+
+@app.get("/api/edit-sessions/{sessionId}/handoff-payload")
+async def get_edit_session_handoff_payload(sessionId: str):
+    """Convenience accessor: return just the embedded handoff payload
+    snapshot. Lets a UI re-render the original handoff context without
+    parsing the whole session doc."""
+    safe_id = _sanitize_session_id(sessionId)
+    if safe_id is None:
+        raise HTTPException(status_code=400, detail="Invalid sessionId")
+    doc = _load_edit_session(library_path(), safe_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"No edit session {safe_id}")
+    return doc.get("handoffPayload") or {}
+
+
+@app.patch("/api/edit-sessions/{sessionId}")
+async def patch_edit_session(sessionId: str, body: _EditSessionPatchBody, request: Request):
+    """Mutate a session through the documented FSM. Immutable fields
+    (handoffPayload, handoffRef, target, intent, identity) cannot be
+    PATCH'd -- attempts return 400 with a precise field list so the
+    caller knows which fields it sent that the audit log refuses.
+
+    Validation enforces per-status required co-fields:
+      extracted    requires extraction.resultingPartPackageId
+      promoted     requires promotion.promotedRevision AND the on-disk
+                   parts/{pn}/{promotedRevision}/ directory to exist
+      compared     requires comparison.revA == sourceRevision AND
+                   comparison.revB == promotion.promotedRevision
+      failed       requires failureReason
+
+    Terminal sessions (compared/abandoned/failed) reject status changes
+    but still accept noteToAppend so the audit log can keep accruing
+    operator notes after the fact."""
+    safe_id = _sanitize_session_id(sessionId)
+    if safe_id is None:
+        raise HTTPException(status_code=400, detail="Invalid sessionId")
+    library_dir = library_path()
+    doc = _load_edit_session(library_dir, safe_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"No edit session {safe_id}")
+
+    # Immutable-field guard: inspect the RAW request body (not the
+    # Pydantic-projected model) so callers learn about keys they sent
+    # that the schema silently dropped.
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raw_body = {}
+    if isinstance(raw_body, dict):
+        bad_keys = sorted(set(raw_body.keys()) & _EDIT_SESSION_IMMUTABLE_FIELDS)
+        if bad_keys:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message":     "Edit session fields are immutable after creation",
+                    "fields":      bad_keys,
+                },
+            )
+
+    current_status = doc.get("status") or "prepared"
+    target_status  = body.status if body.status is not None else current_status
+    if target_status not in _EDIT_SESSION_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {list(_EDIT_SESSION_STATUSES)}; got {target_status!r}",
+        )
+
+    # Plan the mutation BEFORE writing so a failed validation never
+    # leaves a half-applied doc on disk.
+    updates: Dict[str, Any] = {}
+    if body.approval is not None:
+        updates["approval"] = body.approval.model_dump(exclude_none=True)
+    if body.applied is not None:
+        updates["applied"] = body.applied.model_dump(exclude_none=True)
+    if body.extraction is not None:
+        updates["extraction"] = body.extraction.model_dump(exclude_none=True)
+    if body.promotion is not None:
+        updates["promotion"] = body.promotion.model_dump(exclude_none=True)
+    if body.comparison is not None:
+        updates["comparison"] = body.comparison.model_dump(exclude_none=True)
+    if body.abandonReason is not None:
+        updates["abandonReason"] = body.abandonReason
+    if body.failureReason is not None:
+        updates["failureReason"] = body.failureReason
+
+    # Merge the planned updates with whatever is already on the doc
+    # so per-status required-field checks see the post-update view.
+    merged_view = {**doc, **updates}
+
+    transitioning = target_status != current_status
+    if transitioning:
+        if current_status in _EDIT_SESSION_TERMINAL:
+            # Terminal sessions can still receive noteToAppend so the
+            # audit log stays writeable after the fact, but they cannot
+            # change status anymore.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Session is terminal ({current_status}); status cannot change. "
+                    f"noteToAppend is still accepted."
+                ),
+            )
+        allowed = _EDIT_SESSION_FSM.get(current_status) or frozenset()
+        if target_status not in allowed:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Illegal status transition {current_status!r} -> {target_status!r}. "
+                    f"Allowed: {sorted(allowed) or '(none -- terminal state)'}."
+                ),
+            )
+
+    # Per-target-status required co-fields. Run these regardless of
+    # whether status changed in THIS patch -- e.g. a PATCH that sets
+    # promotion.promotedRevision without changing status should still
+    # have a sensible existing status (linked_to_revision or later).
+    if target_status == "extracted":
+        ext = merged_view.get("extraction") or {}
+        if not (ext.get("resultingPartPackageId") or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="status 'extracted' requires extraction.resultingPartPackageId",
+            )
+    if target_status == "promoted":
+        prom = merged_view.get("promotion") or {}
+        promoted_rev = (prom.get("promotedRevision") or "").strip()
+        if not promoted_rev:
+            raise HTTPException(
+                status_code=400,
+                detail="status 'promoted' requires promotion.promotedRevision",
+            )
+        # Verify the target rev directory exists on disk.
+        rev_norm = promoted_rev
+        if not rev_norm.lower().startswith("rev"):
+            rev_norm = "rev" + rev_norm
+        rev_dir = library_dir / "parts" / (merged_view.get("partNumber") or "") / rev_norm
+        if not rev_dir.exists() or not rev_dir.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail=f"promotion.promotedRevision points at {rev_dir.as_posix()} which does not exist on disk",
+            )
+        # Canonicalise stored value to 'revX' shape for downstream consumers.
+        merged_view.setdefault("promotion", {})
+        merged_view["promotion"]["promotedRevision"] = rev_norm
+        updates.setdefault("promotion", {})
+        updates["promotion"]["promotedRevision"] = rev_norm
+    if target_status == "compared":
+        comp = merged_view.get("comparison") or {}
+        rev_a = (comp.get("revA") or "").strip()
+        rev_b = (comp.get("revB") or "").strip()
+        if not rev_a or not rev_b:
+            raise HTTPException(
+                status_code=400,
+                detail="status 'compared' requires comparison.revA and comparison.revB",
+            )
+        if rev_a != merged_view.get("sourceRevision"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"comparison.revA must equal sourceRevision "
+                    f"({merged_view.get('sourceRevision')!r}); got {rev_a!r}"
+                ),
+            )
+        promoted_rev = ((merged_view.get("promotion") or {}).get("promotedRevision") or "").strip()
+        if rev_b != promoted_rev:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"comparison.revB must equal promotion.promotedRevision "
+                    f"({promoted_rev!r}); got {rev_b!r}"
+                ),
+            )
+    if target_status == "failed":
+        reason = (merged_view.get("failureReason") or "").strip()
+        if not reason:
+            raise HTTPException(
+                status_code=400,
+                detail="status 'failed' requires failureReason",
+            )
+
+    # All validations passed -- apply mutations + bump updatedAtUtc.
+    now = _iso_utc_now()
+    new_doc = dict(doc)
+    for k, v in updates.items():
+        # For Pydantic-derived sub-blocks we merge with whatever was
+        # already present so a partial patch doesn't clobber sibling fields.
+        if isinstance(v, dict) and isinstance(new_doc.get(k), dict):
+            merged = dict(new_doc[k])
+            merged.update(v)
+            new_doc[k] = merged
+        else:
+            new_doc[k] = v
+    if transitioning:
+        new_doc["status"] = target_status
+    new_doc["updatedAtUtc"] = now
+
+    if body.noteToAppend is not None and body.noteToAppend.strip():
+        existing_notes = new_doc.get("notes")
+        if not isinstance(existing_notes, list):
+            existing_notes = []
+        existing_notes.append({
+            "atUtc":  now,
+            "text":   body.noteToAppend.strip(),
+            "byUser": body.byUser,
+        })
+        new_doc["notes"] = existing_notes
+
+    out_path = _write_edit_session_atomic(library_dir, safe_id, new_doc)
+    return {
+        "session":    new_doc,
+        "outputPath": str(out_path),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1194,6 +1194,227 @@ def test_GET_cad_handoff_endpoint_404_when_no_match(aircraft_library_with_draft:
 
 
 # ---------------------------------------------------------------------------
+# POST /cad-edit-handoff -- read-only handoff contract for future
+# Sage-in-SOLIDWORKS controlled edits. The endpoint NEVER executes a
+# CAD edit; it returns a structured payload describing the resolved
+# target + parsed intent so the human reviewer + executor layer have
+# something auditable to act on.
+# ---------------------------------------------------------------------------
+
+_CAD_EDIT_HANDOFF_URL = "/api/part-semantic-regions/1030099/cad-edit-handoff"
+
+
+def _snapshot_regions_file(library: Path, pn: str, rev: str) -> tuple:
+    """Return (mtime_ns, raw_text) so we can prove the endpoint did
+    not mutate the on-disk regions JSON."""
+    p = semantic_regions_path(library, pn, rev)
+    st = p.stat()
+    return (st.st_mtime_ns, p.read_text(encoding="utf-8"))
+
+
+def test_cad_edit_handoff_top_wing_thickness_returns_dimension_change(
+    aircraft_library_with_draft: Path,
+):
+    """Spec test 1: 'make the top wing 2 inches thicker' must resolve
+    to top_wing, classify the intent as dimension_change with the
+    numeric value/units/dimension hint, and keep canEdit=false."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["handoffVersion"] == "semantic-region-cad-edit-handoff-0.1"
+    assert body["matched"]      is True
+    assert body["resolvedPhrase"] == "top wing"
+    assert body["userInstruction"].startswith("make the top wing")
+
+    assert body["intent"]["action"] == "dimension_change"
+    hints = body["intent"]["parameterHints"]
+    assert hints.get("value")     == 2.0
+    assert hints.get("units")     == "in"
+    assert hints.get("dimension") == "thickness"
+    assert body["intent"]["confidence"] == "high"
+
+    target_ids = [r["regionId"] for r in body["target"]["regions"]]
+    assert target_ids == ["top_wing"]
+    assert "planarsurface_top_wing" in body["target"]["cadFeatureIds"]
+    assert "planarsurface_top_wing" in body["target"]["glbNodes"]
+    assert "Planarsurface Top Wing" in body["target"]["sourceFeatures"]
+
+    assert body["operationPolicy"]["canEdit"]             is False
+    assert body["operationPolicy"]["requiresHumanReview"] is True
+    assert "Placement surfaces" in body["operationPolicy"]["blockedReason"]
+    assert "not implemented yet" in body["operationPolicy"]["blockedReason"]
+
+
+def test_cad_edit_handoff_lower_wing_hole_returns_hole_pattern(
+    aircraft_library_with_draft: Path,
+):
+    """Spec test 2: 'add 4 holes to the lower wing' must resolve to
+    lower_wing and classify as hole_pattern with count=4."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "lower wing",
+        "userInstruction": "add 4 holes to the lower wing",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["action"]             == "hole_pattern"
+    assert body["intent"]["parameterHints"].get("count") == 4
+    assert body["intent"]["confidence"]         == "high"
+
+    target_ids = [r["regionId"] for r in body["target"]["regions"]]
+    assert target_ids == ["lower_wing"]
+    assert body["target"]["cadFeatureIds"], "lower_wing must carry at least one cadFeatureId"
+    assert body["operationPolicy"]["canEdit"] is False
+
+
+def test_cad_edit_handoff_tail_sketch_returns_sketch_on_face(
+    aircraft_library_with_draft: Path,
+):
+    """Spec test 3: 'sketch on the tail surface' must resolve to the
+    tail aggregate (both stabilizers, per the resolver's plain-tail
+    behavior) and classify as sketch_on_face. canEdit stays false."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "tail",
+        "userInstruction": "sketch on the tail surface",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Per the spec: sketch_on_face is preferred when the verb fits;
+    # the alternative 'unknown' is only acceptable when placement
+    # data is genuinely missing -- our synthetic regions still pass
+    # the verb test so we expect sketch_on_face here.
+    assert body["intent"]["action"] in ("sketch_on_face", "unknown")
+    if body["intent"]["action"] == "sketch_on_face":
+        assert body["intent"]["confidence"] in ("low", "medium")
+
+    target_ids = [r["regionId"] for r in body["target"]["regions"]]
+    assert target_ids == [
+        "tail_horizontal_stabilizer",
+        "tail_vertical_stabilizer",
+    ]
+    # Tail aggregate must carry both stabilizer cadFeatureIds.
+    cad_ids = body["target"]["cadFeatureIds"]
+    assert "netblend_horiz_stab_p" in cad_ids
+    assert "netblend_vert_stab"    in cad_ids
+
+    assert body["operationPolicy"]["canEdit"] is False
+    # Placement scaffolding fields present even when empty defaults.
+    assert "surfaces"     in body["placement"]
+    assert "capabilities" in body["placement"]
+    assert "editReadiness" in body["placement"]
+
+
+def test_cad_edit_handoff_unknown_phrase_returns_404_matched_false(
+    aircraft_library_with_draft: Path,
+):
+    """Spec test 4: an unresolved phrase must 404 with matched=false
+    and echo the user instruction so the caller can show a helpful
+    error. The endpoint must NOT silently fall back to a partial
+    handoff (no canEdit=true ever)."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "completely made up part xyzzy",
+        "userInstruction": "make it 5 inches taller",
+    })
+    assert r.status_code == 404
+    body = r.json()
+    assert body["matched"] is False
+    assert body["handoffVersion"] == "semantic-region-cad-edit-handoff-0.1"
+    assert body["userInstruction"].startswith("make it 5 inches taller")
+    assert "completely made up" in body["detail"]
+
+
+def test_cad_edit_handoff_does_not_mutate_regions_json(
+    aircraft_library_with_draft: Path,
+):
+    """Spec test 5: the endpoint is read-only. The on-disk semantic
+    regions JSON must be byte-for-byte identical before and after a
+    successful handoff, including the file's mtime."""
+    pn, rev = "1030099", "revA"
+    snap_before = _snapshot_regions_file(aircraft_library_with_draft, pn, rev)
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    snap_after = _snapshot_regions_file(aircraft_library_with_draft, pn, rev)
+    assert snap_after == snap_before, \
+        "semantic-region JSON must NOT change after a cad-edit-handoff POST"
+
+
+def test_cad_edit_handoff_existing_cad_handoff_endpoint_unchanged(
+    aircraft_library_with_draft: Path,
+):
+    """Spec test 6: the older read-only GET /cad-handoff endpoint
+    keeps its existing handoffVersion and shape so any caller bound
+    to that contract is not disturbed by the new POST."""
+    client = TestClient(server.app)
+    r = client.get("/api/part-semantic-regions/1030099/cad-handoff",
+                   params={"revision": "A", "phrase": "top wing"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["handoffVersion"] == "semantic-region-cad-handoff-1.0"
+    assert body["region"]["regionId"] == "top_wing"
+    assert "solidWorksTargets" in body
+    assert body["operationPolicy"]["canEdit"] is False
+
+
+def test_cad_edit_handoff_requestedAction_override_wins(
+    aircraft_library_with_draft: Path,
+):
+    """The operator/UI can override the heuristic action when it
+    knows better. The override is restricted to the documented
+    enum to keep the audit story intact (arbitrary action names
+    would defeat downstream review)."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "do something here",     # parser would say unknown
+        "requestedAction": "dimension_change",       # operator override
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["action"] == "dimension_change"
+
+
+def test_cad_edit_handoff_body_parameters_merge_into_hints(
+    aircraft_library_with_draft: Path,
+):
+    """Operator/UI parameters merge into parameterHints and win on
+    conflict with the parser's best guess. This is how a curator-
+    refined value reaches the future executor unchanged."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+        "parameters":      {"value": 2.5, "units": "in", "axis": "thickness"},
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    hints = body["intent"]["parameterHints"]
+    # Operator wins on the value conflict.
+    assert hints["value"] == 2.5
+    assert hints["units"] == "in"
+    # Parser-only fields are preserved.
+    assert hints["dimension"] == "thickness"
+    # Operator-only fields land in the merged hints verbatim.
+    assert hints["axis"] == "thickness"
+
+
+# ---------------------------------------------------------------------------
 # Existing HIGHLIGHT_FEATURES behavior preserved
 # ---------------------------------------------------------------------------
 

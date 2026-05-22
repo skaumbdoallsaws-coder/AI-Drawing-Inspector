@@ -4644,6 +4644,285 @@ def _semantic_region_cad_handoff_payload(
     }
 
 
+_CAD_EDIT_HANDOFF_VERSION = "semantic-region-cad-edit-handoff-0.1"
+
+# Conservative, intent-only keyword sets. The parser is allowed to say
+# "unknown" -- it should NEVER guess an edit action it isn't sure about,
+# because the downstream consumer (Sage-in-SOLIDWORKS) may treat the
+# action as authoritative when the human eventually approves the edit.
+_CAD_EDIT_DIMENSION_KEYWORDS_RE = re.compile(
+    r'\b(thick(?:er|ness)?|tall(?:er)?|short(?:er)?|deep(?:er)?|'
+    r'wid(?:er|en)?|narrow(?:er)?|long(?:er)?|larger|smaller|bigger|'
+    r'extend(?:ed)?|extrude\s+by|increase|decrease|grow|shrink|reduce|enlarge)\b',
+    re.IGNORECASE,
+)
+_CAD_EDIT_HOLE_NOUN_RE = re.compile(r'\bhole(?:s)?\b', re.IGNORECASE)
+_CAD_EDIT_HOLE_ACTION_RE = re.compile(
+    r'\b(add|drill|tap|countersink|counterbore|pattern|place|put|insert|new)\b',
+    re.IGNORECASE,
+)
+_CAD_EDIT_SKETCH_RE = re.compile(
+    r'\b(sketch\s+(?:on|onto|a|new)|new\s+sketch|start\s+a\s+sketch|'
+    r'draw\s+(?:on|a)|create\s+a\s+sketch)\b',
+    re.IGNORECASE,
+)
+_CAD_EDIT_DIMENSION_VALUE_RE = re.compile(
+    r'(-?\d+(?:\.\d+)?)\s*(inches?|in\b|"|”|mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?)',
+    re.IGNORECASE,
+)
+_CAD_EDIT_HOLE_COUNT_RE = re.compile(r'(\d+)\s+holes?\b', re.IGNORECASE)
+
+
+def _normalize_length_units(raw: str) -> str:
+    """Map free-text units to canonical short forms so downstream
+    consumers don't have to handle inches/"/in synonyms themselves."""
+    if not raw:
+        return ""
+    lower = raw.lower()
+    if lower in ('"', '”') or lower.startswith("inch") or lower == "in":
+        return "in"
+    if lower.startswith("millimet") or lower == "mm":
+        return "mm"
+    if lower.startswith("centimet") or lower == "cm":
+        return "cm"
+    return lower
+
+
+def _classify_dimension_axis(text_lower: str) -> Optional[str]:
+    """Best-effort hint about WHICH dimension the operator means, based
+    on the verb used. Returns one of thickness/height/width/length/
+    depth or None when ambiguous. Conservative: prefers None over a
+    wrong guess."""
+    if re.search(r'\bthick(?:er|ness)?\b', text_lower):
+        return "thickness"
+    if re.search(r'\btall(?:er)?\b', text_lower):
+        return "height"
+    if re.search(r'\bwid(?:er|en)?\b', text_lower) or "wider" in text_lower:
+        return "width"
+    if re.search(r'\bnarrow(?:er)?\b', text_lower):
+        return "width"
+    if re.search(r'\blong(?:er)?\b', text_lower):
+        return "length"
+    if re.search(r'\bshort(?:er)?\b', text_lower):
+        # Ambiguous between length/height; pick length as the dominant
+        # CAD intent ("make this part shorter" usually means linear).
+        return "length"
+    if re.search(r'\bdeep(?:er)?\b', text_lower):
+        return "depth"
+    return None
+
+
+def _parse_cad_edit_intent(instruction: str) -> Dict[str, Any]:
+    """Deterministic, no-LLM intent extraction from a free-text edit
+    request. Returns:
+        {action, parameterHints, confidence}
+    where action is one of dimension_change / hole_pattern /
+    sketch_on_face / unknown. Confidence is high/medium/low.
+
+    The parser is intentionally conservative: any ambiguity collapses
+    to 'unknown'. Downstream Sage-in-SOLIDWORKS treats the action as
+    a hint that requires human review (operationPolicy.canEdit stays
+    false either way), but a wrong action is worse than no action
+    because it primes the human reviewer to confirm the wrong thing."""
+    text = (instruction or "").strip()
+    if not text:
+        return {"action": "unknown", "parameterHints": {}, "confidence": "low"}
+    norm = text.lower()
+
+    sketch_hit    = bool(_CAD_EDIT_SKETCH_RE.search(norm))
+    hole_noun     = bool(_CAD_EDIT_HOLE_NOUN_RE.search(norm))
+    hole_action   = bool(_CAD_EDIT_HOLE_ACTION_RE.search(norm))
+    dim_keyword   = bool(_CAD_EDIT_DIMENSION_KEYWORDS_RE.search(norm))
+    value_match   = _CAD_EDIT_DIMENSION_VALUE_RE.search(norm)
+    hole_count_m  = _CAD_EDIT_HOLE_COUNT_RE.search(norm)
+
+    # Priority: sketch_on_face > hole_pattern > dimension_change. The
+    # priority matters when a sentence trips multiple heuristics
+    # (e.g. "sketch a 2 inch hole" -> sketch action, not dimension).
+    if sketch_hit:
+        hints: Dict[str, Any] = {}
+        # Capture a free-text target if the sentence has "on the X".
+        surface_m = re.search(r'on\s+(?:the\s+)?([a-z][\w\s\-]*?)(?:\s+(?:to|and|so|for|with)\b|[.,!?]|$)', norm)
+        if surface_m:
+            hint = surface_m.group(1).strip()
+            if hint:
+                hints["targetSurfaceHint"] = hint
+        confidence = "medium"   # sketch never gets "high" until placement is real
+        return {"action": "sketch_on_face", "parameterHints": hints, "confidence": confidence}
+
+    if hole_noun and (hole_action or hole_count_m):
+        hints = {}
+        if hole_count_m:
+            try:
+                hints["count"] = int(hole_count_m.group(1))
+            except ValueError:
+                pass
+        diam_m = _CAD_EDIT_DIMENSION_VALUE_RE.search(norm)
+        if diam_m:
+            hints["diameter"] = float(diam_m.group(1))
+            hints["units"]    = _normalize_length_units(diam_m.group(2))
+        confidence = "high" if hints.get("count") else "medium"
+        return {"action": "hole_pattern", "parameterHints": hints, "confidence": confidence}
+
+    if dim_keyword or value_match:
+        hints = {}
+        if value_match:
+            try:
+                hints["value"] = float(value_match.group(1))
+            except ValueError:
+                pass
+            hints["units"] = _normalize_length_units(value_match.group(2))
+        axis = _classify_dimension_axis(norm)
+        if axis:
+            hints["dimension"] = axis
+        if hints.get("value") is not None and hints.get("dimension"):
+            confidence = "high"
+        elif hints.get("dimension") or hints.get("value") is not None:
+            confidence = "medium"
+        else:
+            confidence = "low"
+        return {"action": "dimension_change", "parameterHints": hints, "confidence": confidence}
+
+    return {"action": "unknown", "parameterHints": {}, "confidence": "low"}
+
+
+class _CadEditHandoffBody(BaseModel):
+    """POST body for the read-only CAD-edit handoff contract. Loose by
+    design -- the placement / executor layers will tighten this once
+    they exist. Today the endpoint never mutates anything."""
+    revision:         str
+    phrase:           str
+    userInstruction:  str
+    requestedAction:  Optional[str] = None
+    parameters:       Optional[Dict[str, Any]] = None
+
+
+_CAD_EDIT_ALLOWED_ACTIONS = ("dimension_change", "hole_pattern", "sketch_on_face", "unknown")
+
+
+@app.post("/api/part-semantic-regions/{partNumber}/cad-edit-handoff")
+async def part_semantic_regions_cad_edit_handoff(
+    partNumber: str,
+    body:       _CadEditHandoffBody,
+):
+    """Read-only handoff for future Sage-in-SOLIDWORKS controlled edits.
+
+    Given a user phrase (resolves to a semantic region) and a free-text
+    userInstruction ("make the top wing 2 inches thicker"), return a
+    structured payload describing the target CAD features, the parsed
+    intent, the placement scaffolding the operator has filled in, and
+    an explicit operationPolicy.canEdit=false until the placement
+    extraction + SolidWorks edit executor are implemented.
+
+    Reuses _semantic_region_cad_handoff_payload so the target shape is
+    identical to the existing /cad-handoff endpoint -- the new payload
+    just reshapes the same data into a CAD-edit-shaped envelope plus
+    the parsed intent.
+
+    Hard guarantees:
+      - never executes a CAD edit
+      - never calls the SolidWorks bridge
+      - never mutates the semantic-regions JSON file
+      - always returns operationPolicy.canEdit=false
+    The honest blockedReason explains the missing layers so a Sage
+    consumer can surface "this would be ready when placement is
+    populated" instead of silently ignoring the handoff."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision)
+
+    phrase = (body.phrase or "").strip()
+    if not phrase:
+        raise HTTPException(status_code=400, detail="phrase is required")
+    instruction = (body.userInstruction or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="userInstruction is required")
+
+    base_payload = _semantic_region_cad_handoff_payload(library_path(), safe_pn, safe_rev, phrase)
+    if base_payload is None:
+        return JSONResponse(status_code=404, content={
+            "handoffVersion":  _CAD_EDIT_HANDOFF_VERSION,
+            "matched":         False,
+            "partNumber":      safe_pn,
+            "revision":        safe_rev,
+            "phrase":          phrase,
+            "userInstruction": instruction,
+            "detail":          f"No semantic region matched {phrase!r}.",
+        })
+
+    intent = _parse_cad_edit_intent(instruction)
+    # Operator/UI can override the heuristic action when they know
+    # better, but only with one of the recognized actions -- guessing
+    # at arbitrary action names would defeat the whole audit story.
+    if body.requestedAction and body.requestedAction in _CAD_EDIT_ALLOWED_ACTIONS:
+        intent = {**intent, "action": body.requestedAction}
+    if body.parameters:
+        merged_hints = dict(intent.get("parameterHints") or {})
+        # Operator parameters win on conflict so a curated value beats
+        # the parser's best guess. The merge is shallow; nested objects
+        # are replaced wholesale.
+        for k, v in body.parameters.items():
+            merged_hints[k] = v
+        intent = {**intent, "parameterHints": merged_hints}
+
+    regions = base_payload.get("regions") or []
+    targets = base_payload.get("solidWorksTargets") or {}
+
+    target_regions: List[Dict[str, Any]] = []
+    placement_surfaces: List[Any] = []
+    placement_capabilities: List[str] = []
+    edit_readiness_values: List[str] = []
+    for r in regions:
+        target_regions.append({
+            "regionId":   r.get("regionId"),
+            "label":      r.get("label"),
+            "confidence": r.get("confidence"),
+            "reviewed":   bool(r.get("reviewed", False)),
+        })
+        for surface in (r.get("placementSurfaces") or []):
+            if surface not in placement_surfaces:
+                placement_surfaces.append(surface)
+        for cap in (r.get("placementCapabilities") or []):
+            if isinstance(cap, str) and cap not in placement_capabilities:
+                placement_capabilities.append(cap)
+        readiness = str(r.get("editReadiness") or "not_ready")
+        edit_readiness_values.append(readiness)
+
+    if not edit_readiness_values:
+        edit_readiness = "not_ready"
+    elif len(set(edit_readiness_values)) == 1:
+        edit_readiness = edit_readiness_values[0]
+    else:
+        edit_readiness = "mixed"
+
+    return {
+        "handoffVersion":  _CAD_EDIT_HANDOFF_VERSION,
+        "matched":         True,
+        "partNumber":      safe_pn,
+        "revision":        safe_rev,
+        "userInstruction": instruction,
+        "resolvedPhrase":  phrase,
+        "intent":          intent,
+        "target": {
+            "regions":        target_regions,
+            "cadFeatureIds":  list(targets.get("cadFeatureIds") or []),
+            "sourceFeatures": list(targets.get("sourceFeatures") or []),
+            "glbNodes":       list(targets.get("glbNodes") or []),
+        },
+        "placement": {
+            "surfaces":      placement_surfaces,
+            "capabilities":  placement_capabilities,
+            "editReadiness": edit_readiness,
+        },
+        "operationPolicy": {
+            "canEdit":              False,
+            "requiresHumanReview":  True,
+            "blockedReason":        "Placement surfaces and SolidWorks edit execution are not implemented yet.",
+        },
+    }
+
+
 @app.get("/api/part-semantic-regions/{partNumber}/cad-handoff")
 async def part_semantic_regions_cad_handoff(
     partNumber: str,

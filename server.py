@@ -3771,6 +3771,129 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
 
 
 # ---------------------------------------------------------------------------
+# Part Semantic Region Builder (MVP, deterministic heuristics)
+# ---------------------------------------------------------------------------
+#
+# Groups low-level GLB nodes / CAD features into user-facing regions
+# ("top wing", "tail", "propeller") so the UI + Sage can answer questions
+# in human terms instead of SolidWorks operation names. MVP uses spatial
+# + name heuristics only; no LLM. Output lives at
+#   parts/{pn}/{rev}/{pn}_semantic_regions.json
+# and every region is marked reviewed:false so a future operator-curator
+# UI can lock individual regions across re-runs.
+
+from ai_inspector.semantic_regions import (
+    SCHEMA_VERSION as _SEMANTIC_REGIONS_SCHEMA_VERSION,
+    build_draft_regions as _build_semantic_regions_draft,
+    semantic_regions_path as _semantic_regions_path,
+    write_semantic_regions as _write_semantic_regions,
+)
+
+
+class _SemanticRegionsDraftBody(BaseModel):
+    revision: str
+
+
+def _semantic_regions_resolve_rev(library_dir: Path, pn: str, revision: str) -> str:
+    """Accept either 'A' or 'revA' from the request and return the
+    on-disk revision directory name ('revA'). Errors with 400 when
+    the input does not produce a valid revision."""
+    cand = (revision or "").strip()
+    if not cand:
+        raise HTTPException(status_code=400, detail="revision is required")
+    if not cand.lower().startswith("rev"):
+        cand = "rev" + cand
+    safe_rev = _intake_sanitize_revision(cand)
+    if not safe_rev:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid revision {revision!r}; expected rev<alnum> (e.g. revA).",
+        )
+    return safe_rev
+
+
+@app.get("/api/part-semantic-regions/{partNumber}")
+async def part_semantic_regions_read(partNumber: str, revision: str = Query(...)):
+    """Read the persisted draft semantic-regions JSON for a part rev.
+
+    Returns 404 with a JSON body when the file does not exist yet --
+    the caller can then POST /draft to generate it. Never silently
+    invents an empty document so the UI knows to prompt for a draft."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+
+    library_dir = library_path()
+    out_path = _semantic_regions_path(library_dir, safe_pn, safe_rev)
+    if not out_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No semantic-regions draft for {safe_pn} {safe_rev}. "
+                f"POST /api/part-semantic-regions/{safe_pn}/draft to generate one."
+            ),
+        )
+    try:
+        doc = json.loads(out_path.read_text(encoding="utf-8-sig"))
+    except Exception as ex:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Corrupt semantic-regions JSON at {out_path}: {ex}",
+        )
+    return doc
+
+
+@app.post("/api/part-semantic-regions/{partNumber}/draft")
+async def part_semantic_regions_draft(partNumber: str, body: _SemanticRegionsDraftBody):
+    """Generate (or regenerate) the draft semantic-regions JSON for
+    a part rev.
+
+    Preservation policy: any region in the existing file with
+    reviewed=true carries over verbatim and its glbNodes are
+    excluded from the heuristic input set so the rules do not
+    double-assign them. Unreviewed regions are regenerated from
+    scratch.
+
+    Hard requirement: parts/{pn}/{rev}/{pn}_colored.glb must exist.
+    feature_colors.json is optional -- without it sourceFeatures is
+    empty. intake_manifest.json is unused by the MVP but listed in
+    the spec for forward compat (future versions may pin the
+    extractor build that produced the GLB)."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision)
+
+    library_dir = library_path()
+    try:
+        doc = _build_semantic_regions_draft(library_dir, safe_pn, safe_rev)
+    except FileNotFoundError as ex:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Cannot build semantic-regions draft for {safe_pn} {safe_rev}: {ex}. "
+                "Run Enrich Visuals (or re-extract the part) so the colored GLB lands "
+                "in the revision archive first."
+            ),
+        )
+    except ValueError as ex:
+        raise HTTPException(status_code=409, detail=str(ex))
+
+    out_path = _write_semantic_regions(library_dir, safe_pn, safe_rev, doc)
+    return {
+        "ok":             True,
+        "partNumber":     safe_pn,
+        "revision":       safe_rev,
+        "schemaVersion":  _SEMANTIC_REGIONS_SCHEMA_VERSION,
+        "outputPath":     str(out_path),
+        "regions":        doc["regions"],
+        "summary":        doc["summary"],
+        "axisFrame":      doc["axisFrame"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Profile Builder MVP
 # ---------------------------------------------------------------------------
 #

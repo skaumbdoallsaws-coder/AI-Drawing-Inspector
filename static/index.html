@@ -33049,6 +33049,7 @@
                     previewResult:            null,
                     overwriteInput:           '',
                     packageIdChangeAcknowledged: false,
+                    replaceManagedVisuals:    false,
                     enrichLoading:            false,
                     enrichResult:             null,
                     promoteLoading:           false,
@@ -33453,8 +33454,12 @@
                     // Drop stale enrichment summary -- the operator may
                     // have changed partPackageId between visits, in
                     // which case the prior enrich result describes a
-                    // different sidecar.
+                    // different sidecar. Also drop the replace-managed-
+                    // visuals flag: it was tied to that prior enrich
+                    // and must not silently clobber per-rev visuals on
+                    // a different package selection.
                     s.enrichResult = null;
+                    s.replaceManagedVisuals = false;
                     s.previewLoading = true; s.previewResult = null;
                     go(3);
                     _loadPreview();
@@ -33520,7 +33525,15 @@
                     // re-run preview so the action table reflects what
                     // will land on the next promote. The summary panel
                     // remains visible above the refreshed preview.
+                    //
+                    // Tell the backend that the next promote should
+                    // REPLACE the per-rev's managed visual files
+                    // (otherwise copy-if-not-exists skips them and the
+                    // operator's freshly enriched GLB / views never
+                    // reach the archive). Curated files outside the
+                    // wizard whitelist are still preserved.
                     if (s.enrichResult.success) {
+                        s.replaceManagedVisuals = true;
                         s.previewLoading = true;
                         s.previewResult  = null;
                         render();
@@ -33612,20 +33625,24 @@
                 const canPromote = !!pr.planValid;
                 const hasPkgChangeError = (pr.errors || []).some(e => e.code === 'package_id_changed_for_existing_revision');
                 // Detect whether the preview already has visual-asset
-                // CREATE rows. The wizard's managed visual whitelist is
-                // {pn}_colored.glb / *_view_*.png / *_feature_colors.json /
-                // *.stl. If none appear and modelOnly+partPackageId are
-                // set, surface the Enrich button so the operator can
-                // hydrate the sidecar without leaving the wizard.
+                // rows (CREATE / SKIP / UPDATE). The wizard's managed
+                // visual whitelist is {pn}_colored.glb / *_view_*.png /
+                // *_feature_colors.json / *.stl. Used only to pick the
+                // button LABEL -- the button itself is always shown for
+                // model-only intakes with a package id so the operator
+                // can re-run enrichment (e.g. after rebuilding the
+                // extractor binary or noticing the GLB is incomplete).
                 const _visualAssetRe = /(_colored\.glb|_view_(front|top|right|isometric)\.png|_feature_colors\.json|\.stl|\.STL)$/;
                 const hasVisualActions = (pr.actions || []).some(a =>
                     a && typeof a.path === 'string' && _visualAssetRe.test(a.path)
                 );
-                // Enrichment makes sense for model-only intakes (bridge
-                // SLDPRT-only path does not emit visuals). Hide when the
-                // preview already shows visual rows -- nothing to add.
-                const showEnrich = !!(s.modelOnly && s.partPackageId && !hasVisualActions);
-                const enrichBtnLabel = s.enrichResult && s.enrichResult.success
+                // Enrichment makes sense for model-only intakes (the
+                // bridge SLDPRT-only path does not emit visuals).
+                const showEnrich = !!(s.modelOnly && s.partPackageId);
+                // Label: "Re-run" when the preview already shows the
+                // managed visual rows OR a prior enrich landed (covers
+                // both first-time-empty and post-promote states).
+                const enrichBtnLabel = (hasVisualActions || (s.enrichResult && s.enrichResult.success))
                     ? 'Re-run enrich visuals'
                     : 'Enrich visuals';
                 footer.innerHTML = `
@@ -33825,6 +33842,7 @@
                 if (s.modelOnly)                   out.modelOnly                   = true;
                 if (s.overwriteInput === s.revision) out.overwriteConfirmed = s.revision;
                 if (s.packageIdChangeAcknowledged) out.packageIdChangeAcknowledged = true;
+                if (s.replaceManagedVisuals)       out.replaceManagedVisuals       = true;
                 return out;
             }
             async function _refreshProfilesInSession() {

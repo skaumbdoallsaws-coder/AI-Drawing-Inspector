@@ -2653,16 +2653,47 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
     # operator does not have to move them by hand. Curated assets
     # already in the per-rev folder survive: the writer never clobbers
     # an existing target (§6.4 spirit, applied to visual assets).
+    # Mirror the same flags _execute_intake_plan honors so the preview's
+    # action table reflects what would actually happen on promote. Without
+    # this, the operator sees SKIP for the visuals they JUST refreshed via
+    # Enrich Visuals, even though promote would replace them.
+    _existing_pkg_for_preview = (
+        _intake_existing_revision_package_id(library_dir, safe_pn, safe_rev)
+        if rev_dir_exists else None
+    )
+    _will_repack = (
+        rev_dir_exists
+        and bool(getattr(body, "packageIdChangeAcknowledged", False))
+        and _existing_pkg_for_preview
+        and _existing_pkg_for_preview != body.partPackageId
+    )
+    _will_refresh_visuals = (
+        rev_dir_exists
+        and bool(getattr(body, "replaceManagedVisuals", False))
+    )
+    _managed_visual_names = set(_intake_visual_asset_filenames(safe_pn))
     visual_src_paths = _intake_visual_assets_in_sidecar(library_dir, safe_pn, body.partPackageId)
     for vp in visual_src_paths:
         tgt = rev_dir / vp.name
         if tgt.exists():
-            actions.append({
-                "kind":   "SKIP",
-                "path":   _intake_relpath(library_dir, tgt),
-                "bytes":  0,
-                "source": "curated asset preserved (already present in revision target)",
-            })
+            # If the operator opted in to repackage or refresh AND the
+            # target is in the managed whitelist, the promote will UPDATE
+            # the file (delete-then-copy). Curated names outside the
+            # whitelist always stay SKIP-preserved.
+            if (_will_repack or _will_refresh_visuals) and vp.name in _managed_visual_names:
+                actions.append({
+                    "kind":   "UPDATE",
+                    "path":   _intake_relpath(library_dir, tgt),
+                    "bytes":  vp.stat().st_size,
+                    "source": _intake_relpath(library_dir, vp),
+                })
+            else:
+                actions.append({
+                    "kind":   "SKIP",
+                    "path":   _intake_relpath(library_dir, tgt),
+                    "bytes":  0,
+                    "source": "curated asset preserved (already present in revision target)",
+                })
         else:
             actions.append({
                 "kind":   "CREATE",
@@ -3039,6 +3070,7 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
     # managed whitelist (curated operator drops, custom STLs, etc.)
     # are still preserved.
     package_change_ack = bool(getattr(body, "packageIdChangeAcknowledged", False))
+    replace_managed_visuals = bool(getattr(body, "replaceManagedVisuals", False))
     # Use the pre-OVERWRITE snapshot -- by this point intake_manifest.json
     # already carries the NEW packageId, so re-reading it would mask the
     # change.
@@ -3049,19 +3081,27 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
         and existing_pkg_for_rev
         and existing_pkg_for_rev != body.partPackageId
     )
-    if repackage_in_progress:
+    # Same delete-stale-visuals pass also fires when the operator just
+    # refreshed the bridge sidecar via Enrich Visuals (same package id,
+    # new GLB / view PNGs / STL). Without this, the wizard's copy-if-
+    # not-exists pass would skip every refreshed file as "curated asset
+    # preserved" and the operator's new visuals never reach the
+    # per-rev archive.
+    refresh_managed_visuals = rev_dir_exists and replace_managed_visuals
+    if repackage_in_progress or refresh_managed_visuals:
         # Delete stale managed visuals so copy-if-not-exists effectively
-        # becomes copy-from-new-package. The wizard whitelist is the
-        # exhaustive list of file shapes the wizard treats as managed;
-        # anything else in the per-rev dir is untouched.
+        # becomes copy-fresh. The wizard whitelist is the exhaustive
+        # list of file shapes the wizard treats as managed; anything
+        # else in the per-rev dir is untouched.
+        reason = ("packageIdChangeAcknowledged=true" if repackage_in_progress
+                  else "replaceManagedVisuals=true (post-enrich refresh)")
         for fn in _intake_visual_asset_filenames(safe_pn):
             stale = rev_dir / fn
             if stale.exists():
                 try:
                     stale.unlink()
                     _record("UPDATE", stale, True,
-                            detail="deleted stale visual from prior package "
-                                   "(packageIdChangeAcknowledged=true)")
+                            detail=f"deleted stale visual ({reason})")
                 except Exception as ex:
                     _record("UPDATE", stale, False,
                             detail=f"could not delete stale visual: {ex}")
@@ -3170,6 +3210,17 @@ class IntakeRequestBody(BaseModel):
     # the new package's visuals are copied in, so the rev ends up
     # consistent with the package the operator chose.
     packageIdChangeAcknowledged: bool = False
+    # Set by the wizard after a successful Enrich Visuals run (same
+    # package id, just refreshed sidecar assets). Tells the promote
+    # path to delete the per-rev's wizard-managed visual whitelist
+    # files BEFORE the copy-from-sidecar pass, so the new GLB / view
+    # PNGs / feature_colors / STL actually land in the archive instead
+    # of being skipped as "curated asset preserved". Files outside the
+    # whitelist (operator-curated drops, extra PNGs, etc.) are still
+    # untouched. Independent of packageIdChangeAcknowledged -- this
+    # flag fires the same delete-before-copy pass without requiring a
+    # package id change.
+    replaceManagedVisuals:       bool = False
 
 
 @app.get("/api/library/numbering/next")

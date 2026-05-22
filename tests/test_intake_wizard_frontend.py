@@ -386,3 +386,35 @@ def test_wizard_enrich_visuals_button_wiring_present():
         's.enrichResult = null',
     ]:
         assert marker in html, f"enrich-visuals wiring regressed: {marker!r}"
+
+
+def test_wizard_enrich_always_shows_and_label_adapts():
+    """The Enrich Visuals button must show whenever modelOnly+pkg are
+    set (no hidden-when-visuals-exist gate) so the operator can
+    re-run enrichment after rebuilding the extractor binary or after
+    noticing the GLB is incomplete. Label is "Enrich visuals" when
+    the preview has no visual rows yet, "Re-run enrich visuals"
+    otherwise. After a successful re-run the wizard sets
+    replaceManagedVisuals so the next Promote overwrites the
+    per-rev's managed visuals."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        # Always-show gate: no &&-with-hasVisualActions remaining
+        'const showEnrich = !!(s.modelOnly && s.partPackageId);',
+        # Adaptive label expression
+        "'Re-run enrich visuals'",
+        "'Enrich visuals'",
+        # State field for the new flag
+        'replaceManagedVisuals:    false',
+        # Auto-set after enrich success
+        's.replaceManagedVisuals = true',
+        # Cleared when operator returns to Step 2
+        's.replaceManagedVisuals = false',
+        # _intakeBody includes the new flag
+        'out.replaceManagedVisuals',
+    ]:
+        assert marker in html, f"enrich always-show / replace wiring regressed: {marker!r}"
+    # Make sure the old hidden-when-visuals-present gate is GONE.
+    assert '!hasVisualActions' not in html, \
+        "Enrich button should no longer be hidden when visual rows exist"

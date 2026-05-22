@@ -950,3 +950,87 @@ def test_promote_with_acknowledged_package_change_deletes_stale_managed_visuals(
     # Manifest reflects the new package
     manifest = json.loads((rev_dir / "intake_manifest.json").read_text(encoding="utf-8"))
     assert manifest["sourcePart"]["packageId"] == new_pkg
+
+
+def test_promote_replaces_managed_visuals_on_same_package_when_flag_set(intake_library: Path):
+    """Operator clicks Enrich Visuals in Step 3, sidecar gets refreshed
+    GLB / view PNGs / STL, then Promote runs again WITHOUT a package id
+    change. Wizard sends replaceManagedVisuals=true so the per-rev's
+    wizard-managed visual whitelist is overwritten with the fresh
+    sidecar bytes -- otherwise copy-if-not-exists would silently skip
+    them and the operator's just-enriched assets would never land."""
+    pn = "1099999"
+    pkg = "deadbeef0002"
+    # First promote with visual assets so the per-rev has stale bytes.
+    pkg_root = intake_library / "_bridge_imports" / "part" / pn / pkg
+    _seed_visual_assets(pkg_root, pn)
+    client = TestClient(server.app)
+    r1 = client.post("/api/library/intake/promote",
+                     json=_default_body(revision="revA", part_package_id=pkg))
+    assert r1.status_code == 200, r1.text
+    rev_dir = intake_library / "parts" / pn / "revA"
+    stale_glb = rev_dir / f"{pn}_colored.glb"
+    stale_iso = rev_dir / f"{pn}_view_isometric.png"
+    assert stale_glb.read_bytes() == b"glTF\x02\x00\x00\x00"
+
+    # Drop a curated, non-managed file the wizard must preserve.
+    curated = rev_dir / "operator_notes.txt"
+    curated.write_text("keep these", encoding="utf-8")
+
+    # Sidecar gets refreshed visuals (mimics post-enrich state)
+    (pkg_root / "part" / f"{pn}_colored.glb").write_bytes(b"FRESH_GLB_BYTES")
+    (pkg_root / "part" / f"{pn}_view_isometric.png").write_bytes(b"\x89PNG\r\n\x1a\nFRESH")
+
+    # Second promote: SAME package id (no packageIdChangeAcknowledged
+    # needed) + replaceManagedVisuals=true.
+    body = _default_body(revision="revA", part_package_id=pkg,
+                        overwrite_confirmed="revA")
+    body["replaceManagedVisuals"] = True
+    r2 = client.post("/api/library/intake/promote", json=body)
+    assert r2.status_code == 200, r2.text
+
+    # Managed visuals replaced byte-for-byte
+    assert stale_glb.read_bytes() == b"FRESH_GLB_BYTES", \
+        "stale GLB should have been deleted + replaced with the refreshed sidecar GLB"
+    assert stale_iso.read_bytes() == b"\x89PNG\r\n\x1a\nFRESH", \
+        "stale isometric PNG should have been replaced"
+    # Non-managed curated file untouched
+    assert curated.read_text(encoding="utf-8") == "keep these"
+
+
+def test_preview_marks_visual_rows_UPDATE_when_replaceManagedVisuals_set(intake_library: Path):
+    """When the wizard sends replaceManagedVisuals=true the preview's
+    action table must show UPDATE rows for managed visual whitelist
+    files that already exist in the per-rev (not SKIP). This is what
+    tells the operator visually that re-running Promote will actually
+    replace the just-enriched files instead of skipping them."""
+    pn = "1099999"
+    pkg = "deadbeef0002"
+    pkg_root = intake_library / "_bridge_imports" / "part" / pn / pkg
+    _seed_visual_assets(pkg_root, pn)
+    # First promote so per-rev has the visuals
+    client = TestClient(server.app)
+    r1 = client.post("/api/library/intake/promote",
+                     json=_default_body(revision="revA", part_package_id=pkg))
+    assert r1.status_code == 200, r1.text
+
+    # Preview the same revision again WITHOUT the flag -> visual rows
+    # should report SKIP (default copy-if-not-exists semantics).
+    body_no_flag = _default_body(revision="revA", part_package_id=pkg,
+                                  overwrite_confirmed="revA")
+    pr_no_flag = client.post("/api/library/intake/preview", json=body_no_flag).json()
+    glb_rows_no_flag = [a for a in pr_no_flag["actions"]
+                        if a["path"].endswith(f"{pn}_colored.glb")]
+    assert glb_rows_no_flag, "expected a GLB action row in the preview"
+    assert glb_rows_no_flag[0]["kind"] == "SKIP", \
+        f"without the flag, managed visual rows should be SKIP (got {glb_rows_no_flag[0]['kind']})"
+
+    # Now preview WITH the flag -> visual rows flip to UPDATE.
+    body_with_flag = dict(body_no_flag)
+    body_with_flag["replaceManagedVisuals"] = True
+    pr_with_flag = client.post("/api/library/intake/preview", json=body_with_flag).json()
+    glb_rows_with_flag = [a for a in pr_with_flag["actions"]
+                          if a["path"].endswith(f"{pn}_colored.glb")]
+    assert glb_rows_with_flag, "expected a GLB action row in the preview"
+    assert glb_rows_with_flag[0]["kind"] == "UPDATE", \
+        f"with replaceManagedVisuals=true, managed visual rows must be UPDATE (got {glb_rows_with_flag[0]['kind']})"

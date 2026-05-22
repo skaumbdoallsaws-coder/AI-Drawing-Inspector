@@ -396,6 +396,8 @@ def test_served_html_contains_regions_curator_markers():
     for marker in [
         # Sub-tab is added to the existing bar
         "{ id: 'regions', label: 'Regions' }",
+        # The in-viewport sub-tab bar is hidden; the ribbon is the visible switcher.
+        "['3dmodel','compare','regions']",
         # Branching in the renderer
         "_renderRegionsCuratorSubtab",
         # Toolbar DOM IDs
@@ -471,5 +473,25 @@ def test_served_html_curator_select_uses_apply_feature_highlight():
     way it does for agent-driven and feature-explorer-driven highlights."""
     client = TestClient(server.app)
     html = client.get("/").text
-    assert "applyFeatureHighlight(ids)" in html, \
+    assert "applyFeatureHighlight(cleanIds)" in html, \
         "_regionsCuratorSelectRegion must call applyFeatureHighlight"
+
+
+def test_served_html_curator_replays_highlight_after_glb_load_and_input_focus():
+    """Region highlighting must not depend on clicking empty card
+    chrome. Operators naturally click the editable label/alias fields,
+    and that must still preview the selected region. If the model is
+    still loading, the selected IDs are replayed after _buildFeatureMeshMap
+    finishes."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        "pendingHighlightIds",
+        "function _regionsCuratorApplyHighlightIds",
+        "function _regionsCuratorPreviewRegion",
+        "labelInput.addEventListener('focus', () => _regionsCuratorPreviewRegion(region))",
+        "aliasInput.addEventListener('focus', () => _regionsCuratorPreviewRegion(region))",
+        "reviewedCb.addEventListener('focus', () => _regionsCuratorPreviewRegion(region))",
+        "_regionsCuratorApplyHighlightIds(regionsCuratorState.pendingHighlightIds)",
+    ]:
+        assert marker in html, f"missing curator highlight replay marker: {marker!r}"

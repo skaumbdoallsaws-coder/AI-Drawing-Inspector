@@ -14248,17 +14248,21 @@
                 }
 
             } else if (state.activeTab === '3dmodel') {
-                // 3D Model ribbon: View | Compare | Legend
+                // 3D Model ribbon: View | Compare | Regions | Legend
                 if (partDiffState.available) {
                     const g1 = _ribbonGroup('View');
                     g1.classList.add('ribbon-tab-switch-group');
-                    ['3dmodel','compare'].forEach(id => {
-                        const label = id === '3dmodel' ? '3D Model' : 'Compare';
+                    ['3dmodel','compare','regions'].forEach(id => {
+                        const label = id === '3dmodel' ? '3D Model' : (id === 'compare' ? 'Compare' : 'Regions');
                         const btn = _ribbonTabBtn(label, 'ribbon-btn ribbon-subtab-btn' + (partDiffState.activeSubtab === id ? ' active' : ''));
                         btn.addEventListener('click', () => {
                             if (partDiffState.activeSubtab === id) return;
+                            const prev = partDiffState.activeSubtab;
                             partDiffState.activeSubtab = id;
-                            if (id === '3dmodel') _destroyPartDiffViewers();
+                            if (id === '3dmodel' || id === 'regions') _destroyPartDiffViewers();
+                            if (prev === 'regions' && typeof clearFeatureHighlights === 'function') {
+                                clearFeatureHighlights();
+                            }
                             switchTab('3dmodel');
                         });
                         g1.appendChild(btn);
@@ -22790,6 +22794,7 @@
             saving: false,
             drafting: false,
             error: null,
+            pendingHighlightIds: [],
             mountKey: 0,          // increments per render to invalidate stale closures
         };
 
@@ -22808,19 +22813,38 @@
             return out;
         }
 
+        function _regionsCuratorApplyHighlightIds(ids) {
+            const cleanIds = Array.isArray(ids) ? ids.filter(id => typeof id === 'string' && id) : [];
+            regionsCuratorState.pendingHighlightIds = cleanIds.slice();
+            if (!cleanIds.length) {
+                if (typeof clearFeatureHighlights === 'function') clearFeatureHighlights();
+                return false;
+            }
+            if (!state.featureMeshMap || !Object.keys(state.featureMeshMap).length) {
+                return false;
+            }
+            const matched = cleanIds.some(id => !!state.featureMeshMap[id]);
+            if (typeof applyFeatureHighlight === 'function') {
+                applyFeatureHighlight(cleanIds);
+            }
+            return matched;
+        }
+
+        function _regionsCuratorPreviewRegion(region) {
+            if (!region) return;
+            regionsCuratorState.selectedRegionId = region.regionId;
+            _regionsCuratorApplyHighlightIds(_regionsCuratorFeaturesForRegion(region));
+        }
+
         function _regionsCuratorSelectRegion(regionId) {
             regionsCuratorState.selectedRegionId = regionId;
             const region = regionsCuratorState.regions.find(r => r.regionId === regionId);
             if (!region) {
+                regionsCuratorState.pendingHighlightIds = [];
                 if (typeof clearFeatureHighlights === 'function') clearFeatureHighlights();
                 return;
             }
-            const ids = _regionsCuratorFeaturesForRegion(region);
-            if (typeof applyFeatureHighlight === 'function' && ids.length) {
-                applyFeatureHighlight(ids);
-            } else if (typeof clearFeatureHighlights === 'function') {
-                clearFeatureHighlights();
-            }
+            _regionsCuratorPreviewRegion(region);
             _renderRegionsCuratorListIfMounted();
         }
 
@@ -23118,6 +23142,7 @@
                             _renderRegionsCuratorListIfMounted();
                         }
                     });
+                    labelInput.addEventListener('focus', () => _regionsCuratorPreviewRegion(region));
                     labelRow.appendChild(labelInput);
                     card.appendChild(labelRow);
 
@@ -23143,6 +23168,7 @@
                             _renderRegionsCuratorListIfMounted();
                         }
                     });
+                    aliasInput.addEventListener('focus', () => _regionsCuratorPreviewRegion(region));
                     aliasRow.appendChild(aliasInput);
                     card.appendChild(aliasRow);
 
@@ -23160,6 +23186,7 @@
                             _renderRegionsCuratorListIfMounted();
                         }
                     });
+                    reviewedCb.addEventListener('focus', () => _regionsCuratorPreviewRegion(region));
                     reviewedRow.appendChild(reviewedCb);
                     const reviewedLbl = document.createElement('span');
                     reviewedLbl.textContent = 'Reviewed (lock — preserved on Re-draft)';
@@ -25494,6 +25521,18 @@
                 meshMap[featureId].push(child);
             });
             state.featureMeshMap = meshMap;
+            // The Regions curator can be clicked before the GLB finishes
+            // loading. Replay the pending semantic-region selection once
+            // the mesh map exists so the operator does not need to click
+            // the card twice.
+            if (partDiffState.activeSubtab === 'regions'
+                && regionsCuratorState.pendingHighlightIds
+                && regionsCuratorState.pendingHighlightIds.length
+                && typeof _regionsCuratorApplyHighlightIds === 'function') {
+                requestAnimationFrame(() => {
+                    _regionsCuratorApplyHighlightIds(regionsCuratorState.pendingHighlightIds);
+                });
+            }
         }
 
         function applyFeatureHighlight(featureIds) {

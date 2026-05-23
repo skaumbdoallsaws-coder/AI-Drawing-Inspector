@@ -1101,6 +1101,24 @@ def test_served_html_sessions_tab_tracks_empty_loaded_state():
         "fetch completion must mark empty lists as loaded"
 
 
+def test_served_html_create_edit_session_tool_wired():
+    """Sage handoff-prep responses emit create_edit_session; the
+    frontend must POST the cad-edit-handoff payload into the Session Log
+    and refresh the Sessions tab state."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    markers = [
+        "create_edit_session",
+        "handoffPayload",
+        "fetch('/api/edit-sessions'",
+        "Created from Sage CAD edit handoff",
+        "sessionsTabState.loaded = false",
+        "_sessionsTabFetchList()",
+    ]
+    for marker in markers:
+        assert marker in html, f"create_edit_session frontend marker missing: {marker!r}"
+
+
 def test_served_html_sessions_tab_does_not_regress_other_tabs():
     """Regression guard: adding the Sessions tab must NOT remove or
     rename the existing tabs the rest of the app depends on. The

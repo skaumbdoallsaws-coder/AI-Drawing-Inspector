@@ -4287,6 +4287,21 @@ def _is_semantic_edit_intent(message: str) -> bool:
     return _SEMANTIC_EDIT_INTENT_RE.search(str(message or "")) is not None
 
 
+_SEMANTIC_PREPARE_HANDOFF_RE = re.compile(
+    r'\b(?:prepare|create|start|open|track|save|log)\b.*\b(?:handoff|edit\s+session|session)\b'
+    r'|\b(?:handoff|edit\s+session|session)\b.*\b(?:prepare|create|start|open|track|save|log)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_semantic_prepare_handoff_request(message: str) -> bool:
+    """True when the user explicitly asks Sage to turn an edit intent
+    into an edit-session handoff. Plain "can you make X thicker" remains
+    read-only target resolution; "prepare a handoff..." creates the
+    audit record through the frontend tool pipeline."""
+    return _SEMANTIC_PREPARE_HANDOFF_RE.search(str(message or "")) is not None
+
+
 def _semantic_region_handoff_payload_from_context(
     ctx: Optional[Dict[str, Any]],
     message: str,
@@ -4302,6 +4317,28 @@ def _semantic_region_handoff_payload_from_context(
         return None
     for phrase in _semantic_region_phrases_in_text(ctx, message):
         payload = _semantic_region_cad_handoff_payload(library_dir, safe_pn, safe_rev, phrase)
+        if payload:
+            return payload
+    return None
+
+
+def _semantic_region_edit_handoff_payload_from_context(
+    ctx: Optional[Dict[str, Any]],
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    """Resolve the first semantic region phrase in a user edit request
+    into the structured cad-edit-handoff payload accepted by
+    POST /api/edit-sessions."""
+    library_dir, safe_pn, safe_rev = _semantic_regions_target_from_context(ctx)
+    if not library_dir or not safe_pn or not safe_rev:
+        return None
+    instruction = str(message or "").strip()
+    if not instruction:
+        return None
+    for phrase in _semantic_region_phrases_in_text(ctx, message):
+        payload = _semantic_region_cad_edit_handoff_payload(
+            library_dir, safe_pn, safe_rev, phrase, instruction,
+        )
         if payload:
             return payload
     return None
@@ -4363,6 +4400,81 @@ def _semantic_region_cad_handoff_chat_result(
         "tool_calls":         guarded,
         "tool_source":        "semantic_region_cad_handoff_direct",
         "tool_call_count":    len(guarded),
+    }
+    if warnings:
+        result["tool_guardrail_warnings"] = warnings
+    return result
+
+
+def _semantic_region_cad_edit_handoff_chat_result(
+    payload: Dict[str, Any],
+    agent_type: str,
+) -> Dict[str, Any]:
+    """Return a chat result that both highlights the target region and
+    queues creation of an edit-session record. The tool call is still
+    read-only with respect to CAD: it records intent, target, and audit
+    context only."""
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    feature_ids = [
+        str(fid) for fid in (target.get("cadFeatureIds") or [])
+        if isinstance(fid, str) and fid
+    ]
+    source_features = [
+        str(src) for src in (target.get("sourceFeatures") or [])
+        if isinstance(src, str) and src
+    ]
+    regions = target.get("regions") if isinstance(target.get("regions"), list) else []
+    labels = [
+        str(r.get("label") or r.get("regionId")) for r in regions
+        if isinstance(r, dict) and (r.get("label") or r.get("regionId"))
+    ]
+    region_label = " + ".join(labels) if labels else str(payload.get("resolvedPhrase") or "the selected region")
+
+    intent = payload.get("intent") if isinstance(payload.get("intent"), dict) else {}
+    hints = intent.get("parameterHints") if isinstance(intent.get("parameterHints"), dict) else {}
+    hint_parts = []
+    if hints.get("dimension"):
+        hint_parts.append(str(hints.get("dimension")))
+    if hints.get("value") is not None and hints.get("units"):
+        hint_parts.append(f"{hints.get('value'):g} {hints.get('units')}")
+    hint_text = f" ({', '.join(hint_parts)})" if hint_parts else ""
+
+    if source_features and feature_ids:
+        target_text = ", ".join(f"{src} ({fid})" for src, fid in zip(source_features, feature_ids))
+    elif source_features:
+        target_text = ", ".join(source_features)
+    elif feature_ids:
+        target_text = ", ".join(feature_ids)
+    else:
+        target_text = "no mapped CAD feature targets"
+
+    response = (
+        f"Prepared a CAD edit handoff for {region_label}. "
+        f"Intent: {intent.get('action', 'unknown')}{hint_text}. "
+        f"SolidWorks target(s): {target_text}. "
+        "I queued it for the Sessions tab; it is still read-only and requires human review before any SolidWorks work."
+    )
+
+    raw_calls = []
+    if feature_ids:
+        raw_calls.append({"name": "highlight_features", "args": {"feature_ids": feature_ids}})
+    raw_calls.append({
+        "name": "create_edit_session",
+        "args": {
+            "handoffPayload": payload,
+            "notes": "Created from Sage CAD edit handoff",
+        },
+    })
+    guarded, warnings = apply_tool_guardrails(raw_calls, agent_type, "semantic_region_cad_edit_handoff_direct")
+    result = {
+        "response":             response,
+        "highlight_features":   feature_ids,
+        "highlight_regions":    regions,
+        "cad_edit_handoff":     payload,
+        "create_edit_session":  {"handoffPayload": payload, "notes": "Created from Sage CAD edit handoff"},
+        "tool_calls":           guarded,
+        "tool_source":          "semantic_region_cad_edit_handoff_direct",
+        "tool_call_count":      len(guarded),
     }
     if warnings:
         result["tool_guardrail_warnings"] = warnings
@@ -5066,56 +5178,21 @@ class _CadEditHandoffBody(BaseModel):
 _CAD_EDIT_ALLOWED_ACTIONS = ("dimension_change", "hole_pattern", "sketch_on_face", "unknown")
 
 
-@app.post("/api/part-semantic-regions/{partNumber}/cad-edit-handoff")
-async def part_semantic_regions_cad_edit_handoff(
-    partNumber: str,
-    body:       _CadEditHandoffBody,
-):
-    """Read-only handoff for future Sage-in-SOLIDWORKS controlled edits.
-
-    Given a user phrase (resolves to a semantic region) and a free-text
-    userInstruction ("make the top wing 2 inches thicker"), return a
-    structured payload describing the target CAD features, the parsed
-    intent, the placement scaffolding the operator has filled in, and
-    an explicit operationPolicy.canEdit=false until the placement
-    extraction + SolidWorks edit executor are implemented.
-
-    Reuses _semantic_region_cad_handoff_payload so the target shape is
-    identical to the existing /cad-handoff endpoint -- the new payload
-    just reshapes the same data into a CAD-edit-shaped envelope plus
-    the parsed intent.
-
-    Hard guarantees:
-      - never executes a CAD edit
-      - never calls the SolidWorks bridge
-      - never mutates the semantic-regions JSON file
-      - always returns operationPolicy.canEdit=false
-    The honest blockedReason explains the missing layers so a Sage
-    consumer can surface "this would be ready when placement is
-    populated" instead of silently ignoring the handoff."""
-    safe_pn = sanitize_part_number(partNumber)
-    if not safe_pn:
-        raise HTTPException(status_code=400, detail="Invalid part number")
-    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision)
-
-    phrase = (body.phrase or "").strip()
-    if not phrase:
-        raise HTTPException(status_code=400, detail="phrase is required")
-    instruction = (body.userInstruction or "").strip()
-    if not instruction:
-        raise HTTPException(status_code=400, detail="userInstruction is required")
-
-    base_payload = _semantic_region_cad_handoff_payload(library_path(), safe_pn, safe_rev, phrase)
+def _semantic_region_cad_edit_handoff_payload(
+    library_dir:      Path,
+    safe_pn:          str,
+    safe_rev:         str,
+    phrase:           str,
+    instruction:      str,
+    requested_action: Optional[str] = None,
+    parameters:       Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build the structured edit-session handoff payload without
+    mutating disk. Used by both the public HTTP endpoint and Sage's
+    deterministic "prepare a handoff" fast path."""
+    base_payload = _semantic_region_cad_handoff_payload(library_dir, safe_pn, safe_rev, phrase)
     if base_payload is None:
-        return JSONResponse(status_code=404, content={
-            "handoffVersion":  _CAD_EDIT_HANDOFF_VERSION,
-            "matched":         False,
-            "partNumber":      safe_pn,
-            "revision":        safe_rev,
-            "phrase":          phrase,
-            "userInstruction": instruction,
-            "detail":          f"No semantic region matched {phrase!r}.",
-        })
+        return None
 
     intent = _parse_cad_edit_intent(instruction)
     parser_action = intent.get("action") or "unknown"
@@ -5124,23 +5201,23 @@ async def part_semantic_regions_cad_edit_handoff(
     # from an explicit operator override -- a parser miss caught by
     # a human is a very different failure mode from a human approving
     # a wrong override.
-    requested_action_raw = body.requestedAction if isinstance(body.requestedAction, str) else None
+    requested_action_raw = requested_action if isinstance(requested_action, str) else None
     override_honored = bool(requested_action_raw
                              and requested_action_raw in _CAD_EDIT_ALLOWED_ACTIONS)
     if override_honored:
         intent = {**intent, "action": requested_action_raw}
-    if body.parameters:
+    if parameters:
         merged_hints = dict(intent.get("parameterHints") or {})
         # Operator parameters win on conflict so a curated value beats
         # the parser's best guess. The merge is shallow; nested objects
         # are replaced wholesale.
-        for k, v in body.parameters.items():
+        for k, v in parameters.items():
             merged_hints[k] = v
         intent = {**intent, "parameterHints": merged_hints}
 
     if override_honored:
         intent_source = "operator_override"
-    elif body.parameters:
+    elif parameters:
         intent_source = "parser+operator_hints"
     else:
         intent_source = "parser"
@@ -5225,6 +5302,63 @@ async def part_semantic_regions_cad_edit_handoff(
             "blockedReason":              "Placement surfaces and SolidWorks edit execution are not implemented yet.",
         },
     }
+
+
+@app.post("/api/part-semantic-regions/{partNumber}/cad-edit-handoff")
+async def part_semantic_regions_cad_edit_handoff(
+    partNumber: str,
+    body:       _CadEditHandoffBody,
+):
+    """Read-only handoff for future Sage-in-SOLIDWORKS controlled edits.
+
+    Given a user phrase (resolves to a semantic region) and a free-text
+    userInstruction ("make the top wing 2 inches thicker"), return a
+    structured payload describing the target CAD features, the parsed
+    intent, the placement scaffolding the operator has filled in, and
+    an explicit operationPolicy.canEdit=false until the placement
+    extraction + SolidWorks edit executor are implemented.
+
+    Reuses _semantic_region_cad_handoff_payload so the target shape is
+    identical to the existing /cad-handoff endpoint -- the new payload
+    just reshapes the same data into a CAD-edit-shaped envelope plus
+    the parsed intent.
+
+    Hard guarantees:
+      - never executes a CAD edit
+      - never calls the SolidWorks bridge
+      - never mutates the semantic-regions JSON file
+      - always returns operationPolicy.canEdit=false
+    The honest blockedReason explains the missing layers so a Sage
+    consumer can surface "this would be ready when placement is
+    populated" instead of silently ignoring the handoff."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision)
+
+    phrase = (body.phrase or "").strip()
+    if not phrase:
+        raise HTTPException(status_code=400, detail="phrase is required")
+    instruction = (body.userInstruction or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="userInstruction is required")
+
+    payload = _semantic_region_cad_edit_handoff_payload(
+        library_path(), safe_pn, safe_rev, phrase, instruction,
+        requested_action=body.requestedAction,
+        parameters=body.parameters,
+    )
+    if payload is None:
+        return JSONResponse(status_code=404, content={
+            "handoffVersion":  _CAD_EDIT_HANDOFF_VERSION,
+            "matched":         False,
+            "partNumber":      safe_pn,
+            "revision":        safe_rev,
+            "phrase":          phrase,
+            "userInstruction": instruction,
+            "detail":          f"No semantic region matched {phrase!r}.",
+        })
+    return payload
 
 
 @app.get("/api/part-semantic-regions/{partNumber}/cad-handoff")
@@ -10145,6 +10279,7 @@ AGENT_TOOL_SPECS = {
         {"name": "animate_motion", "description": "Start or stop motion animation", "args": {"action": "start or stop"}},
         {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
         {"name": "ui_actions", "description": "Assembly Compare chat-first action registry — workspace + ordered list of declarative UI actions (open_workspace, set_compare_revisions, explode, focus, highlight, extract, select_bom_rows, open_supplier_spec, compare_supplier_specs, clear_compare_overlays).", "args": {"workspace": "string", "actions": "list of action objects"}},
+        {"name": "create_edit_session", "description": "Create an edit-session audit record from a cad-edit-handoff payload; does not execute CAD edits.", "args": {"handoffPayload": "cad-edit-handoff payload object", "notes": "optional note string"}},
     ],
     "parts-finder": [
         {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers"}},
@@ -11711,6 +11846,13 @@ async def agent_chat(request: AgentChatRequest):
         # reasoning tasks: the authoritative answer is the curated
         # semantic-region map for the currently visible revision.
         if request.agent_type == "deviation-analyst" and _is_semantic_cad_target_request(request.message):
+            if _is_semantic_prepare_handoff_request(request.message):
+                edit_handoff_payload = _semantic_region_edit_handoff_payload_from_context(ctx, request.message)
+                if edit_handoff_payload:
+                    return _semantic_region_cad_edit_handoff_chat_result(
+                        edit_handoff_payload,
+                        request.agent_type,
+                    )
             handoff_payload = _semantic_region_handoff_payload_from_context(ctx, request.message)
             if handoff_payload:
                 return _semantic_region_cad_handoff_chat_result(

@@ -1881,6 +1881,39 @@ def test_direct_semantic_edit_request_refuses_edit_but_returns_targets(
     assert body["cad_handoff"]["operationPolicy"]["canEdit"] is False
 
 
+def test_prepare_handoff_request_returns_create_edit_session_tool(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Explicit handoff-prep requests should bridge the semantic region
+    resolver into the Edit Session Log UI. This still does not execute a
+    CAD edit; it returns a cad-edit-handoff payload and a frontend tool
+    call that records the audit session."""
+    msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "Prepare a handoff to make the top wing 2 inches thicker.",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": _inspection_ctx_with_features("1030099", "revA"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert msgs.last_kwargs is None, "semantic handoff prep should not call Anthropic"
+    assert body["tool_source"] == "semantic_region_cad_edit_handoff_direct"
+    assert body["cad_edit_handoff"]["handoffVersion"] == "semantic-region-cad-edit-handoff-0.1"
+    assert body["cad_edit_handoff"]["intent"]["action"] == "dimension_change"
+    assert body["cad_edit_handoff"]["intent"]["parameterHints"] == {
+        "value": 2.0,
+        "units": "in",
+        "dimension": "thickness",
+    }
+    assert body["cad_edit_handoff"]["operationPolicy"]["canEdit"] is False
+    assert "planarsurface_top_wing" in body["highlight_features"]
+    create_calls = [tc for tc in body["tool_calls"] if tc["name"] == "create_edit_session"]
+    assert len(create_calls) == 1
+    assert create_calls[0]["args"]["handoffPayload"] == body["cad_edit_handoff"]
+    assert any(tc["name"] == "highlight_features" for tc in body["tool_calls"])
+
+
 def test_native_highlight_features_semantic_region_token_resolves(
     aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
 ):

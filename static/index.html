@@ -31383,6 +31383,48 @@
                         return { ok: applied > 0, applied };
                     }
                 },
+                create_edit_session: {
+                    agents: ['deviation-analyst'],
+                    async execute(args) {
+                        const handoffPayload = args && (args.handoffPayload || args.handoff_payload);
+                        if (!handoffPayload || typeof handoffPayload !== 'object') {
+                            return { ok: false, error: 'missing_handoffPayload' };
+                        }
+                        const body = {
+                            handoffPayload,
+                            notes: (args && args.notes) || 'Created from Sage CAD edit handoff',
+                        };
+                        const r = await fetch('/api/edit-sessions', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body),
+                        });
+                        const payload = await r.json().catch(() => ({}));
+                        if (!r.ok) {
+                            return { ok: false, error: `http_${r.status}`, detail: payload.detail || payload };
+                        }
+                        const session = payload.session || {};
+                        const sessionId = session.sessionId || null;
+                        if (typeof sessionsTabState !== 'undefined') {
+                            sessionsTabState.loaded = false;
+                            await _sessionsTabFetchList();
+                        }
+                        if (window._toast) {
+                            window._toast(
+                                payload.warning
+                                    ? 'Existing edit session reused'
+                                    : 'Edit session created',
+                                payload.warning ? 'warning' : 'success'
+                            );
+                        }
+                        return {
+                            ok: true,
+                            sessionId,
+                            reused: !!payload.warning,
+                            warning: payload.warning || null,
+                        };
+                    }
+                },
                 ui_actions: {
                     // Assembly Compare chat-first action registry. Each
                     // sub-action is dispatched in declared order through
@@ -31481,6 +31523,7 @@
                 highlight_features: 3000, highlight_parts: 3000,
                 isolate_parts: 4000, animate_motion: 3000,
                 set_explode_level: 3000, fai_fill: 3000, fai_tol: 3000,
+                create_edit_session: 5000,
                 // ui_actions can dispatch many sub-actions; allow longer
                 // ceiling because compare_supplier_specs fetches + renders.
                 ui_actions: 12000,

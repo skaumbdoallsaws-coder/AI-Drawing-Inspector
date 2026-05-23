@@ -4642,7 +4642,14 @@ def _semantic_edit_session_compare_chat_result(
         lines.append("Removed target feature(s): " + ", ".join(removed_target) + ".")
 
     response = " ".join(lines)
-    raw_calls = [{"name": "compare_features", "args": {"markers": compare_markers}}] if compare_markers else []
+    raw_calls = [{
+        "name": "compare_features",
+        "args": {
+            "markers": compare_markers,
+            "revA": diff.get("revA") or source_rev,
+            "revB": diff.get("revB") or promoted_rev,
+        },
+    }] if compare_markers else []
     guarded, warnings = apply_tool_guardrails(raw_calls, agent_type, "edit_session_compare_direct")
     result = {
         "response":         response,

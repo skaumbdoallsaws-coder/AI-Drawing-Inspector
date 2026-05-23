@@ -1244,8 +1244,18 @@ def test_agent_answers_promoted_edit_session_compare_from_diff(
     assert body["compare_features"] == ["pair_0"]
     assert body["tool_calls"] == [{
         "name": "compare_features",
-        "args": {"markers": ["pair_0"]},
+        "args": {"markers": ["pair_0"], "revA": "A", "revB": "B"},
     }]
+
+
+def test_served_html_compare_features_tool_switches_to_requested_revision_pair():
+    html = (Path(server.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    assert "_resolvePartCompareRevisionToken" in html
+    assert "_autoOpenPartCompareAndHighlight(pairIds, revA = null, revB = null)" in html
+    assert "revisionPairChanged" in html
+    assert "diffPairMismatch" in html
+    assert "State can say \"compare\" while the DOM is stale/not mounted" in html
+    assert "_autoOpenPartCompareAndHighlight(args.markers, args.revA, args.revB)" in html
 
 
 def test_served_html_sessions_tab_does_not_regress_other_tabs():

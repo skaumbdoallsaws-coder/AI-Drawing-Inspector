@@ -25853,11 +25853,32 @@
             return _loadPartCompareViewers(pn, revA, revB);
         }
 
-        async function _autoOpenPartCompareAndHighlight(pairIds) {
+        function _resolvePartCompareRevisionToken(rev) {
+            const raw = String(rev || '').trim();
+            if (!raw) return null;
+            const bare = raw.replace(/^rev/i, '');
+            const revs = (partDiffState && partDiffState.revisions) || [];
+            return revs.find(r => String(r).toLowerCase() === raw.toLowerCase())
+                || revs.find(r => String(r).toLowerCase() === bare.toLowerCase())
+                || bare;
+        }
+
+        async function _autoOpenPartCompareAndHighlight(pairIds, revA = null, revB = null) {
             const pn = state.partNumber;
             if (!partDiffState.available || !pn) {
                 console.log('[Compare] No revisions available â€” skipping auto-open');
                 return;
+            }
+
+            const requestedRevA = _resolvePartCompareRevisionToken(revA);
+            const requestedRevB = _resolvePartCompareRevisionToken(revB);
+            let revisionPairChanged = false;
+            if (requestedRevA && requestedRevB
+                && (partDiffState.activeRevA !== requestedRevA || partDiffState.activeRevB !== requestedRevB)) {
+                partDiffState.activeRevA = requestedRevA;
+                partDiffState.activeRevB = requestedRevB;
+                _syncPartCompareSelectors(requestedRevA, requestedRevB);
+                revisionPairChanged = true;
             }
 
             // Switch to 3D Model tab and Compare subtab if not already there
@@ -25867,14 +25888,29 @@
             }
 
             // Wait for compare pane to exist in DOM
-            const pane = await _waitForElement('partDiffPaneA', 3000);
+            let pane = await _waitForElement('partDiffPaneA', 3000);
+            if (!pane) {
+                // State can say "compare" while the DOM is stale/not mounted
+                // (for example after a programmatic Sage tool call). Force a
+                // 3D tab render before giving up.
+                partDiffState.activeSubtab = 'compare';
+                switchTab('3dmodel');
+                pane = await _waitForElement('partDiffPaneA', 3000);
+            }
             if (!pane) {
                 console.log('[Compare] Timed out waiting for compare pane');
                 return;
             }
 
             // Load viewers if not already loaded
-            if (!partDiffState.viewerA || !partDiffState.viewerB) {
+            const activeRevA = partDiffState.activeRevA || partDiffState.revisions[0];
+            const activeRevB = partDiffState.activeRevB || partDiffState.revisions[partDiffState.revisions.length - 1];
+            const diffRevA = partDiffState.diffResult?.revA;
+            const diffRevB = partDiffState.diffResult?.revB;
+            const diffPairMismatch = partDiffState.diffResult
+                && (String(diffRevA || '').toLowerCase() !== String(activeRevA || '').toLowerCase()
+                    || String(diffRevB || '').toLowerCase() !== String(activeRevB || '').toLowerCase());
+            if (!partDiffState.viewerA || !partDiffState.viewerB || revisionPairChanged || diffPairMismatch) {
                 const revA = partDiffState.activeRevA || partDiffState.revisions[0];
                 const revB = partDiffState.activeRevB || partDiffState.revisions[partDiffState.revisions.length - 1];
                 await _loadPartCompareViewersAsync(pn, revA, revB);
@@ -31355,7 +31391,7 @@
                 compare_features: {
                     agents: ['deviation-analyst'],
                     execute(args) {
-                        _autoOpenPartCompareAndHighlight(args.markers);
+                        _autoOpenPartCompareAndHighlight(args.markers, args.revA, args.revB);
                         return { ok: true };
                     }
                 },

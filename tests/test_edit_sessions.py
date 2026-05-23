@@ -1158,6 +1158,31 @@ def test_served_html_create_edit_session_tool_wired():
         assert marker in html, f"create_edit_session frontend marker missing: {marker!r}"
 
 
+def test_served_html_sessions_tab_links_extracted_session_to_promoted_revision():
+    """Regression: once a session is already extracted, Run Sync Preview
+    should not keep trying to match it against applied sessions. The UI
+    needs the next lifecycle action: find the promoted rev whose
+    intake_manifest.sourcePart.packageId matches the session package and
+    PATCH extracted -> linked_to_revision -> promoted."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    markers = [
+        "_sessionsTabFindRevisionForExtractedPackage",
+        "_sessionsTabLinkPromotedRevision",
+        "sessionsLinkPromotedRevision",
+        "Link Promoted Revision",
+        "/api/library/revisions/",
+        "intakeManifest.sourcePart",
+        "linked_to_revision",
+        "promotedRevision",
+        "promotedManifestPath",
+        "s.status === 'applied_in_solidworks'",
+        "sync preview only matches sessions waiting",
+    ]
+    for marker in markers:
+        assert marker in html, f"promoted-revision link marker missing: {marker!r}"
+
+
 def test_served_html_sessions_tab_does_not_regress_other_tabs():
     """Regression guard: adding the Sessions tab must NOT remove or
     rename the existing tabs the rest of the app depends on. The

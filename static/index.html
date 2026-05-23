@@ -15854,6 +15854,80 @@
                 _sessionsTabSetActionBusy(sessionId, false);
             }
         }
+        async function _sessionsTabFindRevisionForExtractedPackage(detail) {
+            const pn = detail && detail.partNumber;
+            const pkg = detail && detail.extraction && detail.extraction.resultingPartPackageId;
+            if (!pn || !pkg) return null;
+            const r = await fetch(`/api/library/revisions/${encodeURIComponent(pn)}`);
+            if (!r.ok) throw new Error(`revisions lookup failed (HTTP ${r.status})`);
+            const body = await r.json();
+            const rev = (body.revisions || []).find(item => {
+                const sp = item && item.intakeManifest && item.intakeManifest.sourcePart;
+                return sp && sp.packageId === pkg;
+            });
+            if (!rev) return null;
+            return {
+                revision: rev.name,
+                manifestPath: `${rev.path}/intake_manifest.json`,
+            };
+        }
+        async function _sessionsTabLinkPromotedRevision(sessionId) {
+            _sessionsTabSetActionBusy(sessionId, true);
+            try {
+                const detail = await _sessionsTabLoadDetail(sessionId);
+                if (!detail) {
+                    sessionsTabState.error = 'Could not load session details before linking promoted revision.';
+                    return;
+                }
+                if (!detail.extraction || !detail.extraction.resultingPartPackageId) {
+                    sessionsTabState.error = 'Session has no extracted package yet. Run Sync Preview and Link Extracted Package first.';
+                    return;
+                }
+                const match = await _sessionsTabFindRevisionForExtractedPackage(detail);
+                if (!match) {
+                    sessionsTabState.error = `No promoted revision currently references package ${detail.extraction.resultingPartPackageId}. Promote the extracted package first, then retry.`;
+                    return;
+                }
+                if (detail.status === 'extracted') {
+                    const linked = await fetch(`/api/edit-sessions/${encodeURIComponent(sessionId)}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            status: 'linked_to_revision',
+                            noteToAppend: `Linked extracted package to ${match.revision}.`,
+                        }),
+                    });
+                    if (!linked.ok) {
+                        const txt = await linked.text();
+                        sessionsTabState.error = `Link Revision failed (HTTP ${linked.status}): ${txt}`;
+                        return;
+                    }
+                }
+                const promoted = await fetch(`/api/edit-sessions/${encodeURIComponent(sessionId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        status: 'promoted',
+                        promotion: {
+                            promotedRevision: match.revision,
+                            promotedManifestPath: match.manifestPath,
+                            promotedAtUtc: new Date().toISOString(),
+                        },
+                    }),
+                });
+                if (!promoted.ok) {
+                    const txt = await promoted.text();
+                    sessionsTabState.error = `Mark Promoted failed (HTTP ${promoted.status}): ${txt}`;
+                    return;
+                }
+                delete sessionsTabState.details[sessionId];
+                await _sessionsTabFetchList();
+            } catch (err) {
+                sessionsTabState.error = `Link Promoted Revision failed: ${err && err.message || err}`;
+            } finally {
+                _sessionsTabSetActionBusy(sessionId, false);
+            }
+        }
         async function _sessionsTabMarkAbandoned(sessionId) {
             _sessionsTabSetActionBusy(sessionId, true);
             try {
@@ -16071,7 +16145,7 @@
             actions.appendChild(mkBtn('sessionsMarkApplied', 'Mark Applied in SolidWorks',
                 () => _sessionsTabMarkApplied(sid), !canMarkApplied || isTerminal));
 
-            const canSyncPreview = !isTerminal;
+            const canSyncPreview = s.status === 'applied_in_solidworks';
             actions.appendChild(mkBtn('sessionsRunSyncPreview', 'Run Sync Preview',
                 () => _sessionsTabRunSyncPreview(sid, s.partNumber), !canSyncPreview));
 
@@ -16084,6 +16158,10 @@
             const canLink = !!linkCandidate && s.status === 'applied_in_solidworks';
             actions.appendChild(mkBtn('sessionsLinkExtractedPackage', 'Link Extracted Package',
                 () => _sessionsTabLinkExtractedPackage(sid), !canLink));
+
+            const canLinkPromoted = s.status === 'extracted' || s.status === 'linked_to_revision';
+            actions.appendChild(mkBtn('sessionsLinkPromotedRevision', 'Link Promoted Revision',
+                () => _sessionsTabLinkPromotedRevision(sid), !canLinkPromoted));
 
             const canAbandon = !isTerminal;
             actions.appendChild(mkBtn('sessionsMarkAbandoned', 'Mark Abandoned',
@@ -16141,7 +16219,11 @@
                     } else {
                         const cands = (preview.candidateSessions || []);
                         const match = cands.find(c => c.sessionId === sid);
+                        const statusNote = s.status !== 'applied_in_solidworks'
+                            ? `This session is already <code>${s.status}</code>; sync preview only matches sessions waiting in <code>applied_in_solidworks</code>. `
+                            : '';
                         pv.innerHTML = `<strong>Latest Sync Preview</strong> (package <code>${preview.partPackageId}</code>):<br>
+                            ${statusNote}
                             ${cands.length} candidate${cands.length === 1 ? '' : 's'};
                             ${match ? `this session is a candidate (confidence: <code>${match.confidence}</code>, reason: <code>${match.reason}</code>).`
                                     : 'this session is NOT among the candidates -- the package likely belongs to another open session.'}`;

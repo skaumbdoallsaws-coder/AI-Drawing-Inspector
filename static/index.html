@@ -8079,6 +8079,7 @@
                     <div class="tab" data-tab="training" tabindex="0" role="tab" aria-selected="false">Training<span class="tab-shortcut" aria-hidden="true">Ctrl+4</span></div>
                     <div class="tab" data-tab="report" tabindex="0" role="tab" aria-selected="false">Report<span class="tab-shortcut" aria-hidden="true">Ctrl+5</span></div>
                     <div class="tab" data-tab="usage" tabindex="0" role="tab" aria-selected="false">Usage<span class="tab-shortcut" aria-hidden="true">Ctrl+6</span></div>
+                    <div class="tab" data-tab="sessions" tabindex="0" role="tab" aria-selected="false" id="sessionsTab">Sessions<span class="tab-shortcut" aria-hidden="true">Ctrl+7</span></div>
                 </div>
                 <!-- Breadcrumb Bar -->
                 <div class="breadcrumb-bar" id="breadcrumbBar"></div>
@@ -14996,6 +14997,11 @@
                 return;
             }
 
+            if (state.activeTab === 'sessions') {
+                _renderSessionsTab();
+                return;
+            }
+
             if (state.activeTab === 'report') {
                 _ensureFaiDrawingMapForCurrentPart();
                 const faiContext = _getFaiResultContext();
@@ -15651,11 +15657,501 @@
 
         // ─────────────────────────────────────────────────────────
         // Training tab — SolidWorks-style command surface.
-        // Ribbon (rendered by renderRibbon) holds command actions.
-        // train-shell hosts: left rail icon | left setup PropertyManager
-        // | clear viewport (re-uses _initAssembly3DScene) | right
-        // playback panel | right rail icon. Setup panel default-opens.
-        // Playback panel opens on Generate or Start.
+        // ─────────────────────────────────────────────────────────
+        // Sessions tab (MVP) -- monitors semantic CAD edit sessions.
+        //
+        // Read-first surface for the lifecycle:
+        //   cad-edit-handoff -> session -> SolidWorks edit
+        //     -> bridge extraction -> sync preview -> link package
+        //     -> promote -> compare
+        //
+        // No create-session UI yet; no promote/compare UI; no SW bridge
+        // calls. Operators advance sessions through the documented
+        // PATCH FSM via the four row actions:
+        //   - Mark Applied in SolidWorks
+        //   - Run Sync Preview
+        //   - Link Extracted Package
+        //   - Mark Abandoned
+        // Manual refresh only; no polling.
+        // ─────────────────────────────────────────────────────────
+        const sessionsTabState = {
+            sessions:          [],           // last GET /api/edit-sessions result
+            loading:           false,
+            error:             null,
+            openOnly:          true,         // filter pill: Open | All
+            partFilter:        '',           // dropdown filter; '' = All parts
+            expandedSessionId: null,         // single inline-expand at a time
+            details:           {},           // { sessionId: full GET response }
+            syncPreviews:      {},           // { sessionId: post-edit-sync-preview response }
+            recentPackages:    {},           // { partNumber: GET recent-packages response }
+            actionBusy:        {},           // { sessionId: bool } -- disables row buttons mid-action
+        };
+
+        function _sessionsTabFmtTime(iso) {
+            if (!iso) return '—';
+            // Tolerant: accept anything Date can parse, fall back to raw text.
+            try {
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return String(iso);
+                return d.toLocaleString();
+            } catch { return String(iso); }
+        }
+        function _sessionsTabStatusClass(status) {
+            // Tone the status pill by lifecycle position so the table
+            // is scannable at a glance.
+            if (status === 'prepared')                return 'sessions-status sessions-status-prepared';
+            if (status === 'approved_for_solidworks') return 'sessions-status sessions-status-approved';
+            if (status === 'applied_in_solidworks')   return 'sessions-status sessions-status-applied';
+            if (status === 'extracted')               return 'sessions-status sessions-status-extracted';
+            if (status === 'linked_to_revision')      return 'sessions-status sessions-status-linked';
+            if (status === 'promoted')                return 'sessions-status sessions-status-promoted';
+            if (status === 'compared')                return 'sessions-status sessions-status-compared';
+            if (status === 'abandoned')               return 'sessions-status sessions-status-abandoned';
+            if (status === 'failed')                  return 'sessions-status sessions-status-failed';
+            return 'sessions-status';
+        }
+        function _sessionsTabSetActionBusy(sessionId, busy) {
+            sessionsTabState.actionBusy[sessionId] = !!busy;
+            renderViewport();
+        }
+        async function _sessionsTabFetchList() {
+            sessionsTabState.loading = true;
+            sessionsTabState.error = null;
+            renderViewport();
+            try {
+                const r = await fetch('/api/edit-sessions');
+                if (!r.ok) {
+                    sessionsTabState.error = `Failed to load sessions (HTTP ${r.status}).`;
+                    sessionsTabState.sessions = [];
+                    return;
+                }
+                const body = await r.json();
+                sessionsTabState.sessions = Array.isArray(body.sessions) ? body.sessions : [];
+            } catch (err) {
+                sessionsTabState.error = `Failed to load sessions: ${err && err.message || err}`;
+                sessionsTabState.sessions = [];
+            } finally {
+                sessionsTabState.loading = false;
+                renderViewport();
+            }
+        }
+        async function _sessionsTabLoadDetail(sessionId) {
+            if (sessionsTabState.details[sessionId]) return sessionsTabState.details[sessionId];
+            try {
+                const r = await fetch(`/api/edit-sessions/${encodeURIComponent(sessionId)}`);
+                if (!r.ok) return null;
+                const doc = await r.json();
+                sessionsTabState.details[sessionId] = doc;
+                renderViewport();
+                return doc;
+            } catch { return null; }
+        }
+        async function _sessionsTabExpand(sessionId) {
+            if (sessionsTabState.expandedSessionId === sessionId) {
+                sessionsTabState.expandedSessionId = null;
+                renderViewport();
+                return;
+            }
+            sessionsTabState.expandedSessionId = sessionId;
+            renderViewport();
+            _sessionsTabLoadDetail(sessionId);
+        }
+
+        // ── Row actions ──────────────────────────────────────────
+        async function _sessionsTabMarkApplied(sessionId) {
+            _sessionsTabSetActionBusy(sessionId, true);
+            try {
+                const nowIso = new Date().toISOString();
+                const byUser = (typeof _getUserDisplayNameForAgent === 'function'
+                                ? _getUserDisplayNameForAgent() : null) || null;
+                const r = await fetch(`/api/edit-sessions/${encodeURIComponent(sessionId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        status: 'applied_in_solidworks',
+                        applied: { appliedAtUtc: nowIso, appliedByUser: byUser || undefined },
+                    }),
+                });
+                if (!r.ok) {
+                    const txt = await r.text();
+                    sessionsTabState.error = `Mark Applied failed (HTTP ${r.status}): ${txt}`;
+                    return;
+                }
+                // Drop cached detail so the row picks up the new state.
+                delete sessionsTabState.details[sessionId];
+                await _sessionsTabFetchList();
+            } finally {
+                _sessionsTabSetActionBusy(sessionId, false);
+            }
+        }
+        async function _sessionsTabRunSyncPreview(sessionId, partNumber) {
+            _sessionsTabSetActionBusy(sessionId, true);
+            try {
+                // Step 1: list recent packages for this part.
+                const rp = await fetch(`/api/library/intake/recent-packages/${encodeURIComponent(partNumber)}`);
+                if (!rp.ok) {
+                    sessionsTabState.error = `recent-packages failed (HTTP ${rp.status}).`;
+                    return;
+                }
+                const rpBody = await rp.json();
+                sessionsTabState.recentPackages[partNumber] = rpBody;
+                const pkgs = (rpBody.packages || []);
+                if (!pkgs.length) {
+                    sessionsTabState.syncPreviews[sessionId] = {
+                        matched: false,
+                        partNumber,
+                        partPackageId: null,
+                        candidateSessions: [],
+                        recommendedNextAction: 'no_recent_packages',
+                        _localMessage: 'No bridge packages have been extracted for this part yet.',
+                    };
+                    return;
+                }
+                const newest = pkgs[0];
+                // Step 2: ask the sync preview to rank candidates.
+                const sp = await fetch('/api/library/intake/post-edit-sync-preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ partNumber, partPackageId: newest.partPackageId }),
+                });
+                if (!sp.ok) {
+                    const txt = await sp.text();
+                    sessionsTabState.error = `post-edit-sync-preview failed (HTTP ${sp.status}): ${txt}`;
+                    return;
+                }
+                sessionsTabState.syncPreviews[sessionId] = await sp.json();
+            } finally {
+                _sessionsTabSetActionBusy(sessionId, false);
+            }
+        }
+        async function _sessionsTabLinkExtractedPackage(sessionId) {
+            const preview = sessionsTabState.syncPreviews[sessionId];
+            if (!preview) return;
+            // Prefer the candidate whose sessionId actually matches this row.
+            const match = (preview.candidateSessions || []).find(c => c.sessionId === sessionId);
+            if (!match) {
+                sessionsTabState.error = 'No candidate in the latest sync preview matches this session. Re-run Sync Preview.';
+                renderViewport();
+                return;
+            }
+            _sessionsTabSetActionBusy(sessionId, true);
+            try {
+                const r = await fetch(`/api/edit-sessions/${encodeURIComponent(sessionId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(match.recommendedPatch),
+                });
+                if (!r.ok) {
+                    const txt = await r.text();
+                    sessionsTabState.error = `Link Extracted Package failed (HTTP ${r.status}): ${txt}`;
+                    return;
+                }
+                delete sessionsTabState.details[sessionId];
+                await _sessionsTabFetchList();
+            } finally {
+                _sessionsTabSetActionBusy(sessionId, false);
+            }
+        }
+        async function _sessionsTabMarkAbandoned(sessionId) {
+            _sessionsTabSetActionBusy(sessionId, true);
+            try {
+                const r = await fetch(`/api/edit-sessions/${encodeURIComponent(sessionId)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        status: 'abandoned',
+                        abandonReason: 'Abandoned from Sessions UI',
+                    }),
+                });
+                if (!r.ok) {
+                    const txt = await r.text();
+                    sessionsTabState.error = `Mark Abandoned failed (HTTP ${r.status}): ${txt}`;
+                    return;
+                }
+                delete sessionsTabState.details[sessionId];
+                await _sessionsTabFetchList();
+            } finally {
+                _sessionsTabSetActionBusy(sessionId, false);
+            }
+        }
+
+        function _sessionsTabFilteredRows() {
+            const rows = sessionsTabState.sessions.slice();
+            const TERMINAL = new Set(['compared', 'abandoned', 'failed']);
+            return rows.filter(s => {
+                if (sessionsTabState.openOnly && TERMINAL.has(s.status)) return false;
+                if (sessionsTabState.partFilter && s.partNumber !== sessionsTabState.partFilter) return false;
+                return true;
+            });
+        }
+
+        function _renderSessionsTab() {
+            const viewportContent = document.getElementById('viewportContent');
+            if (!viewportContent) return;
+            // First mount triggers an eager load. The fetch flips loading
+            // then re-renders so the spinner appears synchronously.
+            if (!sessionsTabState.sessions.length
+                && !sessionsTabState.loading
+                && !sessionsTabState.error) {
+                _sessionsTabFetchList();
+            }
+
+            const shell = document.createElement('div');
+            shell.id = 'sessionsTabShell';
+            shell.style.cssText = 'flex:1;display:flex;flex-direction:column;min-height:0;background:var(--bg-main);color:var(--text-primary);';
+
+            // ── Header bar ──────────────────────────────────────
+            const header = document.createElement('div');
+            header.id = 'sessionsTabHeader';
+            header.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-panel);';
+            const title = document.createElement('div');
+            title.textContent = 'Edit Sessions';
+            title.style.cssText = 'font-size:14px;font-weight:600;';
+            header.appendChild(title);
+
+            const subtitle = document.createElement('div');
+            subtitle.style.cssText = 'color:var(--text-secondary);font-size:11px;';
+            subtitle.textContent = 'Track semantic CAD edits from approved intent to comparison. Read-first; advance lifecycle via the row actions.';
+            header.appendChild(subtitle);
+
+            const spacer = document.createElement('span');
+            spacer.style.flex = '1';
+            header.appendChild(spacer);
+
+            // Open / All filter pill
+            ['open', 'all'].forEach(key => {
+                const btn = document.createElement('button');
+                btn.id = key === 'open' ? 'sessionsFilterOpen' : 'sessionsFilterAll';
+                btn.textContent = key === 'open' ? 'Open' : 'All';
+                const active = (key === 'open') === sessionsTabState.openOnly;
+                btn.style.cssText = 'padding:4px 10px;font-size:11px;border:1px solid var(--border);border-radius:3px;cursor:pointer;'
+                                 + 'background:' + (active ? 'var(--accent)' : 'var(--bg-input)') + ';'
+                                 + 'color:' + (active ? '#fff' : 'var(--text-primary)') + ';';
+                btn.addEventListener('click', () => {
+                    sessionsTabState.openOnly = (key === 'open');
+                    renderViewport();
+                });
+                header.appendChild(btn);
+            });
+
+            // Part-number filter dropdown (populated from loaded sessions)
+            const partOptions = Array.from(new Set(sessionsTabState.sessions
+                                                    .map(s => s.partNumber)
+                                                    .filter(Boolean))).sort();
+            const partSelect = document.createElement('select');
+            partSelect.id = 'sessionsPartFilter';
+            partSelect.style.cssText = 'background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:3px 8px;font-size:11px;cursor:pointer;';
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = 'All parts';
+            partSelect.appendChild(allOpt);
+            partOptions.forEach(pn => {
+                const opt = document.createElement('option');
+                opt.value = pn;
+                opt.textContent = pn;
+                if (pn === sessionsTabState.partFilter) opt.selected = true;
+                partSelect.appendChild(opt);
+            });
+            partSelect.addEventListener('change', () => {
+                sessionsTabState.partFilter = partSelect.value;
+                renderViewport();
+            });
+            header.appendChild(partSelect);
+
+            const refreshBtn = document.createElement('button');
+            refreshBtn.id = 'sessionsRefreshBtn';
+            refreshBtn.textContent = sessionsTabState.loading ? 'Loading...' : 'Refresh';
+            refreshBtn.disabled = sessionsTabState.loading;
+            refreshBtn.style.cssText = 'padding:4px 12px;font-size:11px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer;font-weight:600;';
+            refreshBtn.addEventListener('click', () => _sessionsTabFetchList());
+            header.appendChild(refreshBtn);
+
+            shell.appendChild(header);
+
+            // ── Error banner ────────────────────────────────────
+            if (sessionsTabState.error) {
+                const err = document.createElement('div');
+                err.style.cssText = 'padding:8px 16px;background:var(--missing);color:#fff;font-size:11px;white-space:pre-wrap;';
+                err.textContent = sessionsTabState.error;
+                shell.appendChild(err);
+            }
+
+            // ── Body ─────────────────────────────────────────────
+            const body = document.createElement('div');
+            body.id = 'sessionsTabBody';
+            body.style.cssText = 'flex:1;overflow-y:auto;padding:0;';
+            shell.appendChild(body);
+
+            const rows = _sessionsTabFilteredRows();
+            if (sessionsTabState.loading && !rows.length) {
+                const ld = document.createElement('div');
+                ld.style.cssText = 'padding:16px;color:var(--text-secondary);font-size:12px;';
+                ld.textContent = 'Loading sessions...';
+                body.appendChild(ld);
+            } else if (!rows.length) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'padding:16px;color:var(--text-secondary);font-size:12px;';
+                empty.textContent = sessionsTabState.openOnly
+                    ? 'No open edit sessions. Switch to "All" to see completed/abandoned sessions.'
+                    : 'No edit sessions yet. Sessions appear here after POST /api/edit-sessions creates one from a cad-edit-handoff payload.';
+                body.appendChild(empty);
+            } else {
+                rows.forEach(s => body.appendChild(_renderSessionsTabRow(s)));
+            }
+
+            viewportContent.appendChild(shell);
+        }
+
+        function _renderSessionsTabRow(s) {
+            const sid = s.sessionId;
+            const expanded = sessionsTabState.expandedSessionId === sid;
+            const busy = !!sessionsTabState.actionBusy[sid];
+            const TERMINAL = new Set(['compared', 'abandoned', 'failed']);
+            const isTerminal = TERMINAL.has(s.status);
+
+            const row = document.createElement('div');
+            row.className = 'sessions-row';
+            row.dataset.sessionId = sid;
+            row.style.cssText = 'border-bottom:1px solid var(--border);padding:10px 16px;';
+
+            // Header line: status pill | summary | timestamps
+            const head = document.createElement('div');
+            head.style.cssText = 'display:flex;align-items:center;gap:12px;cursor:pointer;';
+            head.addEventListener('click', (ev) => {
+                if (ev.target && (ev.target.tagName === 'BUTTON' || ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT')) return;
+                _sessionsTabExpand(sid);
+            });
+
+            const pill = document.createElement('span');
+            pill.className = _sessionsTabStatusClass(s.status);
+            pill.textContent = s.status;
+            pill.style.cssText = 'padding:2px 8px;font-size:10px;font-weight:600;border-radius:3px;background:var(--bg-input);color:var(--text-primary);min-width:140px;text-align:center;';
+            head.appendChild(pill);
+
+            const main = document.createElement('div');
+            main.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:2px;';
+            const line1 = document.createElement('div');
+            line1.style.cssText = 'font-size:12px;color:var(--text-primary);';
+            line1.innerHTML = `<strong>${s.partNumber || '?'}</strong> · ${s.sourceRevision || '?'} · `
+                             + `<span style="color:var(--accent);">${(s.semanticPhrase || '?')}</span>`
+                             + ` · <span style="color:var(--text-secondary);">${s.intentAction || '?'}</span>`;
+            main.appendChild(line1);
+            const line2 = document.createElement('div');
+            line2.style.cssText = 'font-size:11px;color:var(--text-secondary);';
+            // Use sessionId tail as a stable handle in the row line.
+            const sidTail = sid ? sid.slice(-8) : '';
+            line2.textContent = `${sidTail} · created ${_sessionsTabFmtTime(s.createdAtUtc)} · updated ${_sessionsTabFmtTime(s.updatedAtUtc)}`;
+            main.appendChild(line2);
+            head.appendChild(main);
+
+            const expBtn = document.createElement('button');
+            expBtn.textContent = expanded ? 'Hide' : 'Details';
+            expBtn.style.cssText = 'padding:3px 10px;font-size:10px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;cursor:pointer;';
+            expBtn.addEventListener('click', (ev) => { ev.stopPropagation(); _sessionsTabExpand(sid); });
+            head.appendChild(expBtn);
+
+            row.appendChild(head);
+
+            // Action row -- always visible so operators can advance without expanding
+            const actions = document.createElement('div');
+            actions.className = 'sessions-row-actions';
+            actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;';
+            const mkBtn = (id, label, handler, disabled) => {
+                const b = document.createElement('button');
+                b.id = id ? `${id}_${sid}` : '';
+                b.textContent = label;
+                b.disabled = !!disabled || busy;
+                b.style.cssText = 'padding:3px 10px;font-size:10px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;cursor:pointer;';
+                b.addEventListener('click', handler);
+                return b;
+            };
+            const canMarkApplied = s.status === 'prepared' || s.status === 'approved_for_solidworks';
+            actions.appendChild(mkBtn('sessionsMarkApplied', 'Mark Applied in SolidWorks',
+                () => _sessionsTabMarkApplied(sid), !canMarkApplied || isTerminal));
+
+            const canSyncPreview = !isTerminal;
+            actions.appendChild(mkBtn('sessionsRunSyncPreview', 'Run Sync Preview',
+                () => _sessionsTabRunSyncPreview(sid, s.partNumber), !canSyncPreview));
+
+            // Link Extracted Package is only meaningful when the latest
+            // sync preview returned a candidate matching THIS session.
+            const preview = sessionsTabState.syncPreviews[sid];
+            const linkCandidate = preview
+                ? (preview.candidateSessions || []).find(c => c.sessionId === sid)
+                : null;
+            const canLink = !!linkCandidate && s.status === 'applied_in_solidworks';
+            actions.appendChild(mkBtn('sessionsLinkExtractedPackage', 'Link Extracted Package',
+                () => _sessionsTabLinkExtractedPackage(sid), !canLink));
+
+            const canAbandon = !isTerminal;
+            actions.appendChild(mkBtn('sessionsMarkAbandoned', 'Mark Abandoned',
+                () => _sessionsTabMarkAbandoned(sid), !canAbandon));
+            row.appendChild(actions);
+
+            // Inline-expand body
+            if (expanded) {
+                const detail = sessionsTabState.details[sid];
+                const ex = document.createElement('div');
+                ex.style.cssText = 'margin-top:10px;padding:10px;background:var(--bg-panel);border:1px solid var(--border);border-radius:3px;font-size:11px;color:var(--text-primary);';
+                if (!detail) {
+                    ex.textContent = 'Loading details...';
+                } else {
+                    const intent = detail.intent || {};
+                    const target = detail.target || {};
+                    const opPolicy = (detail.handoffPayload || {}).operationPolicy || {};
+                    const fmtList = (arr) => Array.isArray(arr) && arr.length ? arr.join(', ') : '—';
+                    ex.innerHTML = `
+                        <div style="margin-bottom:6px;"><strong>Session ID:</strong> <code>${sid}</code></div>
+                        <div style="margin-bottom:6px;"><strong>Requested edit:</strong> ${detail.requestedEdit || '—'}</div>
+                        <div style="margin-bottom:6px;"><strong>Intent:</strong> action=<code>${intent.action || '—'}</code> · source=<code>${intent.source || '—'}</code> · confidence=<code>${intent.confidence || '—'}</code></div>
+                        <div style="margin-bottom:6px;"><strong>Target region IDs:</strong> ${fmtList(target.regionIds)}</div>
+                        <div style="margin-bottom:6px;"><strong>cadFeatureIds:</strong> ${fmtList(target.cadFeatureIds)}</div>
+                        <div style="margin-bottom:6px;"><strong>sourceFeatures:</strong> ${fmtList(target.sourceFeatures)}</div>
+                        <div style="margin-bottom:6px;"><strong>Operation policy:</strong> canEdit=<code>${opPolicy.canEdit === true ? 'true' : 'false'}</code> · requiresHumanReview=<code>${opPolicy.requiresHumanReview === true ? 'true' : 'false'}</code></div>
+                        ${detail.extraction && detail.extraction.resultingPartPackageId
+                            ? `<div style="margin-bottom:6px;"><strong>Resulting package:</strong> <code>${detail.extraction.resultingPartPackageId}</code></div>` : ''}
+                        ${detail.promotion && detail.promotion.promotedRevision
+                            ? `<div style="margin-bottom:6px;"><strong>Promoted revision:</strong> <code>${detail.promotion.promotedRevision}</code></div>` : ''}
+                    `;
+                    const notes = Array.isArray(detail.notes) ? detail.notes : [];
+                    if (notes.length) {
+                        const notesBlock = document.createElement('div');
+                        notesBlock.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px solid var(--border);';
+                        notesBlock.innerHTML = '<strong>Notes:</strong>';
+                        const ul = document.createElement('ul');
+                        ul.style.cssText = 'margin:6px 0 0;padding-left:20px;color:var(--text-secondary);';
+                        notes.forEach(n => {
+                            const li = document.createElement('li');
+                            li.textContent = `${_sessionsTabFmtTime(n.atUtc)} — ${n.text}${n.byUser ? ` (${n.byUser})` : ''}`;
+                            ul.appendChild(li);
+                        });
+                        notesBlock.appendChild(ul);
+                        ex.appendChild(notesBlock);
+                    }
+                }
+                // Latest sync preview block under detail
+                const preview = sessionsTabState.syncPreviews[sid];
+                if (preview) {
+                    const pv = document.createElement('div');
+                    pv.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px solid var(--border);';
+                    if (preview._localMessage) {
+                        pv.innerHTML = `<strong>Latest Sync Preview:</strong> <span style="color:var(--text-secondary);">${preview._localMessage}</span>`;
+                    } else {
+                        const cands = (preview.candidateSessions || []);
+                        const match = cands.find(c => c.sessionId === sid);
+                        pv.innerHTML = `<strong>Latest Sync Preview</strong> (package <code>${preview.partPackageId}</code>):<br>
+                            ${cands.length} candidate${cands.length === 1 ? '' : 's'};
+                            ${match ? `this session is a candidate (confidence: <code>${match.confidence}</code>, reason: <code>${match.reason}</code>).`
+                                    : 'this session is NOT among the candidates -- the package likely belongs to another open session.'}`;
+                    }
+                    ex.appendChild(pv);
+                }
+                row.appendChild(ex);
+            }
+
+            return row;
+        }
+
         // ─────────────────────────────────────────────────────────
         function _renderTrainingTab() {
             const viewportContent = document.getElementById('viewportContent');
@@ -32747,6 +33243,7 @@
                 { label: 'Switch to Training Tab', category: 'View', shortcut: 'Ctrl+4', action: () => document.querySelector('.tab[data-tab="training"]')?.click() },
                 { label: 'Switch to Report Tab', category: 'View', shortcut: 'Ctrl+5', action: () => document.querySelector('.tab[data-tab="report"]')?.click() },
                 { label: 'Switch to Usage Tab', category: 'View', shortcut: 'Ctrl+6', action: () => document.querySelector('.tab[data-tab="usage"]')?.click() },
+                { label: 'Switch to Sessions Tab', category: 'View', shortcut: 'Ctrl+7', action: () => document.querySelector('.tab[data-tab="sessions"]')?.click() },
                 { label: 'Toggle Left Panel', category: 'View', shortcut: 'Ctrl+B', action: () => { if (window._toggleLeftPanel) window._toggleLeftPanel(); } },
                 { label: 'Toggle Agent Panel', category: 'View', shortcut: 'Ctrl+J', action: () => document.getElementById('agentToggleBtn')?.click() },
                 { label: 'Fit to Viewport', category: 'View', shortcut: '', action: () => { if (window._fitDrawingToViewport) window._fitDrawingToViewport(); } },
@@ -32856,6 +33353,7 @@
                     if (e.key === '4') { document.querySelector('.tab[data-tab="training"]')?.click(); e.preventDefault(); }
                     if (e.key === '5') { document.querySelector('.tab[data-tab="report"]')?.click(); e.preventDefault(); }
                     if (e.key === '6') { document.querySelector('.tab[data-tab="usage"]')?.click(); e.preventDefault(); }
+                    if (e.key === '7') { document.querySelector('.tab[data-tab="sessions"]')?.click(); e.preventDefault(); }
                 }
                 // Ctrl+B toggle left panel
                 if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'b') {

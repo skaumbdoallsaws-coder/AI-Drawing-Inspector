@@ -891,3 +891,223 @@ def test_sync_preview_recommendedPatch_uses_provided_package_id(
     cand = r.json()["candidateSessions"][0]
     assert cand["recommendedPatch"]["status"] == "extracted"
     assert cand["recommendedPatch"]["extraction"]["resultingPartPackageId"] == custom_pkg
+
+
+# ===========================================================================
+# GET /api/library/intake/recent-packages/{partNumber}
+# ===========================================================================
+#
+# Powers the Sessions UI's "Run Sync Preview" action: list bridge sidecar
+# packages newest first so the UI can pick the freshest without making
+# the operator paste a packageId.
+
+def _touch_package_dir(library: Path, pn: str, package_id: str,
+                       *, manifest: Optional[dict] = None,
+                       mtime_offset_s: float = 0.0) -> Path:
+    """Plant a bridge sidecar package dir. mtime_offset_s shifts the
+    directory's stat() mtime so the ordering test is deterministic
+    regardless of how fast pytest's file ops resolve."""
+    import os
+    bridge_dir = library / "_bridge_imports" / "part" / pn / package_id
+    bridge_dir.mkdir(parents=True, exist_ok=True)
+    if manifest is not None:
+        (bridge_dir / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8")
+    if mtime_offset_s:
+        # Walltime-anchored so newest-first ordering tests are stable
+        # even when two packages land in the same wall-clock second.
+        target = bridge_dir.stat().st_mtime + mtime_offset_s
+        os.utime(bridge_dir, (target, target))
+    return bridge_dir
+
+
+def test_recent_packages_returns_empty_when_dir_absent(
+    aircraft_library_with_draft: Path,
+):
+    """Missing _bridge_imports/part/{pn}/ -> 200 with packages: []
+    (NOT 404), so the UI can render a clean 'no extractions' state
+    without exception handling."""
+    client = TestClient(server.app)
+    r = client.get(f"/api/library/intake/recent-packages/{PN}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body == {"partNumber": PN, "packages": []}
+
+
+def test_recent_packages_sorted_newest_first(
+    aircraft_library_with_draft: Path,
+):
+    """Multiple package dirs -> sorted by directory mtime descending."""
+    _touch_package_dir(aircraft_library_with_draft, PN, "pkg-older",
+                       manifest={"partNumber": PN, "packageId": "pkg-older"},
+                       mtime_offset_s=-3600.0)
+    _touch_package_dir(aircraft_library_with_draft, PN, "pkg-middle",
+                       manifest={"partNumber": PN, "packageId": "pkg-middle"},
+                       mtime_offset_s=-1800.0)
+    _touch_package_dir(aircraft_library_with_draft, PN, "pkg-newest",
+                       manifest={"partNumber": PN, "packageId": "pkg-newest"})
+
+    client = TestClient(server.app)
+    body = client.get(f"/api/library/intake/recent-packages/{PN}").json()
+    ids = [p["partPackageId"] for p in body["packages"]]
+    assert ids == ["pkg-newest", "pkg-middle", "pkg-older"], \
+        f"expected newest-first ordering, got {ids}"
+
+
+def test_recent_packages_includes_source_path(
+    aircraft_library_with_draft: Path,
+):
+    """manifest.sourceDocument.path is echoed as sourcePath so the
+    UI can show 'C:/CAD/.../foo.SLDPRT' without parsing the manifest
+    itself."""
+    _touch_package_dir(aircraft_library_with_draft, PN, "pkg-with-src",
+                       manifest={"partNumber": PN, "packageId": "pkg-with-src",
+                                 "sourceDocument": {"path": r"C:\CAD\Aircraft\Top.SLDPRT"}})
+    client = TestClient(server.app)
+    pkgs = client.get(f"/api/library/intake/recent-packages/{PN}").json()["packages"]
+    assert pkgs[0]["sourcePath"]  == r"C:\CAD\Aircraft\Top.SLDPRT"
+    assert pkgs[0]["hasManifest"] is True
+
+
+def test_recent_packages_ignores_non_directory_files(
+    aircraft_library_with_draft: Path,
+):
+    """Stray files like _latest.txt under _bridge_imports/part/{pn}/
+    must NOT appear as packages -- only subdirectories are package
+    candidates."""
+    part_dir = aircraft_library_with_draft / "_bridge_imports" / "part" / PN
+    part_dir.mkdir(parents=True, exist_ok=True)
+    (part_dir / "_latest.txt").write_text("pkg-newest", encoding="utf-8")
+    _touch_package_dir(aircraft_library_with_draft, PN, "pkg-newest",
+                       manifest={"partNumber": PN, "packageId": "pkg-newest"})
+
+    client = TestClient(server.app)
+    pkgs = client.get(f"/api/library/intake/recent-packages/{PN}").json()["packages"]
+    ids = [p["partPackageId"] for p in pkgs]
+    assert ids == ["pkg-newest"]
+    assert "_latest.txt" not in ids
+
+
+def test_recent_packages_handles_malformed_manifest(
+    aircraft_library_with_draft: Path,
+):
+    """A package dir whose manifest.json is corrupt must still appear
+    in the listing (hasManifest=true) but with sourcePath=null so the
+    operator sees something is wrong instead of the package silently
+    disappearing."""
+    bridge_dir = _touch_package_dir(aircraft_library_with_draft, PN, "pkg-corrupt")
+    # Write invalid JSON to manifest.json.
+    (bridge_dir / "manifest.json").write_text("not valid json {", encoding="utf-8")
+
+    client = TestClient(server.app)
+    pkgs = client.get(f"/api/library/intake/recent-packages/{PN}").json()["packages"]
+    assert len(pkgs) == 1
+    assert pkgs[0]["partPackageId"] == "pkg-corrupt"
+    assert pkgs[0]["hasManifest"]   is True
+    assert pkgs[0]["sourcePath"]    is None
+
+
+# ===========================================================================
+# Sessions tab UI (frontend static guards)
+# ===========================================================================
+#
+# The Sessions tab JS is wired by string-matched element IDs and function
+# names. If any of these drift, the tab silently misbehaves -- the only
+# guard is asserting their presence in the served HTML.
+
+def test_served_html_contains_sessions_tab_marker():
+    """Top-level Sessions tab must exist in the tab bar so users can
+    actually reach the panel. data-tab="sessions" is the load-bearing
+    attribute the click handler matches on."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    assert 'data-tab="sessions"' in html, \
+        "Sessions tab must be present in the top-level tab bar"
+    assert 'id="sessionsTab"' in html, \
+        "Sessions tab must carry id='sessionsTab' for keyboard shortcuts + tests"
+
+
+def test_served_html_sessions_tab_uses_correct_endpoint_urls():
+    """All four backend endpoints the Sessions UI depends on must
+    appear in the served HTML. Drift here means the UI silently
+    fails on action click."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    # GET list + GET single
+    assert "'/api/edit-sessions'" in html, \
+        "Sessions tab must call GET /api/edit-sessions to load the list"
+    assert "/api/edit-sessions/${encodeURIComponent(sessionId)}" in html, \
+        "Sessions tab must call GET /api/edit-sessions/{id} for details"
+    # recent-packages helper
+    assert "/api/library/intake/recent-packages/${encodeURIComponent(partNumber)}" in html, \
+        "Run Sync Preview must list recent bridge packages"
+    # post-edit-sync-preview
+    assert "'/api/library/intake/post-edit-sync-preview'" in html, \
+        "Run Sync Preview must POST to post-edit-sync-preview"
+    # PATCH for actions
+    assert "method: 'PATCH'" in html, \
+        "row actions must PATCH /api/edit-sessions/{id}"
+
+
+def test_served_html_sessions_tab_action_labels_present():
+    """The four MVP action button labels must be in the served HTML
+    so operators can find them and tests can interact by label."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for label in [
+        "Mark Applied in SolidWorks",
+        "Run Sync Preview",
+        "Link Extracted Package",
+        "Mark Abandoned",
+    ]:
+        assert label in html, f"Sessions row action missing: {label!r}"
+
+
+def test_served_html_sessions_tab_filter_markers_present():
+    """Filter pills + part-number dropdown DOM IDs must be in the
+    served HTML so the Open/All toggle and part filter are wired
+    up the way the JS expects."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        # IDs assigned in JS (not literal HTML attributes), so the bare
+        # string is the right check.
+        "sessionsFilterOpen",
+        "sessionsFilterAll",
+        "sessionsPartFilter",
+        "sessionsRefreshBtn",
+        "sessionsTabState",
+        "_renderSessionsTab",
+        "_sessionsTabFetchList",
+        "_sessionsTabMarkApplied",
+        "_sessionsTabRunSyncPreview",
+        "_sessionsTabLinkExtractedPackage",
+        "_sessionsTabMarkAbandoned",
+    ]:
+        assert marker in html, f"Sessions tab marker missing: {marker!r}"
+
+
+def test_served_html_sessions_tab_does_not_regress_other_tabs():
+    """Regression guard: adding the Sessions tab must NOT remove or
+    rename the existing tabs the rest of the app depends on. The
+    Regions sub-tab is still under the 3D Model tab, the Compare
+    sub-tab markers still exist, and Drawing/3D Model/Report still
+    declare their data-tab attributes."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    for marker in [
+        'data-tab="drawing"',
+        'data-tab="3dmodel"',
+        'data-tab="report"',
+        # 3D-Model sub-tabs
+        "{ id: '3dmodel', label: '3D Model' }",
+        "{ id: 'compare', label: 'Compare' }",
+        "{ id: 'regions', label: 'Regions' }",
+        # Compare-tab JS surfaces
+        "_renderPartCompareSubtab",
+        "partCompareRevASelect",
+        # Regions-curator JS surfaces
+        "_renderRegionsCuratorSubtab",
+        "regionsCuratorState",
+    ]:
+        assert marker in html, f"Regression: required marker missing after Sessions tab change: {marker!r}"

@@ -3961,6 +3961,81 @@ async def post_edit_sync_preview(body: _PostEditSyncPreviewBody):
     }
 
 
+@app.get("/api/library/intake/recent-packages/{partNumber}")
+async def list_recent_bridge_packages(partNumber: str):
+    """List bridge sidecar packages for a part, newest first.
+
+    Powers the Sessions UI's "Run Sync Preview" action: the UI calls
+    this, picks the newest package, then forwards the partPackageId
+    to /api/library/intake/post-edit-sync-preview. Returns an empty
+    list (NOT 404) when the directory is absent so the UI can render
+    a clean "no recent extractions" state without exception handling.
+
+    Read-only. Reads only the package directories under
+    _bridge_imports/part/{pn}/ -- no semantic-region access, no
+    session-log access, no bridge calls."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    library_dir = library_path()
+    part_dir = library_dir / "_bridge_imports" / "part" / safe_pn
+    if not part_dir.exists() or not part_dir.is_dir():
+        return {"partNumber": safe_pn, "packages": []}
+
+    entries: List[Dict[str, Any]] = []
+    for child in part_dir.iterdir():
+        if not child.is_dir():
+            # Skip _latest.txt and any stray files; only package dirs.
+            continue
+        package_id = child.name
+        manifest_path = _intake_part_sidecar_manifest_path(library_dir, safe_pn, package_id)
+        has_manifest = manifest_path.exists()
+        source_path: Optional[str] = None
+        if has_manifest:
+            try:
+                doc = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+                if isinstance(doc, dict):
+                    src = doc.get("sourceDocument")
+                    if isinstance(src, dict):
+                        path = src.get("path")
+                        if isinstance(path, str) and path.strip():
+                            source_path = path
+            except Exception:
+                # Defensive: a malformed manifest still counts as
+                # "package exists" -- we surface hasManifest=true but
+                # null sourcePath so the operator sees something is
+                # wrong instead of the package silently disappearing.
+                pass
+        try:
+            mtime_ns = child.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = 0
+        entries.append({
+            "partPackageId":  package_id,
+            "manifestPath":   manifest_path.as_posix() if has_manifest else None,
+            "sourcePath":     source_path,
+            "modifiedAtNs":   mtime_ns,
+            "hasManifest":    has_manifest,
+        })
+
+    entries.sort(key=lambda e: e["modifiedAtNs"], reverse=True)
+    out_packages: List[Dict[str, Any]] = []
+    for e in entries:
+        # Convert mtime_ns -> ISO 8601 UTC string with millisecond
+        # precision so the UI doesn't have to format raw nanoseconds.
+        ts = datetime.fromtimestamp(e["modifiedAtNs"] / 1e9, tz=timezone.utc)
+        modified_iso = ts.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ts.microsecond // 1000:03d}Z"
+        out_packages.append({
+            "partPackageId":  e["partPackageId"],
+            "manifestPath":   e["manifestPath"],
+            "sourcePath":     e["sourcePath"],
+            "modifiedAtUtc":  modified_iso,
+            "hasManifest":    e["hasManifest"],
+        })
+    return {"partNumber": safe_pn, "packages": out_packages}
+
+
 # ---------------------------------------------------------------------------
 # Part Semantic Region Builder (MVP, deterministic heuristics)
 # ---------------------------------------------------------------------------

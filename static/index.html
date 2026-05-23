@@ -26098,12 +26098,40 @@
             partDiffState._agentHighlightActive = (highlightA.size > 0 || highlightB.size > 0);
             const revAMeshCount = [...highlightA].reduce((n, fid) => n + ((partDiffState.viewerA.partMeshMap[fid] || []).length), 0);
             const revBMeshCount = [...highlightB].reduce((n, fid) => n + ((partDiffState.viewerB.partMeshMap[fid] || []).length), 0);
+
+            // Capture which features got highlighted so the focus
+            // helper, legend rail, and re-apply guard can find them.
+            partDiffState._agentHighlightFeaturesA = [...highlightA];
+            partDiffState._agentHighlightFeaturesB = [...highlightB];
+            partDiffState._agentHighlightColorsA = Array.from(revAHighlights.entries()).map(([fid, c]) => [fid, c.getHexString()]);
+            partDiffState._agentHighlightColorsB = Array.from(revBHighlights.entries()).map(([fid, c]) => [fid, c.getHexString()]);
+
+            // Auto camera focus: the highlighted feature(s) can be a
+            // few pixels in the full-aircraft framing (propeller blade
+            // ice_boss_extrude1 at 0.05 units vs aircraft span of
+            // ~1.0). Without fitting the camera, even bright emissive
+            // + outline boxes are invisible. Skip when no highlights
+            // resolved to actual meshes.
+            const focusResult = _focusCompareCamerasOnFeatures(highlightA, highlightB);
+
+            // Side legend rail: clickable per-feature pills so the
+            // operator can find each change even if the viewport is
+            // dense. Click flies the camera to that feature only.
+            _renderCompareHighlightLegend({
+                changedA: revAHighlights,
+                changedB: revBHighlights,
+                addedSet: addedSet,
+                removedSet: removedSet,
+                diff: diff,
+            });
+
             console.log('[Compare] Agent highlights applied â€” RevA:', [...highlightA], 'RevB:', [...highlightB]);
             console.log('[Compare] RevA mesh keys:', Object.keys(partDiffState.viewerA?.partMeshMap || {}));
             console.log('[Compare] RevB mesh keys:', Object.keys(partDiffState.viewerB?.partMeshMap || {}));
             console.log('[Compare] revAHighlights:', [...revAHighlights.entries()]);
             console.log('[Compare] revBHighlights:', [...revBHighlights.entries()]);
             console.log('[Compare] Highlight mesh counts:', { revA: revAMeshCount, revB: revBMeshCount });
+            console.log('[Compare] Camera focus applied:', focusResult);
             return {
                 ok: partDiffState._agentHighlightActive && (revAMeshCount > 0 || revBMeshCount > 0),
                 revA: partDiffState.activeRevA,
@@ -26113,7 +26141,177 @@
                 revBFeatures: [...highlightB],
                 revAMeshCount,
                 revBMeshCount,
+                cameraFocus: focusResult,
             };
+        }
+
+        // ── Camera focus helper ────────────────────────────────────
+        //
+        // Fits both Compare cameras to the union world-space bounding
+        // box of the highlighted meshes. The two cameras stay sync'd
+        // via the existing animatePartDiff loop (mirror copies primary
+        // each frame), so we only need to position the primary camera;
+        // the mirror follows automatically.
+        //
+        // Heuristic only -- conservative padding factor of 2.2x so
+        // small features don't fill the entire viewport (which would
+        // make it hard for the operator to see context).
+        function _focusCompareCamerasOnFeatures(highlightA, highlightB, padding) {
+            if (!partDiffState.viewerA || !partDiffState.viewerB) {
+                return { ok: false, error: 'compare_viewers_missing' };
+            }
+            const collectMeshes = (viewer, fids) => {
+                const out = [];
+                if (!viewer || !viewer.partMeshMap || !fids) return out;
+                fids.forEach(fid => (viewer.partMeshMap[fid] || []).forEach(m => out.push(m)));
+                return out;
+            };
+            const meshesA = collectMeshes(partDiffState.viewerA, highlightA);
+            const meshesB = collectMeshes(partDiffState.viewerB, highlightB);
+            const meshes = meshesA.concat(meshesB);
+            if (!meshes.length) return { ok: false, error: 'no_highlighted_meshes' };
+
+            const union = new THREE.Box3();
+            const tmp   = new THREE.Box3();
+            let initialized = false;
+            meshes.forEach(m => {
+                tmp.setFromObject(m);
+                if (!isFinite(tmp.min.x) || !isFinite(tmp.max.x)) return;
+                if (!initialized) {
+                    union.copy(tmp);
+                    initialized = true;
+                } else {
+                    union.union(tmp);
+                }
+            });
+            if (!initialized || !isFinite(union.min.x) || !isFinite(union.max.x)) {
+                return { ok: false, error: 'bbox_compute_failed' };
+            }
+
+            const center = union.getCenter(new THREE.Vector3());
+            const size   = union.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+            const pad    = padding != null ? padding : 2.2;
+            const fov    = partDiffState.viewerA.camera.fov || 45;
+            const dist   = (maxDim * pad) / (2 * Math.tan((fov * Math.PI) / 360));
+
+            // Preserve current view direction so the operator's mental
+            // model of orientation survives the auto-fit. Project the
+            // camera-to-target direction, then place the camera at
+            // `dist` along that direction from the new center.
+            const primaryKey  = partDiffState.primaryViewer === 'B' ? 'viewerB' : 'viewerA';
+            const primary     = partDiffState[primaryKey];
+            const dir = new THREE.Vector3()
+                .subVectors(primary.camera.position, primary.controls.target);
+            if (dir.lengthSq() < 1e-6) dir.set(1, 1, 1);
+            dir.normalize().multiplyScalar(dist);
+
+            const newPos = new THREE.Vector3().addVectors(center, dir);
+            primary.camera.position.copy(newPos);
+            primary.controls.target.copy(center);
+            primary.camera.lookAt(center);
+            if (typeof _syncOrbitFromCamera === 'function') {
+                _syncOrbitFromCamera(primary.controls, primary.camera);
+            }
+            // The mirror viewer's camera tracks the primary every frame
+            // in animatePartDiff -- nothing to do here.
+            return {
+                ok: true,
+                center: [center.x, center.y, center.z],
+                size:   [size.x,   size.y,   size.z],
+                distance: dist,
+                meshesA: meshesA.length,
+                meshesB: meshesB.length,
+            };
+        }
+
+        // ── Highlighted-features legend rail ───────────────────────
+        //
+        // Replaces the static color-key legend at the bottom of the
+        // Compare subtab with a clickable rail listing every changed/
+        // added/removed feature. Each pill is colored by status and
+        // clicking it re-focuses the camera on that feature alone --
+        // useful when several small features overlap (multiple
+        // propeller blade mirrors near the nose).
+        function _renderCompareHighlightLegend({ changedA, changedB, addedSet, removedSet, diff }) {
+            const legend = document.getElementById('partDiffLegend');
+            if (!legend) return;
+            // Build a deduped union view per side so each feature is
+            // shown once with the strongest classification (changed >
+            // added/removed).
+            const allFeatures = new Map();   // fid -> {fid, sides:Set<'A'|'B'>, kind}
+            const note = (fid, side, kind) => {
+                if (!fid) return;
+                if (!allFeatures.has(fid)) allFeatures.set(fid, { fid, sides: new Set(), kind });
+                allFeatures.get(fid).sides.add(side);
+                if (kind === 'changed') allFeatures.get(fid).kind = 'changed';
+            };
+            changedA.forEach((_color, fid) => note(fid, 'A', removedSet.has(fid) ? 'removed' : 'changed'));
+            changedB.forEach((_color, fid) => note(fid, 'B', addedSet.has(fid) ? 'added' : 'changed'));
+
+            // Replace the legend contents. Keep the original color key
+            // visible as a smaller right-aligned hint so the meaning
+            // of red/amber/green stays discoverable.
+            legend.innerHTML = '';
+            legend.id = 'partDiffLegend';
+            legend.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-panel);border-top:1px solid var(--border);font-size:11px;color:var(--text-secondary);min-height:32px;';
+
+            if (!allFeatures.size) {
+                legend.innerHTML = '<span style="color:var(--text-secondary);font-size:11px;">No changed features highlighted.</span>';
+                return;
+            }
+
+            const header = document.createElement('span');
+            header.id = 'compareHighlightLegendHeader';
+            header.style.cssText = 'font-weight:600;color:var(--text-primary);margin-right:6px;';
+            header.textContent = `Changed (${allFeatures.size}):`;
+            legend.appendChild(header);
+
+            const sourceFor = (fid) => {
+                const cf = (diff.changed_features || {})[fid];
+                if (cf && cf.source_feature) return cf.source_feature;
+                const af = (diff.added_features || []).find(f => (typeof f === 'object' ? f.cad_feature_id : f) === fid);
+                if (af && typeof af === 'object' && af.source_feature) return af.source_feature;
+                const rf = (diff.removed_features || []).find(f => (typeof f === 'object' ? f.cad_feature_id : f) === fid);
+                if (rf && typeof rf === 'object' && rf.source_feature) return rf.source_feature;
+                return fid;
+            };
+
+            allFeatures.forEach(({ fid, sides, kind }) => {
+                const bg = kind === 'removed' ? '#FF5252'
+                         : kind === 'added'   ? '#00E676'
+                         : '#FFB300';
+                const pill = document.createElement('button');
+                pill.className = 'compare-highlight-pill';
+                pill.dataset.featureId = fid;
+                pill.dataset.changeKind = kind;
+                pill.title = `${kind.toUpperCase()} on Rev ${[...sides].sort().join('+')} — click to focus camera`;
+                pill.textContent = sourceFor(fid);
+                pill.style.cssText = 'cursor:pointer;border:none;border-radius:3px;padding:3px 10px;font-size:11px;font-weight:600;'
+                    + 'background:' + bg + ';color:#fff;'
+                    + 'box-shadow:0 0 0 1px rgba(0,0,0,0.15);';
+                pill.addEventListener('click', () => {
+                    // Focus ONLY this feature so co-located highlights
+                    // can be inspected one at a time.
+                    const setA = new Set(); const setB = new Set();
+                    if (sides.has('A')) setA.add(fid);
+                    if (sides.has('B')) setB.add(fid);
+                    _focusCompareCamerasOnFeatures(setA, setB);
+                });
+                legend.appendChild(pill);
+            });
+
+            const fitAllBtn = document.createElement('button');
+            fitAllBtn.id = 'compareHighlightFitAllBtn';
+            fitAllBtn.textContent = 'Fit all changes';
+            fitAllBtn.style.cssText = 'margin-left:auto;cursor:pointer;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;padding:3px 10px;font-size:11px;';
+            fitAllBtn.addEventListener('click', () => {
+                _focusCompareCamerasOnFeatures(
+                    partDiffState._agentHighlightFeaturesA || [],
+                    partDiffState._agentHighlightFeaturesB || [],
+                );
+            });
+            legend.appendChild(fitAllBtn);
         }
 
         function _destroyPartDiffViewers() {
@@ -26160,6 +26358,45 @@
             empty.textContent = message;
             container.appendChild(empty);
         }
+
+        // Diagnostic + Playwright-smoke surface for the Compare viewport.
+        // Exposed on window so a) operators can probe state from the
+        // browser console when debugging a missing highlight, and b)
+        // the Playwright smoke can drive the highlight pipeline against
+        // the IIFE-internal helpers without monkey-patching anything.
+        // Production behavior is unaffected -- nothing reads these
+        // refs in normal flow.
+        window.__compareDbg = {
+            get state()         { return state; },
+            get partDiffState() { return partDiffState; },
+            applyAgentCompareFeatures: (markers) => _applyAgentCompareFeatures(markers),
+            loadPartCompareViewers:    (pn, a, b, opts) => _loadPartCompareViewers(pn, a, b, opts),
+            focusCompareOnFeatures:    (fidsA, fidsB) => _focusCompareCamerasOnFeatures(fidsA, fidsB),
+            autoOpenPartCompareAndHighlight: (markers, revA, revB) =>
+                _autoOpenPartCompareAndHighlight(markers, revA, revB),
+            mountCompareSubtab:        () => {
+                state.activeTab = '3dmodel';
+                partDiffState.activeSubtab = 'compare';
+                switchTab('3dmodel');
+            },
+            seedRevisionsAndDiff: async (pn, revA, revB) => {
+                const r = await fetch('/api/part-revisions/' + encodeURIComponent(pn));
+                if (r.ok) {
+                    const data = await r.json();
+                    partDiffState.revisions   = data.revisions || [];
+                    partDiffState.available   = (partDiffState.revisions.length >= 2);
+                }
+                partDiffState.activeRevA = revA;
+                partDiffState.activeRevB = revB;
+                const d = await fetch('/api/part-feature-diff/' + encodeURIComponent(pn)
+                                     + '?revA=' + encodeURIComponent(revA)
+                                     + '&revB=' + encodeURIComponent(revB));
+                if (d.ok) partDiffState.diffResult = await d.json();
+                state.partNumber = pn;
+                return { revisions: partDiffState.revisions,
+                         diffKeys: Object.keys(partDiffState.diffResult || {}) };
+            },
+        };
 
         function _init3DScene(container) {
             const width = container.clientWidth || 800;

@@ -1277,6 +1277,48 @@ def test_served_html_compare_features_tool_switches_to_requested_revision_pair()
     assert "new THREE.BoxHelper(mesh, color.getHex())" in html
 
 
+def test_served_html_compare_highlight_has_camera_focus_and_legend():
+    """Static guard for the camera-focus + legend rail. Material-only
+    highlights are invisible when the highlighted features are tiny
+    (propeller blades vs full-aircraft framing), so the Compare flow
+    needs BOTH an auto-fit camera AND a clickable text legend so the
+    operator can find each change. Drift on any of these wires
+    silently breaks the visible-highlight contract."""
+    html = (Path(server.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    # Camera focus helper -- fits both compare cameras to the union
+    # bbox of the highlighted meshes.
+    assert "function _focusCompareCamerasOnFeatures(" in html, \
+        "missing camera-focus helper"
+    assert "_focusCompareCamerasOnFeatures(highlightA, highlightB)" in html, \
+        "_applyAgentCompareFeatures must call the focus helper after applying highlights"
+    # Bbox-union math should be in the helper so we know it actually
+    # computes a frame target rather than no-op'ing.
+    assert "new THREE.Box3()" in html
+    assert "primary.controls.target.copy(center)" in html
+    # Camera focus must preserve the operator's current view direction
+    # rather than snapping to a fixed angle.
+    assert "subVectors(primary.camera.position, primary.controls.target)" in html
+
+    # Clickable legend rail -- per-feature pills + Fit all changes.
+    assert "function _renderCompareHighlightLegend(" in html, \
+        "missing legend rail helper"
+    assert "_renderCompareHighlightLegend({" in html, \
+        "_applyAgentCompareFeatures must render the legend after highlights"
+    assert "compare-highlight-pill" in html, \
+        "legend pills must carry a stable class hook"
+    assert "compareHighlightFitAllBtn" in html, \
+        "legend must include a Fit-all-changes button"
+    # Per-pill click must focus the camera on just that feature.
+    assert "_focusCompareCamerasOnFeatures(setA, setB)" in html
+
+    # Diagnostic surface so Playwright + browser console can probe
+    # state from outside the IIFE.
+    assert "window.__compareDbg" in html
+    assert "applyAgentCompareFeatures:" in html
+    assert "focusCompareOnFeatures:" in html
+    assert "autoOpenPartCompareAndHighlight:" in html
+
+
 def test_served_html_sessions_tab_does_not_regress_other_tabs():
     """Regression guard: adding the Sessions tab must NOT remove or
     rename the existing tabs the rest of the app depends on. The

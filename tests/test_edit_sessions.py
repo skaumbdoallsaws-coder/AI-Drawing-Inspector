@@ -1267,6 +1267,14 @@ def test_served_html_compare_features_tool_switches_to_requested_revision_pair()
     assert "diffPairMismatch" in html
     assert "State can say \"compare\" while the DOM is stale/not mounted" in html
     assert "_autoOpenPartCompareAndHighlight(args.markers, args.revA, args.revB)" in html
+    assert "async execute(args)" in html
+    assert "return await _autoOpenPartCompareAndHighlight(args.markers, args.revA, args.revB)" in html
+    assert "Highlight mesh counts" in html
+    assert "mesh.material.opacity = 0.28" in html
+    assert "mesh.material.emissiveIntensity = 1.15" in html
+    assert "_clearPartCompareAgentHighlightHelpers" in html
+    assert "_addPartCompareHighlightBox" in html
+    assert "new THREE.BoxHelper(mesh, color.getHex())" in html
 
 
 def test_served_html_sessions_tab_does_not_regress_other_tabs():

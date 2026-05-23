@@ -25717,7 +25717,7 @@
                     // Sine wave glow pulse on highlighted features
                     if (partDiffState.diffHighlightActive || partDiffState._agentHighlightActive) {
                         const t = (time || 0) * 0.001;
-                        const pulse = 0.3 + 0.25 * Math.sin(t * 3.0); // oscillate 0.05 to 0.55
+                        const pulse = 0.9 + 0.25 * Math.sin(t * 3.0); // strong compare highlight pulse
                         [partDiffState.viewerA, partDiffState.viewerB].forEach(viewer => {
                             if (!viewer || !viewer.partMeshMap) return;
                             for (const meshes of Object.values(viewer.partMeshMap)) {
@@ -25848,6 +25848,31 @@
             }
         }
 
+        function _clearPartCompareAgentHighlightHelpers() {
+            [partDiffState.viewerA, partDiffState.viewerB].forEach(viewer => {
+                if (!viewer || !viewer.scene) return;
+                (viewer._agentHighlightHelpers || []).forEach(helper => {
+                    viewer.scene.remove(helper);
+                    if (helper.geometry) helper.geometry.dispose();
+                    if (helper.material) helper.material.dispose();
+                });
+                viewer._agentHighlightHelpers = [];
+            });
+        }
+
+        function _addPartCompareHighlightBox(viewer, mesh, color) {
+            if (!viewer || !viewer.scene || !mesh) return;
+            const helper = new THREE.BoxHelper(mesh, color.getHex());
+            helper.material.depthTest = false;
+            helper.material.depthWrite = false;
+            helper.material.transparent = true;
+            helper.material.opacity = 0.95;
+            helper.renderOrder = 999;
+            viewer.scene.add(helper);
+            viewer._agentHighlightHelpers = viewer._agentHighlightHelpers || [];
+            viewer._agentHighlightHelpers.push(helper);
+        }
+
         // Alias for awaiting the existing async function
         async function _loadPartCompareViewersAsync(pn, revA, revB) {
             return _loadPartCompareViewers(pn, revA, revB);
@@ -25867,7 +25892,7 @@
             const pn = state.partNumber;
             if (!partDiffState.available || !pn) {
                 console.log('[Compare] No revisions available â€” skipping auto-open');
-                return;
+                return { ok: false, error: 'no_revisions_available' };
             }
 
             const requestedRevA = _resolvePartCompareRevisionToken(revA);
@@ -25899,7 +25924,7 @@
             }
             if (!pane) {
                 console.log('[Compare] Timed out waiting for compare pane');
-                return;
+                return { ok: false, error: 'compare_pane_missing' };
             }
 
             // Load viewers if not already loaded
@@ -25917,7 +25942,7 @@
             }
 
             // Apply highlights
-            _applyAgentCompareFeatures(pairIds);
+            return _applyAgentCompareFeatures(pairIds);
         }
 
         function _waitForElement(id, timeout) {
@@ -25938,21 +25963,23 @@
             // Phase 2 will add auto-open behavior
             if (!partDiffState.viewerA || !partDiffState.viewerB || !partDiffState.diffResult) {
                 console.log('[Compare] Compare viewers not loaded â€” highlights deferred');
-                return;
+                return { ok: false, error: 'compare_viewers_not_loaded' };
             }
 
             const diff = partDiffState.diffResult;
+            _clearPartCompareAgentHighlightHelpers();
 
             // Reset both viewers to gray before applying new highlights
             [partDiffState.viewerA, partDiffState.viewerB].forEach(viewer => {
                 if (!viewer || !viewer.partMeshMap) return;
                 for (const meshes of Object.values(viewer.partMeshMap)) {
                     meshes.forEach(mesh => {
-                        mesh.material.color.set(0x888888);
+                        mesh.material.color.set(0x9AA5AF);
                         mesh.material.emissive.set(0x000000);
                         mesh.material.emissiveIntensity = 0;
-                        mesh.material.opacity = 1;
-                        mesh.material.transparent = false;
+                        mesh.material.opacity = 0.28;
+                        mesh.material.transparent = true;
+                        mesh.material.depthWrite = false;
                         mesh.material.needsUpdate = true;
                     });
                 }
@@ -26016,18 +26043,23 @@
                             // Use the legend color as both base and emissive â€” strong, unmistakable
                             mesh.material.color.copy(color);
                             mesh.material.emissive.copy(color);
-                            mesh.material.emissiveIntensity = 0.7;
+                            mesh.material.emissiveIntensity = 1.15;
                             mesh.material.metalness = 0.1;
                             mesh.material.roughness = 0.8;
+                            mesh.material.opacity = 1;
+                            mesh.material.transparent = false;
+                            mesh.material.depthWrite = true;
+                            _addPartCompareHighlightBox(partDiffState.viewerA, mesh, color);
                         } else {
-                            mesh.material.color.set(0x888888);
+                            mesh.material.color.set(0x9AA5AF);
                             mesh.material.emissive.set(0x000000);
                             mesh.material.emissiveIntensity = 0;
                             mesh.material.metalness = 0.3;
                             mesh.material.roughness = 0.6;
+                            mesh.material.opacity = 0.28;
+                            mesh.material.transparent = true;
+                            mesh.material.depthWrite = false;
                         }
-                        mesh.material.opacity = 1;
-                        mesh.material.transparent = false;
                         mesh.material.needsUpdate = true;
                     });
                 }
@@ -26041,29 +26073,47 @@
                         if (color) {
                             mesh.material.color.copy(color);
                             mesh.material.emissive.copy(color);
-                            mesh.material.emissiveIntensity = 0.7;
+                            mesh.material.emissiveIntensity = 1.15;
                             mesh.material.metalness = 0.1;
                             mesh.material.roughness = 0.8;
+                            mesh.material.opacity = 1;
+                            mesh.material.transparent = false;
+                            mesh.material.depthWrite = true;
+                            _addPartCompareHighlightBox(partDiffState.viewerB, mesh, color);
                         } else {
-                            mesh.material.color.set(0x888888);
+                            mesh.material.color.set(0x9AA5AF);
                             mesh.material.emissive.set(0x000000);
                             mesh.material.emissiveIntensity = 0;
                             mesh.material.metalness = 0.3;
                             mesh.material.roughness = 0.6;
+                            mesh.material.opacity = 0.28;
+                            mesh.material.transparent = true;
+                            mesh.material.depthWrite = false;
                         }
-                        mesh.material.opacity = 1;
-                        mesh.material.transparent = false;
                         mesh.material.needsUpdate = true;
                     });
                 }
             }
 
             partDiffState._agentHighlightActive = (highlightA.size > 0 || highlightB.size > 0);
+            const revAMeshCount = [...highlightA].reduce((n, fid) => n + ((partDiffState.viewerA.partMeshMap[fid] || []).length), 0);
+            const revBMeshCount = [...highlightB].reduce((n, fid) => n + ((partDiffState.viewerB.partMeshMap[fid] || []).length), 0);
             console.log('[Compare] Agent highlights applied â€” RevA:', [...highlightA], 'RevB:', [...highlightB]);
             console.log('[Compare] RevA mesh keys:', Object.keys(partDiffState.viewerA?.partMeshMap || {}));
             console.log('[Compare] RevB mesh keys:', Object.keys(partDiffState.viewerB?.partMeshMap || {}));
             console.log('[Compare] revAHighlights:', [...revAHighlights.entries()]);
             console.log('[Compare] revBHighlights:', [...revBHighlights.entries()]);
+            console.log('[Compare] Highlight mesh counts:', { revA: revAMeshCount, revB: revBMeshCount });
+            return {
+                ok: partDiffState._agentHighlightActive && (revAMeshCount > 0 || revBMeshCount > 0),
+                revA: partDiffState.activeRevA,
+                revB: partDiffState.activeRevB,
+                markers: pairIds,
+                revAFeatures: [...highlightA],
+                revBFeatures: [...highlightB],
+                revAMeshCount,
+                revBMeshCount,
+            };
         }
 
         function _destroyPartDiffViewers() {
@@ -26077,6 +26127,12 @@
             }
             [partDiffState.viewerA, partDiffState.viewerB].forEach(viewer => {
                 if (!viewer) return;
+                (viewer._agentHighlightHelpers || []).forEach(helper => {
+                    viewer.scene?.remove(helper);
+                    if (helper.geometry) helper.geometry.dispose();
+                    if (helper.material) helper.material.dispose();
+                });
+                viewer._agentHighlightHelpers = [];
                 if (viewer.renderer) {
                     viewer.renderer.dispose();
                     if (viewer.renderer.domElement && viewer.renderer.domElement.parentNode) {
@@ -31390,9 +31446,8 @@
                 },
                 compare_features: {
                     agents: ['deviation-analyst'],
-                    execute(args) {
-                        _autoOpenPartCompareAndHighlight(args.markers, args.revA, args.revB);
-                        return { ok: true };
+                    async execute(args) {
+                        return await _autoOpenPartCompareAndHighlight(args.markers, args.revA, args.revB);
                     }
                 },
                 show_geometry_diff: {

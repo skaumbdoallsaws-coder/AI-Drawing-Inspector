@@ -1205,6 +1205,10 @@ def test_agent_answers_promoted_edit_session_compare_from_diff(
                 feat["parameters"] = {"depth1_mm": depth}
                 feat["display_label"] = "Boss-Extrude1"
                 feat["sw_name"] = "Boss-Extrude1"
+    data_b["features"] = [
+        feat for feat in data_b["features"]
+        if feat["cad_feature_id"] != "netblend_horiz_stab_pm"
+    ]
     rev_a_features.write_text(json.dumps(data_a), encoding="utf-8")
     rev_b_features.write_text(json.dumps(data_b), encoding="utf-8")
 
@@ -1241,10 +1245,17 @@ def test_agent_answers_promoted_edit_session_compare_from_diff(
     assert "Boss-Extrude1 changed depth1_mm: 0.5 mm" in body["response"]
     assert "5.0 mm" in body["response"]
     assert "Cirpattern1" in body["response"] or "CirPattern1" in body["response"]
-    assert body["compare_features"] == ["pair_0"]
+    assert "non-target Rev B/C changes outside the propeller edit" in body["response"]
+    assert "Horizontal stabilizer" in body["response"]
+    assert "Netblend Horiz Stab Pm" in body["response"]
+    assert body["compare_features"] == ["pair_0", "removed_netblend_horiz_stab_pm"]
     assert body["tool_calls"] == [{
         "name": "compare_features",
-        "args": {"markers": ["pair_0"], "revA": "A", "revB": "B"},
+        "args": {
+            "markers": ["pair_0", "removed_netblend_horiz_stab_pm"],
+            "revA": "A",
+            "revB": "B",
+        },
     }]
 
 

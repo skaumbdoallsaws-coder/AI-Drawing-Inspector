@@ -4528,6 +4528,60 @@ def _canon_edit_session_rev(raw: str) -> str:
     return "rev" + cand
 
 
+def _semantic_region_labels_by_cad_feature(
+    library_dir: Path,
+    pn: str,
+    revision: str,
+) -> Dict[str, str]:
+    """Map cadFeatureId -> semantic region label for the given revision.
+    Used only for explanation text; missing/stale semantic drafts should
+    never block the underlying feature diff."""
+    path = _semantic_regions_path(library_dir, pn, revision)
+    if not path.exists():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    out: Dict[str, str] = {}
+    for region in doc.get("regions") or []:
+        if not isinstance(region, dict):
+            continue
+        label = str(region.get("label") or region.get("regionId") or "").strip()
+        if not label:
+            continue
+        cad_targets = region.get("cadTargets") or {}
+        for fid in cad_targets.get("cadFeatureIds") or []:
+            if isinstance(fid, str) and fid:
+                out.setdefault(fid, label)
+    return out
+
+
+def _format_feature_change_summary(label: str, changes: Dict[str, Any]) -> str:
+    param_changes = changes.get("parameters") or {}
+    if param_changes:
+        parts = []
+        for pname, change in param_changes.items():
+            old = change.get("old")
+            new = change.get("new")
+            try:
+                delta = float(new) - float(old)
+                delta_txt = f" ({delta:+g} mm)"
+            except Exception:
+                delta_txt = ""
+            parts.append(f"{pname}: {old} mm -> {new} mm{delta_txt}")
+        return f"{label} changed " + "; ".join(parts)
+    field_parts = []
+    for field, change in changes.items():
+        if field == "parameters":
+            continue
+        if isinstance(change, dict) and "old" in change and "new" in change:
+            field_parts.append(f"{field}: {change.get('old')} -> {change.get('new')}")
+        else:
+            field_parts.append(str(field))
+    return f"{label} changed " + (", ".join(field_parts) if field_parts else "geometry/metadata")
+
+
 def _semantic_edit_session_compare_chat_result(
     ctx: Optional[Dict[str, Any]],
     message: str,
@@ -4602,6 +4656,7 @@ def _semantic_edit_session_compare_chat_result(
     if not focused_changed:
         return None
 
+    source_region_by_fid = _semantic_region_labels_by_cad_feature(library_dir, safe_pn, source_rev)
     phrase = str(session.get("semanticPhrase") or "the edited region")
     lines = [
         f"Between {source_rev} and {promoted_rev}, the edit-session target was {phrase}.",
@@ -4610,20 +4665,7 @@ def _semantic_edit_session_compare_chat_result(
     for idx, fid, info in focused_changed:
         label = info.get("display_label_b") or info.get("display_label_a") or fid
         changes = info.get("changes") or {}
-        param_changes = changes.get("parameters") or {}
-        if param_changes:
-            for pname, change in param_changes.items():
-                old = change.get("old")
-                new = change.get("new")
-                try:
-                    delta = float(new) - float(old)
-                    delta_txt = f" ({delta:+g} mm)"
-                except Exception:
-                    delta_txt = ""
-                lines.append(f"{label} changed {pname}: {old} mm -> {new} mm{delta_txt}.")
-        else:
-            changed_fields = ", ".join(changes.keys()) if changes else "geometry/metadata"
-            lines.append(f"{label} changed: {changed_fields}.")
+        lines.append(_format_feature_change_summary(label, changes) + ".")
         compare_markers.append(f"pair_{idx}")
 
     propagation = handoff_target.get("propagationFeatures") or []
@@ -4640,6 +4682,37 @@ def _semantic_edit_session_compare_chat_result(
     ]
     if removed_target:
         lines.append("Removed target feature(s): " + ", ".join(removed_target) + ".")
+
+    off_target_lines: List[str] = []
+    for idx, (fid, info) in enumerate(changed_items):
+        if fid in target_ids:
+            continue
+        label = info.get("display_label_b") or info.get("display_label_a") or fid
+        region = source_region_by_fid.get(fid)
+        prefix = f"{region}: " if region else ""
+        off_target_lines.append(prefix + _format_feature_change_summary(label, info.get("changes") or {}))
+        compare_markers.append(f"pair_{idx}")
+
+    removed_off_target_by_region: Dict[str, List[str]] = {}
+    for feat in (diff.get("removed_features") or []):
+        if not isinstance(feat, dict):
+            continue
+        fid = feat.get("cad_feature_id")
+        if not fid or fid in target_ids:
+            continue
+        label = feat.get("display_label") or fid
+        region = source_region_by_fid.get(fid) or "Unmapped region"
+        removed_off_target_by_region.setdefault(region, []).append(str(label))
+        compare_markers.append(f"removed_{fid}")
+
+    for region, labels in removed_off_target_by_region.items():
+        off_target_lines.append(f"{region}: removed in {promoted_rev}: " + ", ".join(labels))
+
+    if off_target_lines:
+        lines.append(
+            "Also detected non-target Rev B/C changes outside the "
+            f"{phrase} edit: " + "; ".join(off_target_lines) + "."
+        )
 
     response = " ".join(lines)
     raw_calls = [{

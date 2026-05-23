@@ -3773,6 +3773,195 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
 
 
 # ---------------------------------------------------------------------------
+# Post-edit sync preview
+# ---------------------------------------------------------------------------
+#
+# Read-only matcher between a newly-extracted bridge package and any open
+# edit sessions waiting at applied_in_solidworks. Closes the
+# handoff -> edit -> extraction -> link loop WITHOUT needing the bridge
+# add-in to stamp anything: when the bridge does eventually stamp a
+# sessionId / editSessionId into the package manifest, this endpoint
+# auto-promotes that candidate to high confidence; until then it
+# returns the most-recent applied session as a medium-confidence guess.
+#
+# Never mutates anything -- the operator drives the actual link via the
+# returned recommendedPatch:
+#     PATCH /api/edit-sessions/{id} { status: "extracted", extraction: {...} }
+
+_POST_EDIT_SYNC_PREVIEW_MANIFEST_SESSION_KEYS = ("sessionId", "editSessionId")
+
+
+class _PostEditSyncPreviewBody(BaseModel):
+    partNumber:    str
+    partPackageId: str
+
+
+def _read_bridge_part_manifest(library_dir: Path, pn: str, package_id: str) -> Optional[Dict[str, Any]]:
+    """Defensive read of the bridge sidecar manifest. Returns None on
+    missing or malformed file -- the caller decides whether that's a
+    404 or just empty manifest metadata."""
+    p = _intake_part_sidecar_manifest_path(library_dir, pn, package_id)
+    if not p.exists():
+        return None
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _extract_manifest_session_id(manifest: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Pull a stamped session id from a bridge manifest. Accepts both
+    `sessionId` and `editSessionId` so a future add-in can pick
+    whichever name it wants."""
+    if not isinstance(manifest, dict):
+        return None
+    for key in _POST_EDIT_SYNC_PREVIEW_MANIFEST_SESSION_KEYS:
+        val = manifest.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+
+def _manifest_source_path(manifest: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The bridge sidecar manifest's sourceDocument.path is the
+    operator-visible SLDPRT/SLDASM path -- echo it back so the
+    sync preview can show 'this came from C:/CAD/.../foo.SLDPRT'
+    without the caller parsing the manifest themselves."""
+    if not isinstance(manifest, dict):
+        return None
+    src = manifest.get("sourceDocument")
+    if isinstance(src, dict):
+        path = src.get("path")
+        if isinstance(path, str) and path.strip():
+            return path
+    return None
+
+
+def _candidate_session_payload(
+    doc:               Dict[str, Any],
+    confidence:        str,
+    reason:            str,
+    part_package_id:   str,
+) -> Dict[str, Any]:
+    """Slim per-candidate payload + recommendedPatch. Echoes the
+    fields the operator/UI needs to confirm a link without re-fetching
+    the full session doc."""
+    applied = doc.get("applied") or {}
+    return {
+        "sessionId":      doc.get("sessionId"),
+        "status":         doc.get("status"),
+        "semanticPhrase": doc.get("semanticPhrase"),
+        "requestedEdit":  doc.get("requestedEdit"),
+        "sourceRevision": doc.get("sourceRevision"),
+        "intent":         doc.get("intent") or {},
+        "target":         doc.get("target") or {},
+        "appliedAtUtc":   applied.get("appliedAtUtc"),
+        "appliedByUser":  applied.get("appliedByUser"),
+        "confidence":     confidence,
+        "reason":         reason,
+        "recommendedPatch": {
+            "status":     "extracted",
+            "extraction": {"resultingPartPackageId": part_package_id},
+        },
+    }
+
+
+@app.post("/api/library/intake/post-edit-sync-preview")
+async def post_edit_sync_preview(body: _PostEditSyncPreviewBody):
+    """Given a newly-extracted bridge package, find candidate open
+    edit sessions waiting at applied_in_solidworks and return ranked
+    suggestions for the operator to link.
+
+    Ranking:
+      - Manifest carries `sessionId` (or `editSessionId`) matching an
+        open applied session -> that session first, confidence=high,
+        reason=manifest_session_id.
+      - Otherwise rank remaining applied sessions by appliedAtUtc desc,
+        confidence=medium, reason=recent_applied_session.
+
+    Hard guarantees:
+      - read-only: never modifies any session file or any bridge file
+      - does NOT promote the package as a new revision
+      - does NOT call the SolidWorks bridge
+      - does NOT require any bridge add-in change to be useful (manifest
+        stamp is honored when present but not required)"""
+    raw_pn = (body.partNumber or "").strip()
+    safe_pn = sanitize_part_number(raw_pn)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail=f"Invalid partNumber {raw_pn!r}")
+    raw_pkg = (body.partPackageId or "").strip()
+    if not raw_pkg:
+        raise HTTPException(status_code=400, detail="partPackageId is required")
+
+    library_dir   = library_path()
+    manifest_path = _intake_part_sidecar_manifest_path(library_dir, safe_pn, raw_pkg)
+    if not manifest_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No bridge sidecar manifest at {manifest_path.as_posix()}. "
+                "Re-run the bridge extraction or verify the partPackageId."
+            ),
+        )
+    manifest = _read_bridge_part_manifest(library_dir, safe_pn, raw_pkg)
+    manifest_session_id = _extract_manifest_session_id(manifest)
+    package_source_path = _manifest_source_path(manifest)
+
+    # Index applied sessions for this part. The MVP scans every session
+    # on disk; an index is only worth adding if this gets hot.
+    applied_sessions: List[Dict[str, Any]] = []
+    for doc in _list_edit_sessions(library_dir):
+        if doc.get("partNumber") != safe_pn:
+            continue
+        if doc.get("status") != "applied_in_solidworks":
+            continue
+        applied_sessions.append(doc)
+
+    # Most-recent applied first as the baseline ranking; the manifest-
+    # stamp match (if any) is hoisted in the next pass.
+    def _applied_at(d: Dict[str, Any]) -> str:
+        return ((d.get("applied") or {}).get("appliedAtUtc") or "")
+    applied_sessions.sort(key=_applied_at, reverse=True)
+
+    high_match: Optional[Dict[str, Any]] = None
+    if manifest_session_id:
+        for doc in applied_sessions:
+            if doc.get("sessionId") == manifest_session_id:
+                high_match = doc
+                break
+
+    candidates: List[Dict[str, Any]] = []
+    if high_match is not None:
+        candidates.append(_candidate_session_payload(
+            high_match, "high", "manifest_session_id", raw_pkg,
+        ))
+        for doc in applied_sessions:
+            if doc.get("sessionId") == high_match.get("sessionId"):
+                continue
+            candidates.append(_candidate_session_payload(
+                doc, "medium", "recent_applied_session", raw_pkg,
+            ))
+    else:
+        for doc in applied_sessions:
+            candidates.append(_candidate_session_payload(
+                doc, "medium", "recent_applied_session", raw_pkg,
+            ))
+
+    return {
+        "matched":               bool(candidates),
+        "partNumber":            safe_pn,
+        "partPackageId":         raw_pkg,
+        "packageManifestPath":   manifest_path.as_posix(),
+        "packageSourcePath":     package_source_path,
+        "candidateSessions":     candidates,
+        "recommendedNextAction": (
+            "patch_session_to_extracted" if candidates else "no_candidate_session"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Part Semantic Region Builder (MVP, deterministic heuristics)
 # ---------------------------------------------------------------------------
 #

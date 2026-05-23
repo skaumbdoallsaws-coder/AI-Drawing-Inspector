@@ -556,3 +556,338 @@ def test_embedded_handoffPayload_survives_regions_file_edits(
     labels = [r.get("label") for r in target_regions]
     assert "OPERATOR-RENAMED" not in labels, \
         "embedded handoffPayload must NOT change when regions file is edited later"
+
+
+# ===========================================================================
+# POST /api/library/intake/post-edit-sync-preview
+# ===========================================================================
+#
+# Read-only matcher: given a newly-extracted bridge package, find candidate
+# open sessions waiting at applied_in_solidworks and return ranked
+# suggestions. The bridge sidecar manifest's optional sessionId /
+# editSessionId field auto-promotes a candidate to high confidence;
+# otherwise candidates are ranked by appliedAtUtc desc with medium
+# confidence. The endpoint never mutates session files.
+
+PKG_ID = "pkg-2026-05-22-abc"
+
+
+def _write_bridge_package_manifest(
+    library: Path, pn: str, package_id: str,
+    *, session_id: Optional[str] = None,
+    edit_session_id: Optional[str] = None,
+    source_path: Optional[str] = None,
+) -> Path:
+    """Plant a minimal bridge sidecar manifest at the canonical path so
+    the sync-preview endpoint has something to read."""
+    bridge_dir = library / "_bridge_imports" / "part" / pn / package_id
+    bridge_dir.mkdir(parents=True, exist_ok=True)
+    manifest: dict = {"partNumber": pn, "packageId": package_id}
+    if session_id is not None:
+        manifest["sessionId"] = session_id
+    if edit_session_id is not None:
+        manifest["editSessionId"] = edit_session_id
+    if source_path is not None:
+        manifest["sourceDocument"] = {"path": source_path}
+    p = bridge_dir / "manifest.json"
+    p.write_text(json.dumps(manifest), encoding="utf-8")
+    return p
+
+
+def _advance_to_applied(client: TestClient, session_id: str) -> None:
+    """Walk a freshly-created session to applied_in_solidworks. Tests
+    that need an applied-state session use this helper."""
+    r = client.patch(f"/api/edit-sessions/{session_id}", json={
+        "status":  "applied_in_solidworks",
+        "applied": {"appliedAtUtc": _iso_marker(session_id),
+                    "appliedByUser": "skaumb"},
+    })
+    assert r.status_code == 200, r.text
+
+
+def _iso_marker(seed: str) -> str:
+    """Stable, sortable timestamps derived from the session id so we
+    can prove ordering deterministically. Uses the ULID's first chars
+    to spread timestamps a known distance apart."""
+    base = "2026-05-22T18:"
+    # Use seed length parity to spread minutes apart deterministically.
+    minute = (sum(ord(c) for c in seed) % 50) + 10
+    return f"{base}{minute:02d}:00.000Z"
+
+
+def test_sync_preview_missing_manifest_returns_404(
+    aircraft_library_with_draft: Path,
+):
+    """No sidecar manifest at the package path -> 404 with a clear
+    remediation message."""
+    client = TestClient(server.app)
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": "does-not-exist",
+    })
+    assert r.status_code == 404, r.text
+    assert "No bridge sidecar manifest" in r.text
+
+
+def test_sync_preview_no_applied_sessions_returns_empty(
+    aircraft_library_with_draft: Path,
+):
+    """Sidecar exists but no session is at applied_in_solidworks ->
+    matched=false, empty candidates, recommendedNextAction signals it."""
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID)
+    client = TestClient(server.app)
+    # Create a session and leave it at the default 'prepared' state.
+    handoff = _capture_handoff_payload(client)
+    _create_session(client, handoff)
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["matched"]               is False
+    assert body["candidateSessions"]     == []
+    assert body["recommendedNextAction"] == "no_candidate_session"
+    assert body["packageManifestPath"].endswith(f"/{PKG_ID}/manifest.json")
+
+
+def test_sync_preview_single_applied_session_returns_medium(
+    aircraft_library_with_draft: Path,
+):
+    """One applied session for the part + no manifest stamp -> single
+    candidate with confidence=medium, reason=recent_applied_session."""
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID,
+                                   source_path=r"C:\CAD\Aircraft\Top.SLDPRT")
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    _advance_to_applied(client, sid)
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["matched"]                                is True
+    assert body["packageSourcePath"]                      == r"C:\CAD\Aircraft\Top.SLDPRT"
+    assert body["recommendedNextAction"]                  == "patch_session_to_extracted"
+    assert len(body["candidateSessions"])                 == 1
+    cand = body["candidateSessions"][0]
+    assert cand["sessionId"]                              == sid
+    assert cand["confidence"]                             == "medium"
+    assert cand["reason"]                                 == "recent_applied_session"
+    assert cand["recommendedPatch"] == {
+        "status":     "extracted",
+        "extraction": {"resultingPartPackageId": PKG_ID},
+    }
+
+
+def test_sync_preview_candidates_sorted_by_appliedAtUtc_desc(
+    aircraft_library_with_draft: Path,
+):
+    """Two applied sessions for the same part, no manifest stamp ->
+    most-recent appliedAtUtc comes first."""
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID)
+    client = TestClient(server.app)
+    h1 = _capture_handoff_payload(client, phrase="top wing")
+    h2 = _capture_handoff_payload(client, phrase="lower wing",
+                                  instruction="add 4 holes to the lower wing")
+    sid1 = _create_session(client, h1)["session"]["sessionId"]
+    sid2 = _create_session(client, h2)["session"]["sessionId"]
+    # Pin appliedAtUtc explicitly so the test is order-deterministic.
+    client.patch(f"/api/edit-sessions/{sid1}", json={
+        "status":  "applied_in_solidworks",
+        "applied": {"appliedAtUtc": "2026-05-22T18:10:00.000Z"},
+    })
+    client.patch(f"/api/edit-sessions/{sid2}", json={
+        "status":  "applied_in_solidworks",
+        "applied": {"appliedAtUtc": "2026-05-22T18:30:00.000Z"},
+    })
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    assert r.status_code == 200, r.text
+    ids = [c["sessionId"] for c in r.json()["candidateSessions"]]
+    assert ids == [sid2, sid1], \
+        f"expected most-recent applied session first, got {ids}"
+
+
+def test_sync_preview_manifest_sessionId_match_promotes_to_high(
+    aircraft_library_with_draft: Path,
+):
+    """Manifest stamps an exact sessionId that matches an open applied
+    session -> that session is first with confidence=high. Other applied
+    sessions for the same part remain as medium fallbacks."""
+    client = TestClient(server.app)
+    h1 = _capture_handoff_payload(client, phrase="top wing")
+    h2 = _capture_handoff_payload(client, phrase="lower wing",
+                                  instruction="add 4 holes to the lower wing")
+    sid1 = _create_session(client, h1)["session"]["sessionId"]
+    sid2 = _create_session(client, h2)["session"]["sessionId"]
+    # Both applied -- sid1 EARLIER, sid2 LATER.
+    client.patch(f"/api/edit-sessions/{sid1}", json={
+        "status":  "applied_in_solidworks",
+        "applied": {"appliedAtUtc": "2026-05-22T18:10:00.000Z"},
+    })
+    client.patch(f"/api/edit-sessions/{sid2}", json={
+        "status":  "applied_in_solidworks",
+        "applied": {"appliedAtUtc": "2026-05-22T18:30:00.000Z"},
+    })
+    # Manifest stamps the OLDER session id -> still wins over the
+    # newer one because the explicit stamp outranks recency.
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID,
+                                   session_id=sid1)
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    assert r.status_code == 200, r.text
+    cands = r.json()["candidateSessions"]
+    assert [c["sessionId"] for c in cands] == [sid1, sid2]
+    assert cands[0]["confidence"] == "high"
+    assert cands[0]["reason"]     == "manifest_session_id"
+    assert cands[1]["confidence"] == "medium"
+    assert cands[1]["reason"]     == "recent_applied_session"
+
+
+def test_sync_preview_manifest_editSessionId_match_also_promotes(
+    aircraft_library_with_draft: Path,
+):
+    """The endpoint accepts both `sessionId` and `editSessionId` keys
+    in the manifest -- a future bridge add-in may pick either name."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    _advance_to_applied(client, sid)
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID,
+                                   edit_session_id=sid)
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    cand = r.json()["candidateSessions"][0]
+    assert cand["sessionId"]  == sid
+    assert cand["confidence"] == "high"
+    assert cand["reason"]     == "manifest_session_id"
+
+
+def test_sync_preview_wrong_status_session_excluded(
+    aircraft_library_with_draft: Path,
+):
+    """A session that's still 'prepared' (not applied) must NOT show
+    up as a candidate, even when the manifest stamps its sessionId."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    # Stay at 'prepared'. Manifest stamps it -- but it's still excluded.
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID,
+                                   session_id=sid)
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    body = r.json()
+    assert body["matched"]               is False
+    assert body["candidateSessions"]     == []
+    assert body["recommendedNextAction"] == "no_candidate_session"
+
+
+def test_sync_preview_different_part_session_excluded(
+    aircraft_library_with_draft: Path,
+):
+    """Applied sessions for a DIFFERENT part must not match the
+    incoming package's partNumber. We synthesize a second part rev
+    on disk so a separate session can validly exist."""
+    client = TestClient(server.app)
+    # Plant a second revisioned part 1030199 with its own GLB / colors /
+    # regions so a session can validly exist against it.
+    pn_other = "1030199"
+    other_rev_dir = aircraft_library_with_draft / "parts" / pn_other / REV
+    other_rev_dir.mkdir(parents=True)
+    _sr_tests._write_synthetic_glb(other_rev_dir / f"{pn_other}_colored.glb",
+                                   _sr_tests._aircraft_fixture())
+    (other_rev_dir / f"{pn_other}_feature_colors.json").write_text(
+        (aircraft_library_with_draft / "parts" / PN / REV / f"{PN}_feature_colors.json")
+            .read_text(encoding="utf-8-sig")
+            .replace(f'"partNumber": "{PN}"', f'"partNumber": "{pn_other}"'),
+        encoding="utf-8",
+    )
+    other_doc = build_draft_regions(aircraft_library_with_draft, pn_other, REV)
+    write_semantic_regions(aircraft_library_with_draft, pn_other, REV, other_doc)
+    # Capture a handoff against the OTHER part and create an applied session.
+    r_handoff = client.post(
+        f"/api/part-semantic-regions/{pn_other}/cad-edit-handoff",
+        json={"revision": REV, "phrase": "top wing",
+              "userInstruction": "make the top wing 2 inches thicker"},
+    )
+    assert r_handoff.status_code == 200, r_handoff.text
+    other_sid = _create_session(client, r_handoff.json())["session"]["sessionId"]
+    _advance_to_applied(client, other_sid)
+    # Sidecar is for PN, not pn_other.
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID)
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    body = r.json()
+    assert body["matched"]           is False
+    assert body["candidateSessions"] == []
+
+
+def test_sync_preview_does_not_mutate_session_json(
+    aircraft_library_with_draft: Path,
+):
+    """Read-only contract: a sync-preview POST must not modify any
+    session file's mtime or contents."""
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, PKG_ID,
+                                   source_path="C:/CAD/Top.SLDPRT")
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    _advance_to_applied(client, sid)
+
+    session_path = aircraft_library_with_draft / "_edit_sessions" / f"{sid}.json"
+    before_mtime = session_path.stat().st_mtime_ns
+    before_bytes = session_path.read_bytes()
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": PKG_ID,
+    })
+    assert r.status_code == 200, r.text
+
+    after_mtime = session_path.stat().st_mtime_ns
+    after_bytes = session_path.read_bytes()
+    assert after_mtime == before_mtime, \
+        "session file mtime changed: sync-preview must be read-only"
+    assert after_bytes == before_bytes, \
+        "session file bytes changed: sync-preview must be read-only"
+
+
+def test_sync_preview_recommendedPatch_uses_provided_package_id(
+    aircraft_library_with_draft: Path,
+):
+    """The returned recommendedPatch must carry the EXACT partPackageId
+    that the caller provided in the request body -- this is the value
+    the operator will PATCH into extraction.resultingPartPackageId."""
+    custom_pkg = "pkg-custom-deadbeef-2026"
+    _write_bridge_package_manifest(aircraft_library_with_draft, PN, custom_pkg)
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    _advance_to_applied(client, sid)
+
+    r = client.post("/api/library/intake/post-edit-sync-preview", json={
+        "partNumber":    PN,
+        "partPackageId": custom_pkg,
+    })
+    cand = r.json()["candidateSessions"][0]
+    assert cand["recommendedPatch"]["status"] == "extracted"
+    assert cand["recommendedPatch"]["extraction"]["resultingPartPackageId"] == custom_pkg

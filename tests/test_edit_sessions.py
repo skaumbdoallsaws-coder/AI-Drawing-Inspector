@@ -1087,6 +1087,20 @@ def test_served_html_sessions_tab_filter_markers_present():
         assert marker in html, f"Sessions tab marker missing: {marker!r}"
 
 
+def test_served_html_sessions_tab_tracks_empty_loaded_state():
+    """Regression: an empty sessions list is a valid loaded result.
+    The tab must not use `sessions.length === 0` as the trigger to
+    re-fetch forever; it needs an explicit loaded flag."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    assert "loaded:            false" in html, \
+        "Sessions tab must track loaded state separately from list length"
+    assert "!sessionsTabState.loaded" in html, \
+        "initial fetch gate must use loaded flag, not sessions.length"
+    assert "sessionsTabState.loaded = true" in html, \
+        "fetch completion must mark empty lists as loaded"
+
+
 def test_served_html_sessions_tab_does_not_regress_other_tabs():
     """Regression guard: adding the Sessions tab must NOT remove or
     rename the existing tabs the rest of the app depends on. The

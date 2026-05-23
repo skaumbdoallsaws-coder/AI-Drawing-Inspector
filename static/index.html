@@ -15676,6 +15676,7 @@
         // ─────────────────────────────────────────────────────────
         const sessionsTabState = {
             sessions:          [],           // last GET /api/edit-sessions result
+            loaded:            false,        // true once GET /api/edit-sessions completed (even if empty)
             loading:           false,
             error:             null,
             openOnly:          true,         // filter pill: Open | All
@@ -15731,6 +15732,7 @@
                 sessionsTabState.error = `Failed to load sessions: ${err && err.message || err}`;
                 sessionsTabState.sessions = [];
             } finally {
+                sessionsTabState.loaded = true;
                 sessionsTabState.loading = false;
                 renderViewport();
             }
@@ -15890,7 +15892,7 @@
             if (!viewportContent) return;
             // First mount triggers an eager load. The fetch flips loading
             // then re-renders so the spinner appears synchronously.
-            if (!sessionsTabState.sessions.length
+            if (!sessionsTabState.loaded
                 && !sessionsTabState.loading
                 && !sessionsTabState.error) {
                 _sessionsTabFetchList();

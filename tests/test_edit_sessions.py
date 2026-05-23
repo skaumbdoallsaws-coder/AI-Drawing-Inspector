@@ -111,6 +111,45 @@ def _create_session(client: TestClient, handoff: dict, notes: str = "") -> dict:
 # Create: happy path + immutable identity derivation
 # ---------------------------------------------------------------------------
 
+def test_POST_create_session_preserves_enriched_handoff_classification(
+    aircraft_library_with_draft: Path,
+):
+    """Per spec test 4: when the propeller-thickness handoff has
+    classified editTargets / propagationFeatures / referenceFeatures,
+    the create-session round-trip must preserve those arrays in the
+    embedded handoffPayload verbatim. The session log is the audit
+    snapshot; later curator edits to the regions file must NOT
+    retroactively change what the log said was being mutated."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="make the propeller blades 2 inches thicker",
+    )
+    # Sanity-check the handoff itself carries the classification before
+    # we even create the session.
+    assert handoff["target"]["editTargets"], \
+        "fixture should produce a non-empty editTargets for propeller thickness"
+    captured_edit_ids = [e["cadFeatureId"] for e in handoff["target"]["editTargets"]]
+    captured_prop_ids = [e["cadFeatureId"] for e in handoff["target"]["propagationFeatures"]]
+    captured_ref_ids  = [e["cadFeatureId"] for e in handoff["target"]["referenceFeatures"]]
+
+    body = _create_session(client, handoff)
+    sid = body["session"]["sessionId"]
+    # Re-fetch via GET so we exercise the on-disk round-trip, not just
+    # the in-memory POST response.
+    persisted = client.get(f"/api/edit-sessions/{sid}").json()
+    target = persisted["handoffPayload"]["target"]
+    assert [e["cadFeatureId"] for e in target["editTargets"]]         == captured_edit_ids
+    assert [e["cadFeatureId"] for e in target["propagationFeatures"]] == captured_prop_ids
+    assert [e["cadFeatureId"] for e in target["referenceFeatures"]]   == captured_ref_ids
+    # And the per-entry shape survives -- each entry has all three
+    # identifier fields the executor will eventually need.
+    for entry in target["editTargets"]:
+        assert "cadFeatureId"  in entry
+        assert "sourceFeature" in entry
+        assert "glbNode"       in entry
+
+
 def test_POST_create_session_happy_path(aircraft_library_with_draft: Path):
     """Successful create returns a prepared session with a 26-char ULID,
     the embedded handoff payload preserved verbatim, and a session file

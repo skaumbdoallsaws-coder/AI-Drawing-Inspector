@@ -4448,10 +4448,41 @@ def _semantic_region_cad_edit_handoff_chat_result(
     else:
         target_text = "no mapped CAD feature targets"
 
+    # Edit-target classification call-out. When the handoff resolved a
+    # multi-feature region into a clear editable source + a propagation
+    # feature (e.g. propeller blade Boss-Extrude1 + CirPattern1), tell
+    # the operator EXPLICITLY which feature SolidWorks should mutate so
+    # the human reviewer doesn't approve an edit against the pattern or
+    # a construction surface by mistake. Falls back gracefully when the
+    # classification didn't yield a clear source (no extra sentence).
+    edit_targets         = target.get("editTargets")         or []
+    propagation_features = target.get("propagationFeatures") or []
+    edit_target_clause = ""
+    if isinstance(edit_targets, list) and edit_targets:
+        ed_names = [
+            (e.get("sourceFeature") or e.get("cadFeatureId"))
+            for e in edit_targets
+            if isinstance(e, dict)
+        ]
+        ed_names = [str(n) for n in ed_names if n]
+        if ed_names:
+            edit_target_clause = f" Editable source target: {', '.join(ed_names)}."
+            if isinstance(propagation_features, list) and propagation_features:
+                prop_names = [
+                    (p.get("sourceFeature") or p.get("cadFeatureId"))
+                    for p in propagation_features
+                    if isinstance(p, dict)
+                ]
+                prop_names = [str(n) for n in prop_names if n]
+                if prop_names:
+                    edit_target_clause += (
+                        f" {', '.join(prop_names)} will propagate the change to the other instances."
+                    )
+
     response = (
         f"Prepared a CAD edit handoff for {region_label}. "
         f"Intent: {intent.get('action', 'unknown')}{hint_text}. "
-        f"SolidWorks target(s): {target_text}. "
+        f"SolidWorks target(s): {target_text}.{edit_target_clause} "
         "I queued it for the Sessions tab; it is still read-only and requires human review before any SolidWorks work."
     )
 
@@ -5178,6 +5209,217 @@ class _CadEditHandoffBody(BaseModel):
 _CAD_EDIT_ALLOWED_ACTIONS = ("dimension_change", "hole_pattern", "sketch_on_face", "unknown")
 
 
+# --- Edit-target classification ------------------------------------------
+#
+# A semantic region typically resolves to several CAD features: surfaces +
+# solid bodies + patterns + mirrors. Treating all of them as "edit targets"
+# is dangerous because the operator (or future executor) might mutate the
+# wrong feature. The classifier below partitions the region's features
+# into three deterministic buckets:
+#
+#   - editTargets:         the feature(s) that should actually be edited
+#                          for the requested intent (e.g. Boss-Extrude1
+#                          for "make propeller blades thicker")
+#   - propagationFeatures: pattern / mirror features that will update
+#                          automatically once the source edit applies
+#                          (e.g. CirPattern1 fans the new blade thickness
+#                          to every instance)
+#   - referenceFeatures:   construction surfaces, reference geometry,
+#                          and other features that exist for context and
+#                          must NOT be touched by the edit
+#
+# All three are advisory metadata for human review -- canEdit stays
+# false, the executor doesn't exist yet, and the classifier is purely
+# name-pattern based (no LLM, no parameter inspection).
+
+# Name-prefix indicators. Match against the lower-cased cad_feature_id
+# (which is the SolidWorksExtractor's GLB-node-name form, e.g.
+# "ice_boss_extrude1", "cirpattern1", "planarsurface_top_wing"). When
+# the GLB has the SolidWorks-style name separately, the source_features
+# alias contributes too -- both must be checked.
+_EDIT_TARGET_PATTERN_NAME_PREFIXES = (
+    "cirpattern", "linpattern", "mirrorsolid", "mirrorrefsurf",
+    "mirrorpattern", "tablepattern", "curvedpattern", "sketchpattern",
+    "fillpattern",
+)
+_EDIT_TARGET_REFERENCE_NAME_PREFIXES = (
+    "planarsurface", "extrurefsurface", "revolvrefsurf",
+    "ruledsrffromedge", "netblend", "boundarysurface", "knitsurface",
+    "trimsurface", "deletesurface", "thickensurface", "offsetsurface",
+    "filledsurface", "pline_split", "ruled_surface",
+    "refplane", "refaxis", "refpoint", "refcoord",
+    "sketch", "compcurve", "helix",
+)
+
+
+def _edit_target_classify_feature_kind(
+    cad_feature_id: str,
+    source_feature: str = "",
+) -> str:
+    """Return one of: 'pattern' | 'reference' | 'solid' | 'unknown'.
+
+    Pure name-pattern classification. 'solid' means "this is a candidate
+    edit target subject to intent rules"; 'pattern' propagates source
+    edits; 'reference' is construction / surface geometry; 'unknown'
+    falls through to reference in the conservative caller."""
+    norm    = (cad_feature_id or "").lower()
+    srcnorm = (source_feature or "").lower()
+
+    def _has_any_prefix(text: str, prefixes: tuple) -> bool:
+        return any(text.startswith(p) for p in prefixes)
+
+    # Pattern / mirror features first -- they win even when the source
+    # name also contains a body-op keyword (a "mirrored boss" is still
+    # a propagation feature, not the source).
+    if _has_any_prefix(norm, _EDIT_TARGET_PATTERN_NAME_PREFIXES):
+        return "pattern"
+    if _has_any_prefix(srcnorm.replace("-", "").replace(" ", ""),
+                       _EDIT_TARGET_PATTERN_NAME_PREFIXES):
+        return "pattern"
+    if "cirpattern" in norm or "linpattern" in norm:
+        return "pattern"
+    if norm.startswith("mirror") or "_mirror" in norm:
+        return "pattern"
+
+    # Surfaces, reference planes, sketches.
+    if _has_any_prefix(norm, _EDIT_TARGET_REFERENCE_NAME_PREFIXES):
+        return "reference"
+    # Surface-* SolidWorks names (Surface-Plane1, Surface-Extrude1, ...)
+    # carry through as cad_feature_id-prefixed planarsurface/extrurefsurface
+    # already; the source-name check below catches any stray naming.
+    if "surface" in srcnorm.replace("-", "").replace(" ", "") \
+       and "boss" not in srcnorm.lower():
+        return "reference"
+
+    # Solid body modeling ops. Order matters: "ice_boss_extrude1" should
+    # classify as 'solid' (boss extrude is material addition), not just
+    # any extrude. "revolution_revolve1" is a solid revolve (NOT a
+    # surface revolve -- that would be "revolvrefsurf").
+    solid_indicators = (
+        "boss", "extrude", "revolve", "fillet", "chamfer",
+        "hole", "shell", "cut", "ice_cut", "ice_revolve",
+        "draft", "rib", "loft",
+    )
+    if any(kw in norm for kw in solid_indicators):
+        return "solid"
+
+    return "unknown"
+
+
+def _classify_edit_targets_for_intent(
+    cad_feature_ids:  List[str],
+    source_features:  List[str],
+    glb_nodes:        List[str],
+    intent:           Dict[str, Any],
+) -> Dict[str, List[Dict[str, Optional[str]]]]:
+    """Partition a region's CAD features into editTargets /
+    propagationFeatures / referenceFeatures based on the parsed intent.
+
+    Each output list contains {cadFeatureId, sourceFeature, glbNode}
+    triples so consumers can show the SolidWorks-friendly source name
+    while keeping the stable IDs for the future executor.
+
+    Conservative: any feature whose intent-relevance is unclear ends up
+    in referenceFeatures. This is by design -- a wrong edit target is
+    worse than no edit target because it primes the human reviewer to
+    approve the wrong operation."""
+    # Build parallel lookups by index. The three input lists are
+    # already aligned upstream (each comes from solidWorksTargets), so
+    # zip is safe; we still guard against length drift defensively.
+    def _at(arr: List[str], i: int) -> Optional[str]:
+        if i < 0 or i >= len(arr):
+            return None
+        v = arr[i]
+        return v if isinstance(v, str) and v else None
+
+    intent_action = (intent.get("action") if isinstance(intent, dict) else None) or "unknown"
+    hints         = intent.get("parameterHints") if isinstance(intent, dict) else {}
+    if not isinstance(hints, dict):
+        hints = {}
+    dimension = (hints.get("dimension") or "").lower()
+
+    # First pass: pure name classification.
+    pattern_entries:   List[Dict[str, Optional[str]]] = []
+    reference_entries: List[Dict[str, Optional[str]]] = []
+    solid_candidates:  List[Dict[str, Optional[str]]] = []
+
+    for i, fid in enumerate(cad_feature_ids):
+        if not isinstance(fid, str) or not fid:
+            continue
+        entry = {
+            "cadFeatureId":  fid,
+            "sourceFeature": _at(source_features, i),
+            "glbNode":       _at(glb_nodes, i),
+        }
+        kind = _edit_target_classify_feature_kind(fid, entry["sourceFeature"] or "")
+        if kind == "pattern":
+            pattern_entries.append(entry)
+        elif kind == "reference":
+            reference_entries.append(entry)
+        elif kind == "solid":
+            solid_candidates.append(entry)
+        else:
+            reference_entries.append(entry)
+
+    # Second pass: intent-aware promotion of solid_candidates into
+    # editTargets. Anything not promoted falls into referenceFeatures.
+    edit_targets: List[Dict[str, Optional[str]]] = []
+
+    def _promote(entry: Dict[str, Optional[str]]) -> None:
+        edit_targets.append(entry)
+
+    for entry in solid_candidates:
+        norm = (entry["cadFeatureId"] or "").lower()
+        is_boss        = "boss" in norm
+        is_extrude     = "extrude" in norm and "ref" not in norm
+        is_revolve     = "revolve" in norm and "ref" not in norm
+        is_fillet      = "fillet" in norm
+        is_chamfer     = "chamfer" in norm
+        is_hole        = "hole" in norm
+        is_cut         = "cut" in norm
+
+        if intent_action == "dimension_change":
+            # Thickness is a LINEAR depth -- only boss/extrude operations
+            # have a directly-editable thickness dimension. Revolves and
+            # fillet radii do not match "thicker", they're a different
+            # parameter axis.
+            if dimension == "thickness":
+                if is_boss or is_extrude:
+                    _promote(entry)
+                else:
+                    reference_entries.append(entry)
+            elif dimension in ("depth", "height", "length", "width"):
+                # Generic linear dim -- bosses/extrudes/revolves/cuts all
+                # carry linear params. Fillets/chamfers stay reference
+                # because they're not "make this longer" candidates.
+                if is_boss or is_extrude or is_revolve or is_cut:
+                    _promote(entry)
+                else:
+                    reference_entries.append(entry)
+            else:
+                # No dimension hint -- accept the broad set of body ops.
+                if (is_boss or is_extrude or is_revolve or is_fillet
+                        or is_chamfer or is_cut):
+                    _promote(entry)
+                else:
+                    reference_entries.append(entry)
+        elif intent_action == "hole_pattern":
+            # The HOLE feature(s) themselves are the edit targets.
+            if is_hole:
+                _promote(entry)
+            else:
+                reference_entries.append(entry)
+        else:
+            # sketch_on_face / unknown / future actions -- conservative.
+            reference_entries.append(entry)
+
+    return {
+        "editTargets":         edit_targets,
+        "propagationFeatures": pattern_entries,
+        "referenceFeatures":   reference_entries,
+    }
+
+
 def _semantic_region_cad_edit_handoff_payload(
     library_dir:      Path,
     safe_pn:          str,
@@ -5262,6 +5504,18 @@ def _semantic_region_cad_edit_handoff_payload(
         edit_readiness = "mixed"
 
     multi_region = len(target_regions) > 1
+    # Edit-target classification: split the region's CAD features into
+    # the source(s) the future executor should mutate vs the
+    # patterns/mirrors that will propagate the change vs the
+    # surface/reference geometry that must NOT be touched. ADDITIVE --
+    # cadFeatureIds/sourceFeatures/glbNodes stay populated verbatim so
+    # consumers that don't yet know about the new fields keep working.
+    cad_feature_ids_raw  = list(targets.get("cadFeatureIds")  or [])
+    source_features_raw  = list(targets.get("sourceFeatures") or [])
+    glb_nodes_raw        = list(targets.get("glbNodes")       or [])
+    classification = _classify_edit_targets_for_intent(
+        cad_feature_ids_raw, source_features_raw, glb_nodes_raw, intent,
+    )
     return {
         "handoffVersion":   _CAD_EDIT_HANDOFF_VERSION,
         # Explicit enum so Sage-in-SOLIDWORKS does not have to infer the
@@ -5276,9 +5530,9 @@ def _semantic_region_cad_edit_handoff_payload(
         "intent":           intent,
         "target": {
             "regions":        target_regions,
-            "cadFeatureIds":  list(targets.get("cadFeatureIds") or []),
-            "sourceFeatures": list(targets.get("sourceFeatures") or []),
-            "glbNodes":       list(targets.get("glbNodes") or []),
+            "cadFeatureIds":  cad_feature_ids_raw,
+            "sourceFeatures": source_features_raw,
+            "glbNodes":       glb_nodes_raw,
             # True when the resolved phrase aggregated to more than one
             # semantic region (e.g. "tail" -> horizontal + vertical
             # stabilizers). Multi-region edits are inherently riskier
@@ -5286,6 +5540,13 @@ def _semantic_region_cad_edit_handoff_payload(
             # several physical features at once; the reviewer needs to
             # see that explicitly before approving execution.
             "multiRegion":    multi_region,
+            # Additive classification fields. Each entry carries
+            # {cadFeatureId, sourceFeature, glbNode} so the consumer
+            # can show the SolidWorks-friendly name while keeping the
+            # stable IDs for the future executor.
+            "editTargets":         classification["editTargets"],
+            "propagationFeatures": classification["propagationFeatures"],
+            "referenceFeatures":   classification["referenceFeatures"],
         },
         "placement": {
             "surfaces":      placement_surfaces,

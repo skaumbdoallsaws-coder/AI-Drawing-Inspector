@@ -1560,6 +1560,141 @@ def test_cad_edit_handoff_blank_userInstruction_returns_400(
 
 
 # ---------------------------------------------------------------------------
+# Edit-target classification (target.editTargets / propagationFeatures /
+# referenceFeatures). The classifier is the bridge between "the propeller
+# resolves to 3+ CAD features" and "SolidWorks should mutate Boss-Extrude1
+# specifically." It must be conservative -- a wrong edit target is worse
+# than no edit target because it primes the future executor to act on the
+# wrong source.
+# ---------------------------------------------------------------------------
+
+def test_cad_edit_handoff_propeller_thickness_classifies_boss_extrude_as_only_edit_target(
+    aircraft_library_with_draft: Path,
+):
+    """Per spec: when the user asks 'make propeller blades thicker',
+    the propeller region's Boss-Extrude (the actual blade body) is
+    the only edit target. Revolves and surface features stay as
+    reference geometry because 'thickness' is a linear depth that
+    only boss/extrude operations carry."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "propeller",
+        "userInstruction": "make the propeller blades 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    target = r.json()["target"]
+    edit_ids = [e["cadFeatureId"] for e in target["editTargets"]]
+    # The synthetic propeller region contains: revolution_revolve1,
+    # ice_boss_extrude1, cirpattern1. Of these only ice_boss_extrude1
+    # is a thickness-friendly edit target.
+    assert edit_ids == ["ice_boss_extrude1"], \
+        f"expected ice_boss_extrude1 as the only edit target, got {edit_ids}"
+    # Existing target fields stay populated verbatim (ADDITIVE contract).
+    assert "ice_boss_extrude1" in target["cadFeatureIds"]
+    assert "revolution_revolve1" in target["cadFeatureIds"]
+    assert "cirpattern1" in target["cadFeatureIds"]
+
+
+def test_cad_edit_handoff_propeller_classifies_cirpattern_as_propagation(
+    aircraft_library_with_draft: Path,
+):
+    """CirPattern1 fans the source edit out to the other blade
+    instances -- it is NOT an edit target itself, but the operator
+    needs to see it explicitly so the human reviewer understands
+    the change will propagate."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "propeller",
+        "userInstruction": "make the propeller blades 2 inches thicker",
+    })
+    target = r.json()["target"]
+    propagation_ids = [e["cadFeatureId"] for e in target["propagationFeatures"]]
+    assert propagation_ids == ["cirpattern1"], \
+        f"expected cirpattern1 as the only propagation feature, got {propagation_ids}"
+    # And the revolve stays in reference -- it's not a thickness target.
+    reference_ids = [e["cadFeatureId"] for e in target["referenceFeatures"]]
+    assert "revolution_revolve1" in reference_ids
+    # Sanity: editTargets / propagationFeatures / referenceFeatures
+    # together cover the full set of region cadFeatureIds.
+    all_classified = set(
+        [e["cadFeatureId"] for e in target["editTargets"]]
+        + propagation_ids
+        + reference_ids
+    )
+    assert all_classified == set(target["cadFeatureIds"])
+
+
+def test_cad_edit_handoff_top_wing_remains_conservative_when_no_solid_body_known(
+    aircraft_library_with_draft: Path,
+):
+    """Per spec test 3: the existing top-wing handoff still works and
+    remains conservative when the resolved region contains only
+    surface-style features. The synthetic top_wing region holds
+    planarsurface_top_wing (a surface, not a solid body). Expect
+    editTargets to be empty so the human reviewer must pick the source
+    explicitly -- no false positive promotion just because some
+    feature exists."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    target = r.json()["target"]
+    assert target["editTargets"] == [], \
+        f"top wing has no solid-body edit candidates; expected empty editTargets, got {target['editTargets']}"
+    # Surface features still appear under referenceFeatures so the
+    # reviewer can see what was matched.
+    ref_ids = [e["cadFeatureId"] for e in target["referenceFeatures"]]
+    assert "planarsurface_top_wing" in ref_ids
+    # Existing cadFeatureIds field unchanged.
+    assert "planarsurface_top_wing" in target["cadFeatureIds"]
+
+
+def test_cad_edit_handoff_propeller_response_text_calls_out_editable_source(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Sage's deterministic chat response must explicitly mention the
+    editable source target + the propagation feature so the human
+    reviewer understands BOTH which feature SolidWorks will mutate
+    AND which features will update automatically."""
+    msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "prepare a cad edit handoff: make the propeller blades 2 inches thicker",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": {
+            "part_number": "1030099",
+            "revision":    "revA",
+            "available_cad_features": [
+                {"cad_feature_id": fid, "display_label": fid,
+                 "type": fid.split("_", 1)[0], "color_name": "blue", "face_count": 1}
+                for fid, *_ in _aircraft_fixture()
+            ],
+        },
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # The deterministic fast path returns a chat result without calling
+    # Anthropic; confirm that path actually fired.
+    assert msgs.last_kwargs is None, "edit-handoff fast path should bypass the model"
+    assert body.get("tool_source") == "semantic_region_cad_edit_handoff_direct"
+    resp = body.get("response", "")
+    # The new classifier-aware sentence(s):
+    assert "Editable source target" in resp, \
+        f"response must call out the editable source; got: {resp!r}"
+    # The source-name form (humanized 'Ice Boss Extrude1') flows from
+    # the synthetic feature_colors.json which titlecases the cad id.
+    assert "Ice Boss Extrude1" in resp, \
+        f"expected the boss extrude source name in the response; got: {resp!r}"
+    assert "propagate the change" in resp, \
+        f"response must explain that the pattern propagates; got: {resp!r}"
+
+
+# ---------------------------------------------------------------------------
 # Existing HIGHLIGHT_FEATURES behavior preserved
 # ---------------------------------------------------------------------------
 

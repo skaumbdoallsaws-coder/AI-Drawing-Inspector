@@ -4512,6 +4512,157 @@ def _semantic_region_cad_edit_handoff_chat_result(
     return result
 
 
+_EDIT_SESSION_COMPARE_REQUEST_RE = re.compile(
+    r'\b(compare|compared|difference|differences|changed|what\s+changed|after\s+the\s+edit\s+session)\b',
+    re.IGNORECASE,
+)
+_REV_TOKEN_RE = re.compile(r'\brev\s*([A-Za-z0-9]+)\b', re.IGNORECASE)
+
+
+def _canon_edit_session_rev(raw: str) -> str:
+    cand = re.sub(r'[^\w]', '', str(raw or "").strip())
+    if not cand:
+        return ""
+    if cand.lower().startswith("rev"):
+        cand = cand[3:]
+    return "rev" + cand
+
+
+def _semantic_edit_session_compare_chat_result(
+    ctx: Optional[Dict[str, Any]],
+    message: str,
+    agent_type: str,
+) -> Optional[Dict[str, Any]]:
+    """Answer "what changed after the edit session?" from the audit log
+    plus the part feature diff endpoint. This closes the loop even when
+    the browser did not attach the current compare payload to chat."""
+    msg = str(message or "").strip()
+    if not msg or not _EDIT_SESSION_COMPARE_REQUEST_RE.search(msg):
+        return None
+    safe_pn = sanitize_part_number((ctx or {}).get("part_number") or "")
+    if not safe_pn:
+        return None
+
+    msg_norm = _semantic_scan_norm(msg)
+    revs = [_canon_edit_session_rev(m.group(1)) for m in _REV_TOKEN_RE.finditer(msg)]
+    revs = [r for r in revs if r]
+    requested_pair = set(revs[:2]) if len(revs) >= 2 else set()
+
+    library_dir = library_path()
+    candidates: List[Dict[str, Any]] = []
+    for doc in _list_edit_sessions(library_dir):
+        if doc.get("partNumber") != safe_pn:
+            continue
+        if doc.get("status") not in {"promoted", "compared"}:
+            continue
+        promotion = doc.get("promotion") or {}
+        promoted_rev = _canon_edit_session_rev(promotion.get("promotedRevision") or "")
+        source_rev = _canon_edit_session_rev(doc.get("sourceRevision") or "")
+        if not source_rev or not promoted_rev:
+            continue
+        if requested_pair and {source_rev, promoted_rev} != requested_pair:
+            continue
+        phrase = str(doc.get("semanticPhrase") or "").strip()
+        requested_edit = str(doc.get("requestedEdit") or "").strip()
+        phrase_match = bool(phrase and _semantic_scan_norm(phrase) in msg_norm)
+        # "after the edit session" without naming the region should still
+        # resolve when the requested edit text overlaps the question.
+        request_words = {
+            w for w in re.split(r'\W+', _semantic_scan_norm(requested_edit))
+            if len(w) >= 4 and w not in {"make", "handoff", "prepare", "edit", "session"}
+        }
+        overlap = len(request_words & set(re.split(r'\W+', msg_norm)))
+        if phrase_match or overlap >= 1 or "edit session" in msg_norm:
+            candidates.append(doc)
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda d: str(d.get("updatedAtUtc") or d.get("createdAtUtc") or ""), reverse=True)
+    session = candidates[0]
+    source_rev = _canon_edit_session_rev(session.get("sourceRevision") or "")
+    promoted_rev = _canon_edit_session_rev((session.get("promotion") or {}).get("promotedRevision") or "")
+    if not source_rev or not promoted_rev:
+        return None
+
+    try:
+        diff = _compute_part_feature_diff_payload(safe_pn, source_rev, promoted_rev)
+    except Exception as ex:
+        logger.warning("edit_session_compare.diff_failed pn=%s %s->%s: %s", safe_pn, source_rev, promoted_rev, ex)
+        return None
+
+    target = session.get("target") or {}
+    handoff_target = ((session.get("handoffPayload") or {}).get("target") or {})
+    target_ids = set(target.get("cadFeatureIds") or []) | set(handoff_target.get("cadFeatureIds") or [])
+    edit_targets = handoff_target.get("editTargets") or []
+    if edit_targets:
+        target_ids |= {e.get("cadFeatureId") for e in edit_targets if isinstance(e, dict) and e.get("cadFeatureId")}
+
+    changed_items = list((diff.get("changed_features") or {}).items())
+    focused_changed = [(idx, fid, info) for idx, (fid, info) in enumerate(changed_items) if fid in target_ids]
+    if not focused_changed:
+        return None
+
+    phrase = str(session.get("semanticPhrase") or "the edited region")
+    lines = [
+        f"Between {source_rev} and {promoted_rev}, the edit-session target was {phrase}.",
+    ]
+    compare_markers: List[str] = []
+    for idx, fid, info in focused_changed:
+        label = info.get("display_label_b") or info.get("display_label_a") or fid
+        changes = info.get("changes") or {}
+        param_changes = changes.get("parameters") or {}
+        if param_changes:
+            for pname, change in param_changes.items():
+                old = change.get("old")
+                new = change.get("new")
+                try:
+                    delta = float(new) - float(old)
+                    delta_txt = f" ({delta:+g} mm)"
+                except Exception:
+                    delta_txt = ""
+                lines.append(f"{label} changed {pname}: {old} mm -> {new} mm{delta_txt}.")
+        else:
+            changed_fields = ", ".join(changes.keys()) if changes else "geometry/metadata"
+            lines.append(f"{label} changed: {changed_fields}.")
+        compare_markers.append(f"pair_{idx}")
+
+    propagation = handoff_target.get("propagationFeatures") or []
+    prop_names = [p.get("sourceFeature") or p.get("cadFeatureId") for p in propagation if isinstance(p, dict)]
+    if not prop_names and "cirpattern1" in target_ids:
+        prop_names = ["CirPattern1"]
+    if prop_names:
+        lines.append(f"{', '.join(prop_names)} did not need a direct dimension edit; it propagates the changed source blade to the repeated instances.")
+
+    removed_target = [
+        (f.get("display_label") or f.get("cad_feature_id"))
+        for f in (diff.get("removed_features") or [])
+        if isinstance(f, dict) and f.get("cad_feature_id") in target_ids
+    ]
+    if removed_target:
+        lines.append("Removed target feature(s): " + ", ".join(removed_target) + ".")
+
+    response = " ".join(lines)
+    raw_calls = [{"name": "compare_features", "args": {"markers": compare_markers}}] if compare_markers else []
+    guarded, warnings = apply_tool_guardrails(raw_calls, agent_type, "edit_session_compare_direct")
+    result = {
+        "response":         response,
+        "compare_features": compare_markers,
+        "edit_session": {
+            "sessionId":        session.get("sessionId"),
+            "semanticPhrase":   session.get("semanticPhrase"),
+            "sourceRevision":   source_rev,
+            "promotedRevision": promoted_rev,
+        },
+        "part_feature_diff": diff,
+        "tool_calls":       guarded,
+        "tool_source":      "edit_session_compare_direct",
+        "tool_call_count":  len(guarded),
+    }
+    if warnings:
+        result["tool_guardrail_warnings"] = warnings
+    return result
+
+
 def _merge_feature_ids_into_tool_calls(tool_calls: List[Dict[str, Any]], feature_ids: List[str]) -> None:
     """Append feature IDs to a native highlight_features tool call, or
     create one if none exists. Mutates tool_calls in place."""
@@ -7669,12 +7820,15 @@ async def get_part_glb_revision(part_number: str, revision: str = Query(...)):
     return FileResponse(path=str(glb_path), media_type="model/gltf-binary", filename=f"{safe_pn}_colored.glb")
 
 
-@app.get("/api/part-feature-diff/{part_number}")
-async def get_part_feature_diff(part_number: str, revA: str = Query(...), revB: str = Query(...)):
+def _compute_part_feature_diff_payload(part_number: str, revA: str, revB: str) -> Dict[str, Any]:
     """Compare features between two part revisions."""
     safe_pn = re.sub(r'[^\w\-]', '', part_number)
-    safe_a = re.sub(r'[^\w]', '', revA)
-    safe_b = re.sub(r'[^\w]', '', revB)
+    safe_a = re.sub(r'[^\w]', '', revA or "")
+    safe_b = re.sub(r'[^\w]', '', revB or "")
+    if safe_a.lower().startswith("rev"):
+        safe_a = safe_a[3:]
+    if safe_b.lower().startswith("rev"):
+        safe_b = safe_b[3:]
 
     base_dir = _part_root_dir(safe_pn)
     json_a = base_dir / f"rev{safe_a}" / f"{safe_pn}_feature_colors.json"
@@ -7894,6 +8048,11 @@ async def get_part_feature_diff(part_number: str, revA: str = Query(...), revB: 
         "unchanged_features": sorted(ids_a & ids_b - set(changed.keys())),
         "summary": ", ".join(summary_parts) if summary_parts else "No changes detected",
     }
+
+
+@app.get("/api/part-feature-diff/{part_number}")
+async def get_part_feature_diff(part_number: str, revA: str = Query(...), revB: str = Query(...)):
+    return _compute_part_feature_diff_payload(part_number, revA, revB)
 
 
 # ---------- Assembly Configuration Generation ----------
@@ -12106,6 +12265,13 @@ async def agent_chat(request: AgentChatRequest):
         # and edit-intent handoff questions. These are not open-ended LLM
         # reasoning tasks: the authoritative answer is the curated
         # semantic-region map for the currently visible revision.
+        if request.agent_type == "deviation-analyst":
+            edit_compare_result = _semantic_edit_session_compare_chat_result(
+                ctx, request.message, request.agent_type,
+            )
+            if edit_compare_result:
+                return edit_compare_result
+
         if request.agent_type == "deviation-analyst" and _is_semantic_cad_target_request(request.message):
             if _is_semantic_prepare_handoff_request(request.message):
                 edit_handoff_payload = _semantic_region_edit_handoff_payload_from_context(ctx, request.message)

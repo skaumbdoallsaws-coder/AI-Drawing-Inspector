@@ -1183,6 +1183,71 @@ def test_served_html_sessions_tab_links_extracted_session_to_promoted_revision()
         assert marker in html, f"promoted-revision link marker missing: {marker!r}"
 
 
+def test_agent_answers_promoted_edit_session_compare_from_diff(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """If the browser fails to attach partDiffState.diffResult, Sage
+    should still answer "what changed after the edit session" from the
+    promoted edit session + /api/part-feature-diff data."""
+    client = TestClient(server.app)
+
+    rev_a_dir = aircraft_library_with_draft / "parts" / PN / "revA"
+    rev_b_dir = aircraft_library_with_draft / "parts" / PN / "revB"
+    rev_b_dir.mkdir(parents=True)
+    rev_a_features = rev_a_dir / f"{PN}_feature_colors.json"
+    rev_b_features = rev_b_dir / f"{PN}_feature_colors.json"
+    data_a = json.loads(rev_a_features.read_text(encoding="utf-8"))
+    data_b = json.loads(rev_a_features.read_text(encoding="utf-8"))
+    for data, depth in ((data_a, 0.5), (data_b, 5.0)):
+        for feat in data["features"]:
+            if feat["cad_feature_id"] == "ice_boss_extrude1":
+                feat["parameters"] = {"depth1_mm": depth}
+                feat["display_label"] = "Boss-Extrude1"
+                feat["sw_name"] = "Boss-Extrude1"
+    rev_a_features.write_text(json.dumps(data_a), encoding="utf-8")
+    rev_b_features.write_text(json.dumps(data_b), encoding="utf-8")
+
+    handoff = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="make the propeller blades 5 mm thicker",
+    )
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+    assert client.patch(f"/api/edit-sessions/{sid}", json={
+        "status": "applied_in_solidworks",
+        "applied": {"appliedAtUtc": "2026-05-23T00:00:00.000Z"},
+    }).status_code == 200
+    assert client.patch(f"/api/edit-sessions/{sid}", json={
+        "status": "extracted",
+        "extraction": {"resultingPartPackageId": "pkg-revB"},
+    }).status_code == 200
+    assert client.patch(f"/api/edit-sessions/{sid}", json={
+        "status": "linked_to_revision",
+    }).status_code == 200
+    assert client.patch(f"/api/edit-sessions/{sid}", json={
+        "status": "promoted",
+        "promotion": {"promotedRevision": "revB"},
+    }).status_code == 200
+
+    _sr_tests._stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    r = client.post("/api/agent/chat", json={
+        "message": "Compare Rev A and Rev B. What changed in the propeller after the edit session?",
+        "agent_type": "deviation-analyst",
+        "inspection_context": {"part_number": PN},
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tool_source"] == "edit_session_compare_direct"
+    assert "Boss-Extrude1 changed depth1_mm: 0.5 mm" in body["response"]
+    assert "5.0 mm" in body["response"]
+    assert "Cirpattern1" in body["response"] or "CirPattern1" in body["response"]
+    assert body["compare_features"] == ["pair_0"]
+    assert body["tool_calls"] == [{
+        "name": "compare_features",
+        "args": {"markers": ["pair_0"]},
+    }]
+
+
 def test_served_html_sessions_tab_does_not_regress_other_tabs():
     """Regression guard: adding the Sessions tab must NOT remove or
     rename the existing tabs the rest of the app depends on. The

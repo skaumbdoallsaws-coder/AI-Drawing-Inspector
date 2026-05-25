@@ -1437,8 +1437,10 @@ def test_cad_edit_handoff_response_includes_supportedActions(
 ):
     """The endpoint advertises its supported action enum explicitly so
     downstream consumers can branch on contract version without
-    docs-reading. Adding a new action will require a handoffVersion
-    bump AND an update to this list (failing the test is the signal)."""
+    docs-reading. Updating this list is the explicit signal to add-in
+    consumers that the action surface grew -- additive entries do NOT
+    require a handoffVersion bump (the version exists to flag BREAKING
+    changes; the supportedActions field IS the additive-change channel)."""
     client = TestClient(server.app)
     r = client.post(_CAD_EDIT_HANDOFF_URL, json={
         "revision":        "A",
@@ -1449,6 +1451,7 @@ def test_cad_edit_handoff_response_includes_supportedActions(
     body = r.json()
     assert body["supportedActions"] == [
         "dimension_change",
+        "sketch_dimension_change",
         "hole_pattern",
         "sketch_on_face",
         "unknown",
@@ -1749,6 +1752,266 @@ def test_prepare_solidworks_handoff_fast_path_does_not_fall_to_model(
     assert body["cad_edit_handoff"]["intent"]["parameterHints"]["mode"] == "set_absolute"
     assert body["cad_edit_handoff"]["target"]["propagationFeatures"] == []
     assert any(tc["name"] == "create_edit_session" for tc in body["tool_calls"])
+
+
+# ---------------------------------------------------------------------------
+# sketch_dimension_change emission (Track A of the sketch-dimension
+# execution contract). InspectorPro emits the new action so the
+# SolidWorks add-in can run its separate EvaluateSketchAction() gate
+# without overloading the existing direct-dimension Evaluate(). NO
+# add-in execution is wired here -- canEdit stays false, and the
+# direct-dim payload shape is byte-identical to the prior contract.
+# ---------------------------------------------------------------------------
+
+def test_cad_edit_handoff_parser_promotes_to_sketch_dimension_change_on_explicit_wording():
+    """Parser unit test: when the dimension trigger fires AND the
+    explicit sketch-dimension wording is present, action is upgraded
+    from dimension_change to sketch_dimension_change while value/units/
+    dimension/mode hints carry through unchanged."""
+    intent = server._parse_cad_edit_intent(
+        "set the outer wing strut thickness to 3 mm via sketch dimension"
+    )
+    assert intent["action"] == "sketch_dimension_change"
+    hints = intent["parameterHints"]
+    assert hints["value"]     == 3.0
+    assert hints["units"]     == "mm"
+    assert hints["dimension"] == "thickness"
+    assert hints["mode"]      == "set_absolute"
+
+
+def test_cad_edit_handoff_parser_keeps_dimension_change_when_no_sketch_wording():
+    """Regression -- a thickness-only request (no sketch-dimension
+    wording) must STAY on the direct-dim action so the add-in's
+    existing Evaluate() gate keeps firing for the working path."""
+    intent = server._parse_cad_edit_intent("make the top wing 2 inches thicker")
+    assert intent["action"] == "dimension_change"
+
+
+def test_cad_edit_handoff_parser_sketch_wording_without_dimension_intent_stays_unknown():
+    """Sketch-dimension wording on its own (no dimension verb / value)
+    must NOT divert into the sketch action; the parser should refuse
+    to guess. Conservative -- a wrong action primes the wrong human
+    review."""
+    intent = server._parse_cad_edit_intent("via sketch dimension")
+    assert intent["action"] == "unknown"
+
+
+def test_cad_edit_handoff_explicit_wording_endpoint_emits_sketch_action(
+    aircraft_library_with_draft: Path,
+):
+    """End-to-end: the cad-edit-handoff endpoint promotes the action to
+    sketch_dimension_change when the explicit wording fires, populates
+    the additive sketch fields (sketchFeature=None, dimensionShortName
+    =None, downstreamFeatures=[]), and updates blockedReason to the
+    sketch-specific copy."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "set the top wing thickness to 3 mm via sketch dimension",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["action"] == "sketch_dimension_change"
+
+    # Additive sketch fields land on the target block ONLY when the
+    # action is sketch_dimension_change.
+    target = body["target"]
+    assert "sketchFeature"      in target
+    assert "dimensionShortName" in target
+    assert "downstreamFeatures" in target
+    assert target["sketchFeature"]      is None
+    assert target["dimensionShortName"] is None
+    assert target["downstreamFeatures"] == []
+
+    # Blocked reason flips to the sketch-specific copy so the operator
+    # understands it's preview-only because of the contract, not
+    # because of missing placement scaffolding.
+    blocked = body["operationPolicy"]["blockedReason"]
+    assert "sketch_dimension_change" in blocked
+    assert "operator confirmation"   in blocked
+
+    # supportedActions now includes the new action so add-in versions
+    # that don't yet know about it can refuse rather than execute it.
+    assert "sketch_dimension_change" in body["supportedActions"]
+
+
+def test_cad_edit_handoff_dimension_change_payload_shape_byte_identical_to_prior_contract(
+    aircraft_library_with_draft: Path,
+):
+    """Regression -- existing dimension_change consumers (frontend +
+    add-in v1) must see the SAME payload they always saw. New sketch
+    fields must NOT leak onto dimension_change payloads."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["action"] == "dimension_change"
+    target = body["target"]
+    assert "sketchFeature"      not in target, \
+        "sketchFeature must NOT leak onto dimension_change payloads"
+    assert "dimensionShortName" not in target, \
+        "dimensionShortName must NOT leak onto dimension_change payloads"
+    assert "downstreamFeatures" not in target, \
+        "downstreamFeatures must NOT leak onto dimension_change payloads"
+    # Existing blockedReason copy is preserved exactly so any consumer
+    # that string-matches it (e.g. the Sessions UI) keeps working.
+    blocked = body["operationPolicy"]["blockedReason"]
+    assert "Placement surfaces" in blocked
+    assert "not implemented yet" in blocked
+
+
+def test_cad_edit_handoff_requestedAction_override_promotes_to_sketch(
+    aircraft_library_with_draft: Path,
+):
+    """Operator override path -- the requestedAction enum now accepts
+    sketch_dimension_change so the operator can force the new action
+    even when the parser would have said dimension_change."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "make the top wing 2 inches thicker",
+        "requestedAction": "sketch_dimension_change",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["action"]          == "sketch_dimension_change"
+    assert body["intent"]["parserAction"]    == "dimension_change"
+    assert body["intent"]["requestedAction"] == "sketch_dimension_change"
+    assert body["intent"]["source"]          == "operator_override"
+    assert "downstreamFeatures" in body["target"]
+
+
+def test_cad_edit_handoff_sketch_dimension_change_lifts_downstream_from_intent_map(
+    aircraft_library_with_draft: Path,
+):
+    """Wing-strut case: when the rev's feature_intent_map.json carries
+    downstreamFeatures for the chosen edit target, the handoff payload
+    surfaces them so the SolidWorks add-in's confirm dialog can show
+    the rebuild blast radius BEFORE the operator clicks Apply."""
+    pn, rev = "1030099", "revA"
+
+    # Use the propeller phrase -- the synthetic fixture maps that to
+    # ice_boss_extrude1 (an edit target the classifier promotes for
+    # thickness intent). "top wing" yields only surface features and
+    # produces empty editTargets, which wouldn't exercise the
+    # downstream-lookup path.
+    client = TestClient(server.app)
+    pre = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "propeller",
+        "userInstruction": "set the propeller blade thickness to 3 mm via sketch dimension",
+    })
+    assert pre.status_code == 200, pre.text
+    edit_targets = pre.json()["target"]["editTargets"]
+    assert edit_targets, "fixture must produce at least one edit target for the test to be meaningful"
+    target_cad_id = edit_targets[0]["cadFeatureId"]
+
+    # Seed a minimal feature_intent_map.json that carries downstream
+    # features for the chosen target. The handoff endpoint reads the
+    # map fresh on each call so a test write is enough.
+    intent_map = {
+        "schemaVersion": "feature-intent-map-1.0.0",
+        "partNumber":    pn,
+        "revision":      rev,
+        "generatedAtUtc": "2026-05-25T00:00:00+00:00",
+        "summary": {
+            "totalFeatures": 1, "regionMappedCount": 1, "curatedCount": 0,
+            "editTargetCount": 1, "propagationCount": 1, "referenceCount": 0,
+        },
+        "features": [
+            {
+                "cadFeatureId":       target_cad_id,
+                "solidWorksName":     "Boss-Extrude2",
+                "regionId":           "outer_wing_strut",
+                "regionLabel":        "Outer Wing Strut",
+                "physicalName":       "outer wing strut body",
+                "featureRole":        "creates the strut body",
+                "editRole":           "primary_edit_target",
+                "controls":           [],
+                # Two downstream features that should rebuild when the
+                # sketch dim changes.
+                "downstreamFeatures": ["cirpattern_struts", "fillet_strut_root"],
+                "reviewed":           False,
+                "confidence":         "medium",
+            },
+        ],
+    }
+    intent_map_path = (
+        aircraft_library_with_draft / "parts" / pn / rev / f"{pn}_feature_intent_map.json"
+    )
+    intent_map_path.write_text(json.dumps(intent_map), encoding="utf-8")
+
+    # Re-issue the handoff; downstreamFeatures should now be populated.
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "propeller",
+        "userInstruction": "set the propeller blade thickness to 3 mm via sketch dimension",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent"]["action"] == "sketch_dimension_change"
+    downstreams = body["target"]["downstreamFeatures"]
+    ds_ids = [d["cadFeatureId"] for d in downstreams]
+    assert "cirpattern_struts" in ds_ids
+    assert "fillet_strut_root" in ds_ids
+
+
+def test_cad_edit_handoff_sketch_chat_response_calls_out_rebuild_impact(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Sage's deterministic chat reply for a sketch_dimension_change
+    handoff must say "sketch-dimension handoff" + a rebuild-impact line
+    so the operator knows the bridge will write to a sketch and which
+    downstream features will rebuild."""
+    _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message": "prepare a handoff: set the top wing thickness to 3 mm via sketch dimension",
+        "agent_type": "deviation-analyst",
+        "inspection_context": {
+            "part_number": "1030099",
+            "revision":    "revA",
+            "available_cad_features": [
+                {"cad_feature_id": fid, "display_label": fid,
+                 "type": fid.split("_", 1)[0], "color_name": "blue", "face_count": 1}
+                for fid, *_ in _aircraft_fixture()
+            ],
+        },
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tool_source"] == "semantic_region_cad_edit_handoff_direct"
+    resp = body["response"]
+    assert "sketch-dimension handoff" in resp
+    assert "sketch_dimension_change"  in resp
+    # When no intent map exists for this fixture, the rebuild-impact
+    # line falls back to the spec-required "unknown" wording.
+    assert "Downstream rebuild impact unknown" in resp \
+        or "Rebuild impact:" in resp
+
+
+def test_cad_edit_handoff_supportedActions_includes_sketch_dimension_change(
+    aircraft_library_with_draft: Path,
+):
+    """Add-in versions can branch on supportedActions to refuse actions
+    they don't understand. The new enum entry must be advertised on
+    every payload (matched + unmatched) so version coordination is
+    explicit, not inferred from sample payloads."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "top wing",
+        "userInstruction": "anything goes here",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "sketch_dimension_change" in body["supportedActions"]
 
 
 # ---------------------------------------------------------------------------

@@ -4490,12 +4490,39 @@ def _semantic_region_cad_edit_handoff_chat_result(
                         f" {', '.join(prop_names)} will propagate the change to the other instances."
                     )
 
-    response = (
-        f"Prepared a CAD edit handoff for {region_label}. "
-        f"Intent: {intent.get('action', 'unknown')}{hint_text}. "
-        f"SolidWorks target(s): {target_text}.{edit_target_clause} "
-        "I queued it for the Sessions tab; it is still read-only and requires human review before any SolidWorks work."
-    )
+    # Sketch-dimension handoffs get a dedicated framing + a
+    # rebuild-impact line so the operator knows BEFORE Apply which
+    # downstream features will rebuild. When the intent map did not
+    # surface downstream entries we fall back to the spec wording so
+    # the line is never silently empty.
+    if intent.get("action") == "sketch_dimension_change":
+        downstream_entries = target.get("downstreamFeatures") or []
+        downstream_names: List[str] = []
+        if isinstance(downstream_entries, list):
+            for d in downstream_entries:
+                if isinstance(d, dict):
+                    name = d.get("sourceFeature") or d.get("cadFeatureId")
+                    if isinstance(name, str) and name:
+                        downstream_names.append(name)
+        if downstream_names:
+            downstream_clause = f"Rebuild impact: {', '.join(downstream_names)}."
+        else:
+            downstream_clause = "Downstream rebuild impact unknown; review feature tree after rebuild."
+        response = (
+            f"Prepared a sketch-dimension handoff for {region_label}. "
+            f"Intent: sketch_dimension_change{hint_text}. "
+            f"SolidWorks target(s): {target_text}.{edit_target_clause} "
+            "Sketch + dimension will be confirmed by SolidWorks preview. "
+            f"{downstream_clause} "
+            "Queued for the Sessions tab; still read-only and requires human review before any SolidWorks work."
+        )
+    else:
+        response = (
+            f"Prepared a CAD edit handoff for {region_label}. "
+            f"Intent: {intent.get('action', 'unknown')}{hint_text}. "
+            f"SolidWorks target(s): {target_text}.{edit_target_clause} "
+            "I queued it for the Sessions tab; it is still read-only and requires human review before any SolidWorks work."
+        )
 
     raw_calls = []
     if feature_ids:
@@ -5668,6 +5695,19 @@ _CAD_EDIT_SET_ABSOLUTE_RE = re.compile(
     r'\b(set|make|change)\b.*\b(to|at|=)\b|\bset\s+(?:the\s+)?[\w\s\-]+\s+\d',
     re.IGNORECASE,
 )
+# Sketch-dimension trigger -- when the user explicitly asks for a
+# sketch-driven edit (because the target feature has no direct display
+# dim and the controlling parameter lives on a consumed sketch). Only
+# valid in combination with a dimension intent; on its own it does not
+# imply any edit action. Keeping this conservative for the first cut:
+# the auto-detection from feature_intent_map controlSource is a clearly
+# scoped follow-up once the add-in executor lands and we know what
+# signal the rules engine actually needs to produce.
+_CAD_EDIT_SKETCH_DIMENSION_RE = re.compile(
+    r'\b(sketch[-\s]+dimension|edit\s+the\s+sketch|via\s+sketch|'
+    r'sketch[-\s]+(?:driven|controlled|handoff))\b',
+    re.IGNORECASE,
+)
 
 
 def _normalize_length_units(raw: str) -> str:
@@ -5795,7 +5835,19 @@ def _parse_cad_edit_intent(instruction: str) -> Dict[str, Any]:
             confidence = "medium"
         else:
             confidence = "low"
-        return {"action": "dimension_change", "parameterHints": hints, "confidence": confidence}
+        # Sketch-dimension upgrade. When the user's wording explicitly
+        # asks for a sketch-driven edit ("set the outer wing strut
+        # thickness to 3 mm via sketch dimension"), promote the action
+        # from dimension_change to sketch_dimension_change so the
+        # add-in's separate EvaluateSketchAction() gate runs instead
+        # of the direct-dim Evaluate(). Hints (value/units/dimension/
+        # mode) carry through unchanged -- the executor needs them
+        # regardless of which gate fires. Auto-detection from the
+        # feature intent map (when a control says "sketch-owned") is a
+        # follow-up; the explicit wording trigger is the safe first cut.
+        is_sketch_dim = bool(_CAD_EDIT_SKETCH_DIMENSION_RE.search(norm))
+        action_name   = "sketch_dimension_change" if is_sketch_dim else "dimension_change"
+        return {"action": action_name, "parameterHints": hints, "confidence": confidence}
 
     return {"action": "unknown", "parameterHints": {}, "confidence": "low"}
 
@@ -5811,7 +5863,17 @@ class _CadEditHandoffBody(BaseModel):
     parameters:       Optional[Dict[str, Any]] = None
 
 
-_CAD_EDIT_ALLOWED_ACTIONS = ("dimension_change", "hole_pattern", "sketch_on_face", "unknown")
+_CAD_EDIT_ALLOWED_ACTIONS = (
+    "dimension_change",
+    # Sketch-controlled dimension write. Routed to the add-in's
+    # separate EvaluateSketchAction() gate; the add-in refuses to
+    # write unless the previewed sketch owner matches the handoff's
+    # sketchFeature (when supplied) and the operator confirms.
+    "sketch_dimension_change",
+    "hole_pattern",
+    "sketch_on_face",
+    "unknown",
+)
 _CAD_EDIT_SINGLE_INSTANCE_RE = re.compile(
     r'\b(single|one\s+(?:blade|instance)|just\s+one|only\s+one|no\s+pattern|without\s+(?:the\s+)?pattern)\b',
     re.IGNORECASE,
@@ -5991,11 +6053,15 @@ def _classify_edit_targets_for_intent(
         is_hole        = "hole" in norm
         is_cut         = "cut" in norm
 
-        if intent_action == "dimension_change":
+        if intent_action in ("dimension_change", "sketch_dimension_change"):
             # Thickness is a LINEAR depth -- only boss/extrude operations
             # have a directly-editable thickness dimension. Revolves and
             # fillet radii do not match "thicker", they're a different
-            # parameter axis.
+            # parameter axis. sketch_dimension_change uses the same
+            # edit-target promotion rules: the BOSS feature is still
+            # the named handoff target -- only the dimension's owner
+            # (Sketch vs Boss) differs, and that distinction lives on
+            # the SolidWorks add-in's eligibility gate, not here.
             if dimension == "thickness":
                 if is_boss or is_extrude:
                     _promote(entry)
@@ -6138,7 +6204,48 @@ def _semantic_region_cad_edit_handoff_payload(
             classification["referenceFeatures"] + classification["propagationFeatures"]
         )
         classification["propagationFeatures"] = []
-    return {
+
+    # Sketch-dimension fields. These are present on EVERY payload (as
+    # null/[]) when the action is sketch_dimension_change so the
+    # SolidWorks add-in's gate can read a stable shape, and absent
+    # otherwise so existing dimension_change consumers see the same
+    # payload they always saw (no schema drift on the working path).
+    sketch_block: Dict[str, Any] = {}
+    if intent.get("action") == "sketch_dimension_change":
+        # downstreamFeatures lifted from the feature_intent_map entry
+        # for the first edit target's cadFeatureId. The intent map
+        # already aggregates pattern/mirror/fillet propagation per
+        # primary edit target -- reusing it here means the operator
+        # sees the SAME rebuild-impact list the comparison answers
+        # use. Best-effort: missing intent map OR missing entry yields
+        # an empty list, which the chat layer renders as "Downstream
+        # rebuild impact unknown" rather than blocking emission.
+        downstream_entries: List[Dict[str, Optional[str]]] = []
+        edit_targets_seq = classification.get("editTargets") or []
+        if edit_targets_seq:
+            first_target = edit_targets_seq[0] if isinstance(edit_targets_seq[0], dict) else {}
+            first_cad_id = first_target.get("cadFeatureId") if isinstance(first_target, dict) else None
+            if isinstance(first_cad_id, str) and first_cad_id:
+                entry = _lookup_feature_intent(library_dir, safe_pn, safe_rev, first_cad_id)
+                if isinstance(entry, dict):
+                    for cad_id in (entry.get("downstreamFeatures") or []):
+                        if isinstance(cad_id, str) and cad_id:
+                            downstream_entries.append({
+                                "cadFeatureId":  cad_id,
+                                "sourceFeature": None,
+                                "glbNode":       None,
+                            })
+        sketch_block = {
+            # Resolved by the SolidWorks add-in's Preview Target walk
+            # (it knows the live subfeature tree); InspectorPro emits
+            # null so the operator and the add-in agree there is no
+            # InspectorPro-side commitment to a specific sketch yet.
+            "sketchFeature":         None,
+            "dimensionShortName":    None,
+            "downstreamFeatures":    downstream_entries,
+        }
+
+    payload: Dict[str, Any] = {
         "handoffVersion":   _CAD_EDIT_HANDOFF_VERSION,
         # Explicit enum so Sage-in-SOLIDWORKS does not have to infer the
         # supported command surface from docs. When this set grows the
@@ -6182,9 +6289,22 @@ def _semantic_region_cad_edit_handoff_payload(
             # consumer can route on operationPolicy alone without
             # cross-referencing target.
             "multiRegionReviewRequired":  multi_region,
-            "blockedReason":              "Placement surfaces and SolidWorks edit execution are not implemented yet.",
+            "blockedReason":              (
+                "sketch_dimension_change is preview-only in InspectorPro; "
+                "Sage-in-SOLIDWORKS resolves the controlling sketch + "
+                "dimension via Preview Target and writes only after operator "
+                "confirmation."
+                if intent.get("action") == "sketch_dimension_change"
+                else "Placement surfaces and SolidWorks edit execution are not implemented yet."
+            ),
         },
     }
+    if sketch_block:
+        # Stamp the sketch-dimension fields onto the target block. Kept
+        # additive (no existing field touched) so dimension_change
+        # consumers downstream see byte-identical payloads.
+        payload["target"].update(sketch_block)
+    return payload
 
 
 @app.post("/api/part-semantic-regions/{partNumber}/cad-edit-handoff")

@@ -352,3 +352,192 @@ def test_is_technical_drilldown_message_detects_solidworks_and_parameter_keyword
     assert server._is_technical_drilldown_message("Compare Rev D and Rev E. What changed in SolidWorks?") is True
     assert server._is_technical_drilldown_message("Show me the exact parameter name") is True
     assert server._is_technical_drilldown_message("Compare Rev D and Rev E. What changed in the propeller?") is False
+
+
+# ---------------------------------------------------------------------------
+# Auto-draft: POST /api/part-semantic-regions/{pn}/draft must ALSO produce
+# the feature intent map for the same pn/rev. The two sidecars are
+# operationally siblings; an operator that just drafted regions expects
+# the intent map to land at the same time without a second click.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def aircraft_library_no_regions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """GLB + feature_colors only -- no semantic_regions doc on disk.
+    Used so POST /api/part-semantic-regions/{pn}/draft starts from
+    the clean state the auto-draft path is meant to handle."""
+    library = tmp_path / "lib"
+    rev_dir = library / "parts" / PN / REV
+    rev_dir.mkdir(parents=True)
+    _sr_tests._write_synthetic_glb(rev_dir / f"{PN}_colored.glb",
+                                   _sr_tests._aircraft_fixture())
+    (rev_dir / f"{PN}_feature_colors.json").write_text(json.dumps({
+        "partNumber": PN,
+        "features": [
+            {
+                "cad_feature_id": n,
+                "glb_node_name":  n,
+                "sw_name":        n.replace("_", " ").title(),
+                "type":           n.split("_", 1)[0],
+                "display_label":  n.replace("_", " ").title(),
+            }
+            for n, *_ in _sr_tests._aircraft_fixture()
+        ],
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    yield library
+
+
+@pytest.fixture
+def aircraft_library_no_feature_colors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """GLB only -- no feature_colors.json. POST /draft must still
+    succeed for semantic regions but report featureIntentDraft.ok
+    =false with the spec-worded skip message."""
+    library = tmp_path / "lib"
+    rev_dir = library / "parts" / PN / REV
+    rev_dir.mkdir(parents=True)
+    _sr_tests._write_synthetic_glb(rev_dir / f"{PN}_colored.glb",
+                                   _sr_tests._aircraft_fixture())
+    monkeypatch.setattr(server, "LIBRARY_DIR", library)
+    yield library
+
+
+def test_semantic_regions_draft_auto_writes_feature_intent_map(
+    aircraft_library_no_regions: Path,
+):
+    """Spec: POST /api/part-semantic-regions/{pn}/draft writes BOTH
+    {pn}_semantic_regions.json AND {pn}_feature_intent_map.json.
+    Response surfaces featureIntentDraft.ok=true with the intent
+    schema version + output path + feature count."""
+    client = TestClient(server.app)
+    r = client.post(f"/api/part-semantic-regions/{PN}/draft", json={"revision": "A"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Semantic regions still land as before.
+    assert body["ok"] is True
+    assert body["partNumber"] == PN
+    assert Path(body["outputPath"]).exists()
+
+    # Auto-drafted intent map MUST be in the response + on disk.
+    fid = body.get("featureIntentDraft")
+    assert isinstance(fid, dict), body
+    assert fid.get("ok") is True, fid
+    assert fid.get("schemaVersion") == SCHEMA_VERSION
+    assert fid.get("featureCount", 0) >= 1
+    intent_path = Path(fid["outputPath"])
+    assert intent_path.exists()
+    assert intent_path.name == f"{PN}_feature_intent_map.json"
+    # And the GET endpoint returns it without a second POST.
+    g = client.get(f"/api/part-feature-intent/{PN}", params={"revision": "A"})
+    assert g.status_code == 200, g.text
+    # No warnings on the happy path.
+    assert "warnings" not in body
+
+
+def test_semantic_regions_draft_intent_map_carries_propeller_blade_thickness(
+    aircraft_library_no_regions: Path,
+):
+    """End-to-end: the auto-drafted intent map should contain the
+    same propeller-Boss-Extrude entry the standalone /draft path
+    produces."""
+    client = TestClient(server.app)
+    r = client.post(f"/api/part-semantic-regions/{PN}/draft", json={"revision": "A"})
+    assert r.status_code == 200, r.text
+    g = client.get(f"/api/part-feature-intent/{PN}", params={"revision": "A"})
+    doc = g.json()
+    boss = next(e for e in doc["features"] if e["cadFeatureId"] == "ice_boss_extrude1")
+    assert boss["editRole"] == "primary_edit_target"
+    assert boss["controls"][0]["displayName"] == "blade thickness"
+
+
+def test_semantic_regions_draft_soft_skips_intent_when_feature_colors_missing(
+    aircraft_library_no_feature_colors: Path,
+):
+    """Spec: missing feature_colors.json must NOT fail the semantic
+    regions draft. The response carries featureIntentDraft.ok=false
+    with the spec-worded skip message + a warnings entry."""
+    client = TestClient(server.app)
+    r = client.post(f"/api/part-semantic-regions/{PN}/draft", json={"revision": "A"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Semantic regions still succeeded.
+    assert body["ok"] is True
+    assert Path(body["outputPath"]).exists()
+
+    # Intent map did NOT run, but reported the reason cleanly.
+    fid = body.get("featureIntentDraft")
+    assert isinstance(fid, dict)
+    assert fid.get("ok") is False
+    err = fid.get("error", "")
+    assert "feature_colors.json" in err
+    assert "skipped" in err.lower()
+    # Warning surfaced at the top level too.
+    warnings = body.get("warnings") or []
+    assert any("feature_intent_draft_skipped" in w for w in warnings), warnings
+
+    # And the intent map file does NOT exist on disk.
+    intent_path = aircraft_library_no_feature_colors / "parts" / PN / REV / f"{PN}_feature_intent_map.json"
+    assert not intent_path.exists()
+
+
+def test_semantic_regions_draft_preserves_reviewed_intent_entry_on_auto_redraft(
+    aircraft_library_no_regions: Path,
+):
+    """Spec: existing reviewed=true intent-map entry survives when
+    the semantic-region draft triggers an intent re-draft.
+
+    The flow:
+      1. First semantic-regions /draft writes both sidecars.
+      2. Operator curates the propeller Boss-Extrude entry in the
+         intent map and marks it reviewed=true.
+      3. Operator re-runs semantic-regions /draft (e.g. after fixing
+         a region label). The auto-draft must NOT clobber the
+         curated entry.
+    """
+    client = TestClient(server.app)
+    # Step 1.
+    r1 = client.post(f"/api/part-semantic-regions/{PN}/draft", json={"revision": "A"})
+    assert r1.status_code == 200, r1.text
+
+    # Step 2: curate the propeller boss entry.
+    intent_doc = load_feature_intent_map(aircraft_library_no_regions, PN, REV)
+    assert intent_doc is not None
+    for e in intent_doc["features"]:
+        if e["cadFeatureId"] == "ice_boss_extrude1":
+            e["physicalName"] = "OPERATOR-LOCKED PROP BLADE"
+            e["reviewed"]     = True
+            e["controls"]     = [{
+                "parameter":       "depth1_mm",
+                "displayName":     "curated blade thickness",
+                "units":           "mm",
+                "physicalMeaning": "Locked by operator -- auto-redraft must not touch this.",
+            }]
+            break
+    write_feature_intent_map(aircraft_library_no_regions, PN, REV, intent_doc)
+
+    # Step 3: re-run semantic-regions /draft -> auto-draft fires.
+    r2 = client.post(f"/api/part-semantic-regions/{PN}/draft", json={"revision": "A"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json().get("featureIntentDraft", {}).get("ok") is True
+
+    persisted = load_feature_intent_map(aircraft_library_no_regions, PN, REV)
+    assert persisted is not None
+    boss = next(e for e in persisted["features"] if e["cadFeatureId"] == "ice_boss_extrude1")
+    assert boss["reviewed"]     is True
+    assert boss["physicalName"] == "OPERATOR-LOCKED PROP BLADE"
+    assert boss["controls"][0]["displayName"] == "curated blade thickness"
+    # And the summary's curatedCount reflects the preserved entry.
+    summary = persisted.get("summary") or {}
+    assert summary.get("curatedCount", 0) >= 1
+
+
+def test_semantic_regions_draft_response_field_present_even_when_intent_disabled(
+    aircraft_library_no_feature_colors: Path,
+):
+    """Response contract guard: featureIntentDraft MUST be present
+    in every 200 response so consumers can branch on
+    `featureIntentDraft.ok` without optional-chain checks."""
+    client = TestClient(server.app)
+    r = client.post(f"/api/part-semantic-regions/{PN}/draft", json={"revision": "A"})
+    assert r.status_code == 200
+    assert "featureIntentDraft" in r.json()

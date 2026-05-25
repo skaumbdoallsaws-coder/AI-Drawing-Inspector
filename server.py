@@ -5106,16 +5106,57 @@ async def part_semantic_regions_draft(partNumber: str, body: _SemanticRegionsDra
         raise HTTPException(status_code=409, detail=str(ex))
 
     out_path = _write_semantic_regions(library_dir, safe_pn, safe_rev, doc)
-    return {
-        "ok":             True,
-        "partNumber":     safe_pn,
-        "revision":       safe_rev,
-        "schemaVersion":  _SEMANTIC_REGIONS_SCHEMA_VERSION,
-        "outputPath":     str(out_path),
-        "regions":        doc["regions"],
-        "summary":        doc["summary"],
-        "axisFrame":      doc["axisFrame"],
+
+    # ── Auto-draft the Feature Intent Map for the same pn/rev ──────
+    #
+    # The intent map is built from the SAME inputs as semantic
+    # regions (plus feature_colors.json), so any operator who just
+    # drafted regions wants the intent map too. We always attempt --
+    # any failure is soft, the semantic-region draft above already
+    # succeeded and must NOT be invalidated by a downstream issue.
+    # Reviewed=true entries in any pre-existing intent map are
+    # preserved by _build_feature_intent_draft, mirroring the
+    # semantic_regions preservation contract operators already know.
+    feature_intent_draft: Dict[str, Any]
+    warnings: List[str] = []
+    fc_path = library_dir / "parts" / safe_pn / safe_rev / f"{safe_pn}_feature_colors.json"
+    if not fc_path.exists():
+        msg = f"{fc_path.name} not found; skipped feature intent draft"
+        feature_intent_draft = {"ok": False, "error": msg}
+        warnings.append(f"feature_intent_draft_skipped: {msg}")
+    else:
+        try:
+            intent_doc = _build_feature_intent_draft(library_dir, safe_pn, safe_rev)
+            intent_path = _write_feature_intent_map(library_dir, safe_pn, safe_rev, intent_doc)
+            feature_intent_draft = {
+                "ok":            True,
+                "schemaVersion": _FEATURE_INTENT_SCHEMA_VERSION,
+                "outputPath":    str(intent_path),
+                "featureCount":  len(intent_doc.get("features") or []),
+                "summary":       intent_doc.get("summary"),
+            }
+        except Exception as ex:
+            # Soft failure -- the semantic-region draft already
+            # landed; the operator can retry the intent map alone
+            # via POST /api/part-feature-intent/{pn}/draft.
+            short = (ex.__class__.__name__ + ": " + str(ex))[:200]
+            feature_intent_draft = {"ok": False, "error": short}
+            warnings.append("feature_intent_draft_failed: " + short)
+
+    response: Dict[str, Any] = {
+        "ok":                 True,
+        "partNumber":         safe_pn,
+        "revision":           safe_rev,
+        "schemaVersion":      _SEMANTIC_REGIONS_SCHEMA_VERSION,
+        "outputPath":         str(out_path),
+        "regions":            doc["regions"],
+        "summary":            doc["summary"],
+        "axisFrame":          doc["axisFrame"],
+        "featureIntentDraft": feature_intent_draft,
     }
+    if warnings:
+        response["warnings"] = warnings
+    return response
 
 
 class _SemanticRegionsPutBody(BaseModel):

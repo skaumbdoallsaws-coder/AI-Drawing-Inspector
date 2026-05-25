@@ -1205,6 +1205,9 @@ def test_agent_answers_promoted_edit_session_compare_from_diff(
                 feat["parameters"] = {"depth1_mm": depth}
                 feat["display_label"] = "Boss-Extrude1"
                 feat["sw_name"] = "Boss-Extrude1"
+            if feat["cad_feature_id"] == "cirpattern1":
+                feat["display_label"] = "CirPattern1"
+                feat["sw_name"] = "CirPattern1"
     data_b["features"] = [
         feat for feat in data_b["features"]
         if feat["cad_feature_id"] != "netblend_horiz_stab_pm"
@@ -1275,6 +1278,94 @@ def test_served_html_compare_features_tool_switches_to_requested_revision_pair()
     assert "_clearPartCompareAgentHighlightHelpers" in html
     assert "_addPartCompareHighlightBox" in html
     assert "new THREE.BoxHelper(mesh, color.getHex())" in html
+
+
+def test_agent_explicit_rev_pair_compare_ignores_stale_context(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Regression: after a fresh promote, the browser may still attach
+    the prior compare payload. If the user explicitly asks for Rev D/E,
+    Sage must compute D/E from disk instead of answering from stale B/C
+    context."""
+    client = TestClient(server.app)
+
+    rev_a_dir = aircraft_library_with_draft / "parts" / PN / "revA"
+    rev_d_dir = aircraft_library_with_draft / "parts" / PN / "revD"
+    rev_e_dir = aircraft_library_with_draft / "parts" / PN / "revE"
+    rev_d_dir.mkdir(parents=True)
+    rev_e_dir.mkdir(parents=True)
+
+    source = json.loads((rev_a_dir / f"{PN}_feature_colors.json").read_text(encoding="utf-8"))
+    data_d = json.loads(json.dumps(source))
+    data_e = json.loads(json.dumps(source))
+    for data, depth in ((data_d, 0.5), (data_e, 5.5)):
+        for feat in data["features"]:
+            if feat["cad_feature_id"] == "ice_boss_extrude1":
+                feat["parameters"] = {"depth1_mm": depth}
+                feat["display_label"] = "Boss-Extrude1"
+                feat["sw_name"] = "Boss-Extrude1"
+            if feat["cad_feature_id"] == "cirpattern1":
+                feat["display_label"] = "CirPattern1"
+                feat["sw_name"] = "CirPattern1"
+    data_e["features"] = [
+        feat for feat in data_e["features"]
+        if feat["cad_feature_id"] != "cirpattern1"
+    ]
+    (rev_d_dir / f"{PN}_feature_colors.json").write_text(json.dumps(data_d), encoding="utf-8")
+    (rev_e_dir / f"{PN}_feature_colors.json").write_text(json.dumps(data_e), encoding="utf-8")
+
+    _sr_tests._stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    stale_bc = {
+        "revA": "B",
+        "revB": "C",
+        "summary": "stale B/C summary",
+        "changed_features": {},
+        "added_features": [],
+        "removed_features": [],
+    }
+    r = client.post("/api/agent/chat", json={
+        "message": "Compare Rev D and Rev E?",
+        "agent_type": "deviation-analyst",
+        "inspection_context": {
+            "part_number": PN,
+            "attachments": {
+                "part": {"part_number": PN},
+                "compare": {"part_feature_diff": stale_bc},
+            },
+        },
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tool_source"] == "part_feature_compare_direct"
+    assert "Between D and E" in body["response"]
+    assert "Boss-Extrude1 changed depth1_mm: 0.5 mm -> 5.5 mm" in body["response"]
+    assert "Removed feature(s): CirPattern1" in body["response"]
+    assert "stale B/C" not in body["response"]
+    assert body["part_feature_diff"]["revA"] == "D"
+    assert body["part_feature_diff"]["revB"] == "E"
+    assert body["compare_features"] == ["pair_0", "removed_cirpattern1"]
+    assert body["tool_calls"] == [{
+        "name": "compare_features",
+        "args": {
+            "markers": ["pair_0", "removed_cirpattern1"],
+            "revA": "D",
+            "revB": "E",
+        },
+    }]
+
+
+def test_served_html_agent_context_skips_stale_part_feature_diff():
+    html = (Path(server.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    markers = [
+        "diffMatchesActivePair",
+        "Skipping stale part feature diff",
+        "part_compare_revA",
+        "part_compare_revB",
+        "prior B/C diff must not be",
+    ]
+    for marker in markers:
+        assert marker in html, f"stale compare guard marker missing: {marker!r}"
 
 
 def test_served_html_compare_highlight_has_camera_focus_and_legend():

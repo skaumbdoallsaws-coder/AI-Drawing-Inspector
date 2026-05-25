@@ -29832,13 +29832,35 @@
                 // Part feature revision compare
                 if (partDiffState.diffResult) {
                     const pfd = JSON.parse(JSON.stringify(partDiffState.diffResult));
-                    (pfd.changed_features ? Object.values(pfd.changed_features) : []).forEach(f => { delete f.color_name; });
-                    (pfd.modified_features ? Object.values(pfd.modified_features) : []).forEach(f => { delete f.color_name_a; delete f.color_name_b; });
-                    (pfd.added_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
-                    (pfd.removed_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
-                    att.compare.part_feature_diff = pfd;
+                    const activeCompareRevA = partDiffState.activeRevA || null;
+                    const activeCompareRevB = partDiffState.activeRevB || null;
+                    const diffRevA = pfd.revA || null;
+                    const diffRevB = pfd.revB || null;
+                    const diffMatchesActivePair = (!activeCompareRevA || !activeCompareRevB)
+                        || (String(diffRevA) === String(activeCompareRevA)
+                            && String(diffRevB) === String(activeCompareRevB));
+                    // Do not attach stale compare data to Sage. The
+                    // compare selectors can update before the operator
+                    // clicks Compare, and a prior B/C diff must not be
+                    // presented as context for a new D/E question.
+                    if (!diffMatchesActivePair) {
+                        console.warn('[AgentContext] Skipping stale part feature diff', {
+                            diffRevA, diffRevB, activeCompareRevA, activeCompareRevB,
+                        });
+                    } else {
+                        (pfd.changed_features ? Object.values(pfd.changed_features) : []).forEach(f => { delete f.color_name; });
+                        (pfd.modified_features ? Object.values(pfd.modified_features) : []).forEach(f => { delete f.color_name_a; delete f.color_name_b; });
+                        (pfd.added_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
+                        (pfd.removed_features || []).forEach(f => { if (typeof f === 'object') delete f.color_name; });
+                        att.compare.part_feature_diff = pfd;
+                    }
                     att.compare.part_revisions = partDiffState.revisions;
-                    att.compare.part_compare_active = true;
+                }
+                if (partDiffState.available) {
+                    att.compare.part_revisions = partDiffState.revisions;
+                    att.compare.part_compare_active = partDiffState.activeSubtab === 'compare';
+                    att.compare.part_compare_revA = partDiffState.activeRevA || null;
+                    att.compare.part_compare_revB = partDiffState.activeRevB || null;
                 }
                 // CAD features for highlighting
                 if (state.featureColorMap && state.featureColorMap.features) {

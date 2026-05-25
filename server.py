@@ -4582,6 +4582,122 @@ def _format_feature_change_summary(label: str, changes: Dict[str, Any]) -> str:
     return f"{label} changed " + (", ".join(field_parts) if field_parts else "geometry/metadata")
 
 
+def _requested_revision_pair_from_message(message: str) -> tuple[str, str]:
+    """Return ('revD', 'revE') when the user explicitly names two revs.
+
+    This is intentionally narrow: it is a deterministic compare shortcut,
+    not a fuzzy revision resolver. If the operator says "Compare Rev D and
+    Rev E", the server should compute that exact pair even when the browser
+    still has a stale B/C compare payload attached.
+    """
+    revs = [_canon_edit_session_rev(m.group(1)) for m in _REV_TOKEN_RE.finditer(str(message or ""))]
+    revs = [r for r in revs if r]
+    if len(revs) < 2:
+        return "", ""
+    return revs[0], revs[1]
+
+
+def _part_feature_compare_chat_result(
+    ctx: Optional[Dict[str, Any]],
+    message: str,
+    agent_type: str,
+) -> Optional[Dict[str, Any]]:
+    """Answer explicit part revision compare questions from disk.
+
+    Browser context can lag after a promote/re-extract cycle: the visible
+    dropdown may show Rev D/E while the chat attachment still contains the
+    prior B/C diff. When the user's message names two revisions, the named
+    pair is authoritative and we compute the diff directly.
+    """
+    msg = str(message or "").strip()
+    if not msg or not _EDIT_SESSION_COMPARE_REQUEST_RE.search(msg):
+        return None
+    rev_a, rev_b = _requested_revision_pair_from_message(msg)
+    if not rev_a or not rev_b:
+        return None
+    safe_pn = sanitize_part_number((ctx or {}).get("part_number") or "")
+    if not safe_pn:
+        return None
+
+    try:
+        diff = _compute_part_feature_diff_payload(safe_pn, rev_a, rev_b)
+    except Exception as ex:
+        logger.warning("part_feature_compare.diff_failed pn=%s %s->%s: %s", safe_pn, rev_a, rev_b, ex)
+        return None
+
+    changed_items = list((diff.get("changed_features") or {}).items())
+    added = diff.get("added_features") or []
+    removed = diff.get("removed_features") or []
+    modified = diff.get("modified_features") or {}
+
+    markers: List[str] = []
+    lines = [
+        f"Between {diff.get('revA', rev_a)} and {diff.get('revB', rev_b)}, {diff.get('summary', 'the feature diff completed')}.",
+    ]
+
+    for idx, (fid, info) in enumerate(changed_items):
+        label = info.get("display_label_b") or info.get("display_label_a") or fid
+        lines.append(_format_feature_change_summary(label, info.get("changes") or {}) + ".")
+        markers.append(f"pair_{idx}")
+
+    for mod_id, info in modified.items():
+        label = info.get("display_label_b") or info.get("display_label_a") or mod_id
+        lines.append(_format_feature_change_summary(label, info.get("changes") or {}) + ".")
+        markers.append(mod_id)
+
+    if added:
+        labels = []
+        for feat in added:
+            if isinstance(feat, dict):
+                fid = feat.get("cad_feature_id") or feat.get("display_label") or ""
+                labels.append(str(feat.get("display_label") or fid))
+                if fid:
+                    markers.append(f"added_{fid}")
+            else:
+                labels.append(str(feat))
+                markers.append(f"added_{feat}")
+        if labels:
+            lines.append("Added feature(s): " + ", ".join(labels) + ".")
+
+    if removed:
+        labels = []
+        for feat in removed:
+            if isinstance(feat, dict):
+                fid = feat.get("cad_feature_id") or feat.get("display_label") or ""
+                labels.append(str(feat.get("display_label") or fid))
+                if fid:
+                    markers.append(f"removed_{fid}")
+            else:
+                labels.append(str(feat))
+                markers.append(f"removed_{feat}")
+        if labels:
+            lines.append("Removed feature(s): " + ", ".join(labels) + ".")
+
+    if not changed_items and not modified and not added and not removed:
+        lines.append("No feature-level changes were detected.")
+
+    raw_calls = [{
+        "name": "compare_features",
+        "args": {
+            "markers": markers,
+            "revA": diff.get("revA") or rev_a,
+            "revB": diff.get("revB") or rev_b,
+        },
+    }] if markers else []
+    guarded, warnings = apply_tool_guardrails(raw_calls, agent_type, "part_feature_compare_direct")
+    result = {
+        "response":         " ".join(lines),
+        "compare_features": markers,
+        "part_feature_diff": diff,
+        "tool_calls":       guarded,
+        "tool_source":      "part_feature_compare_direct",
+        "tool_call_count":  len(guarded),
+    }
+    if warnings:
+        result["tool_guardrail_warnings"] = warnings
+    return result
+
+
 def _semantic_edit_session_compare_chat_result(
     ctx: Optional[Dict[str, Any]],
     message: str,
@@ -11357,6 +11473,10 @@ def normalize_agent_context(ctx: dict) -> dict:
             flat.setdefault("part_compare_active", compare.get("part_compare_active", False))
         if compare.get("part_revisions"):
             flat.setdefault("part_revisions", compare["part_revisions"])
+        if compare.get("part_compare_revA"):
+            flat.setdefault("part_compare_revA", compare["part_compare_revA"])
+        if compare.get("part_compare_revB"):
+            flat.setdefault("part_compare_revB", compare["part_compare_revB"])
 
         # Assembly
         if assembly.get("mate_relationships"):
@@ -12351,6 +12471,12 @@ async def agent_chat(request: AgentChatRequest):
             )
             if edit_compare_result:
                 return edit_compare_result
+
+            explicit_compare_result = _part_feature_compare_chat_result(
+                ctx, request.message, request.agent_type,
+            )
+            if explicit_compare_result:
+                return explicit_compare_result
 
         if request.agent_type == "deviation-analyst" and _is_semantic_cad_target_request(request.message):
             if _is_semantic_prepare_handoff_request(request.message):

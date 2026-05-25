@@ -4557,20 +4557,67 @@ def _semantic_region_labels_by_cad_feature(
     return out
 
 
-def _format_feature_change_summary(label: str, changes: Dict[str, Any]) -> str:
+_TECHNICAL_DRILLDOWN_RE = re.compile(
+    r'\b(solidworks|feature\s*tree|feature\s*id|parameter|param|technical(?:ly)?|exact|raw)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_technical_drilldown_message(message: Optional[str]) -> bool:
+    """True when the operator's message asks for SolidWorks-level
+    detail (feature names, parameter names, etc). The compare-answer
+    rendering uses this to decide whether to APPEND a technical
+    sentence after the physical-language one -- physical always
+    leads, technical follows when explicitly requested."""
+    return bool(message and _TECHNICAL_DRILLDOWN_RE.search(message))
+
+
+def _format_feature_change_summary(
+    label:          str,
+    changes:        Dict[str, Any],
+    intent_entry:   Optional[Dict[str, Any]] = None,
+    include_technical: bool = True,
+) -> str:
+    """Render a one-sentence summary of the changes on a single
+    feature.
+
+    intent_entry, when present, drives physical-language wording for
+    every parameter change that has a matching control in the intent
+    map. When include_technical is True we append the legacy
+    "Boss-Extrude1 depth1_mm: 0.5 mm -> 5.5 mm" sentence after the
+    physical line so technical drill-down stays one query away.
+
+    Missing intent_entry or unmapped parameters fall back to the
+    technical-only rendering -- never raises, never invents data.
+    """
     param_changes = changes.get("parameters") or {}
     if param_changes:
-        parts = []
+        physical_sentences: List[str] = []
+        technical_parts:    List[str] = []
         for pname, change in param_changes.items():
             old = change.get("old")
             new = change.get("new")
+            phys = None
+            if intent_entry is not None:
+                phys = _intent_physical_phrase(intent_entry, pname, old, new)
+            if phys:
+                physical_sentences.append(phys)
             try:
                 delta = float(new) - float(old)
                 delta_txt = f" ({delta:+g} mm)"
             except Exception:
                 delta_txt = ""
-            parts.append(f"{pname}: {old} mm -> {new} mm{delta_txt}")
-        return f"{label} changed " + "; ".join(parts)
+            technical_parts.append(f"{pname}: {old} mm -> {new} mm{delta_txt}")
+
+        if physical_sentences:
+            text = " ".join(physical_sentences).rstrip(".")
+            if include_technical:
+                tech = f"Technically, {label} " + "; ".join(technical_parts)
+                return text + ". " + tech
+            return text
+        # No physical mapping at all -- fall back to legacy wording.
+        return f"{label} changed " + "; ".join(technical_parts)
+
     field_parts = []
     for field, change in changes.items():
         if field == "parameters":
@@ -4630,6 +4677,21 @@ def _part_feature_compare_chat_result(
     removed = diff.get("removed_features") or []
     modified = diff.get("modified_features") or {}
 
+    # Feature Intent Map: prefer the post-edit revision's map so a
+    # changed parameter is explained in the language of the NEW state.
+    # The map is per-rev so we ask for revB first and only fall back
+    # to revA when revB's map is absent.
+    library_dir = library_path()
+    intent_rev_b = _semantic_regions_resolve_rev(library_dir, safe_pn, diff.get("revB") or rev_b)
+    intent_rev_a = _semantic_regions_resolve_rev(library_dir, safe_pn, diff.get("revA") or rev_a)
+    include_technical = _is_technical_drilldown_message(msg)
+
+    def _intent_for(cad_id: str) -> Optional[Dict[str, Any]]:
+        # Try revB first, then revA. Returns None when neither map
+        # exists or neither contains the feature.
+        return (_lookup_feature_intent(library_dir, safe_pn, intent_rev_b, cad_id)
+                or _lookup_feature_intent(library_dir, safe_pn, intent_rev_a, cad_id))
+
     markers: List[str] = []
     lines = [
         f"Between {diff.get('revA', rev_a)} and {diff.get('revB', rev_b)}, {diff.get('summary', 'the feature diff completed')}.",
@@ -4637,12 +4699,26 @@ def _part_feature_compare_chat_result(
 
     for idx, (fid, info) in enumerate(changed_items):
         label = info.get("display_label_b") or info.get("display_label_a") or fid
-        lines.append(_format_feature_change_summary(label, info.get("changes") or {}) + ".")
+        intent_entry = _intent_for(fid)
+        lines.append(_format_feature_change_summary(
+            label, info.get("changes") or {},
+            intent_entry=intent_entry,
+            include_technical=include_technical or intent_entry is None,
+        ) + ".")
         markers.append(f"pair_{idx}")
 
     for mod_id, info in modified.items():
         label = info.get("display_label_b") or info.get("display_label_a") or mod_id
-        lines.append(_format_feature_change_summary(label, info.get("changes") or {}) + ".")
+        # Modified-feature entries carry revB_id and revA_id separately
+        # because the cad_feature_id changed across revisions. Prefer
+        # the revB id when looking up intent (post-edit semantics).
+        target_cid = info.get("revB_id") or info.get("revA_id") or mod_id
+        intent_entry = _intent_for(str(target_cid))
+        lines.append(_format_feature_change_summary(
+            label, info.get("changes") or {},
+            intent_entry=intent_entry,
+            include_technical=include_technical or intent_entry is None,
+        ) + ".")
         markers.append(mod_id)
 
     if added:
@@ -4777,11 +4853,21 @@ def _semantic_edit_session_compare_chat_result(
     lines = [
         f"Between {source_rev} and {promoted_rev}, the edit-session target was {phrase}.",
     ]
+    include_technical_es = _is_technical_drilldown_message(msg)
     compare_markers: List[str] = []
     for idx, fid, info in focused_changed:
         label = info.get("display_label_b") or info.get("display_label_a") or fid
         changes = info.get("changes") or {}
-        lines.append(_format_feature_change_summary(label, changes) + ".")
+        # Intent map lives on the post-edit rev (promoted_rev) by
+        # convention -- that's the revision whose curated wording the
+        # operator wants to see in the answer.
+        intent_entry = (_lookup_feature_intent(library_dir, safe_pn, promoted_rev, fid)
+                        or _lookup_feature_intent(library_dir, safe_pn, source_rev, fid))
+        lines.append(_format_feature_change_summary(
+            label, changes,
+            intent_entry=intent_entry,
+            include_technical=include_technical_es or intent_entry is None,
+        ) + ".")
         compare_markers.append(f"pair_{idx}")
 
     propagation = handoff_target.get("propagationFeatures") or []
@@ -4806,7 +4892,13 @@ def _semantic_edit_session_compare_chat_result(
         label = info.get("display_label_b") or info.get("display_label_a") or fid
         region = source_region_by_fid.get(fid)
         prefix = f"{region}: " if region else ""
-        off_target_lines.append(prefix + _format_feature_change_summary(label, info.get("changes") or {}))
+        intent_entry = (_lookup_feature_intent(library_dir, safe_pn, promoted_rev, fid)
+                        or _lookup_feature_intent(library_dir, safe_pn, source_rev, fid))
+        off_target_lines.append(prefix + _format_feature_change_summary(
+            label, info.get("changes") or {},
+            intent_entry=intent_entry,
+            include_technical=include_technical_es or intent_entry is None,
+        ))
         compare_markers.append(f"pair_{idx}")
 
     removed_off_target_by_region: Dict[str, List[str]] = {}
@@ -5298,6 +5390,99 @@ async def part_semantic_regions_resolve(
         "phrase":     phrase,
         **hit.to_dict(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Feature Intent Map v1
+# ---------------------------------------------------------------------------
+# A per-revision sidecar that maps CAD features to user-friendly
+# physical names + parameter meanings ("blade thickness" instead of
+# "Boss-Extrude1.depth1_mm"). Built deterministically from
+# semantic_regions + feature_colors. Reviewed entries are preserved
+# on re-draft so an operator's curated text never gets clobbered.
+
+from ai_inspector.feature_intent import (
+    SCHEMA_VERSION as _FEATURE_INTENT_SCHEMA_VERSION,
+    build_draft_intent_map as _build_feature_intent_draft,
+    feature_intent_map_path as _feature_intent_map_path,
+    load_feature_intent_map as _load_feature_intent_map,
+    write_feature_intent_map as _write_feature_intent_map,
+    lookup_feature_intent as _lookup_feature_intent,
+    intent_entry_physical_phrase_for_param as _intent_physical_phrase,
+)
+
+
+class _FeatureIntentDraftBody(BaseModel):
+    revision: str
+
+
+@app.post("/api/part-feature-intent/{partNumber}/draft")
+async def part_feature_intent_draft(partNumber: str, body: _FeatureIntentDraftBody):
+    """Generate (or regenerate) the Feature Intent Map for a part rev.
+
+    Preservation policy: any feature in the existing on-disk map with
+    reviewed=true carries over verbatim. Heuristic-built entries get
+    overwritten. Mirrors the semantic_regions /draft contract so the
+    two sidecars feel like one extraction surface to operators.
+
+    Hard requirement: parts/{pn}/{rev}/{pn}_feature_colors.json must
+    exist (otherwise we cannot enumerate features). semantic_regions
+    is optional -- a missing regions doc just produces entries with
+    empty regionId/regionLabel and lower confidence.
+    """
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision)
+
+    library_dir = library_path()
+    fc_path = library_dir / "parts" / safe_pn / safe_rev / f"{safe_pn}_feature_colors.json"
+    if not fc_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Cannot build feature intent map for {safe_pn} {safe_rev}: "
+                f"{fc_path.name} is missing. Run Enrich Visuals (or re-extract "
+                "the part) so the colored feature manifest lands in the revision "
+                "archive first."
+            ),
+        )
+    doc = _build_feature_intent_draft(library_dir, safe_pn, safe_rev)
+    out_path = _write_feature_intent_map(library_dir, safe_pn, safe_rev, doc)
+    return {
+        "ok":            True,
+        "partNumber":    safe_pn,
+        "revision":      safe_rev,
+        "schemaVersion": _FEATURE_INTENT_SCHEMA_VERSION,
+        "outputPath":    str(out_path),
+        "summary":       doc.get("summary"),
+        "featureCount":  len(doc.get("features") or []),
+    }
+
+
+@app.get("/api/part-feature-intent/{partNumber}")
+async def part_feature_intent_read(partNumber: str, revision: str = Query(...)):
+    """Read the persisted Feature Intent Map for a part rev.
+
+    Returns 404 with a JSON body when the file does not exist yet
+    -- callers can then POST /draft to generate it. Never silently
+    invents an empty document so the UI knows to prompt for a draft.
+    """
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+    library_dir = library_path()
+    doc = _load_feature_intent_map(library_dir, safe_pn, safe_rev)
+    if doc is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No feature intent map for {safe_pn} {safe_rev}. "
+                f"POST /api/part-feature-intent/{safe_pn}/draft to generate one."
+            ),
+        )
+    return doc
 
 
 def _semantic_region_cad_handoff_payload(

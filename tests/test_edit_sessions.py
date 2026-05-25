@@ -1183,6 +1183,51 @@ def test_served_html_sessions_tab_links_extracted_session_to_promoted_revision()
         assert marker in html, f"promoted-revision link marker missing: {marker!r}"
 
 
+def test_served_html_sessions_tab_refresh_from_solidworks_button_wired():
+    """The Sessions tab must expose the Refresh From SolidWorks
+    orchestrator so the operator can promote + draft regions +
+    advance the session FSM in one click. The button is the only
+    surface for the /refresh-from-solidworks endpoint; if any of
+    these markers drift the demo loop silently regresses to the
+    7-click manual flow."""
+    client = TestClient(server.app)
+    html = client.get("/").text
+    markers = [
+        # Button label + DOM id
+        "Refresh From SolidWorks",
+        "sessionsRefreshFromSolidWorks",
+        # JS surface area
+        "_sessionsTabRefreshFromSolidWorks",
+        "_sessionsTabSuggestNextRevision",
+        "_sessionsTabResolvePackageIdForRefresh",
+        "_sessionsTabReadHttpDetail",
+        "_sessionsTabOpenCompareForRefresh",
+        # State slot for stashing the orchestrator response
+        "refreshResults:    {}",
+        "sessionsTabState.refreshResults",
+        # Endpoint URL (template literal form)
+        "/refresh-from-solidworks",
+        # Request body fields -- must match _RefreshFromSolidWorksBody
+        "targetRevision:",
+        "partPackageId:",
+        "draftSemanticRegions:",
+        # Gating: button must enable for these four statuses
+        "s.status === 'applied_in_solidworks'",
+        "s.status === 'extracted'",
+        "s.status === 'linked_to_revision'",
+        "s.status === 'promoted'",
+        # Compare action wired off the orchestrator response
+        "sessionsCompareAfterRefresh_",
+        "Compare Rev ",
+        "_autoOpenPartCompareAndHighlight([], revA, revB)",
+        # No-overwrite warning text in the confirm dialog so the
+        # operator understands the safety guarantee.
+        "will not overwrite if it already exists",
+    ]
+    for marker in markers:
+        assert marker in html, f"Refresh From SolidWorks marker missing: {marker!r}"
+
+
 def test_agent_answers_promoted_edit_session_compare_from_diff(
     aircraft_library_with_draft: Path,
     monkeypatch: pytest.MonkeyPatch,

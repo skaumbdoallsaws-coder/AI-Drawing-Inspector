@@ -15686,6 +15686,7 @@
             syncPreviews:      {},           // { sessionId: post-edit-sync-preview response }
             recentPackages:    {},           // { partNumber: GET recent-packages response }
             actionBusy:        {},           // { sessionId: bool } -- disables row buttons mid-action
+            refreshResults:    {},           // { sessionId: refresh-from-solidworks response } -- powers the inline "Compare" action
         };
 
         function _sessionsTabFmtTime(iso) {
@@ -15951,6 +15952,194 @@
             }
         }
 
+        // ── Refresh From SolidWorks helpers ──────────────────────
+        // Suggest the next revision letter for a part by walking the
+        // existing /api/library/revisions/{pn} listing. The endpoint
+        // returns directory names like "revA"/"revB"; we strip the
+        // prefix, sort, and take the next ASCII letter after the
+        // highest. Falls back to 'A' for a brand-new part and to ''
+        // when we hit Z (operator must type the next code).
+        async function _sessionsTabSuggestNextRevision(partNumber) {
+            try {
+                const r = await fetch(`/api/library/revisions/${encodeURIComponent(partNumber)}`);
+                if (!r.ok) return 'A';
+                const body = await r.json();
+                const letters = (body.revisions || [])
+                    .map(item => String((item && item.name) || '').replace(/^rev/i, '').toUpperCase())
+                    .filter(s => /^[A-Z]$/.test(s));
+                if (!letters.length) return 'A';
+                letters.sort();
+                const top = letters[letters.length - 1];
+                if (top === 'Z') return '';
+                return String.fromCharCode(top.charCodeAt(0) + 1);
+            } catch { return 'A'; }
+        }
+
+        // Resolve a partPackageId for the refresh call. Order of preference:
+        //   1. session.extraction.resultingPartPackageId (already linked)
+        //   2. newest entry from /api/library/intake/recent-packages
+        // Returns { packageId, source } or null when nothing is available.
+        async function _sessionsTabResolvePackageIdForRefresh(detail, partNumber) {
+            const fromSession = detail
+                && detail.extraction
+                && detail.extraction.resultingPartPackageId;
+            if (fromSession) return { packageId: String(fromSession), source: 'session' };
+            try {
+                const rp = await fetch(`/api/library/intake/recent-packages/${encodeURIComponent(partNumber)}`);
+                if (!rp.ok) return null;
+                const body = await rp.json();
+                sessionsTabState.recentPackages[partNumber] = body;
+                const pkgs = (body.packages || []);
+                if (!pkgs.length) return null;
+                return { packageId: String(pkgs[0].partPackageId), source: 'recent-packages' };
+            } catch { return null; }
+        }
+
+        // Read structured 409 details from the FastAPI HTTPException
+        // payload. `detail` may be a plain string OR a dict (the promote-
+        // failure path returns {message, errors, warnings}). Falls back
+        // to the raw response text when JSON parsing fails so the
+        // operator still sees something actionable.
+        async function _sessionsTabReadHttpDetail(response) {
+            try {
+                const body = await response.json();
+                const detail = body && body.detail;
+                if (detail == null) return JSON.stringify(body);
+                if (typeof detail === 'string') return detail;
+                const pieces = [];
+                if (detail.message) pieces.push(String(detail.message));
+                if (Array.isArray(detail.errors) && detail.errors.length) {
+                    pieces.push('Errors: ' + detail.errors.map(e =>
+                        (e && (e.message || e.error || JSON.stringify(e))) || '').join('; '));
+                }
+                if (Array.isArray(detail.warnings) && detail.warnings.length) {
+                    pieces.push('Warnings: ' + detail.warnings.map(w =>
+                        (w && (w.message || w.warning || JSON.stringify(w))) || '').join('; '));
+                }
+                return pieces.length ? pieces.join(' | ') : JSON.stringify(detail);
+            } catch {
+                try { return await response.text(); } catch { return ''; }
+            }
+        }
+
+        async function _sessionsTabRefreshFromSolidWorks(sessionId, partNumber, sourceRevision) {
+            // Step 1: gather suggestions BEFORE prompting the operator
+            // so the prompt + confirm dialog show concrete values.
+            const detail   = await _sessionsTabLoadDetail(sessionId);
+            const suggest  = await _sessionsTabSuggestNextRevision(partNumber);
+            const resolved = await _sessionsTabResolvePackageIdForRefresh(detail, partNumber);
+
+            // Operator picks (or accepts) the target rev letter.
+            const promptMsg = `Target revision letter for ${partNumber} `
+                + `(source: ${sourceRevision || '?'}). Will create parts/${partNumber}/rev<letter>/.`
+                + (suggest ? `\n\nSuggested next: ${suggest}` : '\n\nNo suggestion (existing revisions reached Z).');
+            const rawRev = window.prompt(promptMsg, suggest || '');
+            if (rawRev == null) return; // operator cancelled
+            const targetLetter = String(rawRev).trim().replace(/^rev/i, '');
+            if (!/^[A-Za-z0-9]+$/.test(targetLetter)) {
+                sessionsTabState.error = `Refresh From SolidWorks: target revision must be alphanumeric (got ${JSON.stringify(rawRev)}).`;
+                renderViewport();
+                return;
+            }
+            const targetRevisionParam = targetLetter.toUpperCase();
+            const targetRevDirName    = 'rev' + targetRevisionParam;
+
+            // Resolve packageId; if neither the session nor recent-packages
+            // had one, prompt the operator to paste one. The endpoint
+            // requires it (409 otherwise) so failing fast here keeps the
+            // round-trip noise down.
+            let packageId = resolved ? resolved.packageId : '';
+            if (!packageId) {
+                const pasted = window.prompt(
+                    `No bridge package found for ${partNumber}. Paste a partPackageId to promote, `
+                    + `or run POST /api/request-part-extraction via the add-in first.`,
+                    '',
+                );
+                if (pasted == null) return; // cancelled
+                packageId = String(pasted).trim();
+                if (!packageId) {
+                    sessionsTabState.error = 'Refresh From SolidWorks: partPackageId is required.';
+                    renderViewport();
+                    return;
+                }
+            }
+
+            // Final confirmation -- this WRITES to the library (creates
+            // a new revision directory, walks the session FSM forward).
+            const confirmMsg =
+                `Refresh From SolidWorks for ${partNumber}:\n\n`
+                + `  • Source revision: ${sourceRevision || '?'}\n`
+                + `  • Target revision: ${targetRevDirName} (will not overwrite if it already exists)\n`
+                + `  • Package: ${packageId.slice(0, 24)}...\n`
+                + `  • Promote + draft semantic regions + advance session FSM\n\n`
+                + `Proceed?`;
+            if (!window.confirm(confirmMsg)) return;
+
+            _sessionsTabSetActionBusy(sessionId, true);
+            try {
+                const r = await fetch(
+                    `/api/edit-sessions/${encodeURIComponent(sessionId)}/refresh-from-solidworks`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            targetRevision:       targetRevisionParam,
+                            partPackageId:        packageId,
+                            promote:              true,
+                            enrichVisuals:        true,
+                            draftSemanticRegions: true,
+                        }),
+                    },
+                );
+                if (!r.ok) {
+                    const msg = await _sessionsTabReadHttpDetail(r);
+                    sessionsTabState.error = `Refresh From SolidWorks failed (HTTP ${r.status}): ${msg}`;
+                    return;
+                }
+                const body = await r.json();
+                sessionsTabState.refreshResults[sessionId] = body;
+                delete sessionsTabState.details[sessionId];
+                await _sessionsTabFetchList();
+            } catch (err) {
+                sessionsTabState.error = `Refresh From SolidWorks failed: ${err && err.message || err}`;
+            } finally {
+                _sessionsTabSetActionBusy(sessionId, false);
+            }
+        }
+
+        // Compare action wired to the refresh result. When the part is
+        // already loaded (state.partNumber matches), this jumps to the
+        // 3D Compare subtab with the two revisions selected. Otherwise
+        // it sets a banner so the operator opens the part first --
+        // _autoOpenPartCompareAndHighlight requires state.partNumber to
+        // be populated already.
+        async function _sessionsTabOpenCompareForRefresh(sessionId) {
+            const result = sessionsTabState.refreshResults[sessionId];
+            if (!result || !result.nextCompare) return;
+            const { revA, revB } = result.nextCompare;
+            const pn = result.partNumber;
+            if (!pn || !revA || !revB) {
+                sessionsTabState.error = 'Refresh result is missing the compare revisions.';
+                renderViewport();
+                return;
+            }
+            if (state.partNumber !== pn) {
+                sessionsTabState.error = `Open part ${pn} in Drawing/3D Model first, then click "Compare ${revA} vs ${revB}".`;
+                renderViewport();
+                return;
+            }
+            try {
+                const out = await _autoOpenPartCompareAndHighlight([], revA, revB);
+                if (out && out.ok === false && out.error === 'no_revisions_available') {
+                    sessionsTabState.error = `Open part ${pn} first -- Part Compare needs the diff state populated for ${pn}.`;
+                    renderViewport();
+                }
+            } catch (err) {
+                sessionsTabState.error = `Compare ${revA} vs ${revB} failed: ${err && err.message || err}`;
+                renderViewport();
+            }
+        }
+
         function _sessionsTabFilteredRows() {
             const rows = sessionsTabState.sessions.slice();
             const TERMINAL = new Set(['compared', 'abandoned', 'failed']);
@@ -16163,10 +16352,65 @@
             actions.appendChild(mkBtn('sessionsLinkPromotedRevision', 'Link Promoted Revision',
                 () => _sessionsTabLinkPromotedRevision(sid), !canLinkPromoted));
 
+            // Refresh From SolidWorks -- one-shot orchestrator that promotes
+            // the extracted package + drafts semantic regions + advances
+            // the session FSM. Gated by the same set of statuses the
+            // backend accepts so the button matches the endpoint contract.
+            const canRefreshFromSolidWorks =
+                s.status === 'applied_in_solidworks'
+                || s.status === 'extracted'
+                || s.status === 'linked_to_revision'
+                || s.status === 'promoted';
+            actions.appendChild(mkBtn('sessionsRefreshFromSolidWorks', 'Refresh From SolidWorks',
+                () => _sessionsTabRefreshFromSolidWorks(sid, s.partNumber, s.sourceRevision),
+                !canRefreshFromSolidWorks));
+
             const canAbandon = !isTerminal;
             actions.appendChild(mkBtn('sessionsMarkAbandoned', 'Mark Abandoned',
                 () => _sessionsTabMarkAbandoned(sid), !canAbandon));
             row.appendChild(actions);
+
+            // Inline refresh-result block: persists across re-renders so
+            // the operator can compare even after refreshing the list.
+            // Sits above the expanded-detail panel so the Compare action
+            // is always visible without clicking Details.
+            const refresh = sessionsTabState.refreshResults[sid];
+            if (refresh && refresh.ok) {
+                const rb = document.createElement('div');
+                rb.className = 'sessions-row-refresh-result';
+                rb.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:3px;background:var(--bg-panel);font-size:11px;color:var(--text-primary);';
+                const ok = refresh.promotedRevision ? '✓' : '·';
+                rb.innerHTML = `
+                    <div><strong>${ok} Refreshed From SolidWorks</strong> · `
+                    + `${refresh.partNumber || '?'} · `
+                    + `<span style="color:var(--text-secondary);">${refresh.sourceRevision || '?'}</span> → `
+                    + `<strong>${refresh.promotedRevision || '(not promoted)'}</strong> · `
+                    + `regions=<code>${refresh.semanticRegionsDrafted ? 'yes' : 'no'}</code> · `
+                    + `intent=<code>${refresh.featureIntentDrafted ? 'yes' : 'no'}</code> · `
+                    + `status=<code>${refresh.sessionStatus || '?'}</code></div>
+                `;
+                if (refresh.nextCompare
+                    && refresh.nextCompare.revA
+                    && refresh.nextCompare.revB) {
+                    const cmpBar = document.createElement('div');
+                    cmpBar.style.cssText = 'margin-top:6px;display:flex;gap:6px;align-items:center;';
+                    const cmpBtn = document.createElement('button');
+                    cmpBtn.id = `sessionsCompareAfterRefresh_${sid}`;
+                    cmpBtn.textContent = `Compare Rev ${refresh.nextCompare.revA} vs ${refresh.nextCompare.revB}`;
+                    cmpBtn.disabled = busy;
+                    cmpBtn.style.cssText = 'padding:3px 10px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer;font-weight:600;';
+                    cmpBtn.addEventListener('click', () => _sessionsTabOpenCompareForRefresh(sid));
+                    cmpBar.appendChild(cmpBtn);
+                    const hint = document.createElement('span');
+                    hint.style.cssText = 'color:var(--text-secondary);font-size:10px;';
+                    hint.textContent = (state.partNumber === refresh.partNumber)
+                        ? 'Opens the 3D Compare panel for this part.'
+                        : `Open part ${refresh.partNumber} first, then click Compare.`;
+                    cmpBar.appendChild(hint);
+                    rb.appendChild(cmpBar);
+                }
+                row.appendChild(rb);
+            }
 
             // Inline-expand body
             if (expanded) {

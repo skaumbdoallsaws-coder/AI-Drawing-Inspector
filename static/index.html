@@ -32081,23 +32081,47 @@
                         }
                         const session = payload.session || {};
                         const sessionId = session.sessionId || null;
+                        let solidWorksSend = null;
+                        if (sessionId) {
+                            try {
+                                const swResp = await fetch(`/api/edit-sessions/${encodeURIComponent(sessionId)}/send-to-solidworks`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({}),
+                                });
+                                const swPayload = await swResp.json().catch(() => ({}));
+                                solidWorksSend = {
+                                    ok: swResp.ok && !!swPayload.ok,
+                                    status: swResp.status,
+                                    detail: swPayload.detail || swPayload,
+                                };
+                            } catch (err) {
+                                solidWorksSend = { ok: false, error: String(err && err.message || err) };
+                            }
+                        }
                         if (typeof sessionsTabState !== 'undefined') {
                             sessionsTabState.loaded = false;
                             await _sessionsTabFetchList();
                         }
                         if (window._toast) {
-                            window._toast(
-                                payload.warning
-                                    ? 'Existing edit session reused'
-                                    : 'Edit session created',
-                                payload.warning ? 'warning' : 'success'
-                            );
+                            if (solidWorksSend && solidWorksSend.ok) {
+                                window._toast('Edit session sent to SolidWorks', 'success');
+                            } else {
+                                window._toast(
+                                    payload.warning
+                                        ? 'Existing edit session reused; SolidWorks send failed'
+                                        : 'Edit session created; SolidWorks send failed',
+                                    'warning'
+                                );
+                            }
                         }
                         return {
                             ok: true,
                             sessionId,
                             reused: !!payload.warning,
                             warning: payload.warning || null,
+                            solidWorksSent: !!(solidWorksSend && solidWorksSend.ok),
+                            solidWorksSend,
                         };
                     }
                 },
@@ -32199,7 +32223,7 @@
                 highlight_features: 3000, highlight_parts: 3000,
                 isolate_parts: 4000, animate_motion: 3000,
                 set_explode_level: 3000, fai_fill: 3000, fai_tol: 3000,
-                create_edit_session: 5000,
+                create_edit_session: 10000,
                 // ui_actions can dispatch many sub-actions; allow longer
                 // ceiling because compare_supplier_specs fetches + renders.
                 ui_actions: 12000,

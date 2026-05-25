@@ -1626,6 +1626,33 @@ def test_cad_edit_handoff_propeller_classifies_cirpattern_as_propagation(
     assert all_classified == set(target["cadFeatureIds"])
 
 
+def test_cad_edit_handoff_single_propeller_blade_does_not_propagate_pattern(
+    aircraft_library_with_draft: Path,
+):
+    """When the operator explicitly says "single blade", CirPattern1 is
+    still visible in the raw region target list for audit, but it must
+    not be advertised as a propagation feature to Sage-in-SOLIDWORKS."""
+    client = TestClient(server.app)
+    r = client.post(_CAD_EDIT_HANDOFF_URL, json={
+        "revision":        "A",
+        "phrase":          "propeller",
+        "userInstruction": "set the single propeller blade thickness to 6 mm",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    hints = body["intent"]["parameterHints"]
+    assert hints["value"] == 6.0
+    assert hints["units"] == "mm"
+    assert hints["dimension"] == "thickness"
+    assert hints["mode"] == "set_absolute"
+
+    target = body["target"]
+    assert "cirpattern1" in target["cadFeatureIds"]
+    assert [e["cadFeatureId"] for e in target["editTargets"]] == ["ice_boss_extrude1"]
+    assert target["propagationFeatures"] == []
+    assert "cirpattern1" in [e["cadFeatureId"] for e in target["referenceFeatures"]]
+
+
 def test_cad_edit_handoff_top_wing_remains_conservative_when_no_solid_body_known(
     aircraft_library_with_draft: Path,
 ):
@@ -1692,6 +1719,36 @@ def test_cad_edit_handoff_propeller_response_text_calls_out_editable_source(
         f"expected the boss extrude source name in the response; got: {resp!r}"
     assert "propagate the change" in resp, \
         f"response must explain that the pattern propagates; got: {resp!r}"
+
+
+def test_prepare_solidworks_handoff_fast_path_does_not_fall_to_model(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Regression for the SolidWorks inbox flow: "prepare a SolidWorks
+    handoff..." must take the deterministic edit-handoff path even when
+    the wording says "set" rather than "make/change"."""
+    msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message": "Prepare a SolidWorks handoff for 1030099 Rev A: set the single propeller blade thickness to 6 mm",
+        "agent_type": "deviation-analyst",
+        "inspection_context": {
+            "part_number": "1030099",
+            "revision": "revA",
+            "available_cad_features": [
+                {"cad_feature_id": fid, "display_label": fid,
+                 "type": fid.split("_", 1)[0], "color_name": "blue", "face_count": 1}
+                for fid, *_ in _aircraft_fixture()
+            ],
+        },
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert msgs.last_kwargs is None, "prepare-handoff fast path should bypass Anthropic"
+    assert body["tool_source"] == "semantic_region_cad_edit_handoff_direct"
+    assert body["cad_edit_handoff"]["intent"]["parameterHints"]["mode"] == "set_absolute"
+    assert body["cad_edit_handoff"]["target"]["propagationFeatures"] == []
+    assert any(tc["name"] == "create_edit_session" for tc in body["tool_calls"])
 
 
 # ---------------------------------------------------------------------------

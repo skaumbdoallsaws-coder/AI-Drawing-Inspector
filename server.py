@@ -4332,6 +4332,17 @@ def _semantic_region_edit_handoff_payload_from_context(
     library_dir, safe_pn, safe_rev = _semantic_regions_target_from_context(ctx)
     if not library_dir or not safe_pn or not safe_rev:
         return None
+    pn_m = re.search(r'\b(\d{6,})\b', str(message or ""))
+    if pn_m:
+        msg_pn = sanitize_part_number(pn_m.group(1))
+        if msg_pn:
+            safe_pn = msg_pn
+    rev_m = re.search(r'\brev\s*([A-Za-z0-9]+)\b', str(message or ""), re.IGNORECASE)
+    if rev_m:
+        try:
+            safe_rev = _semantic_regions_resolve_rev(library_dir, safe_pn, rev_m.group(1))
+        except HTTPException:
+            return None
     instruction = str(message or "").strip()
     if not instruction:
         return None
@@ -5653,6 +5664,10 @@ _CAD_EDIT_DIMENSION_VALUE_RE = re.compile(
     re.IGNORECASE,
 )
 _CAD_EDIT_HOLE_COUNT_RE = re.compile(r'(\d+)\s+holes?\b', re.IGNORECASE)
+_CAD_EDIT_SET_ABSOLUTE_RE = re.compile(
+    r'\b(set|make|change)\b.*\b(to|at|=)\b|\bset\s+(?:the\s+)?[\w\s\-]+\s+\d',
+    re.IGNORECASE,
+)
 
 
 def _normalize_length_units(raw: str) -> str:
@@ -5691,6 +5706,20 @@ def _classify_dimension_axis(text_lower: str) -> Optional[str]:
         return "length"
     if re.search(r'\bdeep(?:er)?\b', text_lower):
         return "depth"
+    return None
+
+
+def _infer_dimension_change_mode(text_lower: str) -> Optional[str]:
+    """Return the dimension-change mode implied by the wording.
+
+    Sage-in-SOLIDWORKS only executes set_absolute today. Emitting an
+    explicit mode lets the add-in reject delta-style requests rather
+    than guessing.
+    """
+    if _CAD_EDIT_SET_ABSOLUTE_RE.search(text_lower):
+        return "set_absolute"
+    if re.search(r'\b(?:increase|decrease|add|subtract|raise|lower)\b.*\bby\b', text_lower):
+        return "delta"
     return None
 
 
@@ -5757,6 +5786,9 @@ def _parse_cad_edit_intent(instruction: str) -> Dict[str, Any]:
         axis = _classify_dimension_axis(norm)
         if axis:
             hints["dimension"] = axis
+        mode = _infer_dimension_change_mode(norm)
+        if mode:
+            hints["mode"] = mode
         if hints.get("value") is not None and hints.get("dimension"):
             confidence = "high"
         elif hints.get("dimension") or hints.get("value") is not None:
@@ -5780,6 +5812,14 @@ class _CadEditHandoffBody(BaseModel):
 
 
 _CAD_EDIT_ALLOWED_ACTIONS = ("dimension_change", "hole_pattern", "sketch_on_face", "unknown")
+_CAD_EDIT_SINGLE_INSTANCE_RE = re.compile(
+    r'\b(single|one\s+(?:blade|instance)|just\s+one|only\s+one|no\s+pattern|without\s+(?:the\s+)?pattern)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_single_instance_edit_instruction(instruction: str) -> bool:
+    return _CAD_EDIT_SINGLE_INSTANCE_RE.search(str(instruction or "")) is not None
 
 
 # --- Edit-target classification ------------------------------------------
@@ -6089,6 +6129,15 @@ def _semantic_region_cad_edit_handoff_payload(
     classification = _classify_edit_targets_for_intent(
         cad_feature_ids_raw, source_features_raw, glb_nodes_raw, intent,
     )
+    if _is_single_instance_edit_instruction(instruction):
+        # "Single blade" / "just one instance" means the pattern is
+        # context only. Keep the raw cadFeatureIds intact for audit, but
+        # do not tell Sage-in-SOLIDWORKS that a pattern should propagate
+        # the change.
+        classification["referenceFeatures"] = (
+            classification["referenceFeatures"] + classification["propagationFeatures"]
+        )
+        classification["propagationFeatures"] = []
     return {
         "handoffVersion":   _CAD_EDIT_HANDOFF_VERSION,
         # Explicit enum so Sage-in-SOLIDWORKS does not have to infer the
@@ -6623,6 +6672,191 @@ async def create_edit_session(body: _EditSessionCreateBody):
     return {
         "session":    doc,
         "outputPath": str(out_path),
+    }
+
+
+def _edit_session_solidworks_handoff_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert an edit-session audit record into the narrow payload
+    accepted by the SolidWorks Sage task pane.
+
+    This does not execute CAD. It only sends the already-audited target
+    and intent to the local add-in inbox so the operator can preview and
+    approve inside SolidWorks.
+    """
+    handoff = doc.get("handoffPayload") if isinstance(doc.get("handoffPayload"), dict) else {}
+    target = handoff.get("target") if isinstance(handoff.get("target"), dict) else {}
+    intent = handoff.get("intent") if isinstance(handoff.get("intent"), dict) else {}
+    hints = intent.get("parameterHints") if isinstance(intent.get("parameterHints"), dict) else {}
+
+    action = str(intent.get("action") or "")
+    if action != "dimension_change":
+        raise HTTPException(
+            status_code=409,
+            detail=f"SolidWorks Sage execution handoff currently supports dimension_change only; got {action or 'unknown'!r}.",
+        )
+
+    raw_value = hints.get("value")
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Handoff intent is missing a numeric parameterHints.value.")
+    if not math.isfinite(value) or value <= 0:
+        raise HTTPException(status_code=409, detail="Handoff intent value must be finite and greater than zero.")
+
+    units = str(hints.get("units") or "").strip().lower()
+    if units != "mm":
+        raise HTTPException(
+            status_code=409,
+            detail=f"SolidWorks Sage execution handoff currently supports millimeters only; got {units or 'missing units'!r}.",
+        )
+
+    requested_edit = str(doc.get("requestedEdit") or handoff.get("userInstruction") or "")
+    mode = str(hints.get("mode") or _infer_dimension_change_mode(requested_edit.lower()) or "")
+    if mode != "set_absolute":
+        raise HTTPException(
+            status_code=409,
+            detail="SolidWorks Sage execution handoff currently requires parameterHints.mode='set_absolute'.",
+        )
+
+    edit_targets = [
+        e for e in (target.get("editTargets") or [])
+        if isinstance(e, dict) and (e.get("sourceFeature") or e.get("cadFeatureId"))
+    ]
+    if not edit_targets:
+        raise HTTPException(status_code=409, detail="Handoff has no classified editTargets to send to SolidWorks.")
+
+    regions = target.get("regions") if isinstance(target.get("regions"), list) else []
+    first_region = next((r for r in regions if isinstance(r, dict)), {})
+    if not isinstance(first_region, dict):
+        first_region = {}
+
+    propagation = [
+        p for p in (target.get("propagationFeatures") or [])
+        if isinstance(p, dict) and (p.get("sourceFeature") or p.get("cadFeatureId"))
+    ]
+    if _is_single_instance_edit_instruction(requested_edit):
+        propagation = []
+
+    def _sw_target(entry: Dict[str, Any], role: str) -> Dict[str, Any]:
+        return {
+            "cadFeatureId":  entry.get("cadFeatureId"),
+            "sourceFeature": entry.get("sourceFeature") or entry.get("cadFeatureId"),
+            "role":          role,
+        }
+
+    session_target = doc.get("target") if isinstance(doc.get("target"), dict) else {}
+    region_ids = session_target.get("regionIds") if isinstance(session_target.get("regionIds"), list) else []
+    fallback_region_id = region_ids[0] if region_ids else ""
+
+    return {
+        "editSessionId":       doc.get("sessionId"),
+        "partNumber":          doc.get("partNumber"),
+        "sourceRevision":      doc.get("sourceRevision"),
+        "semanticRegion": {
+            "regionId": first_region.get("regionId") or fallback_region_id,
+            "label":    first_region.get("label") or doc.get("semanticPhrase"),
+        },
+        "requestedEdit":       requested_edit,
+        "intent": {
+            "action":    "dimension_change",
+            "dimension": hints.get("dimension"),
+            "mode":      "set_absolute",
+            "value":     value,
+            "units":     "mm",
+        },
+        "editTargets":         [_sw_target(e, "primary_edit_feature") for e in edit_targets],
+        "propagationFeatures": [_sw_target(p, "propagation_feature") for p in propagation],
+        "policy": {
+            "requiresHumanApproval": True,
+            "executeAfterApproval":  False,
+        },
+    }
+
+
+async def _send_sage_handoff_to_bridge(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """POST the handoff to the local SolidWorks add-in bridge."""
+    import httpx
+
+    client = BridgeClient()
+    info = client.discover()
+    if info is None:
+        raise BridgeUnavailableError("SOLIDWORKS bridge is unavailable; open SOLIDWORKS with the InspectorPro add-in loaded.")
+
+    url = f"http://127.0.0.1:{info.port}/sage/handoff"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.post(url, json=payload, headers=client._auth_headers())
+    except Exception as ex:
+        raise BridgeUnavailableError(f"POST /sage/handoff failed: {ex}") from ex
+
+    if resp.status_code == 401:
+        raise BridgeUnauthorizedError()
+    if resp.status_code != 200:
+        raise BridgeBadResponseError(
+            f"bridge POST /sage/handoff returned HTTP {resp.status_code}",
+            status_code=resp.status_code,
+            body=resp.text,
+        )
+    try:
+        body = resp.json()
+    except Exception as ex:
+        raise BridgeBadResponseError(
+            f"bridge POST /sage/handoff returned unparseable JSON: {ex}",
+            status_code=200,
+            body=resp.text,
+        )
+    if not isinstance(body, dict):
+        raise BridgeBadResponseError(
+            "bridge POST /sage/handoff returned a non-object JSON body",
+            status_code=200,
+            body=resp.text,
+        )
+    return body
+
+
+@app.post("/api/edit-sessions/{sessionId}/send-to-solidworks")
+async def send_edit_session_to_solidworks(sessionId: str):
+    """Send an existing edit-session handoff to the local SolidWorks
+    Sage task pane inbox.
+
+    This endpoint is still read-only with respect to CAD. It does not
+    mark the session applied, trigger rebuild/save, or extract a new
+    package. Those remain explicit operator steps.
+    """
+    safe_id = _sanitize_session_id(sessionId)
+    if safe_id is None:
+        raise HTTPException(status_code=400, detail="Invalid sessionId")
+    library_dir = library_path()
+    doc = _load_edit_session(library_dir, safe_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"No edit session {safe_id}")
+    if doc.get("status") in _EDIT_SESSION_TERMINAL:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session is terminal ({doc.get('status')}); not sending to SolidWorks.",
+        )
+
+    bridge_payload = _edit_session_solidworks_handoff_payload(doc)
+    try:
+        bridge_result = await _send_sage_handoff_to_bridge(bridge_payload)
+    except BridgeUnauthorizedError as ex:
+        raise HTTPException(status_code=401, detail=str(ex))
+    except BridgeUnavailableError as ex:
+        raise HTTPException(status_code=503, detail=str(ex))
+    except BridgeBadResponseError as ex:
+        raise HTTPException(
+            status_code=ex.status_code or 502,
+            detail={
+                "message": str(ex),
+                "body":    ex.body,
+            },
+        )
+
+    return {
+        "ok":             True,
+        "sessionId":      safe_id,
+        "sentHandoff":    bridge_payload,
+        "bridgeResponse": bridge_result,
     }
 
 
@@ -13054,14 +13288,15 @@ async def agent_chat(request: AgentChatRequest):
             if explicit_compare_result:
                 return explicit_compare_result
 
+        if request.agent_type == "deviation-analyst" and _is_semantic_prepare_handoff_request(request.message):
+            edit_handoff_payload = _semantic_region_edit_handoff_payload_from_context(ctx, request.message)
+            if edit_handoff_payload:
+                return _semantic_region_cad_edit_handoff_chat_result(
+                    edit_handoff_payload,
+                    request.agent_type,
+                )
+
         if request.agent_type == "deviation-analyst" and _is_semantic_cad_target_request(request.message):
-            if _is_semantic_prepare_handoff_request(request.message):
-                edit_handoff_payload = _semantic_region_edit_handoff_payload_from_context(ctx, request.message)
-                if edit_handoff_payload:
-                    return _semantic_region_cad_edit_handoff_chat_result(
-                        edit_handoff_payload,
-                        request.agent_type,
-                    )
             handoff_payload = _semantic_region_handoff_payload_from_context(ctx, request.message)
             if handoff_payload:
                 return _semantic_region_cad_handoff_chat_result(

@@ -181,6 +181,55 @@ def test_POST_create_session_happy_path(aircraft_library_with_draft: Path):
     assert p.exists()
 
 
+def test_send_edit_session_to_solidworks_posts_narrow_bridge_payload(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Browser-created edit sessions must become real SolidWorks Sage
+    inbox handoffs. The server narrows the audited handoff to the
+    executor-safe add-in contract."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="set the single propeller blade thickness to 6 mm",
+    )
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    captured = {}
+
+    async def _fake_send(payload):
+        captured["payload"] = payload
+        return {
+            "accepted": True,
+            "message": "Handoff received",
+            "activeDocument": {"type": "Part", "title": "Fixture.SLDPRT"},
+        }
+
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_send)
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["bridgeResponse"]["accepted"] is True
+
+    payload = captured["payload"]
+    assert payload["editSessionId"] == sid
+    assert payload["partNumber"] == PN
+    assert payload["sourceRevision"] == REV
+    assert payload["semanticRegion"]["regionId"] == "propeller"
+    assert payload["intent"] == {
+        "action": "dimension_change",
+        "dimension": "thickness",
+        "mode": "set_absolute",
+        "value": 6.0,
+        "units": "mm",
+    }
+    assert [e["cadFeatureId"] for e in payload["editTargets"]] == ["ice_boss_extrude1"]
+    assert payload["propagationFeatures"] == []
+    assert payload["policy"]["requiresHumanApproval"] is True
+    assert payload["policy"]["executeAfterApproval"] is False
+
+
 def test_POST_create_session_returns_existing_on_duplicate_intent(
     aircraft_library_with_draft: Path,
 ):
@@ -1150,6 +1199,9 @@ def test_served_html_create_edit_session_tool_wired():
         "create_edit_session",
         "handoffPayload",
         "fetch('/api/edit-sessions'",
+        "/send-to-solidworks",
+        "solidWorksSent",
+        "Edit session sent to SolidWorks",
         "Created from Sage CAD edit handoff",
         "sessionsTabState.loaded = false",
         "_sessionsTabFetchList()",

@@ -6892,6 +6892,356 @@ async def patch_edit_session(sessionId: str, body: _EditSessionPatchBody, reques
     }
 
 
+# ===========================================================================
+# Refresh From SolidWorks -- post-edit revision flow (MVP)
+# ===========================================================================
+#
+# Composes the existing intake plan/execute + semantic-region draft +
+# session FSM helpers into a single endpoint so the demo loop is:
+#
+#   Sage SolidWorks Apply -> /refresh-from-solidworks -> Compare
+#
+# instead of the prior:
+#
+#   Apply -> Extract Part -> wizard -> promote -> enrich -> draft
+#     regions -> draft intent -> compare.
+#
+# Bridge auto-extract is NOT wired in this MVP. The operator (or the
+# add-in) must supply partPackageId from a prior bridge extraction
+# (POST /api/request-part-extraction). When packageId is missing the
+# endpoint returns 409 with a clear "extract first" message rather
+# than silently calling the bridge with a stale snapshot.
+#
+# Enrich Visuals is NOT auto-invoked. The wizard's existing
+# copy-if-not-exists pass inside _execute_intake_plan already pulls
+# visuals from the sidecar; enrich is only needed to REFRESH a stale
+# sidecar. When the operator requests enrichVisuals=True the
+# orchestrator reports the skip + a nextAction so they can call the
+# existing /enrich-visuals endpoint manually.
+
+class _RefreshFromSolidWorksBody(BaseModel):
+    targetRevision:       str
+    partPackageId:        Optional[str] = None
+    promote:              bool = True
+    enrichVisuals:        bool = True
+    draftSemanticRegions: bool = True
+
+
+_REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES = frozenset({
+    "applied_in_solidworks",
+    # Status values upstream of "promoted" that the spec also calls
+    # out as legitimate entry points -- the orchestrator becomes
+    # idempotent for those (skips steps already done).
+    "extracted",
+    "linked_to_revision",
+    "promoted",
+})
+
+
+def _refresh_from_sw_normalise_rev(raw: str) -> str:
+    """Accept 'E' or 'revE'; normalise to the canonical 'revE' shape
+    the rest of the intake pipeline uses. Empty input returns empty
+    string so the caller can 400 with a clear message."""
+    cand = (raw or "").strip()
+    if not cand:
+        return ""
+    if not cand.lower().startswith("rev"):
+        cand = "rev" + cand
+    return _intake_sanitize_revision(cand)
+
+
+def _refresh_from_sw_set_session_block(
+    new_doc: Dict[str, Any],
+    field:   str,
+    payload: Dict[str, Any],
+) -> None:
+    """Merge a sub-block onto the session doc the way the PATCH
+    handler does. Lets the orchestrator update extraction /
+    promotion in a single atomic write rather than three PATCH
+    round-trips, keeping the session consistent if any downstream
+    step throws between transitions."""
+    existing = new_doc.get(field) if isinstance(new_doc.get(field), dict) else {}
+    merged = dict(existing)
+    merged.update(payload)
+    new_doc[field] = merged
+
+
+@app.post("/api/edit-sessions/{sessionId}/refresh-from-solidworks")
+async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSolidWorksBody):
+    """Composite post-edit workflow: promote the extracted package as
+    the operator's target revision, draft semantic regions (which
+    auto-drafts the feature intent map per commit 9bb3690), and walk
+    the session FSM through extracted -> linked_to_revision ->
+    promoted in a single atomic write.
+
+    Idempotent for re-runs from any non-terminal status in
+    {applied_in_solidworks, extracted, linked_to_revision, promoted}
+    -- already-completed transitions are skipped without error.
+    Terminal sessions (compared / abandoned / failed) return 409.
+
+    Hard contract:
+      - partPackageId required for this MVP (bridge auto-extract is
+        not wired). Returns 409 with a clear remediation hint when
+        omitted.
+      - targetRevision must NOT already exist on disk. The spec
+        forbids overwriting an existing revision in the MVP so the
+        demo can't accidentally clobber curated assets.
+      - enrichVisuals=True is logged as a soft skip with
+        nextAction='enrich-visuals-manually' so the operator can
+        call the existing /enrich-visuals endpoint when the sidecar
+        actually needs a refresh.
+    """
+    safe_id = _sanitize_session_id(sessionId)
+    if safe_id is None:
+        raise HTTPException(status_code=400, detail="Invalid sessionId")
+    library_dir = library_path()
+    session = _load_edit_session(library_dir, safe_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"No edit session {safe_id}")
+
+    current_status = str(session.get("status") or "")
+    if current_status in _EDIT_SESSION_TERMINAL:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Session is terminal ({current_status}); refresh-from-solidworks "
+                    "cannot advance it."),
+        )
+    if current_status not in _REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Session status must be one of {sorted(_REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES)} "
+                f"(got {current_status!r}). PATCH to applied_in_solidworks first."
+            ),
+        )
+
+    safe_pn = sanitize_part_number(session.get("partNumber") or "")
+    if not safe_pn:
+        raise HTTPException(
+            status_code=400,
+            detail="Session has no usable partNumber; refresh-from-solidworks cannot proceed.",
+        )
+    source_rev = str(session.get("sourceRevision") or "")
+
+    target_rev = _refresh_from_sw_normalise_rev(body.targetRevision)
+    if not target_rev:
+        raise HTTPException(
+            status_code=400,
+            detail="targetRevision is required and must match rev<alnum> (e.g. revE).",
+        )
+
+    # Resolve packageId. MVP: caller must supply it OR the session
+    # must already carry one from a prior extraction. Auto-extract
+    # via bridge is deferred to a follow-up.
+    pkg_id = (body.partPackageId or "").strip()
+    if not pkg_id:
+        ext_block = session.get("extraction") if isinstance(session.get("extraction"), dict) else {}
+        pkg_id = str(ext_block.get("resultingPartPackageId") or "").strip()
+    if not pkg_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "partPackageId is required for this MVP. Run POST /api/request-part-extraction "
+                "(via the SolidWorks bridge) first, or PATCH the session's extraction."
+                "resultingPartPackageId, then re-call refresh-from-solidworks. "
+                "Bridge auto-extract from this endpoint is not yet implemented."
+            ),
+        )
+
+    # Enforce no-overwrite of an existing revision dir. The spec
+    # explicitly forbids overwriting curated revisions in MVP.
+    target_rev_dir = library_dir / "parts" / safe_pn / target_rev
+    if target_rev_dir.exists() and target_rev_dir.is_dir():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"parts/{safe_pn}/{target_rev} already exists. Refresh-from-solidworks "
+                "will not overwrite curated revisions in MVP; pick a new targetRevision."
+            ),
+        )
+
+    stages: Dict[str, Any] = {}
+
+    # ── Promote ───────────────────────────────────────────────────
+    promote_result: Optional[Dict[str, Any]] = None
+    if body.promote:
+        intake_body = IntakeRequestBody(
+            partNumber          = safe_pn,
+            revision            = target_rev,
+            intakeMode          = "new-revision-of-existing-part",
+            drawingPackageId    = "",
+            partPackageId       = pkg_id,
+            modelOnly           = True,   # post-edit refresh is always model-only
+        )
+        try:
+            promote_result = _execute_intake_plan(intake_body)
+        except Exception as ex:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Promote raised: {ex.__class__.__name__}: {ex}",
+            )
+        if not promote_result.get("success"):
+            # Surface the structured error array so the operator can
+            # see exactly which gate failed (most common: drawing-
+            # required, sidecar missing, etc.).
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Promote failed; revision was not created.",
+                    "errors":  promote_result.get("errors") or [],
+                    "warnings": promote_result.get("warnings") or [],
+                },
+            )
+        stages["promote"] = {"ok": True, "executedActions": len(promote_result.get("executed") or [])}
+    else:
+        stages["promote"] = {"ok": False, "skipped": "promote=false in request"}
+
+    # ── Enrich Visuals -- MVP skip ───────────────────────────────
+    if body.enrichVisuals:
+        stages["enrichVisuals"] = {
+            "ok":          False,
+            "skipped":     "Not invoked from refresh-from-solidworks MVP -- "
+                           "_execute_intake_plan already copied visuals from the sidecar.",
+            "nextAction":  "POST /api/library/intake/enrich-visuals manually if the "
+                           "sidecar visuals are stale.",
+        }
+    else:
+        stages["enrichVisuals"] = {"ok": False, "skipped": "enrichVisuals=false in request"}
+
+    # ── Draft semantic regions (+ auto-draft intent map) ──────────
+    regions_result: Optional[Dict[str, Any]] = None
+    intent_result:  Optional[Dict[str, Any]] = None
+    if body.draftSemanticRegions:
+        try:
+            regions_doc = _build_semantic_regions_draft(library_dir, safe_pn, target_rev)
+            _write_semantic_regions(library_dir, safe_pn, target_rev, regions_doc)
+            stages["semanticRegions"] = {
+                "ok":           True,
+                "regionCount":  len(regions_doc.get("regions") or []),
+                "schemaVersion": _SEMANTIC_REGIONS_SCHEMA_VERSION,
+            }
+            regions_result = regions_doc
+        except FileNotFoundError as ex:
+            stages["semanticRegions"] = {
+                "ok":    False,
+                "error": f"colored GLB missing for {safe_pn} {target_rev}: {ex}",
+            }
+        except Exception as ex:
+            stages["semanticRegions"] = {
+                "ok":    False,
+                "error": f"{ex.__class__.__name__}: {ex}",
+            }
+
+        # Feature intent map -- mirrors the auto-draft hook in the
+        # semantic-region /draft endpoint (commit 9bb3690) so the
+        # response shape is consistent across both code paths.
+        if stages["semanticRegions"].get("ok"):
+            fc_path = library_dir / "parts" / safe_pn / target_rev / f"{safe_pn}_feature_colors.json"
+            if not fc_path.exists():
+                stages["featureIntent"] = {
+                    "ok":    False,
+                    "error": f"{fc_path.name} not found; skipped feature intent draft",
+                }
+            else:
+                try:
+                    intent_doc = _build_feature_intent_draft(library_dir, safe_pn, target_rev)
+                    _write_feature_intent_map(library_dir, safe_pn, target_rev, intent_doc)
+                    stages["featureIntent"] = {
+                        "ok":           True,
+                        "featureCount": len(intent_doc.get("features") or []),
+                        "schemaVersion": _FEATURE_INTENT_SCHEMA_VERSION,
+                    }
+                    intent_result = intent_doc
+                except Exception as ex:
+                    stages["featureIntent"] = {
+                        "ok":    False,
+                        "error": f"{ex.__class__.__name__}: {ex}",
+                    }
+    else:
+        stages["semanticRegions"] = {"ok": False, "skipped": "draftSemanticRegions=false in request"}
+        stages["featureIntent"]   = {"ok": False, "skipped": "draftSemanticRegions=false in request"}
+
+    # ── Advance session FSM (atomic) ──────────────────────────────
+    #
+    # Walk through extracted -> linked_to_revision -> promoted in a
+    # single atomic write. Idempotent: a session already at
+    # `promoted` (re-run scenario) just gets its extraction +
+    # promotion fields touched if they're missing the new values,
+    # but stays at `promoted`.
+    new_session = dict(session)
+    now = _iso_utc_now()
+
+    # extraction block
+    ext_block = new_session.get("extraction") if isinstance(new_session.get("extraction"), dict) else {}
+    if not str(ext_block.get("resultingPartPackageId") or "").strip():
+        _refresh_from_sw_set_session_block(new_session, "extraction", {
+            "resultingPartPackageId": pkg_id,
+            "extractedAtUtc":         now,
+        })
+
+    # promotion block (only when promote ran successfully)
+    promoted_manifest_path: Optional[str] = None
+    if body.promote and stages["promote"].get("ok"):
+        manifest_rel = f"parts/{safe_pn}/{target_rev}/intake_manifest.json"
+        promoted_manifest_path = manifest_rel
+        prom_block = new_session.get("promotion") if isinstance(new_session.get("promotion"), dict) else {}
+        if (prom_block.get("promotedRevision") or "").strip() != target_rev:
+            _refresh_from_sw_set_session_block(new_session, "promotion", {
+                "promotedRevision":     target_rev,
+                "promotedManifestPath": manifest_rel,
+                "promotedAtUtc":        now,
+            })
+
+    # Status walk -- only advance forward; never regress.
+    def _advance(status_from: str, status_to: str) -> None:
+        cur = new_session.get("status")
+        if cur != status_from: return
+        # FSM gate -- safety belt, the explicit walk should already match.
+        allowed = _EDIT_SESSION_FSM.get(cur) or frozenset()
+        if status_to not in allowed: return
+        new_session["status"] = status_to
+
+    if body.promote and stages["promote"].get("ok"):
+        _advance("applied_in_solidworks", "extracted")
+        _advance("extracted",             "linked_to_revision")
+        _advance("linked_to_revision",    "promoted")
+
+    new_session["updatedAtUtc"] = now
+
+    # Audit note so the session log shows the orchestrator ran.
+    notes = new_session.get("notes")
+    if not isinstance(notes, list): notes = []
+    notes.append({
+        "atUtc": now,
+        "text":  (f"Refreshed from SolidWorks: package {pkg_id} promoted as "
+                  f"{target_rev}. Regions drafted: "
+                  f"{stages['semanticRegions'].get('ok')}. "
+                  f"Intent drafted: {stages.get('featureIntent', {}).get('ok')}."),
+        "byUser": None,
+    })
+    new_session["notes"] = notes
+
+    _write_edit_session_atomic(library_dir, safe_id, new_session)
+
+    return {
+        "ok":                      True,
+        "partNumber":              safe_pn,
+        "sourceRevision":          source_rev,
+        "promotedRevision":        target_rev if (body.promote and stages["promote"].get("ok")) else None,
+        "partPackageId":           pkg_id,
+        "semanticRegionsDrafted":  bool(stages["semanticRegions"].get("ok")),
+        "featureIntentDrafted":    bool(stages.get("featureIntent", {}).get("ok")),
+        "nextCompare": {
+            "revA": source_rev.replace("rev", "", 1) if source_rev else None,
+            "revB": target_rev.replace("rev", "", 1) if target_rev else None,
+            "url":  (f"/api/part-feature-diff/{safe_pn}?revA="
+                     f"{source_rev.replace('rev', '', 1)}&revB={target_rev.replace('rev', '', 1)}"),
+        },
+        "sessionStatus":           new_session.get("status"),
+        "stages":                  stages,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Profile Builder MVP
 # ---------------------------------------------------------------------------

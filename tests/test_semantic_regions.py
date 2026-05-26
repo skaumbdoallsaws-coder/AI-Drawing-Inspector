@@ -1684,16 +1684,18 @@ def test_cad_edit_handoff_top_wing_remains_conservative_when_no_solid_body_known
     assert "planarsurface_top_wing" in target["cadFeatureIds"]
 
 
-def test_cad_edit_handoff_propeller_response_text_calls_out_editable_source(
+def test_cad_edit_handoff_propeller_default_response_uses_editable_source_by_sw_name(
     aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Sage's deterministic chat response must explicitly mention the
-    editable source target + the propagation feature so the human
-    reviewer understands BOTH which feature SolidWorks will mutate
-    AND which features will update automatically."""
+    """Default direct-feature response uses the SolidWorks-friendly
+    source name + the simplified wording, hiding cadFeatureIds /
+    propagation features / raw action names. Tool calls + the
+    create_edit_session call are unchanged (verified inline)."""
     msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
     client = TestClient(server.app)
     r = client.post("/api/agent/chat", json={
+        # Natural-language instruction; no technical trigger words ->
+        # default response.
         "message":            "prepare a cad edit handoff: make the propeller blades 2 inches thicker",
         "agent_type":         "deviation-analyst",
         "inspection_context": {
@@ -1708,20 +1710,59 @@ def test_cad_edit_handoff_propeller_response_text_calls_out_editable_source(
     })
     assert r.status_code == 200, r.text
     body = r.json()
-    # The deterministic fast path returns a chat result without calling
-    # Anthropic; confirm that path actually fired.
     assert msgs.last_kwargs is None, "edit-handoff fast path should bypass the model"
     assert body.get("tool_source") == "semantic_region_cad_edit_handoff_direct"
     resp = body.get("response", "")
-    # The new classifier-aware sentence(s):
-    assert "Editable source target" in resp, \
-        f"response must call out the editable source; got: {resp!r}"
-    # The source-name form (humanized 'Ice Boss Extrude1') flows from
-    # the synthetic feature_colors.json which titlecases the cad id.
+
+    # Default-response physical-language frame.
+    assert "Prepared the SolidWorks handoff" in resp, \
+        f"default reply must use the simplified opener; got: {resp!r}"
+    assert "propeller" in resp.lower(), \
+        f"default reply must mention the region; got: {resp!r}"
+    assert "editable source target is" in resp, \
+        f"default reply must name the editable source; got: {resp!r}"
     assert "Ice Boss Extrude1" in resp, \
-        f"expected the boss extrude source name in the response; got: {resp!r}"
+        f"editable source must use the humanised SW name; got: {resp!r}"
+    assert "queued in Sessions" in resp, \
+        f"default reply must surface the Sessions handoff path; got: {resp!r}"
+
+    # CAD internals MUST stay out of the default reply.
+    assert "ice_boss_extrude1"   not in resp, "raw cadFeatureId leaked into default reply"
+    assert "propagate the change" not in resp, "propagation talk belongs to technical reply only"
+    assert "dimension_change"     not in resp, "raw action name leaked into default reply"
+
+    # Tool plumbing is unaffected by the response-format change.
+    assert any(tc["name"] == "create_edit_session" for tc in body["tool_calls"])
+
+
+def test_cad_edit_handoff_propeller_technical_request_uses_detailed_response(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Adding a technical trigger ('cad targets', 'technical', etc.) to
+    the instruction must opt into the detailed reply -- editable source
+    + propagation language + raw action name come back."""
+    _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
+    client = TestClient(server.app)
+    r = client.post("/api/agent/chat", json={
+        "message":            "prepare a cad edit handoff: make the propeller blades 2 inches thicker. Show me the cad targets.",
+        "agent_type":         "deviation-analyst",
+        "inspection_context": {
+            "part_number": "1030099",
+            "revision":    "revA",
+            "available_cad_features": [
+                {"cad_feature_id": fid, "display_label": fid,
+                 "type": fid.split("_", 1)[0], "color_name": "blue", "face_count": 1}
+                for fid, *_ in _aircraft_fixture()
+            ],
+        },
+    })
+    assert r.status_code == 200, r.text
+    resp = r.json()["response"]
+    assert "Editable source target" in resp, \
+        f"technical reply must keep the editable-source colon form; got: {resp!r}"
     assert "propagate the change" in resp, \
-        f"response must explain that the pattern propagates; got: {resp!r}"
+        f"technical reply must explain pattern propagation; got: {resp!r}"
+    assert "Ice Boss Extrude1" in resp
 
 
 def test_prepare_solidworks_handoff_fast_path_does_not_fall_to_model(
@@ -1978,16 +2019,18 @@ def test_cad_edit_handoff_sketch_dimension_change_lifts_downstream_from_intent_m
     assert "fillet_strut_root" in ds_ids
 
 
-def test_cad_edit_handoff_sketch_chat_response_calls_out_rebuild_impact(
+def test_cad_edit_handoff_sketch_default_response_hides_cad_internals(
     aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Sage's deterministic chat reply for a sketch_dimension_change
-    handoff must say "sketch-dimension handoff" + a rebuild-impact line
-    so the operator knows the bridge will write to a sketch and which
-    downstream features will rebuild."""
+    """Default sketch reply uses the simplified user-facing wording
+    and HIDES raw action names, cadFeatureIds, sketch dim ids, and
+    mirror/pattern feature names. Operators who want CAD detail must
+    opt in via the technical request path."""
     _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
     client = TestClient(server.app)
     r = client.post("/api/agent/chat", json={
+        # Natural-language instruction; no technical trigger words ->
+        # default response.
         "message": "prepare a handoff: set the top wing thickness to 3 mm via sketch dimension",
         "agent_type": "deviation-analyst",
         "inspection_context": {
@@ -2001,15 +2044,227 @@ def test_cad_edit_handoff_sketch_chat_response_calls_out_rebuild_impact(
         },
     })
     assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["tool_source"] == "semantic_region_cad_edit_handoff_direct"
-    resp = body["response"]
-    assert "sketch-dimension handoff" in resp
-    assert "sketch_dimension_change"  in resp
-    # When no intent map exists for this fixture, the rebuild-impact
-    # line falls back to the spec-required "unknown" wording.
-    assert "Downstream rebuild impact unknown" in resp \
-        or "Rebuild impact:" in resp
+    resp = r.json()["response"]
+
+    # User-facing frame appears.
+    assert "Prepared the SolidWorks handoff" in resp
+    assert "top wing" in resp.lower(), \
+        f"default reply must mention the region; got: {resp!r}"
+    assert "queued in Sessions" in resp
+
+    # CAD internals stay out of the default reply.
+    assert "sketch_dimension_change" not in resp, "raw action name leaked"
+    assert "ice_boss_extrude"        not in resp, "raw cadFeatureId leaked"
+    assert "D1@Sketch"               not in resp, "raw sketch dim id leaked"
+    assert "mirrorsolid_"            not in resp, "mirror feature name leaked"
+
+
+def test_cad_edit_handoff_sketch_default_response_uses_named_option_when_supplied():
+    """When the payload's target carries sketchDimensionOptions with
+    a displayName, the default reply names that option and asks the
+    operator to confirm in SolidWorks preview. Driven by directly
+    calling the chat-result function so the test doesn't depend on
+    the endpoint's emission of the (forward-looking) options field."""
+    payload = {
+        "handoffVersion":  "semantic-region-cad-edit-handoff-0.1",
+        "matched":         True,
+        "partNumber":      "1030099",
+        "revision":        "revA",
+        "userInstruction": "set the outer wing strut thickness to 3 mm via sketch dimension",
+        "resolvedPhrase":  "outer wing strut",
+        "intent": {
+            "action":         "sketch_dimension_change",
+            "parameterHints": {"value": 3.0, "units": "mm",
+                                "dimension": "thickness", "mode": "set_absolute"},
+        },
+        "target": {
+            "regions":        [{"regionId": "outer_wing_strut",
+                                "label":    "Outer Wing Strut"}],
+            "cadFeatureIds":  ["boss_extrude2"],
+            "sourceFeatures": ["Boss-Extrude2"],
+            "editTargets":    [{"cadFeatureId": "boss_extrude2",
+                                "sourceFeature": "Boss-Extrude2"}],
+            "propagationFeatures": [],
+            # Forward-looking: the payload MAY carry named-option hints
+            # produced by the feature intent map. When present the
+            # default reply uses the displayName so the operator gets a
+            # physical-language anchor for the sketch dim choice.
+            "sketchDimensionOptions": [
+                {"displayName":        "front strut diameter",
+                 "dimensionShortName": "D1",
+                 "sketchFeature":      "Sketch270"},
+            ],
+        },
+    }
+    result = server._semantic_region_cad_edit_handoff_chat_result(payload, "deviation-analyst")
+    resp = result["response"]
+
+    # Default-frame assertions.
+    assert "Prepared the SolidWorks handoff" in resp
+    assert "outer wing strut" in resp.lower()
+    assert "front strut diameter" in resp, \
+        f"default reply must surface the named option; got: {resp!r}"
+    assert "confirm the correct sketch dimension" in resp.lower(), \
+        f"default reply must ask the operator to confirm; got: {resp!r}"
+
+    # CAD internals stay out.
+    assert "sketch_dimension_change" not in resp
+    assert "boss_extrude2"           not in resp
+    assert "D1@Sketch270"            not in resp
+
+    # Tool calls unchanged -- create_edit_session still queued.
+    assert any(tc["name"] == "create_edit_session" for tc in result["tool_calls"])
+
+
+def test_cad_edit_handoff_sketch_default_response_named_hit_uses_dedicated_wording():
+    """When the payload's target carries sketchDimensionIntent with a
+    single confirmed displayName, the default reply uses the named-hit
+    wording ('I found the named sketch dimension: X.') rather than the
+    options wording. No "confirm" prompt in this branch -- the hit IS
+    the confirmation."""
+    payload = {
+        "handoffVersion":  "semantic-region-cad-edit-handoff-0.1",
+        "matched":         True,
+        "partNumber":      "1030099",
+        "revision":        "revA",
+        "userInstruction": "edit the outer wing strut thickness to 3 mm",
+        "resolvedPhrase":  "outer wing strut",
+        "intent": {
+            "action":         "sketch_dimension_change",
+            "parameterHints": {"value": 3.0, "units": "mm",
+                                "dimension": "thickness", "mode": "set_absolute"},
+        },
+        "target": {
+            "regions":        [{"regionId": "outer_wing_strut",
+                                "label":    "Outer Wing Strut"}],
+            "cadFeatureIds":  ["boss_extrude2"],
+            "sourceFeatures": ["Boss-Extrude2"],
+            "editTargets":    [{"cadFeatureId": "boss_extrude2",
+                                "sourceFeature": "Boss-Extrude2"}],
+            "propagationFeatures": [],
+            "sketchFeature":      "Sketch270",
+            "dimensionShortName": "D1",
+            "sketchDimensionIntent": {"displayName": "front strut diameter"},
+        },
+    }
+    result = server._semantic_region_cad_edit_handoff_chat_result(payload, "deviation-analyst")
+    resp = result["response"]
+    assert "I found the named sketch dimension: front strut diameter" in resp, \
+        f"named-hit wording missing; got: {resp!r}"
+
+
+def test_cad_edit_handoff_sketch_default_response_no_options_uses_generic_fallback():
+    """When the payload carries neither a named hit nor options, the
+    default reply uses the generic 'SolidWorks preview will identify'
+    fallback so the operator still knows the next step."""
+    payload = {
+        "handoffVersion":  "semantic-region-cad-edit-handoff-0.1",
+        "matched":         True,
+        "partNumber":      "1030099",
+        "revision":        "revA",
+        "userInstruction": "edit the outer wing strut thickness to 3 mm",
+        "resolvedPhrase":  "outer wing strut",
+        "intent": {
+            "action":         "sketch_dimension_change",
+            "parameterHints": {"value": 3.0, "units": "mm",
+                                "dimension": "thickness", "mode": "set_absolute"},
+        },
+        "target": {
+            "regions":        [{"regionId": "outer_wing_strut",
+                                "label":    "Outer Wing Strut"}],
+            "cadFeatureIds":  ["boss_extrude2"],
+            "sourceFeatures": ["Boss-Extrude2"],
+            "editTargets":    [{"cadFeatureId": "boss_extrude2",
+                                "sourceFeature": "Boss-Extrude2"}],
+            "propagationFeatures": [],
+            # No sketchFeature / dimensionShortName / sketchDimensionIntent /
+            # sketchDimensionOptions -> fallback wording.
+        },
+    }
+    result = server._semantic_region_cad_edit_handoff_chat_result(payload, "deviation-analyst")
+    resp = result["response"]
+    assert "SolidWorks preview will identify the controlling sketch dimension" in resp
+
+
+def test_cad_edit_handoff_sketch_technical_request_includes_cad_internals(
+    aircraft_library_with_draft: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """When the operator's instruction asks for technical detail (e.g.
+    'show me the cad targets and rebuild impact'), the reply preserves
+    the detailed pre-default wording: action name, SolidWorks feature
+    name, sketch dim id D1@Sketch270 when present, and the rebuild-
+    impact line. Driven directly so the sketch fields are populated."""
+    payload = {
+        "handoffVersion":  "semantic-region-cad-edit-handoff-0.1",
+        "matched":         True,
+        "partNumber":      "1030099",
+        "revision":        "revA",
+        # Two technical trigger words ("cad targets", "rebuild impact").
+        "userInstruction": ("set the outer wing strut thickness to 3 mm "
+                            "via sketch dimension. Show me the cad targets and rebuild impact."),
+        "resolvedPhrase":  "outer wing strut",
+        "intent": {
+            "action":         "sketch_dimension_change",
+            "parameterHints": {"value": 3.0, "units": "mm",
+                                "dimension": "thickness", "mode": "set_absolute"},
+        },
+        "target": {
+            "regions":        [{"regionId": "outer_wing_strut",
+                                "label":    "Outer Wing Strut"}],
+            "cadFeatureIds":  ["boss_extrude2"],
+            "sourceFeatures": ["Boss-Extrude2"],
+            "editTargets":    [{"cadFeatureId": "boss_extrude2",
+                                "sourceFeature": "Boss-Extrude2"}],
+            "propagationFeatures": [],
+            "sketchFeature":      "Sketch270",
+            "dimensionShortName": "D1",
+            "downstreamFeatures": [
+                {"cadFeatureId": "cirpattern_struts", "sourceFeature": "CirPattern1"},
+                {"cadFeatureId": "fillet_strut_root", "sourceFeature": "Fillet3"},
+            ],
+        },
+    }
+    result = server._semantic_region_cad_edit_handoff_chat_result(payload, "deviation-analyst")
+    resp = result["response"]
+    assert "sketch_dimension_change" in resp, \
+        f"technical reply must include the raw action name; got: {resp!r}"
+    assert "Boss-Extrude2"            in resp, \
+        f"technical reply must name the SolidWorks feature; got: {resp!r}"
+    assert "D1@Sketch270"             in resp, \
+        f"technical reply must include the sketch dim id; got: {resp!r}"
+    assert "rebuild impact" in resp.lower(), \
+        f"technical reply must keep the rebuild-impact line; got: {resp!r}"
+
+
+def test_cad_handoff_wants_technical_details_recognises_power_user_phrases():
+    """Direct unit test for the detector regex -- power-user phrases
+    trigger, natural sketch wording does NOT. The example operator
+    request ('edit the sketch dimension controlling...') deliberately
+    stays on the default path so the simplified reply is the norm."""
+    yes_phrases = [
+        "show me the cad targets",
+        "give me the technical details",
+        "what's the feature id?",
+        "show the feature tree",
+        "I want the raw payload",
+        "list the rebuild impact",
+        "which features will rebuild?",
+        "what's the dimension id?",
+    ]
+    for phrase in yes_phrases:
+        assert server._cad_handoff_wants_technical_details(phrase), \
+            f"should trigger technical mode: {phrase!r}"
+    # These must NOT trigger -- natural handoff wording.
+    no_phrases = [
+        "make the propeller blades 2 inches thicker",
+        "set the outer wing strut thickness to 3 mm",
+        "edit the sketch dimension controlling the outer wing strut",
+        "Prepare a SolidWorks handoff for 1030099 Rev A",
+        "",
+    ]
+    for phrase in no_phrases:
+        assert not server._cad_handoff_wants_technical_details(phrase), \
+            f"should NOT trigger technical mode: {phrase!r}"
 
 
 def test_cad_edit_handoff_supportedActions_includes_sketch_dimension_change(

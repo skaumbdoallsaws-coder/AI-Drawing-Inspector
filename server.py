@@ -4417,6 +4417,33 @@ def _semantic_region_cad_handoff_chat_result(
     return result
 
 
+# Distinct from _TECHNICAL_DRILLDOWN_RE (used by the compare-answer
+# path): that one matches "solidworks", "parameter", "param" etc. and
+# would falsely fire on natural handoff requests like "Prepare a
+# SolidWorks handoff for..." or "set the propeller blade parameter".
+# This regex is intentionally narrower and gated on power-user
+# vocabulary the operator only uses when they want CAD internals.
+# Phrases like "sketch dimension" or "thickness" are NOT included
+# because they are normal handoff vocabulary -- the example operator
+# request "edit the sketch dimension controlling the outer wing
+# strut thickness" must stay on the DEFAULT (simplified) path.
+_CAD_HANDOFF_TECHNICAL_RE = re.compile(
+    r"\b(technical|cad target|cad targets|solidworks feature|feature tree|"
+    r"feature id|feature ids|dimension id|raw|details|"
+    r"show.*features|which.*features|rebuild impact)\b",
+    re.IGNORECASE,
+)
+
+
+def _cad_handoff_wants_technical_details(text: str) -> bool:
+    """True when the operator's handoff request asks for CAD-internal
+    detail (feature IDs, raw payload, rebuild-impact list, etc).
+    Defaults to False -- the simplified physical-language reply is
+    the norm, and the technical reply is opt-in via explicit power-
+    user phrasing in the operator's instruction."""
+    return bool(_CAD_HANDOFF_TECHNICAL_RE.search(text or ""))
+
+
 def _semantic_region_cad_edit_handoff_chat_result(
     payload: Dict[str, Any],
     agent_type: str,
@@ -4424,7 +4451,19 @@ def _semantic_region_cad_edit_handoff_chat_result(
     """Return a chat result that both highlights the target region and
     queues creation of an edit-session record. The tool call is still
     read-only with respect to CAD: it records intent, target, and audit
-    context only."""
+    context only.
+
+    Two response shapes:
+      - DEFAULT (user-facing, short, physical-language). Used when the
+        operator's instruction does NOT contain CAD-internal vocabulary.
+        Hides feature IDs, action names, sketch-id tokens, propagation
+        feature names.
+      - TECHNICAL (current detailed wording). Triggered by
+        _cad_handoff_wants_technical_details on the user instruction.
+
+    Tool calls, payload shape, session creation, send-to-SolidWorks
+    behavior, and the add-in contract are unchanged either way -- only
+    the human-readable response string differs."""
     target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
     feature_ids = [
         str(fid) for fid in (target.get("cadFeatureIds") or [])
@@ -4490,12 +4529,32 @@ def _semantic_region_cad_edit_handoff_chat_result(
                         f" {', '.join(prop_names)} will propagate the change to the other instances."
                     )
 
+    user_instruction = str(payload.get("userInstruction") or "")
+    wants_technical  = _cad_handoff_wants_technical_details(user_instruction)
+    is_sketch_action = intent.get("action") == "sketch_dimension_change"
+
+    # Lowercase region label for the default response so "for the
+    # outer wing strut" reads naturally regardless of how the region
+    # was titlecased upstream. Multi-region phrases join with " and "
+    # for readability ("outer wing strut and tail" beats "Outer Wing
+    # Strut + Tail" in chat). Strip a leading "the " so we don't
+    # produce "for the the propeller".
+    if labels:
+        if len(labels) == 1:
+            default_label = labels[0].lower()
+        else:
+            default_label = " and ".join(l.lower() for l in labels)
+    else:
+        default_label = str(payload.get("resolvedPhrase") or "selected region").lower()
+    if default_label.startswith("the "):
+        default_label = default_label[4:]
+
     # Sketch-dimension handoffs get a dedicated framing + a
     # rebuild-impact line so the operator knows BEFORE Apply which
     # downstream features will rebuild. When the intent map did not
     # surface downstream entries we fall back to the spec wording so
     # the line is never silently empty.
-    if intent.get("action") == "sketch_dimension_change":
+    if is_sketch_action:
         downstream_entries = target.get("downstreamFeatures") or []
         downstream_names: List[str] = []
         if isinstance(downstream_entries, list):
@@ -4512,15 +4571,19 @@ def _semantic_region_cad_edit_handoff_chat_result(
         sketch_feature = target.get("sketchFeature")
         sketch_short = target.get("dimensionShortName")
         sketch_intent = target.get("sketchDimensionIntent") if isinstance(target.get("sketchDimensionIntent"), dict) else {}
+        sketch_intent_display = str(sketch_intent.get("displayName") or "").strip() if sketch_intent else ""
+
+        # Technical wording for the technical reply (preserved as
+        # before, with explicit "{short}@{sketch}" id line when both
+        # fields are present).
         if isinstance(sketch_feature, str) and sketch_feature and isinstance(sketch_short, str) and sketch_short:
-            sketch_label = str(sketch_intent.get("displayName") or "").strip()
-            if sketch_label:
-                sketch_clause = (
-                    f"Named sketch dimension: {sketch_label} "
+            if sketch_intent_display:
+                technical_sketch_clause = (
+                    f"Named sketch dimension: {sketch_intent_display} "
                     f"({sketch_short}@{sketch_feature}). "
                 )
             else:
-                sketch_clause = f"Named sketch dimension: {sketch_short}@{sketch_feature}. "
+                technical_sketch_clause = f"Named sketch dimension: {sketch_short}@{sketch_feature}. "
         else:
             options = target.get("sketchDimensionOptions") if isinstance(target.get("sketchDimensionOptions"), list) else []
             option_labels: List[str] = []
@@ -4533,28 +4596,83 @@ def _semantic_region_cad_edit_handoff_chat_result(
                 if label and short and sketch:
                     option_labels.append(f"{label} ({short}@{sketch})")
             if option_labels:
-                sketch_clause = (
+                technical_sketch_clause = (
                     "Known sketch dimension option(s): "
                     + "; ".join(option_labels)
                     + ". Choose the correct dimension in SolidWorks preview. "
                 )
             else:
-                sketch_clause = "Sketch + dimension will be confirmed by SolidWorks preview. "
-        response = (
-            f"Prepared a sketch-dimension handoff for {region_label}. "
-            f"Intent: sketch_dimension_change{hint_text}. "
-            f"SolidWorks target(s): {target_text}.{edit_target_clause} "
-            f"{sketch_clause}"
-            f"{downstream_clause} "
-            "Queued for the Sessions tab; still read-only and requires human review before any SolidWorks work."
-        )
+                technical_sketch_clause = "Sketch + dimension will be confirmed by SolidWorks preview. "
+
+        if wants_technical:
+            response = (
+                f"Prepared a sketch-dimension handoff for {region_label}. "
+                f"Intent: sketch_dimension_change{hint_text}. "
+                f"SolidWorks target(s): {target_text}.{edit_target_clause} "
+                f"{technical_sketch_clause}"
+                f"{downstream_clause} "
+                "Queued for the Sessions tab; still read-only and requires human review before any SolidWorks work."
+            )
+        else:
+            # Default sketch reply. Three phrasings based on what the
+            # InspectorPro side could determine about the sketch dim:
+            #   - named hit (sketchDimensionIntent.displayName non-empty)
+            #   - option (sketchDimensionOptions[0].displayName)
+            #   - neither -> generic "preview will identify" wording
+            # Never leaks raw cad ids / sketch tokens / action names.
+            option_display = ""
+            options_for_default = target.get("sketchDimensionOptions") if isinstance(target.get("sketchDimensionOptions"), list) else []
+            for opt in options_for_default:
+                if not isinstance(opt, dict):
+                    continue
+                cand = str(opt.get("displayName") or "").strip()
+                if cand:
+                    option_display = cand
+                    break
+
+            if sketch_intent_display:
+                sketch_default_clause = (
+                    f"I found the named sketch dimension: {sketch_intent_display}."
+                )
+            elif option_display:
+                sketch_default_clause = (
+                    f"I found a named sketch dimension option for this area: {option_display}. "
+                    "Confirm the correct sketch dimension in the SolidWorks preview before applying."
+                )
+            else:
+                sketch_default_clause = (
+                    "SolidWorks preview will identify the controlling sketch dimension before anything can be applied."
+                )
+            response = (
+                f"Prepared the SolidWorks handoff for the {default_label}.\n\n"
+                f"This will be reviewed in SolidWorks before anything is changed. {sketch_default_clause}\n\n"
+                "The handoff is queued in Sessions and sent to the SolidWorks Sage pane."
+            )
     else:
-        response = (
-            f"Prepared a CAD edit handoff for {region_label}. "
-            f"Intent: {intent.get('action', 'unknown')}{hint_text}. "
-            f"SolidWorks target(s): {target_text}.{edit_target_clause} "
-            "I queued it for the Sessions tab; it is still read-only and requires human review before any SolidWorks work."
-        )
+        if wants_technical:
+            response = (
+                f"Prepared a CAD edit handoff for {region_label}. "
+                f"Intent: {intent.get('action', 'unknown')}{hint_text}. "
+                f"SolidWorks target(s): {target_text}.{edit_target_clause} "
+                "I queued it for the Sessions tab; it is still read-only and requires human review before any SolidWorks work."
+            )
+        else:
+            # Default direct-feature reply. Single editable source by
+            # SolidWorks name; cadFeatureIds, propagation features, and
+            # the raw action name stay out of the default response.
+            editable_source_name = ""
+            if isinstance(edit_targets, list) and edit_targets:
+                first_et = edit_targets[0] if isinstance(edit_targets[0], dict) else {}
+                editable_source_name = str(first_et.get("sourceFeature") or "").strip()
+            editable_default_clause = (
+                f" The editable source target is {editable_source_name}."
+                if editable_source_name else ""
+            )
+            response = (
+                f"Prepared the SolidWorks handoff for the {default_label}.\n\n"
+                f"This will be reviewed in SolidWorks before anything is changed.{editable_default_clause}\n\n"
+                "The handoff is queued in Sessions and sent to the SolidWorks Sage pane."
+            )
 
     raw_calls = []
     if feature_ids:

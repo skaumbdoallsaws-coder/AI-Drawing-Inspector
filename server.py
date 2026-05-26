@@ -5331,16 +5331,44 @@ async def part_semantic_regions_draft(partNumber: str, body: _SemanticRegionsDra
             feature_intent_draft = {"ok": False, "error": short}
             warnings.append("feature_intent_draft_failed: " + short)
 
+    # ── Auto-draft the Dimension Intent Map for the same pn/rev ────
+    #
+    # Best-effort sister hook to feature intent. The dimension intent
+    # map binds drawing dims to driving CAD dims and is built from
+    # the same semantic_regions input, so an operator who just
+    # drafted regions wants a fresh dimension map too. Soft failure:
+    # any exception lands as a warning + ok=false stub, the
+    # semantic-region write above still succeeds. Reviewed=true
+    # mappings on disk are preserved by the builder.
+    dimension_intent_draft: Dict[str, Any]
+    try:
+        di_doc, di_path, di_warnings = _dimension_intent_build_and_write(
+            library_dir, safe_pn, safe_rev,
+        )
+        dimension_intent_draft = {
+            "ok":            True,
+            "schemaVersion": _DIMENSION_INTENT_SCHEMA_VERSION,
+            "outputPath":    str(di_path),
+            "mappingCount":  len(di_doc.get("mappings") or []),
+            "summary":       di_doc.get("summary"),
+            "warnings":      di_warnings,
+        }
+    except Exception as ex:
+        short = (ex.__class__.__name__ + ": " + str(ex))[:200]
+        dimension_intent_draft = {"ok": False, "error": short, "warnings": []}
+        warnings.append("dimension_intent_draft_failed: " + short)
+
     response: Dict[str, Any] = {
-        "ok":                 True,
-        "partNumber":         safe_pn,
-        "revision":           safe_rev,
-        "schemaVersion":      _SEMANTIC_REGIONS_SCHEMA_VERSION,
-        "outputPath":         str(out_path),
-        "regions":            doc["regions"],
-        "summary":            doc["summary"],
-        "axisFrame":          doc["axisFrame"],
-        "featureIntentDraft": feature_intent_draft,
+        "ok":                   True,
+        "partNumber":           safe_pn,
+        "revision":             safe_rev,
+        "schemaVersion":        _SEMANTIC_REGIONS_SCHEMA_VERSION,
+        "outputPath":           str(out_path),
+        "regions":              doc["regions"],
+        "summary":              doc["summary"],
+        "axisFrame":            doc["axisFrame"],
+        "featureIntentDraft":   feature_intent_draft,
+        "dimensionIntentDraft": dimension_intent_draft,
     }
     if warnings:
         response["warnings"] = warnings
@@ -5647,6 +5675,16 @@ from ai_inspector.sketch_intent import (
     lookup_sketch_dimension_intent as _lookup_sketch_dimension_intent,
     list_sketch_dimension_intents as _list_sketch_dimension_intents,
 )
+from ai_inspector.dimension_intent import (
+    SCHEMA_VERSION as _DIMENSION_INTENT_SCHEMA_VERSION,
+    dimension_intent_map_path as _dimension_intent_map_path,
+    load_dimension_intent_map as _load_dimension_intent_map,
+    write_dimension_intent_map as _write_dimension_intent_map,
+    build_draft_dimension_intent_map as _build_dimension_intent_draft,
+    validate_mapping as _validate_dimension_intent_mapping,
+    lookup_dimension_intent as _lookup_dimension_intent,
+    lookup_dimension_intent_for_cad_dimension as _lookup_dimension_intent_for_cad_dimension,
+)
 
 
 class _FeatureIntentDraftBody(BaseModel):
@@ -5841,6 +5879,193 @@ async def part_sketch_dimension_intent_write(
         "outputPath": str(out_path),
         "summary": doc.get("summary"),
         "dimensionCount": len(dimensions),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dimension Intent Map v0.1
+# ---------------------------------------------------------------------------
+# Links drawing dimensions (descriptions + values) to the exact
+# SolidWorks driving dimension (D1@Sketch7 style). Built from
+# semantic_regions + feature_intent + drawing_map + dimension_descriptions
+# (+ optional part.json cadDimensions when the extractor adds them).
+# Curated entries with reviewed=true survive re-drafts.
+
+class _DimensionIntentDraftBody(BaseModel):
+    revision: str
+
+
+def _dimension_intent_build_and_write(
+    library_dir: Path, safe_pn: str, safe_rev: str,
+) -> Tuple[Dict[str, Any], Path, List[str]]:
+    """Helper shared by POST /draft and the semantic-regions auto-
+    draft hook so both code paths produce identical disk output +
+    summary metadata. Returns (doc, out_path, warnings)."""
+    doc, warnings = _build_dimension_intent_draft(library_dir, safe_pn, safe_rev)
+    out_path = _write_dimension_intent_map(library_dir, safe_pn, safe_rev, doc)
+    return doc, out_path, warnings
+
+
+@app.post("/api/part-dimension-intent/{partNumber}/draft")
+async def part_dimension_intent_draft(partNumber: str, body: _DimensionIntentDraftBody):
+    """Generate (or regenerate) the Dimension Intent Map for a part rev.
+
+    Preservation policy: reviewed=true mappings carry over verbatim.
+    Heuristic-built mappings get overwritten so the matcher can pick
+    up improvements over time.
+
+    Soft-tolerant of missing inputs:
+      - part.json cadDimensions absent -> warning + empty/seeded
+        mappings (depending on sketch_intent presence)
+      - drawing_map absent -> warning, draft proceeds without
+        drawing<->cad matches
+      - semantic_regions absent -> warning, mappings have empty
+        regionId/regionLabel
+
+    Never 404s on missing source data -- the operator can call this
+    endpoint at any point in the part lifecycle and see what the
+    matcher could resolve given today's inputs."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision)
+
+    library_dir = library_path()
+    doc, out_path, warnings = _dimension_intent_build_and_write(library_dir, safe_pn, safe_rev)
+
+    response: Dict[str, Any] = {
+        "ok":            True,
+        "partNumber":    safe_pn,
+        "revision":      safe_rev,
+        "schemaVersion": _DIMENSION_INTENT_SCHEMA_VERSION,
+        "outputPath":    str(out_path),
+        "mappingCount":  len(doc.get("mappings") or []),
+        "summary":       doc.get("summary"),
+    }
+    if warnings:
+        response["warnings"] = warnings
+    return response
+
+
+@app.get("/api/part-dimension-intent/{partNumber}")
+async def part_dimension_intent_read(partNumber: str, revision: str = Query(...)):
+    """Read the persisted Dimension Intent Map for a part rev.
+
+    Returns 404 with a JSON body when the file does not exist yet --
+    the message includes the POST /draft hint so the UI can prompt
+    for a draft rather than silently rendering an empty list.
+    """
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+    library_dir = library_path()
+    doc = _load_dimension_intent_map(library_dir, safe_pn, safe_rev)
+    if doc is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No dimension intent map for {safe_pn} {safe_rev}. "
+                f"POST /api/part-dimension-intent/{safe_pn}/draft to generate one."
+            ),
+        )
+    return doc
+
+
+class _DimensionIntentPutBody(BaseModel):
+    """Curated dimension intent map submitted from the curator UI.
+
+    Loose by design: only `mappings` is required, every other field
+    round-trips. Server normalises schemaVersion/partNumber/revision/
+    summary so a PATCH-style write does not need to repeat the
+    structural fields.
+    """
+    schemaVersion: Optional[str] = None
+    partNumber:    Optional[str] = None
+    revision:      Optional[str] = None
+    summary:       Optional[Dict[str, Any]] = None
+    mappings:      List[Dict[str, Any]]
+    notes:         Optional[List[Any]] = None
+
+
+@app.put("/api/part-dimension-intent/{partNumber}")
+async def part_dimension_intent_write(
+    partNumber: str,
+    body:       _DimensionIntentPutBody,
+    revision:   str = Query(...),
+):
+    """Persist a curator-edited Dimension Intent Map.
+
+    Validates minimal required fields per mapping (mappingId,
+    cadFeatureId, ownerFeature, dimensionShortName, dimensionFullName,
+    matchConfidence) and rejects duplicate mappingIds. Atomic write
+    via the same .tmp+replace path the heuristic builder uses.
+    """
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+
+    if body.partNumber and sanitize_part_number(body.partNumber) != safe_pn:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Body partNumber {body.partNumber!r} does not match URL partNumber {safe_pn!r}",
+        )
+    if body.revision and _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision) != safe_rev:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Body revision {body.revision!r} does not match URL revision {safe_rev!r}",
+        )
+
+    mappings = body.mappings or []
+    # Per-mapping validation collects ALL errors so the curator UI
+    # can surface them at once rather than one-at-a-time.
+    field_errors: List[Dict[str, Any]] = []
+    seen_ids: Dict[str, int] = {}
+    for idx, mapping in enumerate(mappings):
+        errs = _validate_dimension_intent_mapping(mapping)
+        if errs:
+            field_errors.append({"index": idx, "errors": errs})
+        if isinstance(mapping, dict):
+            mid = mapping.get("mappingId")
+            if isinstance(mid, str) and mid:
+                if mid in seen_ids:
+                    field_errors.append({
+                        "index": idx,
+                        "errors": [f"duplicate mappingId {mid!r} (also at index {seen_ids[mid]})"],
+                    })
+                else:
+                    seen_ids[mid] = idx
+    if field_errors:
+        raise HTTPException(status_code=400, detail={"errors": field_errors})
+
+    raw = body.model_dump(exclude_none=True)
+    reviewed_count = sum(1 for m in mappings if isinstance(m, dict) and m.get("reviewed") is True)
+    high_count     = sum(1 for m in mappings if isinstance(m, dict) and m.get("matchConfidence") == "high")
+    cand_count     = sum(1 for m in mappings if isinstance(m, dict) and m.get("matchConfidence") in ("medium", "low"))
+    doc: Dict[str, Any] = {
+        **raw,
+        "schemaVersion": body.schemaVersion or _DIMENSION_INTENT_SCHEMA_VERSION,
+        "partNumber":    safe_pn,
+        "revision":      safe_rev,
+        "summary": {
+            **(raw.get("summary") or {}),
+            "mappingCount":        len(mappings),
+            "reviewedCount":       reviewed_count,
+            "highConfidenceCount": high_count,
+            "candidateCount":      cand_count,
+        },
+        "mappings":      mappings,
+    }
+    out_path = _write_dimension_intent_map(library_path(), safe_pn, safe_rev, doc)
+    return {
+        "ok":            True,
+        "partNumber":    safe_pn,
+        "revision":      safe_rev,
+        "schemaVersion": doc["schemaVersion"],
+        "outputPath":    str(out_path),
+        "summary":       doc.get("summary"),
+        "mappingCount":  len(mappings),
     }
 
 

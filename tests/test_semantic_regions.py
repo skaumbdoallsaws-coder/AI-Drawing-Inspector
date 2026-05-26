@@ -1779,6 +1779,22 @@ def test_cad_edit_handoff_parser_promotes_to_sketch_dimension_change_on_explicit
     assert hints["mode"]      == "set_absolute"
 
 
+def test_cad_edit_handoff_parser_treats_edit_to_value_as_set_absolute():
+    """Regression from the Rev D sketch smoke: "edit ... to 3 mm"
+    must carry mode=set_absolute, otherwise the /send-to-solidworks
+    bridge transformer rejects the session after the chat already
+    created it."""
+    intent = server._parse_cad_edit_intent(
+        "edit the sketch dimension controlling the outer wing strut thickness to 3 mm"
+    )
+    assert intent["action"] == "sketch_dimension_change"
+    hints = intent["parameterHints"]
+    assert hints["value"] == 3.0
+    assert hints["units"] == "mm"
+    assert hints["dimension"] == "thickness"
+    assert hints["mode"] == "set_absolute"
+
+
 def test_cad_edit_handoff_parser_keeps_dimension_change_when_no_sketch_wording():
     """Regression -- a thickness-only request (no sketch-dimension
     wording) must STAY on the direct-dim action so the add-in's

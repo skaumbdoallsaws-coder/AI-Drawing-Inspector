@@ -5692,7 +5692,7 @@ _CAD_EDIT_DIMENSION_VALUE_RE = re.compile(
 )
 _CAD_EDIT_HOLE_COUNT_RE = re.compile(r'(\d+)\s+holes?\b', re.IGNORECASE)
 _CAD_EDIT_SET_ABSOLUTE_RE = re.compile(
-    r'\b(set|make|change)\b.*\b(to|at|=)\b|\bset\s+(?:the\s+)?[\w\s\-]+\s+\d',
+    r'\b(set|make|change|edit|modify)\b.*\b(to|at|=)\b|\bset\s+(?:the\s+)?[\w\s\-]+\s+\d',
     re.IGNORECASE,
 )
 # Sketch-dimension trigger -- when the user explicitly asks for a

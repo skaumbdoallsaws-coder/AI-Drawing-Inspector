@@ -522,8 +522,8 @@ def test_POST_create_session_returns_existing_on_duplicate_intent(
     aircraft_library_with_draft: Path,
 ):
     """Duplicate-intent policy: second create with the same (pn, rev,
-    phrase, action) tuple returns the EXISTING session + a warning,
-    NOT a new file."""
+    phrase, action, requestedEdit) tuple returns the EXISTING session
+    + a warning, NOT a new file."""
     client = TestClient(server.app)
     handoff = _capture_handoff_payload(client)
     first = _create_session(client, handoff)
@@ -538,6 +538,40 @@ def test_POST_create_session_returns_existing_on_duplicate_intent(
     sessions_dir = aircraft_library_with_draft / "_edit_sessions"
     files = [f for f in sessions_dir.iterdir() if f.suffix == ".json"]
     assert len(files) == 1
+
+
+def test_POST_create_session_allows_same_region_action_with_different_requested_edit(
+    aircraft_library_with_draft: Path,
+):
+    """Regression for sketch-dimension naming: a refined instruction
+    like "front strut diameter" must not reuse an older "outer strut
+    thickness" sketch session just because pn/rev/phrase/action match."""
+    client = TestClient(server.app)
+    first_handoff = _make_sketch_handoff_payload(
+        sketch_feature=None,
+        dimension_short=None,
+    )
+    first_handoff["resolvedPhrase"] = "Outer wing strut"
+    first_handoff["userInstruction"] = (
+        "edit the sketch dimension controlling the outer wing strut thickness to 3 mm"
+    )
+    second_handoff = json.loads(json.dumps(first_handoff))
+    second_handoff["userInstruction"] = "set the front strut diameter to 3 mm"
+    second_handoff["target"]["sketchFeature"] = "Sketch270"
+    second_handoff["target"]["dimensionShortName"] = "D1"
+    second_handoff["target"]["sketchDimensionIntent"] = {
+        "displayName": "front strut diameter",
+        "sketchFeature": "Sketch270",
+        "dimensionShortName": "D1",
+    }
+
+    first = _create_session(client, first_handoff)
+    second = _create_session(client, second_handoff)
+
+    assert second["session"]["sessionId"] != first["session"]["sessionId"]
+    assert "warning" not in second
+    assert second["session"]["handoffPayload"]["target"]["sketchFeature"] == "Sketch270"
+    assert second["session"]["handoffPayload"]["target"]["dimensionShortName"] == "D1"
 
 
 def test_POST_create_session_dedupe_after_abandon_creates_new(

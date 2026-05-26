@@ -6795,12 +6795,20 @@ def _find_duplicate_open_edit_session(
     source_rev:     str,
     phrase:         str,
     intent_action:  str,
+    requested_edit: str,
 ) -> Optional[Dict[str, Any]]:
     """Return the FIRST open (non-terminal) session whose identity
     tuple matches. MVP scans all sessions; switch to an index if
-    this gets hot. The dedupe key intentionally excludes parameter
-    hints -- two requests with different values for the same edit
-    intent are still considered the same active intent."""
+    this gets hot.
+
+    The requested edit text is part of the dedupe key. Earlier versions
+    deduped only on (pn, rev, phrase, action), which incorrectly reused
+    a stale handoff when the operator refined "outer strut thickness" to
+    a named sketch dimension such as "front strut diameter"."""
+    def _norm_edit(s: Any) -> str:
+        return re.sub(r"\s+", " ", str(s or "").strip().lower())
+
+    requested_norm = _norm_edit(requested_edit)
     for doc in _list_edit_sessions(library_dir):
         if doc.get("status") in _EDIT_SESSION_TERMINAL:
             continue
@@ -6812,6 +6820,8 @@ def _find_duplicate_open_edit_session(
             continue
         doc_action = ((doc.get("intent") or {}).get("action") or "").strip()
         if doc_action != intent_action.strip():
+            continue
+        if _norm_edit(doc.get("requestedEdit")) != requested_norm:
             continue
         return doc
     return None
@@ -6942,7 +6952,7 @@ async def create_edit_session(body: _EditSessionCreateBody):
     intent_action = str(intent_block.get("action") or "unknown")
 
     duplicate = _find_duplicate_open_edit_session(
-        library_dir, safe_pn, safe_rev, semantic_phrase, intent_action,
+        library_dir, safe_pn, safe_rev, semantic_phrase, intent_action, requested_edit,
     )
     if duplicate is not None:
         return {
@@ -6950,7 +6960,8 @@ async def create_edit_session(body: _EditSessionCreateBody):
             "warning": (
                 f"An open session already exists for this exact intent "
                 f"({safe_pn} {safe_rev} phrase={semantic_phrase!r} "
-                f"action={intent_action!r}). Returning the existing session. "
+                f"action={intent_action!r} requestedEdit={requested_edit!r}). "
+                f"Returning the existing session. "
                 f"Abandon it first if you want to track a new variant."
             ),
         }

@@ -4508,11 +4508,43 @@ def _semantic_region_cad_edit_handoff_chat_result(
             downstream_clause = f"Rebuild impact: {', '.join(downstream_names)}."
         else:
             downstream_clause = "Downstream rebuild impact unknown; review feature tree after rebuild."
+
+        sketch_feature = target.get("sketchFeature")
+        sketch_short = target.get("dimensionShortName")
+        sketch_intent = target.get("sketchDimensionIntent") if isinstance(target.get("sketchDimensionIntent"), dict) else {}
+        if isinstance(sketch_feature, str) and sketch_feature and isinstance(sketch_short, str) and sketch_short:
+            sketch_label = str(sketch_intent.get("displayName") or "").strip()
+            if sketch_label:
+                sketch_clause = (
+                    f"Named sketch dimension: {sketch_label} "
+                    f"({sketch_short}@{sketch_feature}). "
+                )
+            else:
+                sketch_clause = f"Named sketch dimension: {sketch_short}@{sketch_feature}. "
+        else:
+            options = target.get("sketchDimensionOptions") if isinstance(target.get("sketchDimensionOptions"), list) else []
+            option_labels: List[str] = []
+            for opt in options[:4]:
+                if not isinstance(opt, dict):
+                    continue
+                label = str(opt.get("displayName") or "").strip()
+                short = str(opt.get("dimensionShortName") or "").strip()
+                sketch = str(opt.get("sketchFeature") or "").strip()
+                if label and short and sketch:
+                    option_labels.append(f"{label} ({short}@{sketch})")
+            if option_labels:
+                sketch_clause = (
+                    "Known sketch dimension option(s): "
+                    + "; ".join(option_labels)
+                    + ". Choose the correct dimension in SolidWorks preview. "
+                )
+            else:
+                sketch_clause = "Sketch + dimension will be confirmed by SolidWorks preview. "
         response = (
             f"Prepared a sketch-dimension handoff for {region_label}. "
             f"Intent: sketch_dimension_change{hint_text}. "
             f"SolidWorks target(s): {target_text}.{edit_target_clause} "
-            "Sketch + dimension will be confirmed by SolidWorks preview. "
+            f"{sketch_clause}"
             f"{downstream_clause} "
             "Queued for the Sessions tab; still read-only and requires human review before any SolidWorks work."
         )
@@ -5489,6 +5521,14 @@ from ai_inspector.feature_intent import (
     lookup_feature_intent as _lookup_feature_intent,
     intent_entry_physical_phrase_for_param as _intent_physical_phrase,
 )
+from ai_inspector.sketch_intent import (
+    SCHEMA_VERSION as _SKETCH_DIMENSION_INTENT_SCHEMA_VERSION,
+    sketch_dimension_intent_map_path as _sketch_dimension_intent_map_path,
+    load_sketch_dimension_intent_map as _load_sketch_dimension_intent_map,
+    write_sketch_dimension_intent_map as _write_sketch_dimension_intent_map,
+    lookup_sketch_dimension_intent as _lookup_sketch_dimension_intent,
+    list_sketch_dimension_intents as _list_sketch_dimension_intents,
+)
 
 
 class _FeatureIntentDraftBody(BaseModel):
@@ -5562,6 +5602,128 @@ async def part_feature_intent_read(partNumber: str, revision: str = Query(...)):
             ),
         )
     return doc
+
+
+class _SketchDimensionIntentPutBody(BaseModel):
+    """Curated sketch-dimension naming map.
+
+    The add-in discovers candidate sketch dimensions live. This sidecar
+    lets InspectorPro remember the operator's physical name for those
+    dimensions so future handoffs can target D1/D2/etc without another
+    ambiguous selector step.
+    """
+    schemaVersion: Optional[str] = None
+    partNumber: Optional[str] = None
+    revision: Optional[str] = None
+    summary: Optional[Dict[str, Any]] = None
+    dimensions: List[Dict[str, Any]]
+    notes: Optional[List[Any]] = None
+
+    model_config = {"extra": "allow"}
+
+
+def _sketch_dimension_intent_validate_dimensions(dimensions: List[Dict[str, Any]]) -> List[str]:
+    errors: List[str] = []
+    seen: set[tuple[str, str, str]] = set()
+    for i, entry in enumerate(dimensions):
+        if not isinstance(entry, dict):
+            errors.append(f"dimensions[{i}] must be an object")
+            continue
+        cad_id = entry.get("cadFeatureId")
+        sketch = entry.get("sketchFeature")
+        short = entry.get("dimensionShortName")
+        display = entry.get("displayName")
+        for key, value in (
+            ("cadFeatureId", cad_id),
+            ("sketchFeature", sketch),
+            ("dimensionShortName", short),
+            ("displayName", display),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"dimensions[{i}].{key} is required")
+        if all(isinstance(v, str) and v.strip() for v in (cad_id, sketch, short)):
+            key = (str(cad_id), str(sketch), str(short))
+            if key in seen:
+                errors.append(
+                    f"Duplicate sketch dimension mapping for {cad_id} {short}@{sketch}"
+                )
+            seen.add(key)
+    return errors
+
+
+@app.get("/api/part-sketch-dimension-intent/{partNumber}")
+async def part_sketch_dimension_intent_read(partNumber: str, revision: str = Query(...)):
+    """Read the curated sketch-dimension naming map for a part rev."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+    library_dir = library_path()
+    doc = _load_sketch_dimension_intent_map(library_dir, safe_pn, safe_rev)
+    if doc is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No sketch dimension intent map for {safe_pn} {safe_rev}. "
+                "PUT /api/part-sketch-dimension-intent/{partNumber}?revision=... "
+                "with reviewed dimension names to create one."
+            ),
+        )
+    return doc
+
+
+@app.put("/api/part-sketch-dimension-intent/{partNumber}")
+async def part_sketch_dimension_intent_write(
+    partNumber: str,
+    body: _SketchDimensionIntentPutBody,
+    revision: str = Query(...),
+):
+    """Persist operator-reviewed names for sketch-owned dimensions."""
+    safe_pn = sanitize_part_number(partNumber)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+    safe_rev = _semantic_regions_resolve_rev(library_path(), safe_pn, revision)
+
+    if body.partNumber and sanitize_part_number(body.partNumber) != safe_pn:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Body partNumber {body.partNumber!r} does not match URL partNumber {safe_pn!r}",
+        )
+    if body.revision and _semantic_regions_resolve_rev(library_path(), safe_pn, body.revision) != safe_rev:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Body revision {body.revision!r} does not match URL revision {safe_rev!r}",
+        )
+
+    errors = _sketch_dimension_intent_validate_dimensions(body.dimensions)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    raw = body.model_dump(exclude_none=True)
+    dimensions = raw.get("dimensions") or []
+    reviewed_count = sum(1 for d in dimensions if isinstance(d, dict) and d.get("reviewed") is True)
+    doc: Dict[str, Any] = {
+        **raw,
+        "schemaVersion": body.schemaVersion or _SKETCH_DIMENSION_INTENT_SCHEMA_VERSION,
+        "partNumber": safe_pn,
+        "revision": safe_rev,
+        "summary": {
+            **(raw.get("summary") or {}),
+            "dimensionCount": len(dimensions),
+            "reviewedCount": reviewed_count,
+        },
+        "dimensions": dimensions,
+    }
+    out_path = _write_sketch_dimension_intent_map(library_path(), safe_pn, safe_rev, doc)
+    return {
+        "ok": True,
+        "partNumber": safe_pn,
+        "revision": safe_rev,
+        "schemaVersion": doc["schemaVersion"],
+        "outputPath": str(out_path),
+        "summary": doc.get("summary"),
+        "dimensionCount": len(dimensions),
+    }
 
 
 def _semantic_region_cad_handoff_payload(
@@ -5673,7 +5835,8 @@ _CAD_EDIT_HANDOFF_VERSION = "semantic-region-cad-edit-handoff-0.1"
 _CAD_EDIT_DIMENSION_KEYWORDS_RE = re.compile(
     r'\b(thick(?:er|ness)?|tall(?:er)?|short(?:er)?|deep(?:er)?|'
     r'wid(?:er|en)?|narrow(?:er)?|long(?:er)?|larger|smaller|bigger|'
-    r'extend(?:ed)?|extrude\s+by|increase|decrease|grow|shrink|reduce|enlarge)\b',
+    r'diameter|radius|extend(?:ed)?|extrude\s+by|increase|decrease|'
+    r'grow|shrink|reduce|enlarge)\b',
     re.IGNORECASE,
 )
 _CAD_EDIT_HOLE_NOUN_RE = re.compile(r'\bhole(?:s)?\b', re.IGNORECASE)
@@ -5746,6 +5909,10 @@ def _classify_dimension_axis(text_lower: str) -> Optional[str]:
         return "length"
     if re.search(r'\bdeep(?:er)?\b', text_lower):
         return "depth"
+    if re.search(r'\bdiameter\b', text_lower):
+        return "diameter"
+    if re.search(r'\bradius\b', text_lower):
+        return "radius"
     return None
 
 
@@ -6205,6 +6372,60 @@ def _semantic_region_cad_edit_handoff_payload(
         )
         classification["propagationFeatures"] = []
 
+    def _compact_sketch_dimension_intent(entry: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "cadFeatureId":       entry.get("cadFeatureId"),
+            "solidWorksName":     entry.get("solidWorksName"),
+            "regionId":           entry.get("regionId"),
+            "regionLabel":        entry.get("regionLabel"),
+            "sketchFeature":      entry.get("sketchFeature"),
+            "dimensionShortName": entry.get("dimensionShortName"),
+            "dimensionFullName":  entry.get("dimensionFullName"),
+            "displayName":        entry.get("displayName"),
+            "aliases":            entry.get("aliases") or [],
+            "controlType":        entry.get("controlType"),
+            "physicalMeaning":    entry.get("physicalMeaning"),
+            "units":              entry.get("units"),
+            "reviewed":           bool(entry.get("reviewed", False)),
+            "confidence":         entry.get("confidence"),
+        }
+
+    # Sketch-dimension naming map. This is the human-reviewed bridge
+    # from "front strut diameter" -> D1@Sketch270. It can also promote a
+    # normal dimension_change request into sketch_dimension_change when
+    # the user's phrase clearly names a known sketch-owned dimension.
+    sketch_intent_hit: Optional[Dict[str, Any]] = None
+    sketch_intent_options: List[Dict[str, Any]] = []
+    edit_targets_seq = classification.get("editTargets") or []
+    first_edit_target = edit_targets_seq[0] if edit_targets_seq and isinstance(edit_targets_seq[0], dict) else {}
+    first_edit_cad_id = first_edit_target.get("cadFeatureId") if isinstance(first_edit_target, dict) else None
+    if isinstance(first_edit_cad_id, str) and first_edit_cad_id:
+        sketch_intent_options = [
+            _compact_sketch_dimension_intent(e)
+            for e in _list_sketch_dimension_intents(library_dir, safe_pn, safe_rev, first_edit_cad_id)
+            if isinstance(e, dict)
+        ]
+        if intent.get("action") in ("dimension_change", "sketch_dimension_change"):
+            sketch_intent_hit = _lookup_sketch_dimension_intent(
+                library_dir,
+                safe_pn,
+                safe_rev,
+                first_edit_cad_id,
+                instruction,
+                str((intent.get("parameterHints") or {}).get("dimension") or ""),
+            )
+            if (
+                sketch_intent_hit
+                and intent.get("action") == "dimension_change"
+                and not override_honored
+            ):
+                intent = {
+                    **intent,
+                    "action": "sketch_dimension_change",
+                    "source": "parser+sketch_intent_map",
+                    "sketchIntentResolved": True,
+                }
+
     # Sketch-dimension fields. These are present on EVERY payload (as
     # null/[]) when the action is sketch_dimension_change so the
     # SolidWorks add-in's gate can read a stable shape, and absent
@@ -6221,28 +6442,31 @@ def _semantic_region_cad_edit_handoff_payload(
         # an empty list, which the chat layer renders as "Downstream
         # rebuild impact unknown" rather than blocking emission.
         downstream_entries: List[Dict[str, Optional[str]]] = []
-        edit_targets_seq = classification.get("editTargets") or []
-        if edit_targets_seq:
-            first_target = edit_targets_seq[0] if isinstance(edit_targets_seq[0], dict) else {}
-            first_cad_id = first_target.get("cadFeatureId") if isinstance(first_target, dict) else None
-            if isinstance(first_cad_id, str) and first_cad_id:
-                entry = _lookup_feature_intent(library_dir, safe_pn, safe_rev, first_cad_id)
-                if isinstance(entry, dict):
-                    for cad_id in (entry.get("downstreamFeatures") or []):
-                        if isinstance(cad_id, str) and cad_id:
-                            downstream_entries.append({
-                                "cadFeatureId":  cad_id,
-                                "sourceFeature": None,
-                                "glbNode":       None,
-                            })
+        if isinstance(first_edit_cad_id, str) and first_edit_cad_id:
+            entry = _lookup_feature_intent(library_dir, safe_pn, safe_rev, first_edit_cad_id)
+            if isinstance(entry, dict):
+                for cad_id in (entry.get("downstreamFeatures") or []):
+                    if isinstance(cad_id, str) and cad_id:
+                        downstream_entries.append({
+                            "cadFeatureId":  cad_id,
+                            "sourceFeature": None,
+                            "glbNode":       None,
+                        })
         sketch_block = {
-            # Resolved by the SolidWorks add-in's Preview Target walk
-            # (it knows the live subfeature tree); InspectorPro emits
-            # null so the operator and the add-in agree there is no
-            # InspectorPro-side commitment to a specific sketch yet.
-            "sketchFeature":         None,
-            "dimensionShortName":    None,
-            "downstreamFeatures":    downstream_entries,
+            "sketchFeature": (
+                sketch_intent_hit.get("sketchFeature")
+                if isinstance(sketch_intent_hit, dict) else None
+            ),
+            "dimensionShortName": (
+                sketch_intent_hit.get("dimensionShortName")
+                if isinstance(sketch_intent_hit, dict) else None
+            ),
+            "downstreamFeatures":       downstream_entries,
+            "sketchDimensionIntent": (
+                _compact_sketch_dimension_intent(sketch_intent_hit)
+                if isinstance(sketch_intent_hit, dict) else None
+            ),
+            "sketchDimensionOptions":   sketch_intent_options,
         }
 
     payload: Dict[str, Any] = {

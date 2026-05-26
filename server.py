@@ -6809,11 +6809,22 @@ def _edit_session_solidworks_handoff_payload(doc: Dict[str, Any]) -> Dict[str, A
     hints = intent.get("parameterHints") if isinstance(intent.get("parameterHints"), dict) else {}
 
     action = str(intent.get("action") or "")
-    if action != "dimension_change":
+    # Two supported actions on the Sage execution bridge today:
+    #   - dimension_change         (direct feature dim, existing path)
+    #   - sketch_dimension_change  (sketch-controlled dim; add-in's
+    #     separate EvaluateSketchAction gate runs on receipt)
+    # Same shape requirements for both (mode=set_absolute, units=mm,
+    # finite positive value); only the emitted intent.action and the
+    # optional top-level sketch fields differ.
+    if action not in ("dimension_change", "sketch_dimension_change"):
         raise HTTPException(
             status_code=409,
-            detail=f"SolidWorks Sage execution handoff currently supports dimension_change only; got {action or 'unknown'!r}.",
+            detail=(
+                f"SolidWorks Sage execution handoff currently supports "
+                f"{{dimension_change, sketch_dimension_change}}; got {action or 'unknown'!r}."
+            ),
         )
+    is_sketch_action = action == "sketch_dimension_change"
 
     raw_value = hints.get("value")
     try:
@@ -6868,7 +6879,7 @@ def _edit_session_solidworks_handoff_payload(doc: Dict[str, Any]) -> Dict[str, A
     region_ids = session_target.get("regionIds") if isinstance(session_target.get("regionIds"), list) else []
     fallback_region_id = region_ids[0] if region_ids else ""
 
-    return {
+    payload: Dict[str, Any] = {
         "editSessionId":       doc.get("sessionId"),
         "partNumber":          doc.get("partNumber"),
         "sourceRevision":      doc.get("sourceRevision"),
@@ -6878,7 +6889,7 @@ def _edit_session_solidworks_handoff_payload(doc: Dict[str, Any]) -> Dict[str, A
         },
         "requestedEdit":       requested_edit,
         "intent": {
-            "action":    "dimension_change",
+            "action":    action,            # "dimension_change" OR "sketch_dimension_change"
             "dimension": hints.get("dimension"),
             "mode":      "set_absolute",
             "value":     value,
@@ -6891,6 +6902,35 @@ def _edit_session_solidworks_handoff_payload(doc: Dict[str, Any]) -> Dict[str, A
             "executeAfterApproval":  False,
         },
     }
+
+    # Sketch-action metadata. Forwarded ADDITIVELY (top-level fields the
+    # add-in's SageHandoff DTO reads) so direct-dim payloads stay byte-
+    # identical to the prior contract -- non-sketch handoffs never see
+    # these keys. We intentionally do NOT synthesize fake sketch names:
+    # null in => null out, and the add-in's UI then requires the
+    # operator to explicitly select a sketch candidate before Apply
+    # enables.
+    if is_sketch_action:
+        sketch_feature_raw = target.get("sketchFeature")
+        sketch_short_raw   = target.get("dimensionShortName")
+        downstream_raw     = target.get("downstreamFeatures")
+        payload["sketchFeature"] = (
+            sketch_feature_raw if isinstance(sketch_feature_raw, str) and sketch_feature_raw.strip()
+            else None
+        )
+        payload["dimensionShortName"] = (
+            sketch_short_raw if isinstance(sketch_short_raw, str) and sketch_short_raw.strip()
+            else None
+        )
+        downstream_out: List[Dict[str, Any]] = []
+        if isinstance(downstream_raw, list):
+            for d in downstream_raw:
+                if not isinstance(d, dict):
+                    continue
+                if d.get("sourceFeature") or d.get("cadFeatureId"):
+                    downstream_out.append(_sw_target(d, "downstream_feature"))
+        payload["downstreamFeatures"] = downstream_out
+    return payload
 
 
 async def _send_sage_handoff_to_bridge(payload: Dict[str, Any]) -> Dict[str, Any]:

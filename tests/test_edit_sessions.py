@@ -230,6 +230,294 @@ def test_send_edit_session_to_solidworks_posts_narrow_bridge_payload(
     assert payload["policy"]["executeAfterApproval"] is False
 
 
+# ---------------------------------------------------------------------------
+# Bridge transformer -- sketch_dimension_change forwarding. The Sage
+# add-in's EvaluateSketchAction gate requires sketchFeature /
+# dimensionShortName / downstreamFeatures to ride alongside the narrow
+# intent block; the InspectorPro transformer is the only producer of
+# that wire shape.
+# ---------------------------------------------------------------------------
+
+def _make_sketch_handoff_payload(
+    sketch_feature: str | None  = "Sketch270",
+    dimension_short: str | None = "D1",
+    downstream:      list | None = None,
+    value:           float = 3.0,
+    units:           str   = "mm",
+    mode:            str   = "set_absolute",
+    feature_id:      str   = "boss_extrude2",
+    feature_name:    str   = "Boss-Extrude2",
+) -> dict:
+    """Build a minimal sketch_dimension_change cad-edit-handoff payload
+    that the bridge transformer can chew on. Shape mirrors what
+    _semantic_region_cad_edit_handoff_payload emits for the sketch
+    action -- the sketch fields land on target as additive keys."""
+    target: dict = {
+        "regions": [{"regionId": "outer_wing_strut",
+                      "label":    "Outer Wing Strut",
+                      "confidence": "medium",
+                      "reviewed":  False}],
+        "cadFeatureIds":  [feature_id],
+        "sourceFeatures": [feature_name],
+        "glbNodes":       [feature_id],
+        "multiRegion":    False,
+        "editTargets": [{
+            "cadFeatureId":  feature_id,
+            "sourceFeature": feature_name,
+            "glbNode":       feature_id,
+        }],
+        "propagationFeatures": [],
+        "referenceFeatures":   [],
+    }
+    target["sketchFeature"]      = sketch_feature
+    target["dimensionShortName"] = dimension_short
+    target["downstreamFeatures"] = downstream if downstream is not None else []
+    return {
+        "handoffVersion":   "semantic-region-cad-edit-handoff-0.1",
+        "supportedActions": [
+            "dimension_change", "sketch_dimension_change",
+            "hole_pattern", "sketch_on_face", "unknown",
+        ],
+        "matched":          True,
+        "partNumber":       PN,
+        "revision":         REV,
+        "userInstruction":  "set the outer wing strut thickness to 3 mm via sketch dimension",
+        "resolvedPhrase":   "outer wing strut",
+        "intent": {
+            "action":         "sketch_dimension_change",
+            "parameterHints": {
+                "value":     value,
+                "units":     units,
+                "dimension": "thickness",
+                "mode":      mode,
+            },
+            "parserAction":    "sketch_dimension_change",
+            "requestedAction": None,
+            "source":          "parser",
+            "confidence":      "high",
+        },
+        "target":          target,
+        "placement":       {"surfaces": [], "capabilities": [], "editReadiness": "not_ready"},
+        "operationPolicy": {
+            "canEdit":                   False,
+            "requiresHumanReview":       True,
+            "multiRegionReviewRequired": False,
+            "blockedReason":             "sketch_dimension_change is preview-only in InspectorPro.",
+        },
+    }
+
+
+def test_bridge_transformer_dimension_change_payload_unchanged_by_track_b(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Regression: the existing dimension_change wire payload must stay
+    byte-identical after Track B teaches the transformer about sketch
+    handoffs. Sketch fields must NOT leak onto the direct path."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="set the single propeller blade thickness to 6 mm",
+    )
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    captured = {}
+
+    async def _fake_send(payload):
+        captured["payload"] = payload
+        return {"accepted": True, "message": "ok"}
+
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_send)
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 200, r.text
+    payload = captured["payload"]
+    assert payload["intent"]["action"] == "dimension_change"
+    # Sketch fields MUST NOT appear on direct-dim payloads -- the add-in
+    # SageHandoff DTO can still deserialize them as null but emitting
+    # them on the wire would expand the contract for no benefit.
+    assert "sketchFeature"      not in payload
+    assert "dimensionShortName" not in payload
+    assert "downstreamFeatures" not in payload
+
+
+def test_bridge_transformer_sketch_action_forwards_with_intent_and_sketch_fields(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Happy path: a sketch_dimension_change session sends through
+    /send-to-solidworks, the narrow Sage payload preserves the
+    intent.action verbatim, and the three additive sketch fields land
+    on the wire as top-level keys (matching the add-in SageHandoff
+    [JsonProperty] shape)."""
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload(
+        sketch_feature="Sketch270",
+        dimension_short="D1",
+        downstream=[
+            {"cadFeatureId": "cirpattern_struts", "sourceFeature": "CirPattern1", "glbNode": "cirpattern_struts"},
+            {"cadFeatureId": "fillet_strut_root", "sourceFeature": "Fillet3",     "glbNode": "fillet_strut_root"},
+        ],
+    )
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    captured = {}
+
+    async def _fake_send(payload):
+        captured["payload"] = payload
+        return {"accepted": True, "message": "ok"}
+
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_send)
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 200, r.text
+    payload = captured["payload"]
+    assert payload["intent"]["action"]    == "sketch_dimension_change"
+    assert payload["intent"]["mode"]      == "set_absolute"
+    assert payload["intent"]["units"]     == "mm"
+    assert payload["intent"]["value"]     == 3.0
+    assert payload["intent"]["dimension"] == "thickness"
+    assert [e["cadFeatureId"] for e in payload["editTargets"]] == ["boss_extrude2"]
+    assert payload["sketchFeature"]      == "Sketch270"
+    assert payload["dimensionShortName"] == "D1"
+    ds_ids = [d["cadFeatureId"] for d in payload["downstreamFeatures"]]
+    assert ds_ids == ["cirpattern_struts", "fillet_strut_root"]
+    # Each downstream entry carries the SW-target shape the add-in
+    # expects (cadFeatureId, sourceFeature, role).
+    assert payload["downstreamFeatures"][0]["role"]          == "downstream_feature"
+    assert payload["downstreamFeatures"][0]["sourceFeature"] == "CirPattern1"
+
+
+def test_bridge_transformer_sketch_action_passes_null_when_metadata_unknown(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Per spec: InspectorPro must NOT synthesize fake sketch names.
+    Null in -> null out, empty list when no downstream. The add-in then
+    requires the operator to pick a sketch candidate before Apply
+    enables (its sketch_operator_must_select gate)."""
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload(
+        sketch_feature=None,
+        dimension_short=None,
+        downstream=[],
+    )
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    captured = {}
+    async def _fake_send(payload):
+        captured["payload"] = payload
+        return {"accepted": True, "message": "ok"}
+
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_send)
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 200, r.text
+    payload = captured["payload"]
+    assert payload["intent"]["action"]   == "sketch_dimension_change"
+    assert payload["sketchFeature"]      is None
+    assert payload["dimensionShortName"] is None
+    assert payload["downstreamFeatures"] == []
+
+
+def test_bridge_transformer_sketch_action_treats_empty_string_metadata_as_null(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Defence-in-depth: an empty/whitespace string is functionally the
+    same as null -- the transformer normalises both to None so the
+    add-in's gate never sees an empty-but-not-null name and tries to
+    look up a feature named ''. """
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload(
+        sketch_feature="   ",
+        dimension_short="",
+        downstream=[],
+    )
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    captured = {}
+    async def _fake_send(payload):
+        captured["payload"] = payload
+        return {"accepted": True, "message": "ok"}
+
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_send)
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 200, r.text
+    payload = captured["payload"]
+    assert payload["sketchFeature"]      is None
+    assert payload["dimensionShortName"] is None
+
+
+def test_bridge_transformer_unsupported_action_still_returns_409(
+    aircraft_library_with_draft: Path,
+):
+    """Wrong intent.action must still 409 (not silently send). Tests
+    the union {dimension_change, sketch_dimension_change}; anything
+    else refuses with a clear message naming both supported actions."""
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload()
+    handoff["intent"]["action"] = "hole_pattern"
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 409, r.text
+    detail = r.json()["detail"]
+    assert "dimension_change" in detail
+    assert "sketch_dimension_change" in detail
+
+
+def test_bridge_transformer_sketch_action_non_mm_units_returns_409(
+    aircraft_library_with_draft: Path,
+):
+    """Same shape gates apply to the sketch action: units must be mm."""
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload(units="in")
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 409, r.text
+    assert "millimeters" in r.json()["detail"]
+
+
+def test_bridge_transformer_sketch_action_non_set_absolute_mode_returns_409(
+    aircraft_library_with_draft: Path,
+):
+    """Sketch action must also gate mode == set_absolute (no delta)."""
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload(mode="delta")
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 409, r.text
+    assert "set_absolute" in r.json()["detail"]
+
+
+def test_bridge_transformer_sketch_action_invalid_value_returns_409(
+    aircraft_library_with_draft: Path,
+):
+    """Finite positive value gate applies to both actions."""
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload(value=-1.0)
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 409, r.text
+    assert "greater than zero" in r.json()["detail"]
+
+
+def test_bridge_transformer_sketch_action_no_edit_targets_returns_409(
+    aircraft_library_with_draft: Path,
+):
+    """No editTargets means the add-in has nothing to anchor the
+    sketch edit to. Must refuse rather than send a half-payload."""
+    client = TestClient(server.app)
+    handoff = _make_sketch_handoff_payload()
+    handoff["target"]["editTargets"] = []
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    r = client.post(f"/api/edit-sessions/{sid}/send-to-solidworks")
+    assert r.status_code == 409, r.text
+    assert "editTargets" in r.json()["detail"]
+
+
 def test_POST_create_session_returns_existing_on_duplicate_intent(
     aircraft_library_with_draft: Path,
 ):

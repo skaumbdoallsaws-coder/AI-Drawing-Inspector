@@ -231,12 +231,212 @@ def test_send_edit_session_to_solidworks_posts_narrow_bridge_payload(
 
 
 # ---------------------------------------------------------------------------
-# Bridge transformer -- sketch_dimension_change forwarding. The Sage
-# add-in's EvaluateSketchAction gate requires sketchFeature /
-# dimensionShortName / downstreamFeatures to ride alongside the narrow
-# intent block; the InspectorPro transformer is the only producer of
-# that wire shape.
+# Batch send-to-SolidWorks (demo path). Fans N session IDs out to the
+# SolidWorks Sage pane via the SAME single-session pipeline -- the
+# batch endpoint owns NO new payload-building logic. Execution stays
+# strictly one-at-a-time on the SolidWorks side; this only removes the
+# typing burden on the operator.
 # ---------------------------------------------------------------------------
+
+def test_batch_send_fans_out_to_single_send_for_each_session(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The batch endpoint must call the single-session pipeline ONCE
+    per sessionId. Mocking _send_one_edit_session_to_solidworks
+    isolates the fan-out contract from the per-payload transformer
+    (separate tests cover that)."""
+    client = TestClient(server.app)
+    # Use the propeller fixture twice with two different requestedEdits
+    # so dedupe does not collapse them into one session. The real
+    # cad-edit-handoff endpoint produces real ULIDs we can pass to
+    # the batch endpoint.
+    sids: list = []
+    for instruction in [
+        "set the single propeller blade thickness to 6 mm",
+        "set the single propeller blade thickness to 7 mm",
+    ]:
+        handoff = _capture_handoff_payload(client, phrase="propeller", instruction=instruction)
+        sid = _create_session(client, handoff)["session"]["sessionId"]
+        sids.append(sid)
+
+    # Mock the per-session helper itself -- the fan-out test asserts
+    # WIRING, not transformer correctness.
+    helper_calls: list = []
+    async def _fake_single(safe_id):
+        helper_calls.append(safe_id)
+        return {
+            "ok":             True,
+            "sessionId":      safe_id,
+            "sentHandoff":    {"editSessionId": safe_id},
+            "bridgeResponse": {"accepted": True, "queueCount": len(helper_calls)},
+        }
+    monkeypatch.setattr(server, "_send_one_edit_session_to_solidworks", _fake_single)
+
+    r = client.post("/api/edit-sessions/batch-send-to-solidworks", json={
+        "sessionIds": sids,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"]      is True
+    assert body["sent"]    == 2
+    assert body["failed"]  == 0
+    assert len(body["results"]) == 2
+    assert all(item["ok"] for item in body["results"])
+    assert [item["sessionId"] for item in body["results"]] == sids
+    # Per-item record carries the bridge response shape the queue UI
+    # needs (accepted + queueCount).
+    assert body["results"][0]["solidWorksResponse"]["accepted"] is True
+    # Single-session helper was invoked once per sessionId, in order.
+    assert helper_calls == sids
+
+
+def test_batch_send_continueOnError_true_records_failures_and_keeps_going(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """When the bridge rejects one item (e.g. session terminal,
+    bridge transient error), continueOnError=true must record the
+    failure and try the remaining items. Overall endpoint still 200."""
+    client = TestClient(server.app)
+    handoff_a = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="set the single propeller blade thickness to 6 mm",
+    )
+    handoff_b = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="set the single propeller blade thickness to 7 mm",
+    )
+    sid_a = _create_session(client, handoff_a)["session"]["sessionId"]
+    sid_b = _create_session(client, handoff_b)["session"]["sessionId"]
+    # Patch sid_a to terminal so the per-item send fails at the
+    # session-status gate inside _send_one_edit_session_to_solidworks.
+    abandon = client.patch(f"/api/edit-sessions/{sid_a}",
+                            json={"status": "abandoned", "abandonReason": "test"})
+    assert abandon.status_code == 200, abandon.text
+
+    sent_payloads: list = []
+    async def _fake_bridge(payload):
+        sent_payloads.append(payload)
+        return {"accepted": True, "message": "Queued", "queueCount": len(sent_payloads)}
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_bridge)
+
+    r = client.post("/api/edit-sessions/batch-send-to-solidworks", json={
+        "sessionIds":      [sid_a, sid_b],
+        "continueOnError": True,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sent"]   == 1
+    assert body["failed"] == 1
+    # Per-item shape: failure records statusCode + message; success
+    # records the bridge response.
+    fail_item = body["results"][0]
+    pass_item = body["results"][1]
+    assert fail_item["sessionId"]  == sid_a
+    assert fail_item["ok"]         is False
+    assert fail_item["statusCode"] == 409
+    assert "terminal" in fail_item["message"]
+    assert pass_item["sessionId"]  == sid_b
+    assert pass_item["ok"]         is True
+    # Only the successful item produced a bridge POST.
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0]["editSessionId"] == sid_b
+
+
+def test_batch_send_continueOnError_false_stops_at_first_failure(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """continueOnError=false aborts after the first failure -- the
+    remaining sessions are NOT attempted (no bridge POST for them)."""
+    client = TestClient(server.app)
+    handoff_a = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="set the single propeller blade thickness to 6 mm",
+    )
+    handoff_b = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="set the single propeller blade thickness to 7 mm",
+    )
+    sid_a = _create_session(client, handoff_a)["session"]["sessionId"]
+    sid_b = _create_session(client, handoff_b)["session"]["sessionId"]
+    client.patch(f"/api/edit-sessions/{sid_a}",
+                 json={"status": "abandoned", "abandonReason": "test"})
+
+    sent_payloads: list = []
+    async def _fake_bridge(payload):
+        sent_payloads.append(payload)
+        return {"accepted": True, "message": "Queued", "queueCount": len(sent_payloads)}
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_bridge)
+
+    r = client.post("/api/edit-sessions/batch-send-to-solidworks", json={
+        "sessionIds":      [sid_a, sid_b],
+        "continueOnError": False,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sent"]          == 0
+    assert body["failed"]        == 1
+    assert len(body["results"])  == 1
+    assert body["results"][0]["ok"] is False
+    # The healthy second session was never attempted.
+    assert sent_payloads == []
+
+
+def test_batch_send_empty_sessionids_returns_400(aircraft_library_with_draft: Path):
+    client = TestClient(server.app)
+    r = client.post("/api/edit-sessions/batch-send-to-solidworks", json={"sessionIds": []})
+    assert r.status_code == 400, r.text
+    assert "sessionIds" in r.text
+
+
+def test_batch_send_invalid_sessionid_recorded_as_per_item_400(
+    aircraft_library_with_draft: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Garbage sessionIds are recorded as per-item 400 entries, NOT
+    raised globally. The endpoint contract is "report per-item;
+    keep going" when continueOnError=true."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(
+        client, phrase="propeller",
+        instruction="set the single propeller blade thickness to 6 mm",
+    )
+    sid = _create_session(client, handoff)["session"]["sessionId"]
+
+    async def _fake_bridge(payload):
+        return {"accepted": True, "message": "Queued"}
+    monkeypatch.setattr(server, "_send_sage_handoff_to_bridge", _fake_bridge)
+
+    r = client.post("/api/edit-sessions/batch-send-to-solidworks", json={
+        "sessionIds": ["not-a-ulid", sid],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sent"]   == 1
+    assert body["failed"] == 1
+    assert body["results"][0]["statusCode"] == 400
+    assert body["results"][1]["sessionId"]  == sid
+
+
+# ---------------------------------------------------------------------------
+# Demo-batch Sage fast path. Builds 3 real cad-edit-handoff payloads
+# against 1030035 Rev A, creates 3 edit sessions, batch-sends them to
+# the SolidWorks Sage pane. Default response is concise and physical-
+# language; CAD internals stay out of the user-facing reply.
+# ---------------------------------------------------------------------------
+
+def test_demo_batch_detector_recognises_canonical_phrasings():
+    assert server._is_demo_batch_handoff_request("queue the caster demo handoffs")
+    assert server._is_demo_batch_handoff_request("prepare the three caster demo changes")
+    assert server._is_demo_batch_handoff_request("prepare demo handoffs for 1030035 Rev A")
+    assert server._is_demo_batch_handoff_request("Send the demo handoffs")
+    # Plain single-handoff phrasings must NOT match.
+    assert not server._is_demo_batch_handoff_request(
+        "prepare a SolidWorks handoff: set the mounting plate length to 150 mm")
+    assert not server._is_demo_batch_handoff_request("compare rev A and rev B")
+    assert not server._is_demo_batch_handoff_request("")
 
 def _make_sketch_handoff_payload(
     sketch_feature: str | None  = "Sketch270",
@@ -1575,6 +1775,10 @@ def test_served_html_sessions_tab_refresh_from_solidworks_button_wired():
         "_sessionsTabSuggestNextRevision",
         "_sessionsTabReadHttpDetail",
         "_sessionsTabOpenCompareForRefresh",
+        "_sessionsTabEnsurePartLoadedForCompare",
+        "_sessionsTabOpenPersistedPromotionCompare",
+        "_sessionsTabBareRevision",
+        "await selectPartNumber(pn, false)",
         # State slot for stashing the orchestrator response + the
         # cached compare context Sage reads.
         "refreshResults:    {}",
@@ -1597,8 +1801,13 @@ def test_served_html_sessions_tab_refresh_from_solidworks_button_wired():
         "s.status === 'promoted'",
         # Compare action wired off the orchestrator response
         "sessionsCompareAfterRefresh_",
+        "sessionsComparePromotedRevision",
+        "Compare Promoted Revision",
         "Compare Rev ",
         "_autoOpenPartCompareAndHighlight([], revA, revB)",
+        "loads the part first",
+        "Loads part ${refresh.partNumber}, then opens Compare.",
+        "no_revisions_available",
         # No-overwrite warning text in the confirm dialog so the
         # operator understands the safety guarantee.
         "will not overwrite if it already exists",
@@ -1616,6 +1825,8 @@ def test_served_html_sessions_tab_refresh_from_solidworks_button_wired():
     # The retired packageId-resolver helper must not be referenced.
     assert "_sessionsTabResolvePackageIdForRefresh" not in html, \
         "retired packageId resolver helper must not be referenced"
+    assert "Open part ${pn} first -- Part Compare needs the diff state populated" not in html, \
+        "Sessions compare launcher must hydrate the part instead of asking the operator to open it"
 
 
 def test_agent_answers_promoted_edit_session_compare_from_diff(
@@ -1760,7 +1971,7 @@ def test_agent_explicit_rev_pair_compare_ignores_stale_context(
         "removed_features": [],
     }
     r = client.post("/api/agent/chat", json={
-        "message": "Compare Rev D and Rev E?",
+            "message": "what changed between rev d and e?",
         "agent_type": "deviation-analyst",
         "inspection_context": {
             "part_number": PN,

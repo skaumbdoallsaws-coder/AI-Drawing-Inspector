@@ -4316,6 +4316,8 @@ _SEMANTIC_DEMO_BATCH_RE = re.compile(
     r'\b(?:'
     r'(?:prepare|queue|send|create|run)\s+(?:the\s+)?(?:caster|three|3|demo)\s+(?:demo\s+)?handoffs?'
     r'|(?:prepare|queue)\s+(?:the\s+)?three\s+caster\s+demo\s+changes?'
+    r'|(?:prepare|queue|send|create)\s+(?:these\s+|the\s+)?(?:solidworks\s+)?handoffs?\s+for\s+1030035'
+    r'|1030035\s+rev\s*a.*mounting\s+plate\s+length.*mounting\s+plate\s+thickness.*mounting\s+slot\s+width'
     r'|demo\s+handoffs?\s+for\s+1030035'
     r')\b',
     re.IGNORECASE,
@@ -4327,7 +4329,24 @@ def _is_demo_batch_handoff_request(message: str) -> bool:
     demo batch. Conservative regex: anything specific to the caster
     demo wording. Plain "prepare a handoff for X" still routes to the
     single-handoff path above."""
-    return _SEMANTIC_DEMO_BATCH_RE.search(str(message or "")) is not None
+    # Chat UI wrapping can insert line breaks inside the natural
+    # operator prompt ("mounting plate thickness\n to 15 mm"). Collapse
+    # whitespace before matching so the deterministic demo path cannot
+    # fall through to the LLM just because the prompt wrapped.
+    text = re.sub(r'\s+', ' ', str(message or "")).strip()
+    if _SEMANTIC_DEMO_BATCH_RE.search(text):
+        return True
+    # Extra belt: the real demo prompt names all three known edit
+    # intents. If those three phrases and the part/revision are present,
+    # this is the batch request even without the word "handoff".
+    low = text.lower()
+    return (
+        "1030035" in low
+        and "rev a" in low
+        and "mounting plate length" in low
+        and "mounting plate thickness" in low
+        and "mounting slot width" in low
+    )
 
 
 # Canonical 1030035 Rev A demo handoff instructions. Order is the

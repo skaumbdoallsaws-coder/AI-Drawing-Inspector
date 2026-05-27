@@ -432,6 +432,10 @@ def test_demo_batch_detector_recognises_canonical_phrasings():
     assert server._is_demo_batch_handoff_request("prepare the three caster demo changes")
     assert server._is_demo_batch_handoff_request("prepare demo handoffs for 1030035 Rev A")
     assert server._is_demo_batch_handoff_request("Send the demo handoffs")
+    assert server._is_demo_batch_handoff_request(
+        "For 1030035 Rev A set the mounting plate length to 150 mm, "
+        "mounting plate thickness\n  to 15 mm, and mounting slot width to 10 mm."
+    )
     # Plain single-handoff phrasings must NOT match.
     assert not server._is_demo_batch_handoff_request(
         "prepare a SolidWorks handoff: set the mounting plate length to 150 mm")

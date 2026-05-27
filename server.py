@@ -7892,11 +7892,20 @@ async def patch_edit_session(sessionId: str, body: _EditSessionPatchBody, reques
 # existing /enrich-visuals endpoint manually.
 
 class _RefreshFromSolidWorksBody(BaseModel):
-    targetRevision:       str
+    # targetRevision is now optional -- server picks the next free
+    # rev letter when omitted so the demo path never has to ask the
+    # operator to type one.
+    targetRevision:       Optional[str] = None
     partPackageId:        Optional[str] = None
     promote:              bool = True
     enrichVisuals:        bool = True
     draftSemanticRegions: bool = True
+    # When True, a session still in "prepared" is auto-advanced to
+    # applied_in_solidworks before the rest of the orchestrator runs.
+    # The frontend sets this only after the operator confirms the
+    # "this marks the edit as applied" dialog, so the server cannot
+    # advance prepared sessions accidentally.
+    assumeApplied:        bool = False
 
 
 _REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES = frozenset({
@@ -7908,6 +7917,11 @@ _REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES = frozenset({
     "linked_to_revision",
     "promoted",
 })
+
+# Allowed only when body.assumeApplied=true. Lets the orchestrator
+# walk prepared -> applied_in_solidworks before the standard
+# extracted -> linked_to_revision -> promoted chain.
+_REFRESH_FROM_SW_ASSUME_APPLIED_STATUSES = frozenset({"prepared"})
 
 
 def _refresh_from_sw_normalise_rev(raw: str) -> str:
@@ -7936,6 +7950,138 @@ def _refresh_from_sw_set_session_block(
     merged = dict(existing)
     merged.update(payload)
     new_doc[field] = merged
+
+
+def _refresh_pick_next_revision_letter(library_dir: Path, safe_pn: str) -> str:
+    """Return the next free rev letter (e.g. 'B') by scanning
+    parts/{pn}/rev{A..Z}. Mirrors the frontend's
+    _sessionsTabSuggestNextRevision so the demo path never asks the
+    operator to type a letter. Returns 'A' when nothing exists yet
+    and '' when the existing set already reaches Z (caller 409s)."""
+    parts_dir = library_dir / "parts" / safe_pn
+    if not parts_dir.exists():
+        return "A"
+    letters: List[str] = []
+    for p in parts_dir.iterdir():
+        if not p.is_dir():
+            continue
+        name = p.name
+        if not name.lower().startswith("rev"):
+            continue
+        tail = name[3:]
+        if len(tail) == 1 and tail.isalpha():
+            letters.append(tail.upper())
+    if not letters:
+        return "A"
+    top = max(letters)
+    if top == "Z":
+        return ""
+    return chr(ord(top) + 1)
+
+
+async def _refresh_active_doc_check(safe_pn: str, session_id: str) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Query the bridge for the active document and gate by:
+       - bridge reachable + authenticated
+       - active doc type == "Part"
+       - active doc path (if known) basename mentions the session's
+         partNumber (loose; the production extractor will tighten this
+         once it surfaces a canonical pn token)
+    Returns (bridge_doc_dict, source_path) on success. Raises
+    HTTPException(409) with a clear message otherwise so the
+    Sessions UI can render a single actionable line.
+    """
+    client = BridgeClient()
+    info = client.discover()
+    if info is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"SolidWorks bridge is unavailable. Open the edited SolidWorks part for session "
+                f"{session_id}, then retry Refresh From SolidWorks."
+            ),
+        )
+    status = await client.status()
+    if status is None or (status.auth_required and not status.authenticated):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"SolidWorks bridge is reachable but not authenticated. Open the edited SolidWorks part for "
+                f"session {session_id}, ensure the InspectorPro add-in is loaded, then retry."
+            ),
+        )
+    active = status.active_doc
+    if active is None or not getattr(active, "type", None):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No active SolidWorks document. Open the edited SolidWorks part for session "
+                f"{session_id}, then retry Refresh From SolidWorks."
+            ),
+        )
+    doc_type = str(getattr(active, "type", "") or "")
+    if doc_type.lower() != "part":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Active SolidWorks document is {doc_type!r}, not a Part. Open the edited SolidWorks "
+                f"part for session {session_id}, then retry."
+            ),
+        )
+    path = getattr(active, "path", None)
+    source_path = str(path) if path else None
+    # Loose pn match against the filename basename when a path is
+    # available. Mismatch only -- when path is missing we trust the
+    # operator (e.g. unsaved doc); the extractor still records the
+    # actual sourceDocument.path in the resulting sidecar manifest.
+    if source_path:
+        basename = os.path.basename(source_path)
+        if safe_pn and safe_pn.lower() not in basename.lower():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Active SolidWorks document {basename!r} does not appear to be part {safe_pn}. "
+                    f"Open the edited SolidWorks part for session {session_id}, then retry."
+                ),
+            )
+    bridge_doc = {
+        "type":  doc_type,
+        "title": getattr(active, "title", None),
+        "path":  source_path,
+    }
+    return bridge_doc, source_path
+
+
+async def _refresh_auto_extract(safe_pn: str, expected_doc_path: Optional[str]) -> Dict[str, Any]:
+    """Run the same extraction the public POST /api/request-part-extraction
+    endpoint runs, under the SAME single-flight lock. Returns the
+    extraction response on success; raises HTTPException with a clear
+    operator-facing detail when extraction is denied or fails."""
+    if _request_extraction_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="Another extraction request is in progress; one at a time. Retry in a moment.",
+        )
+    async with _request_extraction_lock:
+        try:
+            ext = await _drive_part_extraction(safe_pn, expected_doc_path)
+        except HTTPException:
+            raise
+        except Exception as ex:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Auto-extract raised: {ex.__class__.__name__}: {ex}",
+            )
+    if not ext.get("success"):
+        # _drive_part_extraction returns a denial dict for the
+        # awaiting-approval path; the field naming follows _denial_response.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Bridge extraction did not complete; SolidWorks approval may be pending.",
+                "extraction": ext,
+            },
+        )
+    return ext
 
 
 @app.post("/api/edit-sessions/{sessionId}/refresh-from-solidworks")
@@ -7978,12 +8124,26 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
             detail=(f"Session is terminal ({current_status}); refresh-from-solidworks "
                     "cannot advance it."),
         )
-    if current_status not in _REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES:
+    # "prepared" sessions are only valid when assumeApplied=true (the
+    # frontend sets that flag only after the operator confirms the
+    # "this marks the edit as applied" dialog). Otherwise refuse so
+    # the orchestrator cannot race ahead of the human approval gate.
+    if current_status in _REFRESH_FROM_SW_ASSUME_APPLIED_STATUSES:
+        if not body.assumeApplied:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Session is still {current_status!r}. Mark Applied in SolidWorks first, "
+                    f"or call refresh-from-solidworks with assumeApplied=true after the operator "
+                    "confirms the Sage handoff actually landed in SolidWorks."
+                ),
+            )
+    elif current_status not in _REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES:
         raise HTTPException(
             status_code=409,
             detail=(
                 f"Session status must be one of {sorted(_REFRESH_FROM_SW_ALLOWED_INPUT_STATUSES)} "
-                f"(got {current_status!r}). PATCH to applied_in_solidworks first."
+                f"(or 'prepared' with assumeApplied=true); got {current_status!r}."
             ),
         )
 
@@ -7995,30 +8155,55 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
         )
     source_rev = str(session.get("sourceRevision") or "")
 
-    target_rev = _refresh_from_sw_normalise_rev(body.targetRevision)
-    if not target_rev:
-        raise HTTPException(
-            status_code=400,
-            detail="targetRevision is required and must match rev<alnum> (e.g. revE).",
-        )
+    # ── Resolve target revision ───────────────────────────────────
+    # Body wins; otherwise pick the next free letter so the demo
+    # path never asks the operator to type one.
+    if body.targetRevision and body.targetRevision.strip():
+        target_rev = _refresh_from_sw_normalise_rev(body.targetRevision)
+        if not target_rev:
+            raise HTTPException(
+                status_code=400,
+                detail="targetRevision must match rev<alnum> (e.g. revE).",
+            )
+    else:
+        next_letter = _refresh_pick_next_revision_letter(library_dir, safe_pn)
+        if not next_letter:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Cannot auto-pick a target revision for {safe_pn}: existing revisions reached Z. "
+                    "Supply an explicit targetRevision in the request body."
+                ),
+            )
+        target_rev = "rev" + next_letter
 
-    # Resolve packageId. MVP: caller must supply it OR the session
-    # must already carry one from a prior extraction. Auto-extract
-    # via bridge is deferred to a follow-up.
+    # ── Resolve packageId (body > session.extraction > auto-extract) ──
     pkg_id = (body.partPackageId or "").strip()
+    pkg_source = "body" if pkg_id else None
     if not pkg_id:
         ext_block = session.get("extraction") if isinstance(session.get("extraction"), dict) else {}
         pkg_id = str(ext_block.get("resultingPartPackageId") or "").strip()
+        if pkg_id:
+            pkg_source = "session_extraction"
+
+    bridge_active_doc: Optional[Dict[str, Any]] = None
+    extraction_result: Optional[Dict[str, Any]] = None
+    auto_extracted = False
+
     if not pkg_id:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "partPackageId is required for this MVP. Run POST /api/request-part-extraction "
-                "(via the SolidWorks bridge) first, or PATCH the session's extraction."
-                "resultingPartPackageId, then re-call refresh-from-solidworks. "
-                "Bridge auto-extract from this endpoint is not yet implemented."
-            ),
-        )
+        # Auto-extract path. Gate by the active SolidWorks document
+        # FIRST so the operator sees a clear "open the part" message
+        # before we tie up the extraction lock.
+        bridge_active_doc, source_path = await _refresh_active_doc_check(safe_pn, safe_id)
+        extraction_result = await _refresh_auto_extract(safe_pn, source_path)
+        pkg_id = str(extraction_result.get("packageId") or "").strip()
+        if not pkg_id:
+            raise HTTPException(
+                status_code=500,
+                detail="Bridge extraction succeeded but returned no packageId; cannot promote.",
+            )
+        pkg_source = "auto_extract"
+        auto_extracted = True
 
     # Enforce no-overwrite of an existing revision dir. The spec
     # explicitly forbids overwriting curated revisions in MVP.
@@ -8028,7 +8213,7 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
             status_code=409,
             detail=(
                 f"parts/{safe_pn}/{target_rev} already exists. Refresh-from-solidworks "
-                "will not overwrite curated revisions in MVP; pick a new targetRevision."
+                "will not overwrite curated revisions; pick a new targetRevision."
             ),
         )
 
@@ -8173,6 +8358,20 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
         if status_to not in allowed: return
         new_session["status"] = status_to
 
+    # When assumeApplied=true was honoured upstream, first step the
+    # prepared session into applied_in_solidworks so the rest of the
+    # walk picks it up. Records the applied block with the audit
+    # timestamp so the session reflects the auto-applied moment.
+    if body.assumeApplied and new_session.get("status") == "prepared":
+        applied_block = new_session.get("applied") if isinstance(new_session.get("applied"), dict) else {}
+        if not str(applied_block.get("appliedAtUtc") or "").strip():
+            _refresh_from_sw_set_session_block(new_session, "applied", {
+                "appliedAtUtc":  now,
+                "appliedByUser": None,
+                "appliedNotes":  "auto-applied by refresh-from-solidworks (assumeApplied=true)",
+            })
+        _advance("prepared", "applied_in_solidworks")
+
     if body.promote and stages["promote"].get("ok"):
         _advance("applied_in_solidworks", "extracted")
         _advance("extracted",             "linked_to_revision")
@@ -8181,19 +8380,33 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
     new_session["updatedAtUtc"] = now
 
     # Audit note so the session log shows the orchestrator ran.
+    # Surfaces the auto-extract path explicitly so a reader of the
+    # session log can tell whether the operator pre-extracted or the
+    # orchestrator pulled the package itself.
     notes = new_session.get("notes")
     if not isinstance(notes, list): notes = []
-    notes.append({
-        "atUtc": now,
-        "text":  (f"Refreshed from SolidWorks: package {pkg_id} promoted as "
-                  f"{target_rev}. Regions drafted: "
-                  f"{stages['semanticRegions'].get('ok')}. "
-                  f"Intent drafted: {stages.get('featureIntent', {}).get('ok')}."),
-        "byUser": None,
-    })
+    audit_text = (
+        f"Refresh From SolidWorks {'auto-extracted active document package' if auto_extracted else 'used package'} "
+        f"{pkg_id} and promoted {target_rev}. "
+        f"Regions drafted: {stages['semanticRegions'].get('ok')}. "
+        f"Intent drafted: {stages.get('featureIntent', {}).get('ok')}."
+    )
+    notes.append({"atUtc": now, "text": audit_text, "byUser": None})
     new_session["notes"] = notes
 
     _write_edit_session_atomic(library_dir, safe_id, new_session)
+
+    # Extraction block for the response. Always present (so the UI
+    # can render a consistent "extraction" pane) but with auto_extract
+    # detail only when the orchestrator owned the extraction.
+    extraction_response: Dict[str, Any] = {
+        "ok":             True,
+        "partPackageId":  pkg_id,
+        "source":         pkg_source,        # body | session_extraction | auto_extract
+        "autoExtracted":  auto_extracted,
+        "sourcePath":     (extraction_result or {}).get("importPath"),
+        "bridgeActiveDoc": bridge_active_doc,
+    }
 
     return {
         "ok":                      True,
@@ -8201,6 +8414,8 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
         "sourceRevision":          source_rev,
         "promotedRevision":        target_rev if (body.promote and stages["promote"].get("ok")) else None,
         "partPackageId":           pkg_id,
+        "autoExtracted":           auto_extracted,
+        "extraction":              extraction_response,
         "semanticRegionsDrafted":  bool(stages["semanticRegions"].get("ok")),
         "featureIntentDrafted":    bool(stages.get("featureIntent", {}).get("ok")),
         "nextCompare": {

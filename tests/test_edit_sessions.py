@@ -1573,19 +1573,24 @@ def test_served_html_sessions_tab_refresh_from_solidworks_button_wired():
         # JS surface area
         "_sessionsTabRefreshFromSolidWorks",
         "_sessionsTabSuggestNextRevision",
-        "_sessionsTabResolvePackageIdForRefresh",
         "_sessionsTabReadHttpDetail",
         "_sessionsTabOpenCompareForRefresh",
-        # State slot for stashing the orchestrator response
+        # State slot for stashing the orchestrator response + the
+        # cached compare context Sage reads.
         "refreshResults:    {}",
         "sessionsTabState.refreshResults",
+        "lastRefreshCompare",
         # Endpoint URL (template literal form)
         "/refresh-from-solidworks",
-        # Request body fields -- must match _RefreshFromSolidWorksBody
-        "targetRevision:",
-        "partPackageId:",
+        # Request body fields -- must match _RefreshFromSolidWorksBody.
+        # assumeApplied is the new demo-path flag; we no longer send
+        # partPackageId (server auto-extracts).
+        "targetRevision",
         "draftSemanticRegions:",
-        # Gating: button must enable for these four statuses
+        "assumeApplied:",
+        # Gating: button must enable for these five statuses (prepared
+        # is now in the gate -- the backend lifts it via assumeApplied).
+        "s.status === 'prepared'",
         "s.status === 'applied_in_solidworks'",
         "s.status === 'extracted'",
         "s.status === 'linked_to_revision'",
@@ -1597,9 +1602,20 @@ def test_served_html_sessions_tab_refresh_from_solidworks_button_wired():
         # No-overwrite warning text in the confirm dialog so the
         # operator understands the safety guarantee.
         "will not overwrite if it already exists",
+        # Operator-confirm copy for prepared sessions (assumeApplied
+        # path). Spec wording.
+        "This marks the edit as applied in SolidWorks",
     ]
     for marker in markers:
         assert marker in html, f"Refresh From SolidWorks marker missing: {marker!r}"
+    # Anti-markers -- the demo path must NOT prompt the operator to
+    # paste a packageId. The whole point of auto-extract is removing
+    # that copy/paste step.
+    assert "Paste a partPackageId" not in html, \
+        "packageId paste prompt must be removed; backend auto-extracts now"
+    # The retired packageId-resolver helper must not be referenced.
+    assert "_sessionsTabResolvePackageIdForRefresh" not in html, \
+        "retired packageId resolver helper must not be referenced"
 
 
 def test_agent_answers_promoted_edit_session_compare_from_diff(

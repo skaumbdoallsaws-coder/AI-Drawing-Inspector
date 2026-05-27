@@ -230,9 +230,11 @@ def test_refresh_session_advances_through_extracted_linked_promoted(
     assert session["promotion"]["promotedRevision"]       == TARGET_REV
     assert session["promotion"]["promotedManifestPath"]   == \
         f"parts/{PN}/{TARGET_REV}/intake_manifest.json"
-    # Audit note appended to the session log.
+    # Audit note appended to the session log. The orchestrator's
+    # phrasing differentiates between supplied-package and auto-
+    # extracted paths -- both start with "Refresh From SolidWorks".
     notes = session.get("notes") or []
-    assert any("Refreshed from SolidWorks" in n.get("text", "") for n in notes), notes
+    assert any("Refresh From SolidWorks" in n.get("text", "") for n in notes), notes
 
 
 def test_refresh_accepts_bare_revision_letter_in_targetRevision(
@@ -272,23 +274,82 @@ def test_refresh_rejects_existing_target_revision(refresh_library: Path):
     assert "will not overwrite" in r.text
 
 
-def test_refresh_missing_packageid_returns_409_with_extract_hint(
-    refresh_library: Path,
+def test_refresh_missing_packageid_triggers_bridge_auto_extract(
+    refresh_library: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """Spec: missing partPackageId returns clear 409 telling the
-    operator to extract first (bridge auto-extract is not wired)."""
+    """Demo path: when neither body nor session carries a packageId,
+    the orchestrator auto-extracts the active SolidWorks document via
+    the bridge. Earlier MVP returned 409; the auto-extract upgrade
+    makes that 409 a successful promote when the bridge is online."""
     client = TestClient(server.app)
     sid = _create_session_at_applied(client, PN, SOURCE_REV, PACKAGE_ID)
 
+    bridge_doc = {"type": "Part", "title": f"{PN}.SLDPRT", "path": f"C:/CAD/{PN}.SLDPRT"}
+    async def _fake_active_doc_check(safe_pn, session_id):
+        return (bridge_doc, bridge_doc["path"])
+    extract_calls: list = []
+    async def _fake_auto_extract(safe_pn, expected_doc_path):
+        extract_calls.append({"pn": safe_pn, "path": expected_doc_path})
+        return {
+            "success":             True,
+            "kind":                "part",
+            "packageId":           PACKAGE_ID,
+            "importPath":          str(refresh_library / "_bridge_imports" / "part" / safe_pn / PACKAGE_ID),
+            "latestPointerPath":   str(refresh_library / "_bridge_imports" / "part" / safe_pn / "_latest.txt"),
+            "featureCount":        3,
+            "activeConfiguration": "Default",
+        }
+    monkeypatch.setattr(server, "_refresh_active_doc_check", _fake_active_doc_check)
+    monkeypatch.setattr(server, "_refresh_auto_extract",     _fake_auto_extract)
+
     r = client.post(
         f"/api/edit-sessions/{sid}/refresh-from-solidworks",
-        json={"targetRevision": TARGET_REV},  # NO partPackageId
+        json={"targetRevision": TARGET_REV},  # NO partPackageId -> auto-extract
     )
-    assert r.status_code == 409, r.text
-    body_text = r.text
-    assert "partPackageId is required" in body_text
-    assert "request-part-extraction" in body_text
-    assert "Bridge auto-extract" in body_text
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["promotedRevision"] == TARGET_REV
+    assert body["partPackageId"]    == PACKAGE_ID
+    assert body["autoExtracted"]    is True
+    ext = body["extraction"]
+    assert ext["ok"]              is True
+    assert ext["partPackageId"]   == PACKAGE_ID
+    assert ext["source"]          == "auto_extract"
+    assert ext["autoExtracted"]   is True
+    assert ext["bridgeActiveDoc"] == bridge_doc
+    assert len(extract_calls) == 1
+    assert extract_calls[0]["pn"]   == PN
+    assert extract_calls[0]["path"] == bridge_doc["path"]
+
+
+def test_refresh_explicit_packageid_skips_auto_extract(
+    refresh_library: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Regression: passing an explicit partPackageId in the body keeps
+    the existing fast path -- the active-doc gate and auto-extract
+    helpers must NOT run (cheaper + lets operators batch-promote a
+    pre-extracted package without SolidWorks open)."""
+    client = TestClient(server.app)
+    sid = _create_session_at_applied(client, PN, SOURCE_REV, PACKAGE_ID)
+
+    bridge_calls: list = []
+    extract_calls: list = []
+    async def _spy_active_doc(*a, **kw): bridge_calls.append((a, kw))
+    async def _spy_extract(*a, **kw):    extract_calls.append((a, kw))
+    monkeypatch.setattr(server, "_refresh_active_doc_check", _spy_active_doc)
+    monkeypatch.setattr(server, "_refresh_auto_extract",     _spy_extract)
+
+    r = client.post(
+        f"/api/edit-sessions/{sid}/refresh-from-solidworks",
+        json={"targetRevision": TARGET_REV, "partPackageId": PACKAGE_ID},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["autoExtracted"]              is False
+    assert body["extraction"]["source"]       == "body"
+    assert body["extraction"]["autoExtracted"] is False
+    assert bridge_calls == [], "active-doc check must not run when packageId supplied"
+    assert extract_calls == [], "auto-extract must not run when packageId supplied"
 
 
 def test_refresh_uses_packageId_from_session_extraction_when_body_omits(
@@ -318,9 +379,10 @@ def test_refresh_uses_packageId_from_session_extraction_when_body_omits(
 
 
 def test_refresh_rejects_session_in_prepared_status(refresh_library: Path):
-    """Session that has not been applied in SolidWorks yet -> 409
-    with a hint to PATCH first. Prevents the orchestrator from
-    racing ahead of the human approval gate."""
+    """Session that has not been applied in SolidWorks yet AND was
+    not flagged assumeApplied -> 409 with a hint pointing to either
+    Mark Applied or the assumeApplied flag. Prevents the orchestrator
+    from racing ahead of the human approval gate."""
     client = TestClient(server.app)
     handoff = _capture_handoff_payload(client, PN, SOURCE_REV)
     r1 = client.post("/api/edit-sessions", json={"handoffPayload": handoff})
@@ -331,7 +393,9 @@ def test_refresh_rejects_session_in_prepared_status(refresh_library: Path):
         json={"targetRevision": TARGET_REV, "partPackageId": PACKAGE_ID},
     )
     assert r.status_code == 409, r.text
-    assert "applied_in_solidworks" in r.text
+    detail = r.json()["detail"]
+    assert "Mark Applied in SolidWorks" in detail
+    assert "assumeApplied=true" in detail
 
 
 def test_refresh_rejects_terminal_session(refresh_library: Path):
@@ -412,12 +476,139 @@ def test_refresh_skips_regions_when_draftSemanticRegions_false(refresh_library: 
     assert "skipped" in stages["featureIntent"]
 
 
-def test_refresh_400_for_missing_targetRevision(refresh_library: Path):
+def test_refresh_omitted_targetRevision_auto_picks_next_letter(refresh_library: Path):
+    """Demo path: when targetRevision is omitted (or empty), the
+    server picks the next free rev letter by scanning parts/{pn}/rev*.
+    The existing source rev (revA) means the next free letter is B."""
+    client = TestClient(server.app)
+    sid = _create_session_at_applied(client, PN, SOURCE_REV, PACKAGE_ID)
+    r = client.post(
+        f"/api/edit-sessions/{sid}/refresh-from-solidworks",
+        json={"partPackageId": PACKAGE_ID},  # NO targetRevision
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["promotedRevision"] == "revB"
+    nc = body["nextCompare"]
+    assert nc["revA"] == "A"
+    assert nc["revB"] == "B"
+
+
+def test_refresh_empty_string_targetRevision_also_auto_picks(refresh_library: Path):
+    """Belt-and-suspenders: a JSON body that sends targetRevision=''
+    (e.g. a UI that defaulted to an empty input) should NOT 400 --
+    the server treats it the same as omitted and auto-picks. The
+    earlier MVP returned 400; the demo upgrade relaxes that."""
     client = TestClient(server.app)
     sid = _create_session_at_applied(client, PN, SOURCE_REV, PACKAGE_ID)
     r = client.post(
         f"/api/edit-sessions/{sid}/refresh-from-solidworks",
         json={"targetRevision": "", "partPackageId": PACKAGE_ID},
     )
-    assert r.status_code == 400, r.text
-    assert "targetRevision" in r.text
+    assert r.status_code == 200, r.text
+    assert r.json()["promotedRevision"] == "revB"
+
+
+def test_refresh_bridge_unavailable_returns_409_with_open_part_message(
+    refresh_library: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Spec error UX: when the bridge is unreachable and we need to
+    auto-extract, refuse with a clear "open the edited part" message
+    -- never a raw stack trace."""
+    client = TestClient(server.app)
+    sid = _create_session_at_applied(client, PN, SOURCE_REV, PACKAGE_ID)
+
+    from fastapi import HTTPException
+    async def _fake_active_doc_check(safe_pn, session_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"SolidWorks bridge is unavailable. Open the edited SolidWorks part for session "
+                f"{session_id}, then retry Refresh From SolidWorks."
+            ),
+        )
+    monkeypatch.setattr(server, "_refresh_active_doc_check", _fake_active_doc_check)
+
+    r = client.post(
+        f"/api/edit-sessions/{sid}/refresh-from-solidworks",
+        json={"targetRevision": TARGET_REV},  # NO partPackageId -> auto path -> active-doc check fires
+    )
+    assert r.status_code == 409, r.text
+    detail = r.json()["detail"]
+    assert "bridge is unavailable" in detail
+    assert "Open the edited SolidWorks part" in detail
+
+
+def test_refresh_active_doc_wrong_type_returns_409(
+    refresh_library: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """When the operator has a Drawing or Assembly open instead of the
+    edited Part, the orchestrator must refuse before tying up the
+    extraction lock."""
+    client = TestClient(server.app)
+    sid = _create_session_at_applied(client, PN, SOURCE_REV, PACKAGE_ID)
+
+    from fastapi import HTTPException
+    async def _fake_active_doc_check(safe_pn, session_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Active SolidWorks document is 'Drawing', not a Part. Open the edited "
+                f"SolidWorks part for session {session_id}, then retry."
+            ),
+        )
+    monkeypatch.setattr(server, "_refresh_active_doc_check", _fake_active_doc_check)
+
+    r = client.post(
+        f"/api/edit-sessions/{sid}/refresh-from-solidworks",
+        json={"targetRevision": TARGET_REV},
+    )
+    assert r.status_code == 409, r.text
+    assert "not a Part" in r.json()["detail"]
+
+
+def test_refresh_prepared_session_without_assumeApplied_returns_409(refresh_library: Path):
+    """Safety: a session still in 'prepared' must NOT promote unless
+    the caller explicitly sets assumeApplied=true (the frontend does
+    that only after the operator confirms 'this marks the edit as
+    applied')."""
+    client = TestClient(server.app)
+    # Build a session and leave it at 'prepared' (no PATCH to applied).
+    handoff = _capture_handoff_payload(client, PN, SOURCE_REV)
+    r1 = client.post("/api/edit-sessions", json={"handoffPayload": handoff})
+    sid = r1.json()["session"]["sessionId"]
+
+    r = client.post(
+        f"/api/edit-sessions/{sid}/refresh-from-solidworks",
+        json={"targetRevision": TARGET_REV, "partPackageId": PACKAGE_ID},
+    )
+    assert r.status_code == 409, r.text
+    assert "assumeApplied=true" in r.json()["detail"]
+
+
+def test_refresh_prepared_session_with_assumeApplied_walks_to_promoted(refresh_library: Path):
+    """assumeApplied=true lifts a 'prepared' session through
+    applied_in_solidworks before the normal extracted -> linked ->
+    promoted chain. End state must be 'promoted'."""
+    client = TestClient(server.app)
+    handoff = _capture_handoff_payload(client, PN, SOURCE_REV)
+    r1 = client.post("/api/edit-sessions", json={"handoffPayload": handoff})
+    sid = r1.json()["session"]["sessionId"]
+
+    r = client.post(
+        f"/api/edit-sessions/{sid}/refresh-from-solidworks",
+        json={
+            "targetRevision":  TARGET_REV,
+            "partPackageId":   PACKAGE_ID,
+            "assumeApplied":   True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sessionStatus"]    == "promoted"
+    assert body["promotedRevision"] == TARGET_REV
+    # Re-load the session and confirm the applied block + audit note
+    # were stamped during the assumeApplied lift.
+    sess = client.get(f"/api/edit-sessions/{sid}").json()
+    assert sess["applied"]["appliedAtUtc"]
+    assert "auto-applied by refresh-from-solidworks" in (sess["applied"].get("appliedNotes") or "")

@@ -15687,6 +15687,11 @@
             recentPackages:    {},           // { partNumber: GET recent-packages response }
             actionBusy:        {},           // { sessionId: bool } -- disables row buttons mid-action
             refreshResults:    {},           // { sessionId: refresh-from-solidworks response } -- powers the inline "Compare" action
+            // Cached compare context from the most recent successful
+            // Refresh From SolidWorks. Lets Sage answer "what changed
+            // after the edit?" without forcing the operator to click
+            // Compare manually first.
+            lastRefreshCompare: null,         // { sessionId, partNumber, revA, revB, nextCompare, at }
         };
 
         function _sessionsTabFmtTime(iso) {
@@ -15975,25 +15980,11 @@
             } catch { return 'A'; }
         }
 
-        // Resolve a partPackageId for the refresh call. Order of preference:
-        //   1. session.extraction.resultingPartPackageId (already linked)
-        //   2. newest entry from /api/library/intake/recent-packages
-        // Returns { packageId, source } or null when nothing is available.
-        async function _sessionsTabResolvePackageIdForRefresh(detail, partNumber) {
-            const fromSession = detail
-                && detail.extraction
-                && detail.extraction.resultingPartPackageId;
-            if (fromSession) return { packageId: String(fromSession), source: 'session' };
-            try {
-                const rp = await fetch(`/api/library/intake/recent-packages/${encodeURIComponent(partNumber)}`);
-                if (!rp.ok) return null;
-                const body = await rp.json();
-                sessionsTabState.recentPackages[partNumber] = body;
-                const pkgs = (body.packages || []);
-                if (!pkgs.length) return null;
-                return { packageId: String(pkgs[0].partPackageId), source: 'recent-packages' };
-            } catch { return null; }
-        }
+        // (The packageId resolver helper was retired when the backend
+        // learned to auto-extract via the bridge. The refresh endpoint
+        // now resolves packageId itself: body > session extraction >
+        // bridge auto-extract. Frontend no longer prompts the operator
+        // to paste a packageId at any point in the demo path.)
 
         // Read structured 409 details from the FastAPI HTTPException
         // payload. `detail` may be a plain string OR a dict (the promote-
@@ -16022,73 +16013,49 @@
             }
         }
 
-        async function _sessionsTabRefreshFromSolidWorks(sessionId, partNumber, sourceRevision) {
-            // Step 1: gather suggestions BEFORE prompting the operator
-            // so the prompt + confirm dialog show concrete values.
-            const detail   = await _sessionsTabLoadDetail(sessionId);
-            const suggest  = await _sessionsTabSuggestNextRevision(partNumber);
-            const resolved = await _sessionsTabResolvePackageIdForRefresh(detail, partNumber);
+        async function _sessionsTabRefreshFromSolidWorks(sessionId, partNumber, sourceRevision, sessionStatus) {
+            // The demo path: one confirm, server auto-extracts the
+            // active SolidWorks document if no packageId is on file,
+            // server picks the next rev letter if none is supplied,
+            // server walks the FSM (incl. prepared -> applied when
+            // assumeApplied=true). No packageId prompt; no copy-paste.
+            const suggest = await _sessionsTabSuggestNextRevision(partNumber);
+            const targetLetter = (suggest || '').toUpperCase();
+            const targetRevDirName = targetLetter ? ('rev' + targetLetter) : '(server auto-pick)';
+            const isPrepared = sessionStatus === 'prepared';
 
-            // Operator picks (or accepts) the target rev letter.
-            const promptMsg = `Target revision letter for ${partNumber} `
-                + `(source: ${sourceRevision || '?'}). Will create parts/${partNumber}/rev<letter>/.`
-                + (suggest ? `\n\nSuggested next: ${suggest}` : '\n\nNo suggestion (existing revisions reached Z).');
-            const rawRev = window.prompt(promptMsg, suggest || '');
-            if (rawRev == null) return; // operator cancelled
-            const targetLetter = String(rawRev).trim().replace(/^rev/i, '');
-            if (!/^[A-Za-z0-9]+$/.test(targetLetter)) {
-                sessionsTabState.error = `Refresh From SolidWorks: target revision must be alphanumeric (got ${JSON.stringify(rawRev)}).`;
-                renderViewport();
-                return;
-            }
-            const targetRevisionParam = targetLetter.toUpperCase();
-            const targetRevDirName    = 'rev' + targetRevisionParam;
-
-            // Resolve packageId; if neither the session nor recent-packages
-            // had one, prompt the operator to paste one. The endpoint
-            // requires it (409 otherwise) so failing fast here keeps the
-            // round-trip noise down.
-            let packageId = resolved ? resolved.packageId : '';
-            if (!packageId) {
-                const pasted = window.prompt(
-                    `No bridge package found for ${partNumber}. Paste a partPackageId to promote, `
-                    + `or run POST /api/request-part-extraction via the add-in first.`,
-                    '',
-                );
-                if (pasted == null) return; // cancelled
-                packageId = String(pasted).trim();
-                if (!packageId) {
-                    sessionsTabState.error = 'Refresh From SolidWorks: partPackageId is required.';
-                    renderViewport();
-                    return;
-                }
-            }
-
-            // Final confirmation -- this WRITES to the library (creates
-            // a new revision directory, walks the session FSM forward).
+            const preparedNote = isPrepared
+                ? '\n\n  This marks the edit as applied in SolidWorks and extracts the active document.'
+                : '';
             const confirmMsg =
                 `Refresh From SolidWorks for ${partNumber}:\n\n`
                 + `  • Source revision: ${sourceRevision || '?'}\n`
                 + `  • Target revision: ${targetRevDirName} (will not overwrite if it already exists)\n`
-                + `  • Package: ${packageId.slice(0, 24)}...\n`
-                + `  • Promote + draft semantic regions + advance session FSM\n\n`
-                + `Proceed?`;
+                + `  • Auto-extract the active SolidWorks document if no package is on file\n`
+                + `  • Promote + draft semantic regions + advance session FSM`
+                + preparedNote
+                + `\n\nProceed?`;
             if (!window.confirm(confirmMsg)) return;
 
             _sessionsTabSetActionBusy(sessionId, true);
+            const reqBody = {
+                // targetRevision omitted lets the server pick the next
+                // free letter; we still send it when we have a hint so
+                // the operator sees what the dialog showed.
+                promote:              true,
+                enrichVisuals:        true,
+                draftSemanticRegions: true,
+                assumeApplied:        true,
+            };
+            if (targetLetter) reqBody.targetRevision = targetLetter;
+
             try {
                 const r = await fetch(
                     `/api/edit-sessions/${encodeURIComponent(sessionId)}/refresh-from-solidworks`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            targetRevision:       targetRevisionParam,
-                            partPackageId:        packageId,
-                            promote:              true,
-                            enrichVisuals:        true,
-                            draftSemanticRegions: true,
-                        }),
+                        body: JSON.stringify(reqBody),
                     },
                 );
                 if (!r.ok) {
@@ -16098,8 +16065,33 @@
                 }
                 const body = await r.json();
                 sessionsTabState.refreshResults[sessionId] = body;
+                // Cache the compare context so Sage can answer "what
+                // changed after the edit?" using the new rev pair
+                // without a manual Compare click.
+                if (body && body.nextCompare && body.partNumber) {
+                    sessionsTabState.lastRefreshCompare = {
+                        sessionId,
+                        partNumber:  body.partNumber,
+                        revA:        body.nextCompare.revA,
+                        revB:        body.nextCompare.revB,
+                        nextCompare: body.nextCompare,
+                        at:          new Date().toISOString(),
+                    };
+                }
                 delete sessionsTabState.details[sessionId];
                 await _sessionsTabFetchList();
+                // Auto-open the Compare pane when the right part is
+                // already loaded. Demo path: no extra click. Operators
+                // with a different part open get the existing inline
+                // "Compare Rev X vs Y" button rendered by the row.
+                if (state && state.partNumber === body.partNumber) {
+                    try { await _sessionsTabOpenCompareForRefresh(sessionId); }
+                    catch (cmpErr) {
+                        // Compare opening is best-effort -- the refresh
+                        // itself already succeeded.
+                        console.warn('[Sessions] auto-open compare failed:', cmpErr);
+                    }
+                }
             } catch (err) {
                 sessionsTabState.error = `Refresh From SolidWorks failed: ${err && err.message || err}`;
             } finally {
@@ -16352,17 +16344,21 @@
             actions.appendChild(mkBtn('sessionsLinkPromotedRevision', 'Link Promoted Revision',
                 () => _sessionsTabLinkPromotedRevision(sid), !canLinkPromoted));
 
-            // Refresh From SolidWorks -- one-shot orchestrator that promotes
-            // the extracted package + drafts semantic regions + advances
-            // the session FSM. Gated by the same set of statuses the
-            // backend accepts so the button matches the endpoint contract.
+            // Refresh From SolidWorks -- one-shot orchestrator that
+            // auto-extracts the active SolidWorks document, promotes
+            // a new rev, drafts semantic regions, and advances the
+            // session FSM. "prepared" is now in the gate because the
+            // backend lifts it via assumeApplied=true after the
+            // operator confirms the "this marks the edit as applied"
+            // dialog the handler shows.
             const canRefreshFromSolidWorks =
-                s.status === 'applied_in_solidworks'
+                s.status === 'prepared'
+                || s.status === 'applied_in_solidworks'
                 || s.status === 'extracted'
                 || s.status === 'linked_to_revision'
                 || s.status === 'promoted';
             actions.appendChild(mkBtn('sessionsRefreshFromSolidWorks', 'Refresh From SolidWorks',
-                () => _sessionsTabRefreshFromSolidWorks(sid, s.partNumber, s.sourceRevision),
+                () => _sessionsTabRefreshFromSolidWorks(sid, s.partNumber, s.sourceRevision, s.status),
                 !canRefreshFromSolidWorks));
 
             const canAbandon = !isTerminal;
@@ -23722,7 +23718,9 @@
             if (!state.featureMeshMap || !Object.keys(state.featureMeshMap).length) {
                 return false;
             }
-            const matched = cleanIds.some(id => !!state.featureMeshMap[id]);
+            const matched = (typeof _resolveFeatureHighlightFeatureIds === 'function')
+                ? _resolveFeatureHighlightFeatureIds(cleanIds).size > 0
+                : cleanIds.some(id => !!state.featureMeshMap[id]);
             if (typeof applyFeatureHighlight === 'function') {
                 applyFeatureHighlight(cleanIds);
             }
@@ -26823,9 +26821,81 @@
             }
         }
 
+        function _normalizeFeatureHighlightId(value) {
+            return String(value || '').trim().toLowerCase();
+        }
+
+        function _featureColorAliasesForMeshKey(meshKey) {
+            const aliases = [];
+            const features = (state.featureColorMap && Array.isArray(state.featureColorMap.features))
+                ? state.featureColorMap.features
+                : [];
+            const keyNorm = _normalizeFeatureHighlightId(meshKey);
+            for (const feat of features) {
+                if (!feat || typeof feat !== 'object') continue;
+                const cadId = feat.cad_feature_id || feat.cadFeatureId;
+                const glbNode = feat.glb_node_name || feat.glbNodeName;
+                const swName = feat.sw_name || feat.swName;
+                const label = feat.display_label || feat.displayLabel;
+                const candidates = [cadId, glbNode, swName, label];
+                if (candidates.some(v => _normalizeFeatureHighlightId(v) === keyNorm)) {
+                    candidates.forEach(v => {
+                        if (v && !aliases.includes(v)) aliases.push(v);
+                    });
+                }
+            }
+            return aliases;
+        }
+
+        function _featureHighlightAliasesForMesh(meshKey, mesh) {
+            const u = (mesh && mesh.userData) || {};
+            return [
+                meshKey,
+                mesh && mesh.name,
+                u._featureId,
+                u.featureId,
+                u.cadFeatureId,
+                u.cad_feature_id,
+                u.glbNodeName,
+                u.glb_node_name,
+                ..._featureColorAliasesForMeshKey(meshKey),
+            ].filter(v => typeof v === 'string' && v.trim());
+        }
+
+        function _resolveFeatureHighlightFeatureIds(featureIds) {
+            const requested = Array.isArray(featureIds)
+                ? featureIds.map(_normalizeFeatureHighlightId).filter(Boolean)
+                : [];
+            const requestedSet = new Set(requested);
+            const matched = new Set();
+            if (!state.featureMeshMap || !requestedSet.size) return matched;
+
+            for (const [meshKey, meshes] of Object.entries(state.featureMeshMap)) {
+                const sampleMesh = Array.isArray(meshes) && meshes.length ? meshes[0] : null;
+                const aliases = _featureHighlightAliasesForMesh(meshKey, sampleMesh)
+                    .map(_normalizeFeatureHighlightId)
+                    .filter(Boolean);
+                if (aliases.some(alias => requestedSet.has(alias))) {
+                    matched.add(meshKey);
+                }
+            }
+            return matched;
+        }
+
         function applyFeatureHighlight(featureIds) {
-            if (!state.featureMeshMap) return;
-            const highlightSet = new Set(featureIds);
+            if (!state.featureMeshMap) return { ok: false, matched: 0, requested: [] };
+            const cleanFeatureIds = Array.isArray(featureIds)
+                ? featureIds.filter(id => typeof id === 'string' && id.trim())
+                : [];
+            const highlightSet = _resolveFeatureHighlightFeatureIds(cleanFeatureIds);
+            if (!highlightSet.size) {
+                console.warn('[3D] No meshes matched feature highlight request:', cleanFeatureIds);
+                if (state.featureHighlightActive) clearFeatureHighlights();
+                if (window._toast && cleanFeatureIds.length) {
+                    window._toast('No matching 3D feature found for highlight target', 'warning');
+                }
+                return { ok: false, matched: 0, requested: cleanFeatureIds };
+            }
             const neutralGray = new THREE.Color(0x888888);
             const fallbackGlow = new THREE.Color(0xffc400);
             for (const [featId, meshes] of Object.entries(state.featureMeshMap)) {
@@ -26859,6 +26929,7 @@
                 });
             }
             state.featureHighlightActive = true;
+            return { ok: true, matched: highlightSet.size, requested: cleanFeatureIds };
         }
 
         function clearFeatureHighlights() {
@@ -31892,8 +31963,13 @@
                 highlight_features: {
                     agents: ['inspector', 'deviation-analyst'],
                     execute(args) {
-                        applyFeatureHighlight(args.feature_ids);
-                        return { ok: true, applied: args.feature_ids.length };
+                        const featureIds = Array.isArray(args && args.feature_ids) ? args.feature_ids : [];
+                        const result = applyFeatureHighlight(featureIds);
+                        return {
+                            ok: !!(result && result.ok),
+                            applied: (result && result.matched) || 0,
+                            requested: featureIds.length,
+                        };
                     }
                 },
                 highlight_parts: {
@@ -33267,11 +33343,9 @@
                     tip.className = 'agent-icon-tooltip';
                     tip.textContent = agent.name + ' \u2014 ' + agent.role;
                     btn.appendChild(tip);
-                    // Feature #143: Grey out Deviation Analyst when no assembly context AND no part revisions
-                    if (key === 'deviation-analyst' && !assemblyContextAvailable && !partDiffState.available) {
-                        btn.classList.add('disabled');
-                        btn.title = 'No assembly context or part revisions available';
-                    }
+                    // Sage is no longer compare-only. Keep it selectable even
+                    // for single-revision parts so semantic-region handoffs and
+                    // CAD target questions work before a second revision exists.
                     btn.addEventListener('click', () => selectAgent(key));
                     agentIconsStrip.appendChild(btn);
                 }

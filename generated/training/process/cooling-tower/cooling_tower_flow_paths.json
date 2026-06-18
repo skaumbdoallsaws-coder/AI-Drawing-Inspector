@@ -1,0 +1,6331 @@
+﻿{
+  "schemaVersion": "flow_paths.v1",
+  "description": "Authored process-flow visualization paths for operator training. These are teaching overlays, not CFD or velocity/pressure simulation. Airflow is distributed across the measured side louver openings and fan outlet disks to communicate broad intake and full-diameter exhaust.",
+  "sourceMeasurements": {
+    "sideLouverOpening": {
+      "widthMm": 2310,
+      "heightMm": 2060,
+      "areaM2": 4.7586,
+      "source": "SolidWorks screenshot measurement from zoompic/51.png"
+    },
+    "fanOpening": {
+      "diameterMm": 1830,
+      "source": "SolidWorks screenshot measurement from earlier fan-opening review"
+    }
+  },
+  "visualizationNotes": {
+    "intakeEmitterGridPerFace": "4 columns x 3 rows",
+    "openFacesPerCell": 2,
+    "cellCount": 2,
+    "flowCount": 52,
+    "curveVisibility": "air guide curves hidden; water guide curves lightly visible to clarify pipe/header routing",
+    "thermalColorGradient": "air particles transition from cyan at louver intake to yellow through the cell and red-orange at the fan outlet to show heat absorbed from the water",
+    "mistPlumeCount": 2,
+    "mistPlumeBehavior": "soft white translucent particles rise and expand above each fan outlet when Air Flow is active; teaching overlay only, not CFD or plume dispersion simulation",
+    "waterFlowCount": 4,
+    "waterFlowBehavior": "hot-water paths now use body-level anchors instead of broad group centers: filter vessel flange/body, 8-inch connector/valve/trunk, split branches, 5-inch valves, and individual riser tops; curves stay visible for tuning",
+    "totalFlowCount": 62,
+    "waterRouteGranularity": "body-level anchors with light visible guide curves",
+    "drainOverflowFlowCount": 7,
+    "drainOverflowBehavior": "Drain/overflow is authored as visible/front vertical takeoffs, local T merges, lower collector bends, and one common right-discharge collector so the overlay sits on the pipe centerline instead of between pipe faces."
+  },
+  "flows": [
+    {
+      "flowId": "airflow-cell-1-front-lower-left",
+      "label": "Air entering cell 1 through the front louver face (lower left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-lower-left-center",
+      "label": "Air entering cell 1 through the front louver face (lower left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-lower-right-center",
+      "label": "Air entering cell 1 through the front louver face (lower right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-lower-right",
+      "label": "Air entering cell 1 through the front louver face (lower right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-middle-left",
+      "label": "Air entering cell 1 through the front louver face (middle left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-middle-left-center",
+      "label": "Air entering cell 1 through the front louver face (middle left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-middle-right-center",
+      "label": "Air entering cell 1 through the front louver face (middle right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-middle-right",
+      "label": "Air entering cell 1 through the front louver face (middle right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-upper-left",
+      "label": "Air entering cell 1 through the front louver face (upper left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-upper-left-center",
+      "label": "Air entering cell 1 through the front louver face (upper left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-upper-right-center",
+      "label": "Air entering cell 1 through the front louver face (upper right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-front-upper-right",
+      "label": "Air entering cell 1 through the front louver face (upper right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-lower-left",
+      "label": "Air entering cell 1 through the back louver face (lower left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-lower-left-center",
+      "label": "Air entering cell 1 through the back louver face (lower left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-lower-right-center",
+      "label": "Air entering cell 1 through the back louver face (lower right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-lower-right",
+      "label": "Air entering cell 1 through the back louver face (lower right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-middle-left",
+      "label": "Air entering cell 1 through the back louver face (middle left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-middle-left-center",
+      "label": "Air entering cell 1 through the back louver face (middle left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-middle-right-center",
+      "label": "Air entering cell 1 through the back louver face (middle right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-middle-right",
+      "label": "Air entering cell 1 through the back louver face (middle right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-upper-left",
+      "label": "Air entering cell 1 through the back louver face (upper left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-upper-left-center",
+      "label": "Air entering cell 1 through the back louver face (upper left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-upper-right-center",
+      "label": "Air entering cell 1 through the back louver face (upper right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-1-back-upper-right",
+      "label": "Air entering cell 1 through the back louver face (upper right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-lower-left",
+      "label": "Air entering cell 2 through the front louver face (lower left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-lower-left-center",
+      "label": "Air entering cell 2 through the front louver face (lower left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-lower-right-center",
+      "label": "Air entering cell 2 through the front louver face (lower right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-lower-right",
+      "label": "Air entering cell 2 through the front louver face (lower right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-middle-left",
+      "label": "Air entering cell 2 through the front louver face (middle left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-middle-left-center",
+      "label": "Air entering cell 2 through the front louver face (middle left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-middle-right-center",
+      "label": "Air entering cell 2 through the front louver face (middle right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-middle-right",
+      "label": "Air entering cell 2 through the front louver face (middle right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-upper-left",
+      "label": "Air entering cell 2 through the front louver face (upper left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-upper-left-center",
+      "label": "Air entering cell 2 through the front louver face (upper left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-upper-right-center",
+      "label": "Air entering cell 2 through the front louver face (upper right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-front-upper-right",
+      "label": "Air entering cell 2 through the front louver face (upper right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "front",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-lower-left",
+      "label": "Air entering cell 2 through the back louver face (lower left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-lower-left-center",
+      "label": "Air entering cell 2 through the back louver face (lower left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-lower-right-center",
+      "label": "Air entering cell 2 through the back louver face (lower right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            -0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-lower-right",
+      "label": "Air entering cell 2 through the back louver face (lower right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            -0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            -0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            -0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-middle-left",
+      "label": "Air entering cell 2 through the back louver face (middle left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-middle-left-center",
+      "label": "Air entering cell 2 through the back louver face (middle left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-middle-right-center",
+      "label": "Air entering cell 2 through the back louver face (middle right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.24,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-middle-right",
+      "label": "Air entering cell 2 through the back louver face (middle right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.72,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-upper-left",
+      "label": "Air entering cell 2 through the back louver face (upper left intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-upper-left-center",
+      "label": "Air entering cell 2 through the back louver face (upper left-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            -0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            -0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            -0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-upper-right-center",
+      "label": "Air entering cell 2 through the back louver face (upper right-center intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            0.35,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.084,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.68
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "airflow-cell-2-back-upper-right",
+      "label": "Air entering cell 2 through the back louver face (upper right intake zone)",
+      "medium": "air",
+      "color": "#9FE7FF",
+      "speed": 0.155,
+      "particleCount": 16,
+      "particleSize": 0.054,
+      "opacity": 0.72,
+      "curveOpacity": 0.0,
+      "spread": [
+        0.09,
+        0.11,
+        0.045
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "fan_airflow"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "back",
+            "distance": 0.95
+          },
+          "manualOffset": [
+            1.06,
+            0.94,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": "center",
+          "manualOffset": [
+            0.254,
+            0.169,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "groupId": "cooling_tower_cell_2"
+          },
+          "offset": {
+            "face": "top",
+            "distance": 1.02
+          },
+          "manualOffset": [
+            0.58,
+            0.0,
+            0.42
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#9FE7FF",
+          "meaning": "cool ambient air entering through the side louvers"
+        },
+        {
+          "t": 0.58,
+          "color": "#FFF3A6",
+          "meaning": "air warming as it crosses the wet heat-transfer zone"
+        },
+        {
+          "t": 1.0,
+          "color": "#FF5A3D",
+          "meaning": "heated discharge air leaving through the fan opening"
+        }
+      ]
+    },
+    {
+      "flowId": "hot-water-filter-to-riser-01-7",
+      "label": "Hot water from the filter vessel to 5-inch riser 01-7",
+      "medium": "water",
+      "processRole": "hot_water_inlet_loop_body_level_route",
+      "curveType": "linear",
+      "color": "#FF8A2A",
+      "speed": 0.095,
+      "particleCount": 76,
+      "particleSize": 0.068,
+      "opacity": 0.88,
+      "curveOpacity": 0.1,
+      "spread": [
+        0.012,
+        0.012,
+        0.012
+      ],
+      "relatedGroups": [
+        "existing_cooling_tower_filter_vessel",
+        "spi_01_8_rev_01_existing_2",
+        "butterfly_valve_kitz_dia_8_inch_1",
+        "spi_01_8_rev_03_1",
+        "butterfly_valve_kitz_dia_5_inch",
+        "spi_ct_5_inch",
+        "spi_02_8_rev_03_1"
+      ],
+      "activationZones": [
+        "hot_water_inlet",
+        "filter_vessel",
+        "inlet_header",
+        "tower_risers"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ],
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.98,
+            0.25,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.75,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_077__filter_ct_existing_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_364__spi_01_8_rev_01_existing_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_092__butterfly_valve_kitz_dia_8_inch_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_334__spi_01_8_rev_03_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_271__spi_01_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_271__spi_01_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_386__spi_02_8_rev_03_1_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_297__spi_02_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.42,
+            0.81
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_297__spi_02_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.0,
+            0.42,
+            0.81
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_551__spi_02_8_rev_03_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_320__butterfly_valve_kitz_dia_5_inch_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_314__spi_ct_5_inch_01_7_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_143__spi_ct_5_inch_01_7_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.02,
+            0.965
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_143__spi_ct_5_inch_01_7_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.92,
+            0.965
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_143__spi_ct_5_inch_01_7_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.965
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_143__spi_ct_5_inch_01_7_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.08
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#FF7A2E",
+          "meaning": "hot return water entering the visible loop at the filter vessel inlet flange"
+        },
+        {
+          "t": 0.5,
+          "color": "#FFB14A",
+          "meaning": "filtered hot water moving through the 8-inch inlet header"
+        },
+        {
+          "t": 1.0,
+          "color": "#FFD166",
+          "meaning": "hot water feeding the tower riser/distribution area"
+        }
+      ],
+      "meaning": "Explicit body-level hot-water route using linear segments through pipe endpoints and riser extents. This is an authored process teaching overlay, not a hydraulic simulation.",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "dashCount": 22,
+      "dashLength": 0.02,
+      "dashSpeed": 0.105,
+      "dashOpacity": 0.96,
+      "particles": false,
+      "temperature": "hot"
+    },
+    {
+      "flowId": "hot-water-filter-to-riser-01-6",
+      "label": "Hot water from the filter vessel to 5-inch riser 01-6",
+      "medium": "water",
+      "processRole": "hot_water_inlet_loop_body_level_route",
+      "curveType": "linear",
+      "color": "#FF8A2A",
+      "speed": 0.095,
+      "particleCount": 76,
+      "particleSize": 0.068,
+      "opacity": 0.88,
+      "curveOpacity": 0.1,
+      "spread": [
+        0.012,
+        0.012,
+        0.012
+      ],
+      "relatedGroups": [
+        "existing_cooling_tower_filter_vessel",
+        "spi_01_8_rev_01_existing_2",
+        "butterfly_valve_kitz_dia_8_inch_1",
+        "spi_01_8_rev_03_1",
+        "butterfly_valve_kitz_dia_5_inch",
+        "spi_ct_5_inch",
+        "spi_02_8_rev_03_1"
+      ],
+      "activationZones": [
+        "hot_water_inlet",
+        "filter_vessel",
+        "inlet_header",
+        "tower_risers"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ],
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.98,
+            0.25,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.75,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_077__filter_ct_existing_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_364__spi_01_8_rev_01_existing_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_092__butterfly_valve_kitz_dia_8_inch_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_334__spi_01_8_rev_03_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_271__spi_01_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_271__spi_01_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_386__spi_02_8_rev_03_1_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_297__spi_02_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.42,
+            0.81
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_297__spi_02_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.613,
+            0.42,
+            0.81
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_114__spi_02_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_583__butterfly_valve_kitz_dia_5_inch_2_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_575__spi_ct_5_inch_01_6_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_389__spi_ct_5_inch_01_6_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.02,
+            0.965
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_389__spi_ct_5_inch_01_6_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.92,
+            0.965
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_389__spi_ct_5_inch_01_6_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.965
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_389__spi_ct_5_inch_01_6_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.08
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#FF7A2E",
+          "meaning": "hot return water entering the visible loop at the filter vessel inlet flange"
+        },
+        {
+          "t": 0.5,
+          "color": "#FFB14A",
+          "meaning": "filtered hot water moving through the 8-inch inlet header"
+        },
+        {
+          "t": 1.0,
+          "color": "#FFD166",
+          "meaning": "hot water feeding the tower riser/distribution area"
+        }
+      ],
+      "meaning": "Explicit body-level hot-water route using linear segments through pipe endpoints and riser extents. This is an authored process teaching overlay, not a hydraulic simulation.",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "dashCount": 22,
+      "dashLength": 0.02,
+      "dashSpeed": 0.105,
+      "dashOpacity": 0.96,
+      "particles": false,
+      "temperature": "hot"
+    },
+    {
+      "flowId": "hot-water-filter-to-riser-02-4",
+      "label": "Hot water from the filter vessel to 5-inch riser 02-4",
+      "medium": "water",
+      "processRole": "hot_water_inlet_loop_body_level_route",
+      "curveType": "linear",
+      "color": "#FF8A2A",
+      "speed": 0.095,
+      "particleCount": 76,
+      "particleSize": 0.068,
+      "opacity": 0.88,
+      "curveOpacity": 0.1,
+      "spread": [
+        0.012,
+        0.012,
+        0.012
+      ],
+      "relatedGroups": [
+        "existing_cooling_tower_filter_vessel",
+        "spi_01_8_rev_01_existing_2",
+        "butterfly_valve_kitz_dia_8_inch_1",
+        "spi_01_8_rev_03_1",
+        "butterfly_valve_kitz_dia_5_inch",
+        "spi_ct_5_inch",
+        "spi_03_8_rev_01_2"
+      ],
+      "activationZones": [
+        "hot_water_inlet",
+        "filter_vessel",
+        "inlet_header",
+        "tower_risers"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ],
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.98,
+            0.25,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.75,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_077__filter_ct_existing_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_364__spi_01_8_rev_01_existing_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_092__butterfly_valve_kitz_dia_8_inch_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_334__spi_01_8_rev_03_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_271__spi_01_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_023__spi_01_8_rev_03_1_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_133__spi_03_8_rev_01_2_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_026__spi_03_8_rev_01_2_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.42,
+            0.09
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_026__spi_03_8_rev_01_2_solid1"
+          },
+          "bboxPoint": [
+            0.105,
+            0.42,
+            0.09
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_482__spi_03_8_rev_01_2_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_468__butterfly_valve_kitz_dia_5_inch_4_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_428__spi_ct_5_inch_02_4_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_248__spi_ct_5_inch_02_4_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.02,
+            0.05
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_248__spi_ct_5_inch_02_4_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.9,
+            0.05
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_248__spi_ct_5_inch_02_4_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.05
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_248__spi_ct_5_inch_02_4_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.92
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#FF7A2E",
+          "meaning": "hot return water entering the visible loop at the filter vessel inlet flange"
+        },
+        {
+          "t": 0.5,
+          "color": "#FFB14A",
+          "meaning": "filtered hot water moving through the 8-inch inlet header"
+        },
+        {
+          "t": 1.0,
+          "color": "#FFD166",
+          "meaning": "hot water feeding the tower riser/distribution area"
+        }
+      ],
+      "meaning": "Explicit body-level hot-water route using linear segments through pipe endpoints and riser extents. This is an authored process teaching overlay, not a hydraulic simulation.",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "dashCount": 22,
+      "dashLength": 0.02,
+      "dashSpeed": 0.105,
+      "dashOpacity": 0.96,
+      "particles": false,
+      "temperature": "hot"
+    },
+    {
+      "flowId": "hot-water-filter-to-riser-02-3",
+      "label": "Hot water from the filter vessel to 5-inch riser 02-3",
+      "medium": "water",
+      "processRole": "hot_water_inlet_loop_body_level_route",
+      "curveType": "linear",
+      "color": "#FF8A2A",
+      "speed": 0.095,
+      "particleCount": 76,
+      "particleSize": 0.068,
+      "opacity": 0.88,
+      "curveOpacity": 0.1,
+      "spread": [
+        0.012,
+        0.012,
+        0.012
+      ],
+      "relatedGroups": [
+        "existing_cooling_tower_filter_vessel",
+        "spi_01_8_rev_01_existing_2",
+        "butterfly_valve_kitz_dia_8_inch_1",
+        "spi_01_8_rev_03_1",
+        "butterfly_valve_kitz_dia_5_inch",
+        "spi_ct_5_inch",
+        "spi_03_8_rev_01_2"
+      ],
+      "activationZones": [
+        "hot_water_inlet",
+        "filter_vessel",
+        "inlet_header",
+        "tower_risers"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ],
+          "manualOffset": [
+            0.18,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_526__filter_ct_existing_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.98,
+            0.25,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_342__filter_ct_existing_1_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.75,
+            0.58
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_077__filter_ct_existing_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_364__spi_01_8_rev_01_existing_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_301__spi_01_8_rev_01_existing_2_solid1"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_092__butterfly_valve_kitz_dia_8_inch_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_334__spi_01_8_rev_03_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_609__spi_01_8_rev_03_1_solid3"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_271__spi_01_8_rev_03_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_023__spi_01_8_rev_03_1_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_133__spi_03_8_rev_01_2_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_026__spi_03_8_rev_01_2_solid1"
+          },
+          "bboxPoint": [
+            1.0,
+            0.42,
+            0.09
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_026__spi_03_8_rev_01_2_solid1"
+          },
+          "bboxPoint": [
+            0.613,
+            0.42,
+            0.09
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_284__spi_03_8_rev_01_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_210__butterfly_valve_kitz_dia_5_inch_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_059__spi_ct_5_inch_02_3_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_510__spi_ct_5_inch_02_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.02,
+            0.05
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_510__spi_ct_5_inch_02_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.9,
+            0.05
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_510__spi_ct_5_inch_02_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.05
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_510__spi_ct_5_inch_02_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.98,
+            0.92
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#FF7A2E",
+          "meaning": "hot return water entering the visible loop at the filter vessel inlet flange"
+        },
+        {
+          "t": 0.5,
+          "color": "#FFB14A",
+          "meaning": "filtered hot water moving through the 8-inch inlet header"
+        },
+        {
+          "t": 1.0,
+          "color": "#FFD166",
+          "meaning": "hot water feeding the tower riser/distribution area"
+        }
+      ],
+      "meaning": "Explicit body-level hot-water route using linear segments through pipe endpoints and riser extents. This is an authored process teaching overlay, not a hydraulic simulation.",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "dashCount": 22,
+      "dashLength": 0.02,
+      "dashSpeed": 0.105,
+      "dashOpacity": 0.96,
+      "particles": false,
+      "temperature": "hot"
+    },
+    {
+      "flowId": "cold-water-basin-outlet-branch-a",
+      "label": "Cold water outlet branch A from basin to 12-inch PVC manifold",
+      "medium": "water",
+      "temperature": "cold",
+      "processRole": "cold_water_outlet_loop",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34BFFF",
+      "dashCount": 18,
+      "dashLength": 0.02,
+      "dashSpeed": 0.105,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.1,
+      "relatedGroups": [
+        "sp_outlet_ct_01_8_inch",
+        "flexible_rubber_jis_10_k_8_inch",
+        "spo_ct_01a_8_inch",
+        "butterfly_valve_kitz_dia_8_inch",
+        "spo_ct_01_12_inch_pvc"
+      ],
+      "activationZones": [
+        "cold_water_outlet",
+        "cooling_basin",
+        "outlet_header",
+        "tank_feed"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "bodyId": "body_410__sp_outlet_ct_01_8_inch_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_327__sp_outlet_ct_01_8_inch_2_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_327__sp_outlet_ct_01_8_inch_2_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_053__sp_outlet_ct_01_8_inch_2_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_392__flexible_rubber_jis_10_k_8_inch_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_088__flexible_rubber_jis_10_k_8_inch_2_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_084__flexible_rubber_jis_10_k_8_inch_2_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_566__spo_ct_01a_8_inch_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_484__spo_ct_01a_8_inch_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_231__spo_ct_01a_8_inch_1_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_353__butterfly_valve_kitz_dia_8_inch_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_144__spo_ct_01_12_inch_pvc_2_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_072__spo_ct_01_12_inch_pvc_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_024__spo_ct_01_12_inch_pvc_2_solid8"
+          },
+          "bboxPoint": [
+            0.145,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#7DEBFF",
+          "meaning": "cooled water leaving the basin outlet branch"
+        },
+        {
+          "t": 0.55,
+          "color": "#34BFFF",
+          "meaning": "cooled water moving through the outlet manifold"
+        },
+        {
+          "t": 1.0,
+          "color": "#1F7CFF",
+          "meaning": "cooled water directed toward the large tank"
+        }
+      ],
+      "meaning": "Authored cold-water outlet path: cooled basin water leaves through the 8-inch outlet branch, enters the 12-inch PVC manifold, and is directed toward the large tank. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "cold-water-basin-outlet-branch-b",
+      "label": "Cold water outlet branch B from basin to 12-inch PVC manifold",
+      "medium": "water",
+      "temperature": "cold",
+      "processRole": "cold_water_outlet_loop",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34BFFF",
+      "dashCount": 18,
+      "dashLength": 0.02,
+      "dashSpeed": 0.105,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.1,
+      "relatedGroups": [
+        "sp_outlet_ct_01_8_inch",
+        "flexible_rubber_jis_10_k_8_inch",
+        "spo_ct_01a_8_inch",
+        "butterfly_valve_kitz_dia_8_inch",
+        "spo_ct_01_12_inch_pvc"
+      ],
+      "activationZones": [
+        "cold_water_outlet",
+        "cooling_basin",
+        "outlet_header",
+        "tank_feed"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "bodyId": "body_387__sp_outlet_ct_01_8_inch_3_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_316__sp_outlet_ct_01_8_inch_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_316__sp_outlet_ct_01_8_inch_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_029__sp_outlet_ct_01_8_inch_3_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_083__flexible_rubber_jis_10_k_8_inch_3_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_409__flexible_rubber_jis_10_k_8_inch_3_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_406__flexible_rubber_jis_10_k_8_inch_3_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_610__spo_ct_01a_8_inch_2_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_538__spo_ct_01a_8_inch_2_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_289__spo_ct_01a_8_inch_2_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_617__butterfly_valve_kitz_dia_8_inch_4_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_441__spo_ct_01_12_inch_pvc_2_solid4"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_625__spo_ct_01_12_inch_pvc_2_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_024__spo_ct_01_12_inch_pvc_2_solid8"
+          },
+          "bboxPoint": [
+            0.612,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#7DEBFF",
+          "meaning": "cooled water leaving the basin outlet branch"
+        },
+        {
+          "t": 0.55,
+          "color": "#34BFFF",
+          "meaning": "cooled water moving through the outlet manifold"
+        },
+        {
+          "t": 1.0,
+          "color": "#1F7CFF",
+          "meaning": "cooled water directed toward the large tank"
+        }
+      ],
+      "meaning": "Authored cold-water outlet path: cooled basin water leaves through the 8-inch outlet branch, enters the 12-inch PVC manifold, and is directed toward the large tank. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "cold-water-12-inch-manifold-to-tank",
+      "label": "Cold water through 12-inch PVC outlet manifold toward the large tank",
+      "medium": "water",
+      "temperature": "cold",
+      "processRole": "cold_water_tank_feed",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34BFFF",
+      "dashCount": 18,
+      "dashLength": 0.02,
+      "dashSpeed": 0.105,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.1,
+      "relatedGroups": [
+        "sp_outlet_ct_01_8_inch",
+        "flexible_rubber_jis_10_k_8_inch",
+        "spo_ct_01a_8_inch",
+        "butterfly_valve_kitz_dia_8_inch",
+        "spo_ct_01_12_inch_pvc"
+      ],
+      "activationZones": [
+        "cold_water_outlet",
+        "cooling_basin",
+        "outlet_header",
+        "tank_feed"
+      ],
+      "waypoints": [
+        {
+          "anchor": {
+            "bodyId": "body_024__spo_ct_01_12_inch_pvc_2_solid8"
+          },
+          "bboxPoint": [
+            0.145,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_024__spo_ct_01_12_inch_pvc_2_solid8"
+          },
+          "bboxPoint": [
+            0.612,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_024__spo_ct_01_12_inch_pvc_2_solid8"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_093__spo_ct_01_12_inch_pvc_2_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_225__spo_ct_01_12_inch_pvc_2_solid6"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_305__spo_ct_01_12_inch_pvc_2_solid7"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_537__spo_ct_02_12_inch_pvc_1_solid3"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_466__spo_ct_02_12_inch_pvc_1_solid2"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_590__spo_ct_02_12_inch_pvc_1_solid1"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_285__spo_ct_02_12_inch_pvc_1_solid4"
+          },
+          "bboxPoint": [
+            0.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_285__spo_ct_02_12_inch_pvc_1_solid4"
+          },
+          "bboxPoint": [
+            1.0,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_349__spo_ct_02_12_inch_pvc_1_solid5"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_481__spo_ct_02_12_inch_pvc_1_solid6"
+          },
+          "bboxPoint": [
+            0.5,
+            1.0,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_481__spo_ct_02_12_inch_pvc_1_solid6"
+          },
+          "bboxPoint": [
+            0.5,
+            0.0,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_561__spo_ct_02_12_inch_pvc_1_solid7"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_054__spo_ct_02_12_inch_pvc_1_solid8"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_123__spo_ct_02_12_inch_pvc_1_solid9"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_081__spo_ct_02_12_inch_pvc_1_solid10"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "anchor": {
+            "bodyId": "body_166__spo_ct_02_12_inch_pvc_1_solid11"
+          },
+          "bboxPoint": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#7DEBFF",
+          "meaning": "cooled water leaving the basin outlet branch"
+        },
+        {
+          "t": 0.55,
+          "color": "#34BFFF",
+          "meaning": "cooled water moving through the outlet manifold"
+        },
+        {
+          "t": 1.0,
+          "color": "#1F7CFF",
+          "meaning": "cooled water directed toward the large tank"
+        }
+      ],
+      "meaning": "Authored cold-water outlet path: cooled basin water leaves through the 8-inch outlet branch, enters the 12-inch PVC manifold, and is directed toward the large tank. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-left-straight-takeoff",
+      "label": "Left basin straight drain takeoff into the local T",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 5,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            5.881,
+            2.992,
+            7.828
+          ]
+        },
+        {
+          "modelPoint": [
+            5.881,
+            2.6875,
+            7.828
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "basin water entering one drain or overflow takeoff"
+        },
+        {
+          "t": 0.55,
+          "color": "#34D6B3",
+          "meaning": "water dropping and merging through the 2-inch drain/overflow piping"
+        },
+        {
+          "t": 1.0,
+          "color": "#00A37A",
+          "meaning": "water leaving through the common drain/overflow run"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: each cooling basin has two takeoffs; the L-shaped takeoff and straight takeoff meet at a local T, then the merged drain/overflow line drops into a lower collector and carries water to the right. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-left-local-merge-drop",
+      "label": "Left local T dropping into the lower drain collector",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 7,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            5.881,
+            2.6875,
+            7.828
+          ]
+        },
+        {
+          "modelPoint": [
+            5.881,
+            1.95,
+            7.828
+          ]
+        },
+        {
+          "modelPoint": [
+            5.881,
+            1.95,
+            8.399
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "basin water entering one drain or overflow takeoff"
+        },
+        {
+          "t": 0.55,
+          "color": "#34D6B3",
+          "meaning": "water dropping and merging through the 2-inch drain/overflow piping"
+        },
+        {
+          "t": 1.0,
+          "color": "#00A37A",
+          "meaning": "water leaving through the common drain/overflow run"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: each cooling basin has two takeoffs; the L-shaped takeoff and straight takeoff meet at a local T, then the merged drain/overflow line drops into a lower collector and carries water to the right. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-right-straight-takeoff",
+      "label": "Right basin straight drain takeoff into the local T",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 5,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            8.291,
+            2.992,
+            7.828
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            2.6875,
+            7.828
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "basin water entering one drain or overflow takeoff"
+        },
+        {
+          "t": 0.55,
+          "color": "#34D6B3",
+          "meaning": "water dropping and merging through the 2-inch drain/overflow piping"
+        },
+        {
+          "t": 1.0,
+          "color": "#00A37A",
+          "meaning": "water leaving through the common drain/overflow run"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: each cooling basin has two takeoffs; the L-shaped takeoff and straight takeoff meet at a local T, then the merged drain/overflow line drops into a lower collector and carries water to the right. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-right-local-merge-drop",
+      "label": "Right local T dropping into the lower drain collector",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 7,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            8.291,
+            2.6875,
+            7.828
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            1.95,
+            7.828
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            1.95,
+            8.399
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "basin water entering one drain or overflow takeoff"
+        },
+        {
+          "t": 0.55,
+          "color": "#34D6B3",
+          "meaning": "water dropping and merging through the 2-inch drain/overflow piping"
+        },
+        {
+          "t": 1.0,
+          "color": "#00A37A",
+          "meaning": "water leaving through the common drain/overflow run"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: each cooling basin has two takeoffs; the L-shaped takeoff and straight takeoff meet at a local T, then the merged drain/overflow line drops into a lower collector and carries water to the right. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-common-right-discharge",
+      "label": "Common drain/overflow collector carrying water to the right",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 15,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            5.881,
+            1.95,
+            8.399
+          ]
+        },
+        {
+          "modelPoint": [
+            5.896,
+            1.861,
+            8.453
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            1.763,
+            8.463
+          ]
+        },
+        {
+          "modelPoint": [
+            9.962,
+            1.752,
+            8.434
+          ]
+        },
+        {
+          "modelPoint": [
+            9.962,
+            1.752,
+            4.615
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "basin water entering one drain or overflow takeoff"
+        },
+        {
+          "t": 0.55,
+          "color": "#34D6B3",
+          "meaning": "water dropping and merging through the 2-inch drain/overflow piping"
+        },
+        {
+          "t": 1.0,
+          "color": "#00A37A",
+          "meaning": "water leaving through the common drain/overflow run"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: each cooling basin has two takeoffs; the L-shaped takeoff and straight takeoff meet at a local T, then the merged drain/overflow line drops into a lower collector and carries water to the right. This is a process-teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-right-overflow-standpipe",
+      "label": "Right basin overflow standpipe dropping to the common discharge",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 9,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            8.291,
+            3.375,
+            8.418
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            1.973,
+            8.444
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            1.882,
+            8.452
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            1.784,
+            8.463
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "right basin overflow spilling into the standpipe rim"
+        },
+        {
+          "t": 0.55,
+          "color": "#34D6B3",
+          "meaning": "overflow water dropping through the 2-inch standpipe"
+        },
+        {
+          "t": 1.0,
+          "color": "#00A37A",
+          "meaning": "water joining the common drain/overflow discharge run"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: the right basin overflow standpipe (body_576) carries spill-over water down to the common discharge run. Teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-left-top-takeoff",
+      "label": "Left basin overflow takeoff stub into the drain riser",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 4,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            5.881,
+            3.4025,
+            8.083
+          ]
+        },
+        {
+          "modelPoint": [
+            5.881,
+            3.4025,
+            8.208
+          ]
+        },
+        {
+          "modelPoint": [
+            5.881,
+            3.4025,
+            8.213
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "basin overflow entering the takeoff stub"
+        },
+        {
+          "t": 1.0,
+          "color": "#34D6B3",
+          "meaning": "overflow heading into the drain/overflow riser"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: left basin overflow takeoff stub. Teaching overlay, not a hydraulic simulation."
+    },
+    {
+      "flowId": "drain-overflow-right-top-takeoff",
+      "label": "Right basin overflow takeoff stub into the drain riser",
+      "medium": "water",
+      "temperature": "service",
+      "processRole": "drain_overflow",
+      "flowRole": "drain_overflow",
+      "curveType": "linear",
+      "renderStyle": "dashes",
+      "dashSegments": true,
+      "color": "#34D6B3",
+      "dashCount": 4,
+      "dashLength": 0.015,
+      "dashSpeed": 0.09,
+      "dashOpacity": 0.94,
+      "particles": false,
+      "curveOpacity": 0.13,
+      "relatedGroups": [
+        "drain_overflow_sp_01_rev_01_2_inch_1",
+        "cooling_tower_cell",
+        "cooling_tower_cell_2"
+      ],
+      "activationZones": [
+        "drain_overflow",
+        "basin_cleaning",
+        "overflow_discharge"
+      ],
+      "waypoints": [
+        {
+          "modelPoint": [
+            8.291,
+            3.4025,
+            8.083
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            3.4025,
+            8.208
+          ]
+        },
+        {
+          "modelPoint": [
+            8.291,
+            3.4025,
+            8.213
+          ]
+        }
+      ],
+      "colorStops": [
+        {
+          "t": 0.0,
+          "color": "#8DFFE5",
+          "meaning": "basin overflow entering the takeoff stub"
+        },
+        {
+          "t": 1.0,
+          "color": "#34D6B3",
+          "meaning": "overflow heading into the drain/overflow riser"
+        }
+      ],
+      "meaning": "Authored drain/overflow path: right basin overflow takeoff stub. Teaching overlay, not a hydraulic simulation."
+    }
+  ],
+  "mistPlumes": [
+    {
+      "plumeId": "mist-cell-1-fan-exit",
+      "label": "Warm humid discharge mist leaving cell 1 through the fan opening",
+      "medium": "air",
+      "anchor": {
+        "groupId": "cooling_tower_cell"
+      },
+      "offset": {
+        "face": "top",
+        "distance": 1.08
+      },
+      "manualOffset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell"
+      ],
+      "particleCount": 150,
+      "particleSize": 0.3,
+      "opacity": 0.24,
+      "radius": 0.86,
+      "height": 1.75,
+      "expandRadius": 0.68,
+      "riseSpeed": 0.078,
+      "twist": 1.15,
+      "driftSpeed": 0.09,
+      "color": "#F3FAFA",
+      "meaning": "soft teaching overlay showing humid air rising and spreading after heat absorption"
+    },
+    {
+      "plumeId": "mist-cell-2-fan-exit",
+      "label": "Warm humid discharge mist leaving cell 2 through the fan opening",
+      "medium": "air",
+      "anchor": {
+        "groupId": "cooling_tower_cell_2"
+      },
+      "offset": {
+        "face": "top",
+        "distance": 1.08
+      },
+      "manualOffset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "relatedGroups": [
+        "cooling_tower_cell_2"
+      ],
+      "particleCount": 150,
+      "particleSize": 0.3,
+      "opacity": 0.24,
+      "radius": 0.86,
+      "height": 1.75,
+      "expandRadius": 0.68,
+      "riseSpeed": 0.078,
+      "twist": 1.15,
+      "driftSpeed": 0.09,
+      "color": "#F3FAFA",
+      "meaning": "soft teaching overlay showing humid air rising and spreading after heat absorption"
+    }
+  ]
+}

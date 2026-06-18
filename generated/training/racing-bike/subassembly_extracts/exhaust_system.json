@@ -1,0 +1,1583 @@
+{
+  "fileName": "Exhaust System.SLDASM",
+  "filePath": "public-demo-source/racing-bike/Exhaust System.SLDASM",
+  "extractionTime": "2026-06-01T14:06:51.1931861-05:00",
+  "identity": {
+    "assemblyNumber": null,
+    "description": null,
+    "revision": null,
+    "author": null,
+    "customProperties": {}
+  },
+  "statistics": {
+    "totalComponents": 4,
+    "uniquePartCount": 3,
+    "subAssemblyCount": 0,
+    "totalMates": 0,
+    "resolvedCount": 4,
+    "lightweightCount": 0,
+    "suppressedCount": 0,
+    "mateTypeCounts": {}
+  },
+  "components": [
+    {
+      "name": "Exhaust System",
+      "referencedFileName": "Exhaust System.SLDASM",
+      "type": "Assembly",
+      "state": "Resolved",
+      "level": 0,
+      "parentName": null,
+      "isSuppressed": false,
+      "isLightweight": false,
+      "activeConfiguration": "",
+      "partDataKey": null,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1,
+        "rotation": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "quaternion": []
+      }
+    },
+    {
+      "name": "User Library-racing bike_racing bike.sldasm-Part-10-1",
+      "referencedFileName": "User Library-racing bike_racing bike.sldasm-Part-10.sldprt",
+      "type": "Part",
+      "state": "Resolved",
+      "level": 1,
+      "parentName": "Exhaust System",
+      "isSuppressed": false,
+      "isLightweight": false,
+      "activeConfiguration": "Default",
+      "partDataKey": "user library-racing bike_racing bike.sldasm-part-10.sldprt",
+      "transform": {
+        "translation": [
+          -0.04125861254,
+          0,
+          0
+        ],
+        "scale": 1,
+        "rotation": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "eulerAngles": [
+          0,
+          0,
+          0
+        ],
+        "quaternion": [
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "User Library-racing bike_racing bike.sldasm-Part-8-1",
+      "referencedFileName": "User Library-racing bike_racing bike.sldasm-Part-8.sldprt",
+      "type": "Part",
+      "state": "Resolved",
+      "level": 1,
+      "parentName": "Exhaust System",
+      "isSuppressed": false,
+      "isLightweight": false,
+      "activeConfiguration": "Default",
+      "partDataKey": "user library-racing bike_racing bike.sldasm-part-8.sldprt",
+      "transform": {
+        "translation": [
+          -0.03140001918,
+          0,
+          0
+        ],
+        "scale": 1,
+        "rotation": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "eulerAngles": [
+          0,
+          0,
+          0
+        ],
+        "quaternion": [
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "User Library-racing bike_racing bike.sldasm-Part-9-1",
+      "referencedFileName": "User Library-racing bike_racing bike.sldasm-Part-9.sldprt",
+      "type": "Part",
+      "state": "Resolved",
+      "level": 1,
+      "parentName": "Exhaust System",
+      "isSuppressed": false,
+      "isLightweight": false,
+      "activeConfiguration": "Default",
+      "partDataKey": "user library-racing bike_racing bike.sldasm-part-9.sldprt",
+      "transform": {
+        "translation": [
+          0.06391783126,
+          0,
+          0
+        ],
+        "scale": 1,
+        "rotation": [
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "eulerAngles": [
+          0,
+          0,
+          0
+        ],
+        "quaternion": [
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  ],
+  "mates": [],
+  "mateRelationships": [],
+  "explodeSteps": [
+    {
+      "explodeViewName": "Exploded View1",
+      "stepIndex": 0,
+      "name": "Muffer",
+      "stepType": "Translate",
+      "componentNames": [
+        "User Library-racing bike_racing bike.sldasm-Part-9-1"
+      ],
+      "componentFileNames": [
+        "User Library-racing bike_racing bike.sldasm-Part-9.sldprt"
+      ],
+      "direction": [
+        1,
+        0,
+        0
+      ],
+      "distanceMeters": 0.06391783126,
+      "reverseDirection": false,
+      "rotationAngleRadians": 0,
+      "reverseRotation": false
+    },
+    {
+      "explodeViewName": "Exploded View1",
+      "stepIndex": 1,
+      "name": "exhaust clamp band B",
+      "stepType": "Translate",
+      "componentNames": [
+        "User Library-racing bike_racing bike.sldasm-Part-10-1"
+      ],
+      "componentFileNames": [
+        "User Library-racing bike_racing bike.sldasm-Part-10.sldprt"
+      ],
+      "direction": [
+        -1,
+        0,
+        0
+      ],
+      "distanceMeters": 0.04125861254,
+      "reverseDirection": true,
+      "rotationAngleRadians": 0,
+      "reverseRotation": false
+    },
+    {
+      "explodeViewName": "Exploded View1",
+      "stepIndex": 2,
+      "name": "exhaust clamp band A",
+      "stepType": "Translate",
+      "componentNames": [
+        "User Library-racing bike_racing bike.sldasm-Part-8-1"
+      ],
+      "componentFileNames": [
+        "User Library-racing bike_racing bike.sldasm-Part-8.sldprt"
+      ],
+      "direction": [
+        -1,
+        0,
+        0
+      ],
+      "distanceMeters": 0.03140001918,
+      "reverseDirection": true,
+      "rotationAngleRadians": 0,
+      "reverseRotation": false
+    }
+  ],
+  "assemblyFeatures": {
+    "holeWizardHoles": [],
+    "extrudes": [],
+    "cuts": [],
+    "revolves": [],
+    "fillets": [],
+    "chamfers": [],
+    "patterns": [],
+    "sheetMetal": [],
+    "otherFeatures": [
+      {
+        "name": "User Library-racing bike_racing bike.sldasm-Part-8-1",
+        "typeName": "Reference",
+        "isSuppressed": false
+      },
+      {
+        "name": "User Library-racing bike_racing bike.sldasm-Part-9-1",
+        "typeName": "Reference",
+        "isSuppressed": false
+      },
+      {
+        "name": "User Library-racing bike_racing bike.sldasm-Part-10-1",
+        "typeName": "Reference",
+        "isSuppressed": false
+      }
+    ]
+  },
+  "viewExports": {
+    "colorized": false,
+    "views": []
+  },
+  "partColorMapping": {},
+  "partDataCache": {
+    "user library-racing bike_racing bike.sldasm-part-10.sldprt": {
+      "fileName": "User Library-racing bike_racing bike.sldasm-Part-10.sldprt",
+      "filePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-10.sldprt",
+      "extractionTime": "2026-06-01T14:06:51.4423815-05:00",
+      "solidWorksVersion": null,
+      "units": {
+        "docUnitSystem": "MMGS",
+        "docLengthUnit": "mm",
+        "docMassUnit": "mg",
+        "docAngleUnit": "deg",
+        "internalSystem": "SI (meters)",
+        "note": "All internal values in SI (meters). Also provided in mm and inches for convenience.",
+        "conversions": {
+          "metersToMm": 1000,
+          "metersToInches": 39.3701,
+          "mmToInches": 0.0393701,
+          "inchesToMm": 25.4
+        }
+      },
+      "identity": {
+        "partNumber": null,
+        "description": null,
+        "revision": null,
+        "author": null,
+        "material": null,
+        "finish": null,
+        "customProperties": {
+          "activeconfig": "Default"
+        },
+        "configProperties": {}
+      },
+      "physical": {
+        "lengthUnit": "mm",
+        "massUnit": "mg",
+        "mass": 1.343507481e-05,
+        "volume": 1.343507481e-08,
+        "surfaceArea": 0.0001219402641,
+        "centerOfMass": [
+          -0.005750639012,
+          0.1202408846,
+          3.520495016
+        ],
+        "assignedMaterial": "Steel",
+        "materialDatabase": null,
+        "boundingBox": {
+          "minX": -0.008822625387,
+          "minY": 0.1158280874,
+          "minZ": 3.51608381,
+          "maxX": -0.002649128309,
+          "maxY": 0.1246387162,
+          "maxZ": 3.524907653,
+          "length": 0.006173497078,
+          "width": 0.008810628722,
+          "height": 0.00882384302
+        }
+      },
+      "features": {
+        "holeWizardHoles": [],
+        "extrudes": [],
+        "cuts": [],
+        "revolves": [],
+        "fillets": [],
+        "chamfers": [],
+        "patterns": [],
+        "sheetMetal": [],
+        "otherFeatures": [
+          {
+            "name": "Imported1",
+            "typeName": "BaseBody",
+            "isSuppressed": false
+          }
+        ]
+      },
+      "geometry": {
+        "cylinders": [
+          {
+            "id": "CYL_1",
+            "type": "ThroughHole",
+            "isInternal": true,
+            "diameter": 0.008719454056,
+            "radius": 0.004359727028,
+            "length": 0.00213873097,
+            "axisPoint": [
+              0.002606168097,
+              0.1160136126,
+              3.520525743
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 1,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_2",
+            "type": "ThroughHole",
+            "isInternal": true,
+            "diameter": 0.008119454056,
+            "radius": 0.004059727028,
+            "length": 0.00273873097,
+            "axisPoint": [
+              -5.232599651e-05,
+              0.117358401,
+              3.520515969
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 2,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_3",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              -0.4446348236,
+              -0.8776935122,
+              0.1787567406
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_4",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              -0.313982812,
+              -0.6154544005,
+              0.7229319986
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_5",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              -0.06340003814,
+              -0.1181326264,
+              0.9909718047
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_6",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              0.2113993954,
+              0.4243117958,
+              0.8804940633
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_7",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              0.4054514451,
+              0.8046835339,
+              0.4336975166
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_8",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              0.4446348236,
+              0.8776935122,
+              -0.1787567406
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_9",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              0.313982812,
+              0.6154544005,
+              -0.7229319986
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_10",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              0.06340003814,
+              0.1181326264,
+              -0.9909718047
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_11",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              -0.2113993954,
+              -0.4243117958,
+              -0.8804940633
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_12",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.005708540871,
+              0.120219574,
+              3.520495175
+            ],
+            "axisDirection": [
+              -0.4054514451,
+              -0.8046835339,
+              -0.4336975166
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          }
+        ],
+        "planarFaces": [],
+        "edges": {
+          "totalEdgeCount": 24,
+          "linearEdgeCount": 0,
+          "circularEdgeCount": 4,
+          "helicalEdgeCount": 0,
+          "splineEdgeCount": 20
+        }
+      },
+      "configurations": [
+        {
+          "name": "Default",
+          "isActive": true,
+          "description": "Default",
+          "properties": {}
+        }
+      ],
+      "comparison": {
+        "holeGroups": [],
+        "allHoles": [],
+        "slots": []
+      },
+      "sketches": [],
+      "viewExports": {
+        "colorized": false,
+        "views": []
+      },
+      "verificationChecklist": []
+    },
+    "user library-racing bike_racing bike.sldasm-part-8.sldprt": {
+      "fileName": "User Library-racing bike_racing bike.sldasm-Part-8.sldprt",
+      "filePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-8.sldprt",
+      "extractionTime": "2026-06-01T14:06:53.7361753-05:00",
+      "solidWorksVersion": null,
+      "units": {
+        "docUnitSystem": "MMGS",
+        "docLengthUnit": "mm",
+        "docMassUnit": "mg",
+        "docAngleUnit": "deg",
+        "internalSystem": "SI (meters)",
+        "note": "All internal values in SI (meters). Also provided in mm and inches for convenience.",
+        "conversions": {
+          "metersToMm": 1000,
+          "metersToInches": 39.3701,
+          "mmToInches": 0.0393701,
+          "inchesToMm": 25.4
+        }
+      },
+      "identity": {
+        "partNumber": null,
+        "description": null,
+        "revision": null,
+        "author": null,
+        "material": null,
+        "finish": null,
+        "customProperties": {
+          "activeconfig": "Default"
+        },
+        "configProperties": {}
+      },
+      "physical": {
+        "lengthUnit": "mm",
+        "massUnit": "mg",
+        "mass": 1.343507481e-05,
+        "volume": 1.343507481e-08,
+        "surfaceArea": 0.0001219402641,
+        "centerOfMass": [
+          -0.001289008678,
+          0.1179839873,
+          3.520511419
+        ],
+        "assignedMaterial": "Steel",
+        "materialDatabase": null,
+        "boundingBox": {
+          "minX": -0.004360995053,
+          "minY": 0.1135711901,
+          "minZ": 3.516100212,
+          "maxX": 0.001812502025,
+          "maxY": 0.1223818188,
+          "maxZ": 3.524924056,
+          "length": 0.006173497078,
+          "width": 0.008810628722,
+          "height": 0.00882384302
+        }
+      },
+      "features": {
+        "holeWizardHoles": [],
+        "extrudes": [],
+        "cuts": [],
+        "revolves": [],
+        "fillets": [],
+        "chamfers": [],
+        "patterns": [],
+        "sheetMetal": [],
+        "otherFeatures": [
+          {
+            "name": "Imported1",
+            "typeName": "BaseBody",
+            "isSuppressed": false
+          }
+        ]
+      },
+      "geometry": {
+        "cylinders": [
+          {
+            "id": "CYL_1",
+            "type": "ThroughHole",
+            "isInternal": true,
+            "diameter": 0.008719454056,
+            "radius": 0.004359727028,
+            "length": 0.00213873097,
+            "axisPoint": [
+              0.002606168097,
+              0.1160136126,
+              3.520525743
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 1,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_2",
+            "type": "ThroughHole",
+            "isInternal": true,
+            "diameter": 0.008119454056,
+            "radius": 0.004059727028,
+            "length": 0.00273873097,
+            "axisPoint": [
+              -5.232599651e-05,
+              0.117358401,
+              3.520515969
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 2,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_3",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              -0.4446348236,
+              -0.8776935122,
+              0.1787567406
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_4",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              -0.313982812,
+              -0.6154544005,
+              0.7229319986
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_5",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              -0.06340003814,
+              -0.1181326264,
+              0.9909718047
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_6",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              0.2113993954,
+              0.4243117958,
+              0.8804940633
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_7",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              0.4054514451,
+              0.8046835339,
+              0.4336975166
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_8",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              0.4446348236,
+              0.8776935122,
+              -0.1787567406
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_9",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              0.313982812,
+              0.6154544005,
+              -0.7229319986
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_10",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              -0.2113993954,
+              -0.4243117958,
+              -0.8804940633
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_11",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              0.06340003814,
+              0.1181326264,
+              -0.9909718047
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          },
+          {
+            "id": "CYL_12",
+            "type": "ExternalCylinder",
+            "isInternal": false,
+            "diameter": 0.00175,
+            "radius": 0.000875,
+            "length": 0,
+            "axisPoint": [
+              -0.001246910537,
+              0.1179626766,
+              3.520511578
+            ],
+            "axisDirection": [
+              -0.4054514451,
+              -0.8046835339,
+              -0.4336975166
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 0,
+            "instanceInGroup": 0
+          }
+        ],
+        "planarFaces": [],
+        "edges": {
+          "totalEdgeCount": 24,
+          "linearEdgeCount": 0,
+          "circularEdgeCount": 4,
+          "helicalEdgeCount": 0,
+          "splineEdgeCount": 20
+        }
+      },
+      "configurations": [
+        {
+          "name": "Default",
+          "isActive": true,
+          "description": "Default",
+          "properties": {}
+        }
+      ],
+      "comparison": {
+        "holeGroups": [],
+        "allHoles": [],
+        "slots": []
+      },
+      "sketches": [],
+      "viewExports": {
+        "colorized": false,
+        "views": []
+      },
+      "verificationChecklist": []
+    },
+    "user library-racing bike_racing bike.sldasm-part-9.sldprt": {
+      "fileName": "User Library-racing bike_racing bike.sldasm-Part-9.sldprt",
+      "filePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-9.sldprt",
+      "extractionTime": "2026-06-01T14:06:56.3530638-05:00",
+      "solidWorksVersion": null,
+      "units": {
+        "docUnitSystem": "MMGS",
+        "docLengthUnit": "mm",
+        "docMassUnit": "mg",
+        "docAngleUnit": "deg",
+        "internalSystem": "SI (meters)",
+        "note": "All internal values in SI (meters). Also provided in mm and inches for convenience.",
+        "conversions": {
+          "metersToMm": 1000,
+          "metersToInches": 39.3701,
+          "mmToInches": 0.0393701,
+          "inchesToMm": 25.4
+        }
+      },
+      "identity": {
+        "partNumber": null,
+        "description": null,
+        "revision": null,
+        "author": null,
+        "material": null,
+        "finish": null,
+        "customProperties": {
+          "activeconfig": "Default"
+        },
+        "configProperties": {}
+      },
+      "physical": {
+        "lengthUnit": "mm",
+        "massUnit": "mg",
+        "mass": 0.001168854908,
+        "volume": 1.168854908e-06,
+        "surfaceArea": 0.002652598059,
+        "centerOfMass": [
+          0.01353615253,
+          0.1152894381,
+          3.515973456
+        ],
+        "assignedMaterial": "Steel",
+        "materialDatabase": null,
+        "boundingBox": {
+          "minX": -0.02885052081,
+          "minY": 0.08908116979,
+          "minZ": 3.499968347,
+          "maxX": 0.06194550478,
+          "maxY": 0.1336374352,
+          "maxZ": 3.524575674,
+          "length": 0.0907960256,
+          "width": 0.04455626536,
+          "height": 0.02460732745
+        }
+      },
+      "features": {
+        "holeWizardHoles": [],
+        "extrudes": [],
+        "cuts": [],
+        "revolves": [],
+        "fillets": [],
+        "chamfers": [],
+        "patterns": [],
+        "sheetMetal": [],
+        "otherFeatures": [
+          {
+            "name": "Imported1",
+            "typeName": "BaseBody",
+            "isSuppressed": false
+          }
+        ]
+      },
+      "geometry": {
+        "cylinders": [
+          {
+            "id": "CYL_1",
+            "type": "BlindHole",
+            "isInternal": true,
+            "diameter": 0.003464517078,
+            "radius": 0.001732258539,
+            "length": 0,
+            "axisPoint": [
+              -0.02478423834,
+              0.1300148854,
+              3.520424113
+            ],
+            "axisDirection": [
+              -0.9571528845,
+              0.2895741445,
+              -0.002273875251
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 1,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_2",
+            "type": "BlindHole",
+            "isInternal": true,
+            "diameter": 0.0025,
+            "radius": 0.00125,
+            "length": 0.0029,
+            "axisPoint": [
+              -0.02837356166,
+              0.1311007885,
+              3.520415586
+            ],
+            "axisDirection": [
+              0.9571528845,
+              -0.2895741445,
+              0.002273875251
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 2,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_3",
+            "type": "HoleWall",
+            "isInternal": true,
+            "diameter": 0.0025,
+            "radius": 0.00125,
+            "length": 0.00035,
+            "axisPoint": [
+              -0.02550210301,
+              0.1302320661,
+              3.520422408
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 2,
+            "instanceInGroup": 2
+          },
+          {
+            "id": "CYL_4",
+            "type": "HoleWall",
+            "isInternal": true,
+            "diameter": 0.0025,
+            "radius": 0.00125,
+            "length": 1.307380362e-14,
+            "axisPoint": [
+              -0.02550210301,
+              0.1302320661,
+              3.520422408
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 2,
+            "instanceInGroup": 3
+          },
+          {
+            "id": "CYL_5",
+            "type": "CountersunkHole",
+            "isInternal": true,
+            "diameter": 0.00801769856,
+            "radius": 0.00400884928,
+            "length": 0.02028233572,
+            "axisPoint": [
+              0.003052331131,
+              0.1157879229,
+              3.520527383
+            ],
+            "axisDirection": [
+              -0.8923260668,
+              0.4513794733,
+              -0.003280480811
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 3,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_6",
+            "type": "ThroughHole",
+            "isInternal": true,
+            "diameter": 0.003464517078,
+            "radius": 0.001732258539,
+            "length": 0,
+            "axisPoint": [
+              -0.02478423834,
+              0.1300148854,
+              3.520424113
+            ],
+            "axisDirection": [
+              -0.9571528845,
+              0.2895741445,
+              -0.002273875251
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 1,
+            "instanceInGroup": 2
+          },
+          {
+            "id": "CYL_7",
+            "type": "BlindHole",
+            "isInternal": true,
+            "diameter": 0.0025,
+            "radius": 0.00125,
+            "length": 0.00075,
+            "axisPoint": [
+              -0.02837356166,
+              0.1311007885,
+              3.520415586
+            ],
+            "axisDirection": [
+              0.9571528845,
+              -0.2895741445,
+              0.002273875251
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 2,
+            "instanceInGroup": 4
+          },
+          {
+            "id": "CYL_8",
+            "type": "ThroughHole",
+            "isInternal": true,
+            "diameter": 0.006400716022,
+            "radius": 0.003200358011,
+            "length": 0.03115,
+            "axisPoint": [
+              0.002606168097,
+              0.1160136126,
+              3.520525743
+            ],
+            "axisDirection": [
+              -0.8923260668,
+              0.4513794733,
+              -0.003280480811
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 4,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_9",
+            "type": "BlindHole",
+            "isInternal": true,
+            "diameter": 0.008119454056,
+            "radius": 0.004059727028,
+            "length": 0.00273873097,
+            "axisPoint": [
+              -5.232599651e-05,
+              0.117358401,
+              3.520515969
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 5,
+            "instanceInGroup": 1
+          },
+          {
+            "id": "CYL_10",
+            "type": "CountersunkHole",
+            "isInternal": true,
+            "diameter": 0.00801769856,
+            "radius": 0.00400884928,
+            "length": 0.002261621198,
+            "axisPoint": [
+              0.003052331131,
+              0.1157879229,
+              3.520527383
+            ],
+            "axisDirection": [
+              -0.8923260668,
+              0.4513794733,
+              -0.003280480811
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 3,
+            "instanceInGroup": 2
+          },
+          {
+            "id": "CYL_11",
+            "type": "BlindHole",
+            "isInternal": true,
+            "diameter": 0.008119454056,
+            "radius": 0.004059727028,
+            "length": 0.00273873097,
+            "axisPoint": [
+              -5.232599651e-05,
+              0.117358401,
+              3.520515969
+            ],
+            "axisDirection": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 5,
+            "instanceInGroup": 2
+          },
+          {
+            "id": "CYL_12",
+            "type": "BlindHole",
+            "isInternal": true,
+            "diameter": 0.00801769856,
+            "radius": 0.00400884928,
+            "length": 0.00297928548,
+            "axisPoint": [
+              0.003052331131,
+              0.1157879229,
+              3.520527383
+            ],
+            "axisDirection": [
+              -0.8923260668,
+              0.4513794733,
+              -0.003280480811
+            ],
+            "isThrough": false,
+            "hasThread": false,
+            "groupId": 3,
+            "instanceInGroup": 3
+          },
+          {
+            "id": "CYL_13",
+            "type": "ThroughHole",
+            "isInternal": true,
+            "diameter": 0.00225,
+            "radius": 0.001125,
+            "length": 0.002716025679,
+            "axisPoint": [
+              0.05544931761,
+              0.103827369,
+              3.507794947
+            ],
+            "axisDirection": [
+              -0.4511727099,
+              -0.8916440185,
+              0.03760492169
+            ],
+            "isThrough": true,
+            "hasThread": false,
+            "groupId": 6,
+            "instanceInGroup": 1
+          }
+        ],
+        "planarFaces": [
+          {
+            "id": "PLANE_29_merged_2",
+            "orientation": "Angled",
+            "normal": [
+              -0.09903088447,
+              0.2921078361,
+              0.9512443934
+            ],
+            "area": 3.052649378e-10
+          },
+          {
+            "id": "PLANE_26_merged_2",
+            "orientation": "Angled",
+            "normal": [
+              -0.09903088447,
+              0.2921078361,
+              0.9512443934
+            ],
+            "area": 3.052705407e-10
+          },
+          {
+            "id": "PLANE_21_merged_3",
+            "orientation": "Angled",
+            "normal": [
+              -0.4846216544,
+              -0.8305928699,
+              0.2743307066
+            ],
+            "area": 5.00247034e-09
+          },
+          {
+            "id": "PLANE_20_merged_2",
+            "orientation": "Angled",
+            "normal": [
+              0.4477587209,
+              0.8860416515,
+              0.1201762027
+            ],
+            "area": 1.145853609e-08
+          },
+          {
+            "id": "PLANE_13_merged_4",
+            "orientation": "Angled",
+            "normal": [
+              0.9100238852,
+              -0.4145445813,
+              0.00305262182
+            ],
+            "area": 1.256637061e-05
+          },
+          {
+            "id": "PLANE_10",
+            "orientation": "Angled",
+            "normal": [
+              0.8910610051,
+              -0.4538306096,
+              0.006932750868
+            ],
+            "area": 1.988123217e-06
+          },
+          {
+            "id": "PLANE_11",
+            "orientation": "Angled",
+            "normal": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "area": 3.671703056e-05
+          },
+          {
+            "id": "PLANE_7",
+            "orientation": "Angled",
+            "normal": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "area": 3.217710741e-05
+          },
+          {
+            "id": "PLANE_12",
+            "orientation": "Angled",
+            "normal": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "area": 1.289658314e-06
+          },
+          {
+            "id": "PLANE_9",
+            "orientation": "Angled",
+            "normal": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "area": 1.289658314e-06
+          },
+          {
+            "id": "PLANE_6",
+            "orientation": "Angled",
+            "normal": [
+              0.9571528845,
+              -0.2895741445,
+              0.002273875251
+            ],
+            "area": 4.518300274e-06
+          },
+          {
+            "id": "PLANE_1",
+            "orientation": "Angled",
+            "normal": [
+              0.9571528845,
+              -0.2895741445,
+              0.002273875251
+            ],
+            "area": 2.64449197e-06
+          },
+          {
+            "id": "PLANE_2_merged_2",
+            "orientation": "Angled",
+            "normal": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "area": 2.280216257e-05
+          },
+          {
+            "id": "PLANE_3_merged_3",
+            "orientation": "Angled",
+            "normal": [
+              0.8923260668,
+              -0.4513794733,
+              0.003280480811
+            ],
+            "area": 2.286801848e-05
+          },
+          {
+            "id": "PLANE_17_merged_3",
+            "orientation": "Angled",
+            "normal": [
+              -0.4792990715,
+              -0.8242553567,
+              -0.3014556467
+            ],
+            "area": 1.070883296e-08
+          },
+          {
+            "id": "PLANE_25",
+            "orientation": "Angled",
+            "normal": [
+              0.09903088647,
+              -0.2921078327,
+              -0.9512443943
+            ],
+            "area": 3.29198341e-12
+          },
+          {
+            "id": "PLANE_28",
+            "orientation": "Angled",
+            "normal": [
+              0.09903088647,
+              -0.2921078327,
+              -0.9512443943
+            ],
+            "area": 3.291983381e-12
+          }
+        ],
+        "edges": {
+          "totalEdgeCount": 155,
+          "linearEdgeCount": 1,
+          "circularEdgeCount": 41,
+          "helicalEdgeCount": 0,
+          "splineEdgeCount": 104
+        }
+      },
+      "configurations": [
+        {
+          "name": "Default",
+          "isActive": true,
+          "description": "Default",
+          "properties": {}
+        }
+      ],
+      "comparison": {
+        "holeGroups": [],
+        "allHoles": [],
+        "slots": []
+      },
+      "sketches": [],
+      "viewExports": {
+        "colorized": false,
+        "views": []
+      },
+      "verificationChecklist": []
+    }
+  }
+}

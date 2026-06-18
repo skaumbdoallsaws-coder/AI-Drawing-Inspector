@@ -1,0 +1,1727 @@
+{
+  "schemaVersion": "racing-bike-guided-build-plan-0.1",
+  "productName": "Racing Bike Assembly",
+  "sourceProcessMap": "racing_bike_process_map_working_draft.json",
+  "sourceVisualManifest": "racing_bike_subassembly_visuals.json",
+  "motionModel": "Start fully exploded and dimmed. Each instruction lights target parts plus all previously joined parts, then collapses accumulated parts to assembled pose while unjoined parts stay exploded.",
+  "solidWorksExplodeSequenceRole": "Used only as motion vectors when available. The guided build sequence below is the assembly authority.",
+  "plansByNodeId": {
+    "L0-000": {
+      "nodeId": "L0-000",
+      "nodeName": "Complete Racing Bike Assembly",
+      "level": 0,
+      "sourceSldasm": "User Library-racing bike.sldasm",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L0-000-join-01",
+          "sequence": 1,
+          "label": "Join Internal Mechanical Assembly",
+          "targetNodeId": "L1-001",
+          "targetNodeName": "Internal Mechanical Assembly",
+          "targetPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034",
+            "RB-038",
+            "RB-043",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-033",
+            "RB-032",
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020",
+            "RB-027",
+            "RB-009",
+            "RB-008",
+            "RB-010"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034",
+            "RB-038",
+            "RB-043",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-033",
+            "RB-032",
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020",
+            "RB-027",
+            "RB-009",
+            "RB-008",
+            "RB-010"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.5,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Internal Mechanical Assembly and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Internal Mechanical Assembly is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L0-000-join-02",
+          "sequence": 2,
+          "label": "Join Bodywork / Exterior Assembly",
+          "targetNodeId": "L1-002",
+          "targetNodeName": "Bodywork / Exterior Assembly",
+          "targetPartIds": [
+            "RB-003",
+            "RB-021",
+            "RB-022",
+            "RB-023",
+            "RB-024",
+            "RB-046",
+            "RB-047"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034",
+            "RB-038",
+            "RB-043",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-033",
+            "RB-032",
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020",
+            "RB-027",
+            "RB-009",
+            "RB-008",
+            "RB-010",
+            "RB-003",
+            "RB-021",
+            "RB-022",
+            "RB-023",
+            "RB-024",
+            "RB-046",
+            "RB-047"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "inferred",
+          "reviewRequired": true,
+          "sageInstruction": "Bring in Bodywork / Exterior Assembly and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Bodywork / Exterior Assembly is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-001": {
+      "nodeId": "L1-001",
+      "nodeName": "Internal Mechanical Assembly",
+      "level": 1,
+      "sourceSldasm": "Internal Mechanical Assembly.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-001-join-01",
+          "sequence": 1,
+          "label": "Join Swingarm & Linkage",
+          "targetNodeId": "L1-001-01",
+          "targetNodeName": "Swingarm & Linkage",
+          "targetPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.75,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Swingarm & Linkage and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Swingarm & Linkage is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-join-02",
+          "sequence": 2,
+          "label": "Join Front Wheel & Brake",
+          "targetNodeId": "L1-001-02",
+          "targetNodeName": "Front Wheel & Brake",
+          "targetPartIds": [
+            "RB-038",
+            "RB-043",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-033",
+            "RB-032"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034",
+            "RB-038",
+            "RB-043",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-033",
+            "RB-032"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.5,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Wheel & Brake and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Wheel & Brake is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-join-03",
+          "sequence": 3,
+          "label": "Join Rear Wheel & Brake",
+          "targetNodeId": "L1-001-03",
+          "targetNodeName": "Rear Wheel & Brake",
+          "targetPartIds": [
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020",
+            "RB-027"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034",
+            "RB-038",
+            "RB-043",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-033",
+            "RB-032",
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020",
+            "RB-027"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.25,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Rear Wheel & Brake and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Rear Wheel & Brake is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-join-04",
+          "sequence": 4,
+          "label": "Join Exhaust System",
+          "targetNodeId": "L1-001-06",
+          "targetNodeName": "Exhaust System",
+          "targetPartIds": [
+            "RB-009",
+            "RB-008",
+            "RB-010"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034",
+            "RB-038",
+            "RB-043",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-033",
+            "RB-032",
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020",
+            "RB-027",
+            "RB-009",
+            "RB-008",
+            "RB-010"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Exhaust System and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Exhaust System is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-002": {
+      "nodeId": "L1-002",
+      "nodeName": "Bodywork / Exterior Assembly",
+      "level": 1,
+      "sourceSldasm": "bodyworkAssembly.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-002-join-01",
+          "sequence": 1,
+          "label": "Join Seat & Tail",
+          "targetNodeId": "L1-002-03",
+          "targetNodeName": "Seat & Tail",
+          "targetPartIds": [
+            "RB-003",
+            "RB-021",
+            "RB-022"
+          ],
+          "accumulatedPartIds": [
+            "RB-003",
+            "RB-021",
+            "RB-022"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.5,
+          "evidenceLevel": "inferred",
+          "reviewRequired": true,
+          "sageInstruction": "Bring in Seat & Tail and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Seat & Tail is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-002-join-02",
+          "sequence": 2,
+          "label": "Join Side Fairings",
+          "targetNodeId": "L1-002-05",
+          "targetNodeName": "Side Fairings",
+          "targetPartIds": [
+            "RB-023",
+            "RB-024",
+            "RB-046",
+            "RB-047"
+          ],
+          "accumulatedPartIds": [
+            "RB-003",
+            "RB-021",
+            "RB-022",
+            "RB-023",
+            "RB-024",
+            "RB-046",
+            "RB-047"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Side Fairings and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Side Fairings is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-001-01": {
+      "nodeId": "L1-001-01",
+      "nodeName": "Swingarm & Linkage",
+      "level": 2,
+      "sourceSldasm": "Swingarm&Linkage.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-001-01-join-01",
+          "sequence": 1,
+          "label": "Join Flanged Pivot Bushing A",
+          "targetNodeId": "L1-001-01-C01",
+          "targetNodeName": "Flanged Pivot Bushing A",
+          "targetPartIds": [
+            "RB-044"
+          ],
+          "accumulatedPartIds": [
+            "RB-044"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.95,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Flanged Pivot Bushing A and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Flanged Pivot Bushing A is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-02",
+          "sequence": 2,
+          "label": "Join Flanged Pivot Bushing B",
+          "targetNodeId": "L1-001-01-C02",
+          "targetNodeName": "Flanged Pivot Bushing B",
+          "targetPartIds": [
+            "RB-045"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.9,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Flanged Pivot Bushing B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Flanged Pivot Bushing B is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-03",
+          "sequence": 3,
+          "label": "Join Adjuster / Clamp Block",
+          "targetNodeId": "L1-001-01-C03",
+          "targetNodeName": "Adjuster / Clamp Block",
+          "targetPartIds": [
+            "RB-030"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.86,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Adjuster / Clamp Block and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Adjuster / Clamp Block is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-04",
+          "sequence": 4,
+          "label": "Join Front Axle Shaft",
+          "targetNodeId": "L1-001-01-C04",
+          "targetNodeName": "Front Axle Shaft",
+          "targetPartIds": [
+            "RB-017"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.81,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Axle Shaft and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Axle Shaft is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-05",
+          "sequence": 5,
+          "label": "Join Front Axle Spacer Tube",
+          "targetNodeId": "L1-001-01-C05",
+          "targetNodeName": "Front Axle Spacer Tube",
+          "targetPartIds": [
+            "RB-018"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.76,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Axle Spacer Tube and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Axle Spacer Tube is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-06",
+          "sequence": 6,
+          "label": "Join Front Axle Spacer Cap A",
+          "targetNodeId": "L1-001-01-C06",
+          "targetNodeName": "Front Axle Spacer Cap A",
+          "targetPartIds": [
+            "RB-028"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.71,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Axle Spacer Cap A and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Axle Spacer Cap A is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-07",
+          "sequence": 7,
+          "label": "Join Front Axle Spacer Cap B",
+          "targetNodeId": "L1-001-01-C07",
+          "targetNodeName": "Front Axle Spacer Cap B",
+          "targetPartIds": [
+            "RB-029"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.67,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Axle Spacer Cap B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Axle Spacer Cap B is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-08",
+          "sequence": 8,
+          "label": "Join Clip-On / Hand Lever (Left)",
+          "targetNodeId": "L1-001-01-C08",
+          "targetNodeName": "Clip-On / Hand Lever (Left)",
+          "targetPartIds": [
+            "RB-012"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.62,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Clip-On / Hand Lever (Left) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Clip-On / Hand Lever (Left) is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-09",
+          "sequence": 9,
+          "label": "Join Clip-On / Hand Lever (Right)",
+          "targetNodeId": "L1-001-01-C09",
+          "targetNodeName": "Clip-On / Hand Lever (Right)",
+          "targetPartIds": [
+            "RB-013"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.57,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Clip-On / Hand Lever (Right) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Clip-On / Hand Lever (Right) is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-10",
+          "sequence": 10,
+          "label": "Join Long Mounting Bolt A",
+          "targetNodeId": "L1-001-01-C10",
+          "targetNodeName": "Long Mounting Bolt A",
+          "targetPartIds": [
+            "RB-026"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.52,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Long Mounting Bolt A and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Long Mounting Bolt A is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-11",
+          "sequence": 11,
+          "label": "Join Long Mounting Bolt B",
+          "targetNodeId": "L1-001-01-C11",
+          "targetNodeName": "Long Mounting Bolt B",
+          "targetPartIds": [
+            "RB-036"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.48,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Long Mounting Bolt B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Long Mounting Bolt B is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-12",
+          "sequence": 12,
+          "label": "Join Dowel Pin / Spacer",
+          "targetNodeId": "L1-001-01-C12",
+          "targetNodeName": "Dowel Pin / Spacer",
+          "targetPartIds": [
+            "RB-015"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.43,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Dowel Pin / Spacer and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Dowel Pin / Spacer is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-13",
+          "sequence": 13,
+          "label": "Join Round Cap / Spacer A",
+          "targetNodeId": "L1-001-01-C13",
+          "targetNodeName": "Round Cap / Spacer A",
+          "targetPartIds": [
+            "RB-011"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.38,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Round Cap / Spacer A and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Round Cap / Spacer A is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-14",
+          "sequence": 14,
+          "label": "Join Round Cap / Spacer B",
+          "targetNodeId": "L1-001-01-C14",
+          "targetNodeName": "Round Cap / Spacer B",
+          "targetPartIds": [
+            "RB-014"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.33,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Round Cap / Spacer B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Round Cap / Spacer B is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-15",
+          "sequence": 15,
+          "label": "Join Bar-End / Steering Stem Boss",
+          "targetNodeId": "L1-001-01-C15",
+          "targetNodeName": "Bar-End / Steering Stem Boss",
+          "targetPartIds": [
+            "RB-019"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.29,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Bar-End / Steering Stem Boss and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Bar-End / Steering Stem Boss is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-16",
+          "sequence": 16,
+          "label": "Join Tail Subframe Hoop / Grab Loop",
+          "targetNodeId": "L1-001-01-C16",
+          "targetNodeName": "Tail Subframe Hoop / Grab Loop",
+          "targetPartIds": [
+            "RB-025"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.24,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Tail Subframe Hoop / Grab Loop and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Tail Subframe Hoop / Grab Loop is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-17",
+          "sequence": 17,
+          "label": "Join Tubular Subframe / Fairing Stay",
+          "targetNodeId": "L1-001-01-C17",
+          "targetNodeName": "Tubular Subframe / Fairing Stay",
+          "targetPartIds": [
+            "RB-016"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.19,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Tubular Subframe / Fairing Stay and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Tubular Subframe / Fairing Stay is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-18",
+          "sequence": 18,
+          "label": "Join Foot Control Lever A (Shift)",
+          "targetNodeId": "L1-001-01-C18",
+          "targetNodeName": "Foot Control Lever A (Shift)",
+          "targetPartIds": [
+            "RB-004"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.14,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Foot Control Lever A (Shift) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Foot Control Lever A (Shift) is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-19",
+          "sequence": 19,
+          "label": "Join Foot Control Lever B (Brake Pedal)",
+          "targetNodeId": "L1-001-01-C19",
+          "targetNodeName": "Foot Control Lever B (Brake Pedal)",
+          "targetPartIds": [
+            "RB-005"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.1,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Foot Control Lever B (Brake Pedal) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Foot Control Lever B (Brake Pedal) is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-20",
+          "sequence": 20,
+          "label": "Join Footpeg / Foot-Control Fitting A",
+          "targetNodeId": "L1-001-01-C20",
+          "targetNodeName": "Footpeg / Foot-Control Fitting A",
+          "targetPartIds": [
+            "RB-006"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Footpeg / Foot-Control Fitting A and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Footpeg / Foot-Control Fitting A is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-21",
+          "sequence": 21,
+          "label": "Join Footpeg / Foot-Control Fitting B",
+          "targetNodeId": "L1-001-01-C21",
+          "targetNodeName": "Footpeg / Foot-Control Fitting B",
+          "targetPartIds": [
+            "RB-007"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Footpeg / Foot-Control Fitting B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Footpeg / Foot-Control Fitting B is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-01-join-22",
+          "sequence": 22,
+          "label": "Join Front Fender / Mudguard",
+          "targetNodeId": "L1-001-01-C22",
+          "targetNodeName": "Front Fender / Mudguard",
+          "targetPartIds": [
+            "RB-034"
+          ],
+          "accumulatedPartIds": [
+            "RB-044",
+            "RB-045",
+            "RB-030",
+            "RB-017",
+            "RB-018",
+            "RB-028",
+            "RB-029",
+            "RB-012",
+            "RB-013",
+            "RB-026",
+            "RB-036",
+            "RB-015",
+            "RB-011",
+            "RB-014",
+            "RB-019",
+            "RB-025",
+            "RB-016",
+            "RB-004",
+            "RB-005",
+            "RB-006",
+            "RB-007",
+            "RB-034"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "inferred",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Fender / Mudguard and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Fender / Mudguard is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-001-02": {
+      "nodeId": "L1-001-02",
+      "nodeName": "Front Wheel & Brake",
+      "level": 2,
+      "sourceSldasm": "Front wheel & brake.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-001-02-join-01",
+          "sequence": 1,
+          "label": "Join Front Wheel Rim (3-spoke)",
+          "targetNodeId": "L1-001-02-C01",
+          "targetNodeName": "Front Wheel Rim (3-spoke)",
+          "targetPartIds": [
+            "RB-038"
+          ],
+          "accumulatedPartIds": [
+            "RB-038"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.89,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Wheel Rim (3-spoke) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Wheel Rim (3-spoke) is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-02-join-02",
+          "sequence": 2,
+          "label": "Join Front Hub Inner Sleeve Spacer",
+          "targetNodeId": "L1-001-02-C07",
+          "targetNodeName": "Front Hub Inner Sleeve Spacer",
+          "targetPartIds": [
+            "RB-033"
+          ],
+          "accumulatedPartIds": [
+            "RB-038",
+            "RB-033"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.78,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Hub Inner Sleeve Spacer and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Hub Inner Sleeve Spacer is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-02-join-03",
+          "sequence": 3,
+          "label": "Join Front Wheel Shaft",
+          "targetNodeId": "L1-001-02-C08",
+          "targetNodeName": "Front Wheel Shaft",
+          "targetPartIds": [
+            "RB-032"
+          ],
+          "accumulatedPartIds": [
+            "RB-038",
+            "RB-033",
+            "RB-032"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.67,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Wheel Shaft and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Wheel Shaft is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-02-join-04",
+          "sequence": 4,
+          "label": "Join Front Brake Rotor A",
+          "targetNodeId": "L1-001-02-C03",
+          "targetNodeName": "Front Brake Rotor A",
+          "targetPartIds": [
+            "RB-039"
+          ],
+          "accumulatedPartIds": [
+            "RB-038",
+            "RB-033",
+            "RB-032",
+            "RB-039"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.56,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Brake Rotor A and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Brake Rotor A is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-02-join-05",
+          "sequence": 5,
+          "label": "Join Front Brake Rotor B",
+          "targetNodeId": "L1-001-02-C04",
+          "targetNodeName": "Front Brake Rotor B",
+          "targetPartIds": [
+            "RB-040"
+          ],
+          "accumulatedPartIds": [
+            "RB-038",
+            "RB-033",
+            "RB-032",
+            "RB-039",
+            "RB-040"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.44,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Brake Rotor B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Brake Rotor B is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-02-join-06",
+          "sequence": 6,
+          "label": "Join Front Brake Pads A and B",
+          "targetNodeId": "L1-001-02-C05-C06",
+          "targetNodeName": "Front Brake Pads A and B",
+          "targetPartIds": [
+            "RB-035",
+            "RB-037"
+          ],
+          "accumulatedPartIds": [
+            "RB-038",
+            "RB-033",
+            "RB-032",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.33,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Brake Pads A and B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Brake Pads A and B is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-02-join-07",
+          "sequence": 7,
+          "label": "Join Front Tire / Outer Wheel Ring",
+          "targetNodeId": "L1-001-02-C02",
+          "targetNodeName": "Front Tire / Outer Wheel Ring",
+          "targetPartIds": [
+            "RB-043"
+          ],
+          "accumulatedPartIds": [
+            "RB-038",
+            "RB-033",
+            "RB-032",
+            "RB-039",
+            "RB-040",
+            "RB-035",
+            "RB-037",
+            "RB-043"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Front Tire / Outer Wheel Ring and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Front Tire / Outer Wheel Ring is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-001-03": {
+      "nodeId": "L1-001-03",
+      "nodeName": "Rear Wheel & Brake",
+      "level": 2,
+      "sourceSldasm": "rear wheel & brake.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-001-03-join-01",
+          "sequence": 1,
+          "label": "Join Rear Wheel Rim (3-spoke)",
+          "targetNodeId": "L1-001-03-C01",
+          "targetNodeName": "Rear Wheel Rim (3-spoke)",
+          "targetPartIds": [
+            "RB-031"
+          ],
+          "accumulatedPartIds": [
+            "RB-031"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.86,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Rear Wheel Rim (3-spoke) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Rear Wheel Rim (3-spoke) is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-03-join-02",
+          "sequence": 2,
+          "label": "Join Rear Tire / Outer Wheel Ring",
+          "targetNodeId": "L1-001-03-C02",
+          "targetNodeName": "Rear Tire / Outer Wheel Ring",
+          "targetPartIds": [
+            "RB-042"
+          ],
+          "accumulatedPartIds": [
+            "RB-031",
+            "RB-042"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.71,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Rear Tire / Outer Wheel Ring and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Rear Tire / Outer Wheel Ring is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-03-join-03",
+          "sequence": 3,
+          "label": "Join Rear Brake Rotor",
+          "targetNodeId": "L1-001-03-C03",
+          "targetNodeName": "Rear Brake Rotor",
+          "targetPartIds": [
+            "RB-002"
+          ],
+          "accumulatedPartIds": [
+            "RB-031",
+            "RB-042",
+            "RB-002"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.57,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Rear Brake Rotor and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Rear Brake Rotor is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-03-join-04",
+          "sequence": 4,
+          "label": "Join Rear Hub Cover / Sprocket Disc",
+          "targetNodeId": "L1-001-03-C04",
+          "targetNodeName": "Rear Hub Cover / Sprocket Disc",
+          "targetPartIds": [
+            "RB-041"
+          ],
+          "accumulatedPartIds": [
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.43,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Rear Hub Cover / Sprocket Disc and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Rear Hub Cover / Sprocket Disc is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-03-join-05",
+          "sequence": 5,
+          "label": "Join Rear Brake Pad",
+          "targetNodeId": "L1-001-03-C05",
+          "targetNodeName": "Rear Brake Pad",
+          "targetPartIds": [
+            "RB-001"
+          ],
+          "accumulatedPartIds": [
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.29,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Rear Brake Pad and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Rear Brake Pad is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-03-join-06",
+          "sequence": 6,
+          "label": "Join Swingarm / Suspension Rocker Arm",
+          "targetNodeId": "L1-001-03-C06",
+          "targetNodeName": "Swingarm / Suspension Rocker Arm",
+          "targetPartIds": [
+            "RB-020"
+          ],
+          "accumulatedPartIds": [
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.14,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Swingarm / Suspension Rocker Arm and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Swingarm / Suspension Rocker Arm is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-03-join-07",
+          "sequence": 7,
+          "label": "Join Rear Hugger / Chain Guard",
+          "targetNodeId": "L1-001-03-C07",
+          "targetNodeName": "Rear Hugger / Chain Guard",
+          "targetPartIds": [
+            "RB-027"
+          ],
+          "accumulatedPartIds": [
+            "RB-031",
+            "RB-042",
+            "RB-002",
+            "RB-041",
+            "RB-001",
+            "RB-020",
+            "RB-027"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Rear Hugger / Chain Guard and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Rear Hugger / Chain Guard is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-001-06": {
+      "nodeId": "L1-001-06",
+      "nodeName": "Exhaust System",
+      "level": 2,
+      "sourceSldasm": "Exhaust System.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-001-06-join-01",
+          "sequence": 1,
+          "label": "Join Exhaust Header & Muffler",
+          "targetNodeId": "L1-001-06-C01",
+          "targetNodeName": "Exhaust Header & Muffler",
+          "targetPartIds": [
+            "RB-009"
+          ],
+          "accumulatedPartIds": [
+            "RB-009"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.67,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Exhaust Header & Muffler and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Exhaust Header & Muffler is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-06-join-02",
+          "sequence": 2,
+          "label": "Join Exhaust Clamp Band A",
+          "targetNodeId": "L1-001-06-C02",
+          "targetNodeName": "Exhaust Clamp Band A",
+          "targetPartIds": [
+            "RB-008"
+          ],
+          "accumulatedPartIds": [
+            "RB-009",
+            "RB-008"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.33,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Exhaust Clamp Band A and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Exhaust Clamp Band A is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-001-06-join-03",
+          "sequence": 3,
+          "label": "Join Exhaust Clamp Band B",
+          "targetNodeId": "L1-001-06-C03",
+          "targetNodeName": "Exhaust Clamp Band B",
+          "targetPartIds": [
+            "RB-010"
+          ],
+          "accumulatedPartIds": [
+            "RB-009",
+            "RB-008",
+            "RB-010"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Exhaust Clamp Band B and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Exhaust Clamp Band B is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-002-03": {
+      "nodeId": "L1-002-03",
+      "nodeName": "Seat & Tail",
+      "level": 2,
+      "sourceSldasm": "seat_tail_subassembly.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-002-03-join-01",
+          "sequence": 1,
+          "label": "Join Seat / Tail Body Shell",
+          "targetNodeId": "L1-002-03-C02",
+          "targetNodeName": "Seat / Tail Body Shell",
+          "targetPartIds": [
+            "RB-003"
+          ],
+          "accumulatedPartIds": [
+            "RB-003"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.67,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Seat / Tail Body Shell and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Seat / Tail Body Shell is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-002-03-join-02",
+          "sequence": 2,
+          "label": "Join Cowl / Tail Panel (Left)",
+          "targetNodeId": "L1-002-03-C04",
+          "targetNodeName": "Cowl / Tail Panel (Left)",
+          "targetPartIds": [
+            "RB-021"
+          ],
+          "accumulatedPartIds": [
+            "RB-003",
+            "RB-021"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.33,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Cowl / Tail Panel (Left) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Cowl / Tail Panel (Left) is seated in the assembled pose before continuing."
+        },
+        {
+          "stepId": "L1-002-03-join-03",
+          "sequence": 3,
+          "label": "Join Cowl / Tail Panel (Right)",
+          "targetNodeId": "L1-002-03-C05",
+          "targetNodeName": "Cowl / Tail Panel (Right)",
+          "targetPartIds": [
+            "RB-022"
+          ],
+          "accumulatedPartIds": [
+            "RB-003",
+            "RB-021",
+            "RB-022"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Bring in Cowl / Tail Panel (Right) and keep previously joined parts highlighted.",
+          "verificationCheck": "Confirm Cowl / Tail Panel (Right) is seated in the assembled pose before continuing."
+        }
+      ]
+    },
+    "L1-002-05": {
+      "nodeId": "L1-002-05",
+      "nodeName": "Side Fairings",
+      "level": 2,
+      "sourceSldasm": "Side_Fairings_Assembly.SLDASM",
+      "startState": "fully_exploded_dimmed",
+      "retentionMode": "previous_joined_parts_remain_highlighted",
+      "sequenceAuthority": "operator_defined_required_not_solidworks_explode_order",
+      "steps": [
+        {
+          "stepId": "L1-002-05-join-01",
+          "sequence": 1,
+          "label": "Start with Nose Cowl / Windscreen",
+          "targetNodeId": "L1-002-05-C01",
+          "targetNodeName": "Nose Cowl / Windscreen",
+          "targetPartIds": [
+            "RB-023"
+          ],
+          "accumulatedPartIds": [
+            "RB-023"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.75,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Start with RB-023, the Nose Cowl / Windscreen. This is our front reference, so bring it into position first and use its shape to guide the rest of the fairing.",
+          "verificationCheck": "Confirm the nose cowl is seated cleanly and the front shape looks correct before adding the trim."
+        },
+        {
+          "stepId": "L1-002-05-join-02",
+          "sequence": 2,
+          "label": "Fit Front Cowl Trim Panel",
+          "targetNodeId": "L1-002-05-C02",
+          "targetNodeName": "Front Cowl Trim Panel",
+          "targetPartIds": [
+            "RB-024"
+          ],
+          "accumulatedPartIds": [
+            "RB-023",
+            "RB-024"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.5,
+          "evidenceLevel": "inferred",
+          "reviewRequired": true,
+          "sageInstruction": "Now take RB-024, the Front Cowl Trim Panel. Fit it to the nose cowl and watch that the trim follows the same curve without sitting high or offset.",
+          "verificationCheck": "Check that the trim visually completes the front cowl area and does not create a step, gap, or obvious mismatch."
+        },
+        {
+          "stepId": "L1-002-05-join-03",
+          "sequence": 3,
+          "label": "Add Left Side Fairing Panel",
+          "targetNodeId": "L1-002-05-C03",
+          "targetNodeName": "Side Fairing Panel (Left)",
+          "targetPartIds": [
+            "RB-046"
+          ],
+          "accumulatedPartIds": [
+            "RB-023",
+            "RB-024",
+            "RB-046"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.25,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Next, bring in RB-046, the left side fairing panel. Line up the upper front edge to the cowl first, then let the rest of the panel settle into the body shape.",
+          "verificationCheck": "Confirm the left panel follows the cowl smoothly and does not visibly collide with or float away from the front bodywork."
+        },
+        {
+          "stepId": "L1-002-05-join-04",
+          "sequence": 4,
+          "label": "Add Right Side Fairing Panel",
+          "targetNodeId": "L1-002-05-C04",
+          "targetNodeName": "Side Fairing Panel (Right)",
+          "targetPartIds": [
+            "RB-047"
+          ],
+          "accumulatedPartIds": [
+            "RB-023",
+            "RB-024",
+            "RB-046",
+            "RB-047"
+          ],
+          "motion": "collapse_target_to_assembled_pose_keep_prior_joined_lit",
+          "fallbackExplodeLevel": 0.08,
+          "evidenceLevel": "cad_known",
+          "reviewRequired": false,
+          "sageInstruction": "Now bring in RB-047, the right side fairing panel. Install it the same way on the opposite side and compare it against the left panel.",
+          "verificationCheck": "Confirm both side panels look balanced, the gaps are even, and the four highlighted parts form one continuous outer shell."
+        }
+      ]
+    }
+  }
+}

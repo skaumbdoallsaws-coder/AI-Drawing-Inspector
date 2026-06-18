@@ -1,0 +1,1505 @@
+[
+  {
+    "partId": "RB-001",
+    "sourcePartIndex": 1,
+    "proposedName": "engine_mount_plate_a",
+    "displayName": "Engine Mount Plate A",
+    "module": "frame_chassis",
+    "recommendedSubassembly": "chassis_hardware",
+    "confidence": "medium",
+    "visualEvidence": [
+      "scalloped edge",
+      "curved flat bracket profile"
+    ],
+    "metadataEvidence": [
+      "holes: 8",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "brake_rotor_carrier_plate"
+    ],
+    "uncertaintyNotes": "Re-classified from braking bracket to engine mount based on frame proximity.",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -7.3,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-1.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-1.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-001_part-01_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-1_colored.glb"
+  },
+  {
+    "partId": "RB-002",
+    "sourcePartIndex": 2,
+    "proposedName": "rear_brake_rotor",
+    "displayName": "Rear Brake Rotor",
+    "module": "braking_system",
+    "recommendedSubassembly": "rear_brake_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "thin disc",
+      "multiple radial spokes",
+      "outer braking ring"
+    ],
+    "metadataEvidence": [
+      "holes: 38",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -14.4,
+      "flags": [
+        "front_name_but_rear_assembly_zone"
+      ]
+    },
+    "namingStatus": "location_corrected_working_draft",
+    "reviewRequired": true,
+    "workingDraftNotes": "Location correction applied from assembly-reference audit; verify manually before final release.",
+    "locationCorrection": {
+      "old": {
+        "proposedName": "front_brake_rotor",
+        "displayName": "Front Brake Rotor",
+        "module": "braking_system",
+        "recommendedSubassembly": "front_wheel_assembly"
+      },
+      "reason": "assembly audit placed this part at the rear wheel cluster"
+    },
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-2.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-2.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-002_part-02_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-2_colored.glb"
+  },
+  {
+    "partId": "RB-003",
+    "sourcePartIndex": 3,
+    "proposedName": "rearset_control_bracket",
+    "displayName": "Rearset Control Bracket",
+    "module": "controls_cockpit",
+    "recommendedSubassembly": "foot_controls",
+    "confidence": "high",
+    "visualEvidence": [
+      "complex cast geometry",
+      "mounting points"
+    ],
+    "metadataEvidence": [
+      "holes: 16",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": 11.4,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-3.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-3.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-003_part-03_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-3_colored.glb"
+  },
+  {
+    "partId": "RB-004",
+    "sourcePartIndex": 4,
+    "proposedName": "shift_lever",
+    "displayName": "Shift Lever",
+    "module": "controls_cockpit",
+    "recommendedSubassembly": "foot_controls",
+    "confidence": "high",
+    "visualEvidence": [
+      "lever arm",
+      "offset pedal peg"
+    ],
+    "metadataEvidence": [
+      "holes: 11",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 32.9,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-4.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-4.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-004_part-04_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-4_colored.glb"
+  },
+  {
+    "partId": "RB-005",
+    "sourcePartIndex": 5,
+    "proposedName": "brake_pedal",
+    "displayName": "Brake Pedal",
+    "module": "controls_cockpit",
+    "recommendedSubassembly": "foot_controls",
+    "confidence": "high",
+    "visualEvidence": [
+      "mirrored to RB-004"
+    ],
+    "metadataEvidence": [
+      "holes: 11",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 32.8,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-5.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-5.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-005_part-05_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-5_colored.glb"
+  },
+  {
+    "partId": "RB-006",
+    "sourcePartIndex": 6,
+    "proposedName": "battery_box",
+    "displayName": "Battery Box",
+    "module": "electrical_lighting",
+    "recommendedSubassembly": "electrical_harness",
+    "confidence": "medium",
+    "visualEvidence": [
+      "boxy shape",
+      "protruding wire port"
+    ],
+    "metadataEvidence": [
+      "holes: 13",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "ecu_housing"
+    ],
+    "uncertaintyNotes": "Re-classified from fluid reservoir based on form factor and system needs.",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 29.1,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-6.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-6.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-006_part-06_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-6_colored.glb"
+  },
+  {
+    "partId": "RB-007",
+    "sourcePartIndex": 7,
+    "proposedName": "battery_box_lid",
+    "displayName": "Battery Box Lid",
+    "module": "electrical_lighting",
+    "recommendedSubassembly": "electrical_harness",
+    "confidence": "medium",
+    "visualEvidence": [
+      "matches footprint of RB-006"
+    ],
+    "metadataEvidence": [
+      "holes: 13",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 29.1,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-7.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-7.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-007_part-07_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-7_colored.glb"
+  },
+  {
+    "partId": "RB-008",
+    "sourcePartIndex": 8,
+    "proposedName": "suspension_linkage_plate_a",
+    "displayName": "Suspension Linkage Plate A",
+    "module": "rear_suspension_swingarm",
+    "recommendedSubassembly": "shock_linkage",
+    "confidence": "high",
+    "visualEvidence": [
+      "flat rectangular plate",
+      "5 inline holes"
+    ],
+    "metadataEvidence": [
+      "holes: 2",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -1.3,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-8.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-8.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-008_part-08_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-8_colored.glb"
+  },
+  {
+    "partId": "RB-009",
+    "sourcePartIndex": 9,
+    "proposedName": "steering_damper",
+    "displayName": "Steering Damper",
+    "module": "front_suspension_steering",
+    "recommendedSubassembly": "steering_controls",
+    "confidence": "high",
+    "visualEvidence": [
+      "long cylindrical body",
+      "rod",
+      "fork end"
+    ],
+    "metadataEvidence": [
+      "holes: 13",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": 16.5,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-9.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-9.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-009_part-09_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-9_colored.glb"
+  },
+  {
+    "partId": "RB-010",
+    "sourcePartIndex": 10,
+    "proposedName": "suspension_linkage_plate_b",
+    "displayName": "Suspension Linkage Plate B",
+    "module": "rear_suspension_swingarm",
+    "recommendedSubassembly": "shock_linkage",
+    "confidence": "high",
+    "visualEvidence": [
+      "matches RB-008"
+    ],
+    "metadataEvidence": [
+      "holes: 2",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -5.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-10.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-10.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-010_part-10_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-10_colored.glb"
+  },
+  {
+    "partId": "RB-011",
+    "sourcePartIndex": 11,
+    "proposedName": "bearing_race",
+    "displayName": "Bearing Race",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": null,
+    "confidence": "medium",
+    "visualEvidence": [
+      "short hollow cylinder"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "collar_spacer"
+    ],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 71.1,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-11.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-11.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-011_part-11_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-11_colored.glb"
+  },
+  {
+    "partId": "RB-012",
+    "sourcePartIndex": 12,
+    "proposedName": "clip_on_handlebar_left",
+    "displayName": "Clip-On Handlebar (Left)",
+    "module": "controls_cockpit",
+    "recommendedSubassembly": "steering_controls",
+    "confidence": "high",
+    "visualEvidence": [
+      "bent tubing",
+      "straight grip axis"
+    ],
+    "metadataEvidence": [
+      "holes: 12",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "Re-classified from fluid line after viewing the cockpit assembly context.",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 71.1,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-12.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-12.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-012_part-12_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-12_colored.glb"
+  },
+  {
+    "partId": "RB-013",
+    "sourcePartIndex": 13,
+    "proposedName": "clip_on_handlebar_right",
+    "displayName": "Clip-On Handlebar (Right)",
+    "module": "controls_cockpit",
+    "recommendedSubassembly": "steering_controls",
+    "confidence": "high",
+    "visualEvidence": [
+      "matches RB-012"
+    ],
+    "metadataEvidence": [
+      "holes: 12",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 71.2,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-13.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-13.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-013_part-13_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-13_colored.glb"
+  },
+  {
+    "partId": "RB-014",
+    "sourcePartIndex": 14,
+    "proposedName": "large_spacer_ring",
+    "displayName": "Large Spacer Ring",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": null,
+    "confidence": "medium",
+    "visualEvidence": [
+      "thin walled large ring"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "dust_seal"
+    ],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 71.2,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-14.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-14.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-014_part-14_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-14_colored.glb"
+  },
+  {
+    "partId": "RB-015",
+    "sourcePartIndex": 15,
+    "proposedName": "dowel_pin",
+    "displayName": "Dowel Pin",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": null,
+    "confidence": "high",
+    "visualEvidence": [
+      "small solid cylinder"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 66.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-15.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-15.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-015_part-15_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-15_colored.glb"
+  },
+  {
+    "partId": "RB-016",
+    "sourcePartIndex": 16,
+    "proposedName": "tubular_front_subframe",
+    "displayName": "Tubular Front Subframe",
+    "module": "frame_chassis",
+    "recommendedSubassembly": "front_fairing_stay",
+    "confidence": "high",
+    "visualEvidence": [
+      "bent U-shaped thin tubing"
+    ],
+    "metadataEvidence": [
+      "holes: 6",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "rear_subframe_loop"
+    ],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 59.6,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-16.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-16.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-016_part-16_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-16_colored.glb"
+  },
+  {
+    "partId": "RB-017",
+    "sourcePartIndex": 17,
+    "proposedName": "front_axle_shaft",
+    "displayName": "Front Axle Shaft",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "front_wheel_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "long straight cylinder"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 70.2,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-17.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-17.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-017_part-17_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-17_colored.glb"
+  },
+  {
+    "partId": "RB-018",
+    "sourcePartIndex": 18,
+    "proposedName": "thick_spacer_tube",
+    "displayName": "Thick Spacer Tube",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "wheel_assembly",
+    "confidence": "medium",
+    "visualEvidence": [
+      "hollow tube"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 66.6,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-18.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-18.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-018_part-18_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-18_colored.glb"
+  },
+  {
+    "partId": "RB-019",
+    "sourcePartIndex": 19,
+    "proposedName": "bar_end_weight",
+    "displayName": "Bar End Weight",
+    "module": "controls_cockpit",
+    "recommendedSubassembly": "steering_controls",
+    "confidence": "high",
+    "visualEvidence": [
+      "plug with flanged head",
+      "inner shaft"
+    ],
+    "metadataEvidence": [
+      "holes: 10",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 63.0,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-19.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-19.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-019_part-19_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-19_colored.glb"
+  },
+  {
+    "partId": "RB-020",
+    "sourcePartIndex": 20,
+    "proposedName": "rear_brake_caliper",
+    "displayName": "Rear Brake Caliper",
+    "module": "braking_system",
+    "recommendedSubassembly": "rear_brake_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "U-shaped body",
+      "mounting ears",
+      "central opening"
+    ],
+    "metadataEvidence": [
+      "holes: 10",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": 10.4,
+      "flags": [
+        "front_name_but_rear_assembly_zone"
+      ]
+    },
+    "namingStatus": "location_corrected_working_draft",
+    "reviewRequired": true,
+    "workingDraftNotes": "Location correction applied from assembly-reference audit; verify manually before final release.",
+    "locationCorrection": {
+      "old": {
+        "proposedName": "front_brake_caliper",
+        "displayName": "Front Brake Caliper",
+        "module": "braking_system",
+        "recommendedSubassembly": "brake_caliper"
+      },
+      "reason": "assembly audit placed this part at the rear wheel cluster"
+    },
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-20.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-20.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-020_part-20_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-20_colored.glb"
+  },
+  {
+    "partId": "RB-021",
+    "sourcePartIndex": 21,
+    "proposedName": "side_fairing_left",
+    "displayName": "Side Fairing (Left)",
+    "module": "fuel_bodywork_fairings",
+    "recommendedSubassembly": "bodywork_kit",
+    "confidence": "high",
+    "visualEvidence": [
+      "curved aerodynamic surface"
+    ],
+    "metadataEvidence": [
+      "holes: 0",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": 12.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-21.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-21.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-021_part-21_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-21_colored.glb"
+  },
+  {
+    "partId": "RB-022",
+    "sourcePartIndex": 22,
+    "proposedName": "side_fairing_right",
+    "displayName": "Side Fairing (Right)",
+    "module": "fuel_bodywork_fairings",
+    "recommendedSubassembly": "bodywork_kit",
+    "confidence": "high",
+    "visualEvidence": [
+      "mirrored curved aerodynamic surface"
+    ],
+    "metadataEvidence": [
+      "holes: 0",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": 12.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-22.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-22.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-022_part-22_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-22_colored.glb"
+  },
+  {
+    "partId": "RB-023",
+    "sourcePartIndex": 23,
+    "proposedName": "nose_cowl_panel",
+    "displayName": "Nose Cowl Panel",
+    "module": "fuel_bodywork_fairings",
+    "recommendedSubassembly": "bodywork_kit",
+    "confidence": "high",
+    "visualEvidence": [
+      "symmetrical swept aerodynamic shell"
+    ],
+    "metadataEvidence": [
+      "holes: 0",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 76.9,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-23.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-23.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-023_part-23_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-23_colored.glb"
+  },
+  {
+    "partId": "RB-024",
+    "sourcePartIndex": 24,
+    "proposedName": "front_fender_trim",
+    "displayName": "Front Fender Trim",
+    "module": "fuel_bodywork_fairings",
+    "recommendedSubassembly": "front_fender_assembly",
+    "confidence": "medium",
+    "visualEvidence": [
+      "thin swept arch"
+    ],
+    "metadataEvidence": [
+      "holes: 0",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "windscreen_lip"
+    ],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 90.1,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-24.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-24.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-024_part-24_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-24_colored.glb"
+  },
+  {
+    "partId": "RB-025",
+    "sourcePartIndex": 25,
+    "proposedName": "exhaust_hanger_clamp",
+    "displayName": "Exhaust Hanger Clamp",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "exhaust",
+    "confidence": "medium",
+    "visualEvidence": [
+      "P-clamp design"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 45.0,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-25.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-25.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-025_part-25_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-25_colored.glb"
+  },
+  {
+    "partId": "RB-026",
+    "sourcePartIndex": 26,
+    "proposedName": "long_mounting_bolt_a",
+    "displayName": "Long Mounting Bolt A",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": null,
+    "confidence": "high",
+    "visualEvidence": [
+      "long threaded shaft",
+      "socket head"
+    ],
+    "metadataEvidence": [
+      "holes: 3",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 73.6,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-26.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-26.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-026_part-26_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-26_colored.glb"
+  },
+  {
+    "partId": "RB-027",
+    "sourcePartIndex": 27,
+    "proposedName": "chain_slider_guard",
+    "displayName": "Chain Slider Guard",
+    "module": "rear_suspension_swingarm",
+    "recommendedSubassembly": "swingarm_assembly",
+    "confidence": "medium",
+    "visualEvidence": [
+      "curved strip profile"
+    ],
+    "metadataEvidence": [
+      "holes: 0",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "fender_support"
+    ],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -9.2,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-27.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-27.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-027_part-27_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-27_colored.glb"
+  },
+  {
+    "partId": "RB-028",
+    "sourcePartIndex": 28,
+    "proposedName": "axle_spacer_cap_a",
+    "displayName": "Axle Spacer Cap A",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "wheel_assembly",
+    "confidence": "medium",
+    "visualEvidence": [
+      "stepped spacer cup"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 70.2,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-28.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-28.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-028_part-28_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-28_colored.glb"
+  },
+  {
+    "partId": "RB-029",
+    "sourcePartIndex": 29,
+    "proposedName": "axle_spacer_cap_b",
+    "displayName": "Axle Spacer Cap B",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "wheel_assembly",
+    "confidence": "medium",
+    "visualEvidence": [
+      "stepped spacer cup"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 70.1,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-29.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-29.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-029_part-29_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-29_colored.glb"
+  },
+  {
+    "partId": "RB-030",
+    "sourcePartIndex": 30,
+    "proposedName": "chain_adjuster_block",
+    "displayName": "Chain Adjuster Block",
+    "module": "rear_suspension_swingarm",
+    "recommendedSubassembly": "swingarm_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "rectangular block",
+      "adjusting screw profile"
+    ],
+    "metadataEvidence": [
+      "holes: 44",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 68.5,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-30.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-30.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-030_part-30_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-30_colored.glb"
+  },
+  {
+    "partId": "RB-031",
+    "sourcePartIndex": 31,
+    "proposedName": "rear_wheel_rim",
+    "displayName": "Rear Wheel Rim",
+    "module": "rear_wheel_assembly",
+    "recommendedSubassembly": "rear_wheel_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "complete circular rim",
+      "3 solid spokes"
+    ],
+    "metadataEvidence": [
+      "holes: 27",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "rear_wheel_rim"
+    ],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -14.3,
+      "flags": [
+        "front_name_but_rear_assembly_zone"
+      ]
+    },
+    "namingStatus": "location_corrected_working_draft",
+    "reviewRequired": true,
+    "workingDraftNotes": "Location correction applied from assembly-reference audit; verify manually before final release.",
+    "locationCorrection": {
+      "old": {
+        "proposedName": "front_wheel_rim",
+        "displayName": "Front Wheel Rim",
+        "module": "front_wheel_assembly",
+        "recommendedSubassembly": "wheel_assembly"
+      },
+      "reason": "assembly audit placed this rim at the rear wheel"
+    },
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-31.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-31.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-031_part-31_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-31_colored.glb"
+  },
+  {
+    "partId": "RB-032",
+    "sourcePartIndex": 32,
+    "proposedName": "front_axle_shaft",
+    "displayName": "Front Axle Shaft",
+    "module": "front_wheel_assembly",
+    "recommendedSubassembly": "front_wheel_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "long cylindrical bar"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 83.9,
+      "flags": [
+        "rear_name_but_front_assembly_zone"
+      ]
+    },
+    "namingStatus": "location_corrected_working_draft",
+    "reviewRequired": true,
+    "workingDraftNotes": "Location correction applied from assembly-reference audit; verify manually before final release.",
+    "locationCorrection": {
+      "old": {
+        "proposedName": "rear_axle_shaft",
+        "displayName": "Rear Axle Shaft",
+        "module": "fasteners_hardware",
+        "recommendedSubassembly": "swingarm_assembly"
+      },
+      "reason": "assembly audit placed this shaft at the front wheel/fork cluster"
+    },
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-32.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-32.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-032_part-32_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-32_colored.glb"
+  },
+  {
+    "partId": "RB-033",
+    "sourcePartIndex": 33,
+    "proposedName": "inner_sleeve_spacer",
+    "displayName": "Inner Sleeve Spacer",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "wheel_assembly",
+    "confidence": "medium",
+    "visualEvidence": [
+      "simple hollow cylinder"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 83.9,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-33.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-33.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-033_part-33_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-33_colored.glb"
+  },
+  {
+    "partId": "RB-034",
+    "sourcePartIndex": 34,
+    "proposedName": "front_fender_arch",
+    "displayName": "Front Fender Arch",
+    "module": "fuel_bodywork_fairings",
+    "recommendedSubassembly": "front_fender_assembly",
+    "confidence": "medium",
+    "visualEvidence": [
+      "thin curved support arch"
+    ],
+    "metadataEvidence": [
+      "holes: 0",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 82.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-34.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-34.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-034_part-34_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-34_colored.glb"
+  },
+  {
+    "partId": "RB-035",
+    "sourcePartIndex": 35,
+    "proposedName": "engine_mount_plate_b",
+    "displayName": "Engine Mount Plate B",
+    "module": "frame_chassis",
+    "recommendedSubassembly": "chassis_hardware",
+    "confidence": "medium",
+    "visualEvidence": [
+      "matches RB-001"
+    ],
+    "metadataEvidence": [
+      "holes: 8",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 75.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-35.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-35.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-035_part-35_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-35_colored.glb"
+  },
+  {
+    "partId": "RB-036",
+    "sourcePartIndex": 36,
+    "proposedName": "long_mounting_bolt_b",
+    "displayName": "Long Mounting Bolt B",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": null,
+    "confidence": "high",
+    "visualEvidence": [
+      "matches RB-026"
+    ],
+    "metadataEvidence": [
+      "holes: 3",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 73.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-36.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-36.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-036_part-36_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-36_colored.glb"
+  },
+  {
+    "partId": "RB-037",
+    "sourcePartIndex": 37,
+    "proposedName": "engine_mount_plate_c",
+    "displayName": "Engine Mount Plate C",
+    "module": "frame_chassis",
+    "recommendedSubassembly": "chassis_hardware",
+    "confidence": "medium",
+    "visualEvidence": [
+      "matches RB-001"
+    ],
+    "metadataEvidence": [
+      "holes: 8",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 75.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-37.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-37.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-037_part-37_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-37_colored.glb"
+  },
+  {
+    "partId": "RB-038",
+    "sourcePartIndex": 38,
+    "proposedName": "sprocket_carrier_hub",
+    "displayName": "Sprocket Carrier Hub",
+    "module": "final_drive",
+    "recommendedSubassembly": "rear_wheel_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "central hub",
+      "3 bolt flanges"
+    ],
+    "metadataEvidence": [
+      "holes: 51",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 83.9,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-38.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-38.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-038_part-38_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-38_colored.glb"
+  },
+  {
+    "partId": "RB-039",
+    "sourcePartIndex": 39,
+    "proposedName": "abs_tone_ring_front",
+    "displayName": "ABS Tone Ring (Front)",
+    "module": "front_wheel_assembly",
+    "recommendedSubassembly": "wheel_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "thin ring",
+      "internal radial slots"
+    ],
+    "metadataEvidence": [
+      "holes: 38",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 84.0,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-39.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-39.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-039_part-39_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-39_colored.glb"
+  },
+  {
+    "partId": "RB-040",
+    "sourcePartIndex": 40,
+    "proposedName": "front_abs_tone_ring",
+    "displayName": "Front ABS Tone Ring",
+    "module": "front_wheel_assembly",
+    "recommendedSubassembly": "front_wheel_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "matches RB-039"
+    ],
+    "metadataEvidence": [
+      "holes: 38",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 83.9,
+      "flags": [
+        "rear_name_but_front_assembly_zone"
+      ]
+    },
+    "namingStatus": "location_corrected_working_draft",
+    "reviewRequired": true,
+    "workingDraftNotes": "Location correction applied from assembly-reference audit; verify manually before final release.",
+    "locationCorrection": {
+      "old": {
+        "proposedName": "abs_tone_ring_rear",
+        "displayName": "ABS Tone Ring (Rear)",
+        "module": "rear_wheel_assembly",
+        "recommendedSubassembly": "wheel_assembly"
+      },
+      "reason": "assembly audit placed this tone ring at the front wheel cluster"
+    },
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-40.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-40.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-040_part-40_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-40_colored.glb"
+  },
+  {
+    "partId": "RB-041",
+    "sourcePartIndex": 41,
+    "proposedName": "clutch_cover_disc",
+    "displayName": "Clutch Cover Disc",
+    "module": "engine_powertrain",
+    "recommendedSubassembly": "engine_covers",
+    "confidence": "medium",
+    "visualEvidence": [
+      "solid disc plate",
+      "center mounting pin"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -14.3,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-41.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-41.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-041_part-41_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-41_colored.glb"
+  },
+  {
+    "partId": "RB-042",
+    "sourcePartIndex": 42,
+    "proposedName": "steering_head_bearing_upper",
+    "displayName": "Steering Head Bearing (Upper)",
+    "module": "front_suspension_steering",
+    "recommendedSubassembly": "steering_head",
+    "confidence": "medium",
+    "visualEvidence": [
+      "thick toroidal ring"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [
+      "dust_seal"
+    ],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "rear",
+      "xMm": -14.3,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-42.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-42.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-042_part-42_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-42_colored.glb"
+  },
+  {
+    "partId": "RB-043",
+    "sourcePartIndex": 43,
+    "proposedName": "steering_head_bearing_lower",
+    "displayName": "Steering Head Bearing (Lower)",
+    "module": "front_suspension_steering",
+    "recommendedSubassembly": "steering_head",
+    "confidence": "medium",
+    "visualEvidence": [
+      "matches RB-042"
+    ],
+    "metadataEvidence": [
+      "holes: 1",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 83.9,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-43.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-43.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-043_part-43_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-43_colored.glb"
+  },
+  {
+    "partId": "RB-044",
+    "sourcePartIndex": 44,
+    "proposedName": "swingarm_pivot_bushing_a",
+    "displayName": "Swingarm Pivot Bushing A",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "swingarm_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "hollow cylinder with flange"
+    ],
+    "metadataEvidence": [
+      "holes: 2",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 67.7,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-44.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-44.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-044_part-44_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-44_colored.glb"
+  },
+  {
+    "partId": "RB-045",
+    "sourcePartIndex": 45,
+    "proposedName": "swingarm_pivot_bushing_b",
+    "displayName": "Swingarm Pivot Bushing B",
+    "module": "fasteners_hardware",
+    "recommendedSubassembly": "swingarm_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "matches RB-044"
+    ],
+    "metadataEvidence": [
+      "holes: 2",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "front",
+      "xMm": 67.6,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-45.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-45.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-045_part-45_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-45_colored.glb"
+  },
+  {
+    "partId": "RB-046",
+    "sourcePartIndex": 46,
+    "proposedName": "main_frame_spar_left",
+    "displayName": "Main Frame Spar (Left)",
+    "module": "frame_chassis",
+    "recommendedSubassembly": "chassis_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "large structural casting",
+      "engine mounting recesses"
+    ],
+    "metadataEvidence": [
+      "holes: 11",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 54.2,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-46.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-46.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-046_part-46_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-46_colored.glb"
+  },
+  {
+    "partId": "RB-047",
+    "sourcePartIndex": 47,
+    "proposedName": "main_frame_spar_right",
+    "displayName": "Main Frame Spar (Right)",
+    "module": "frame_chassis",
+    "recommendedSubassembly": "chassis_assembly",
+    "confidence": "high",
+    "visualEvidence": [
+      "mirrored structural casting"
+    ],
+    "metadataEvidence": [
+      "holes: 11",
+      "mat: Steel"
+    ],
+    "possibleAlternatives": [],
+    "uncertaintyNotes": "",
+    "assemblyAudit": {
+      "zoneHeuristic": "middle",
+      "xMm": 54.1,
+      "flags": []
+    },
+    "namingStatus": "working_draft",
+    "reviewRequired": false,
+    "workingDraftNotes": "Imported from Gemini subassembly pass.",
+    "sourceFileName": "User Library-racing bike_racing bike.sldasm-Part-47.sldprt",
+    "sourceFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-47.sldprt",
+    "cardImage": "public-demo-source/racing-bike/RB-047_part-47_card.png",
+    "glbFilePath": "public-demo-source/racing-bike/User Library-racing bike_racing bike.sldasm-Part-47_colored.glb"
+  }
+]

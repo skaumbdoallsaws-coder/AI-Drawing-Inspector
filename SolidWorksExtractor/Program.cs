@@ -34,6 +34,7 @@ namespace SolidWorksExtractor
     ///   --fast              Fast mode: skip geometry analysis and per-config suppression
     ///   --full              Full mode: complete extraction (default)
     ///   --part-glb          Export per-feature colored GLB for a single part
+    ///   --process-bodies    Export body-level GLB + process body sidecar for multibody parts
     ///   --fea               Export FEA simulation results (stress GLB + results JSON)
     /// </summary>
     class Program
@@ -157,6 +158,10 @@ namespace SolidWorksExtractor
                 else if (arg == "--part-glb")
                 {
                     options.ExportPartGlb = true;
+                }
+                else if (arg == "--process-bodies")
+                {
+                    options.ExportProcessBodies = true;
                 }
                 else if (arg == "--fea")
                 {
@@ -294,6 +299,32 @@ namespace SolidWorksExtractor
                             else
                             {
                                 Console.WriteLine("    Warning: Could not cast document to IPartDoc for GLB export");
+                            }
+                        }
+
+                        // Export process body map for multibody/imported plant parts
+                        if (options.ExportProcessBodies)
+                        {
+                            Console.WriteLine("  - Exporting process body map and body-level GLB...");
+                            IPartDoc partDocInterface = doc as IPartDoc;
+                            if (partDocInterface != null)
+                            {
+                                var glbExporter = new GlbExporter();
+                                string glbOutputDir = Path.GetDirectoryName(outputFile);
+                                string bodyBaseName = GetDeterministicPartNumber(partData, Path.GetFileName(doc.GetPathName()));
+                                string glbPath = glbExporter.ExportPartBodyGlb(partDocInterface, doc, glbOutputDir, bodyBaseName);
+                                if (glbPath != null)
+                                {
+                                    Console.WriteLine($"    Body-level GLB saved: {Path.GetFileName(glbPath)}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine("    Warning: Process body export produced no data");
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("    Warning: Could not cast document to IPartDoc for process body export");
                             }
                         }
 
@@ -1281,6 +1312,7 @@ namespace SolidWorksExtractor
             Console.WriteLine("  --no-color-parts       Skip part colorization in assembly views");
             Console.WriteLine("  --export-glb           Export colored GLB 3D model for assembly");
             Console.WriteLine("  --part-glb             Export per-feature colored GLB for a single part");
+            Console.WriteLine("  --process-bodies       Export body-level GLB + process body sidecar for multibody parts");
             Console.WriteLine("  --fea                  Export FEA simulation results (stress GLB + results JSON)");
             Console.WriteLine();
             Console.WriteLine("Batch Mode:");

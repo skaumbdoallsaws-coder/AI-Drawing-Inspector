@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using SolidWorks.Interop.sldworks;
@@ -98,6 +99,21 @@ namespace SolidWorksExtractor.Services
         {
             public IBody2 Body;
             public bool   IsSheet;
+        }
+
+        private class BodyProcessRecord
+        {
+            public string BodyId;
+            public string BodyName;
+            public string BodyType;
+            public string GlbNodeName;
+            public List<string> FolderPath = new List<string>();
+            public string ColorHex;
+            public int FaceCount;
+            public int VertexCount;
+            public int TriangleCount;
+            public float[] BoundsMin;
+            public float[] BoundsMax;
         }
 
         /// <summary>
@@ -610,6 +626,472 @@ namespace SolidWorksExtractor.Services
                 if (needRestore && flatPatternFeature != null)
                     RestoreFlatPattern(flatPatternFeature, modelDoc);
             }
+        }
+
+        /// <summary>
+        /// Export a multibody part with one GLB node per visible body, plus a
+        /// process-body sidecar JSON that records body names, body-folder paths,
+        /// bounding boxes, and GLB node names. This is intended for imported
+        /// plant/process models where the SolidWorks file is a single SLDPRT
+        /// containing hundreds of bodies rather than a true SLDASM.
+        /// </summary>
+        public string ExportPartBodyGlb(IPartDoc partDoc, IModelDoc2 modelDoc, string outputFolder, string baseName)
+        {
+            if (partDoc == null || modelDoc == null)
+            {
+                Console.WriteLine("    Warning: No part document for body-level GLB export");
+                return null;
+            }
+
+            if (!Directory.Exists(outputFolder))
+                Directory.CreateDirectory(outputFolder);
+
+            var taggedBodies = EnumerateVisibleBodies(partDoc);
+            if (taggedBodies.Count == 0)
+            {
+                Console.WriteLine("    Warning: No visible solid or sheet bodies found");
+                return null;
+            }
+
+            var folderMap = BuildBodyFolderPathMap(modelDoc);
+            var meshes = new List<MeshData>();
+            var records = new List<BodyProcessRecord>();
+            int bodyIndex = 0;
+
+            foreach (var tagged in taggedBodies)
+            {
+                bodyIndex++;
+                IBody2 body = tagged.Body;
+                if (body == null) continue;
+
+                string bodyName = GetBodyDisplayName(body, bodyIndex);
+                string bodyId = MakeBodyId(bodyIndex, bodyName);
+                string nodeName = bodyId;
+                int paletteIndex = (bodyIndex - 1) % Palette.Length;
+
+                var positions = new List<float>();
+                var normals = new List<float>();
+                var indices = new List<uint>();
+                uint indexOffset = 0;
+                int faceCount = 0;
+
+                IFace2 face = null;
+                try { face = (IFace2)body.GetFirstFace(); } catch { face = null; }
+                while (face != null)
+                {
+                    float[] triVerts = null;
+                    float[] triNorms = null;
+
+                    try
+                    {
+                        triVerts = ConvertToFloatArray(face.GetTessTriangles(true));
+                        triNorms = ConvertToFloatArray(face.GetTessNorms());
+                    }
+                    catch { }
+
+                    if (triVerts != null && triVerts.Length >= 9)
+                    {
+                        faceCount++;
+                        int vertexCount = triVerts.Length / 3;
+                        if (triNorms == null || triNorms.Length != triVerts.Length)
+                        {
+                            triNorms = new float[triVerts.Length];
+                            for (int i = 0; i < vertexCount; i++)
+                            {
+                                triNorms[i * 3 + 0] = 0f;
+                                triNorms[i * 3 + 1] = 1f;
+                                triNorms[i * 3 + 2] = 0f;
+                            }
+                        }
+
+                        for (int v = 0; v < vertexCount; v++)
+                        {
+                            positions.Add(triVerts[v * 3 + 0]);
+                            positions.Add(triVerts[v * 3 + 1]);
+                            positions.Add(triVerts[v * 3 + 2]);
+                            normals.Add(triNorms[v * 3 + 0]);
+                            normals.Add(triNorms[v * 3 + 1]);
+                            normals.Add(triNorms[v * 3 + 2]);
+                        }
+
+                        for (uint i = 0; i < (uint)vertexCount; i++)
+                            indices.Add(indexOffset + i);
+                        indexOffset += (uint)vertexCount;
+                    }
+
+                    try { face = (IFace2)face.GetNextFace(); }
+                    catch { face = null; }
+                }
+
+                if (positions.Count == 0)
+                {
+                    Console.WriteLine($"    Skipping body '{bodyName}' (no tessellation)");
+                    continue;
+                }
+
+                float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+                float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+                for (int i = 0; i < positions.Count; i += 3)
+                {
+                    float x = positions[i], y = positions[i + 1], z = positions[i + 2];
+                    if (x < minX) minX = x; if (x > maxX) maxX = x;
+                    if (y < minY) minY = y; if (y > maxY) maxY = y;
+                    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+                }
+
+                var boundsMin = new float[] { minX, minY, minZ };
+                var boundsMax = new float[] { maxX, maxY, maxZ };
+                var folderPath = folderMap.ContainsKey(bodyName)
+                    ? new List<string>(folderMap[bodyName])
+                    : new List<string>();
+                var color = Palette[paletteIndex];
+
+                meshes.Add(new MeshData
+                {
+                    Name = nodeName,
+                    PartFilename = nodeName,
+                    PaletteIndex = paletteIndex,
+                    Positions = positions.ToArray(),
+                    Normals = normals.ToArray(),
+                    Indices = indices.ToArray(),
+                    BoundsMin = boundsMin,
+                    BoundsMax = boundsMax,
+                    IsSheetBody = tagged.IsSheet
+                });
+
+                records.Add(new BodyProcessRecord
+                {
+                    BodyId = bodyId,
+                    BodyName = bodyName,
+                    BodyType = tagged.IsSheet ? "sheet" : "solid",
+                    GlbNodeName = nodeName,
+                    FolderPath = folderPath,
+                    ColorHex = color.Hex,
+                    FaceCount = faceCount,
+                    VertexCount = positions.Count / 3,
+                    TriangleCount = indices.Count / 3,
+                    BoundsMin = boundsMin,
+                    BoundsMax = boundsMax
+                });
+
+                Console.WriteLine($"    Body '{bodyId}': {positions.Count / 3:N0} verts, {indices.Count / 3:N0} tris, folder={string.Join("/", folderPath)}");
+            }
+
+            if (meshes.Count == 0)
+            {
+                Console.WriteLine("    Warning: No body meshes generated");
+                return null;
+            }
+
+            List<BufferViewInfo> bufferViews;
+            byte[] binData = BuildBinaryBuffer(meshes, out bufferViews);
+            string gltfJson = BuildGltfJson(meshes, bufferViews, binData.Length);
+
+            string glbPath = Path.Combine(outputFolder, baseName + "_body.glb");
+            WriteGlbFile(gltfJson, binData, glbPath);
+
+            string jsonPath = Path.Combine(outputFolder, baseName + "_process_bodies.json");
+            WriteProcessBodiesJson(records, modelDoc, Path.GetFileName(glbPath), jsonPath);
+
+            long fileSizeKb = new FileInfo(glbPath).Length / 1024;
+            Console.WriteLine($"    Body-level GLB: {meshes.Count} nodes, {fileSizeKb} KB");
+            Console.WriteLine($"    Process bodies JSON: {jsonPath}");
+
+            return glbPath;
+        }
+
+        private string GetBodyDisplayName(IBody2 body, int index)
+        {
+            try
+            {
+                string name = body.Name;
+                if (!string.IsNullOrWhiteSpace(name))
+                    return name.Trim();
+            }
+            catch { }
+            return "Body " + index.ToString("000", CultureInfo.InvariantCulture);
+        }
+
+        private string MakeBodyId(int index, string bodyName)
+        {
+            string slug = Slugify(bodyName);
+            if (string.IsNullOrEmpty(slug)) slug = "body";
+            return "body_" + index.ToString("000", CultureInfo.InvariantCulture) + "__" + slug;
+        }
+
+        private string Slugify(string raw)
+        {
+            string s = (raw ?? "").Trim().ToLowerInvariant();
+            s = Regex.Replace(s, @"[^a-z0-9]+", "_").Trim('_');
+            if (s.Length > 80) s = s.Substring(0, 80).Trim('_');
+            return s;
+        }
+
+        private Dictionary<string, List<string>> BuildBodyFolderPathMap(IModelDoc2 modelDoc)
+        {
+            var map = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            if (modelDoc == null) return map;
+
+            try
+            {
+                IFeature feat = (IFeature)modelDoc.FirstFeature();
+                while (feat != null)
+                {
+                    WalkFeatureForBodyFolders(feat, new List<string>(), map);
+                    feat = (IFeature)feat.GetNextFeature();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    Warning: body folder traversal failed: {ex.Message}");
+            }
+
+            return map;
+        }
+
+        private void WalkFeatureForBodyFolders(IFeature feat, List<string> parentPath, Dictionary<string, List<string>> map)
+        {
+            if (feat == null) return;
+
+            string typeName = "";
+            string featureName = "";
+            try { typeName = feat.GetTypeName2() ?? ""; } catch { }
+            try { featureName = feat.Name ?? ""; } catch { }
+
+            bool folderLike = typeName.IndexOf("Folder", StringComparison.OrdinalIgnoreCase) >= 0
+                || string.Equals(typeName, "FtrFolder", StringComparison.OrdinalIgnoreCase);
+
+            var path = new List<string>(parentPath);
+            if (folderLike && !IsSystemBodyFolder(featureName, typeName))
+            {
+                string clean = CleanFolderName(featureName);
+                if (!string.IsNullOrWhiteSpace(clean))
+                    path.Add(clean);
+            }
+
+            if (folderLike)
+                TryMapBodiesFromFolder(feat, path, map);
+            else if (path.Count > 0)
+                TryMapBodyFeatureName(feat, path, map);
+
+            try
+            {
+                IFeature sub = (IFeature)feat.GetFirstSubFeature();
+                while (sub != null)
+                {
+                    WalkFeatureForBodyFolders(sub, path, map);
+                    sub = (IFeature)sub.GetNextSubFeature();
+                }
+            }
+            catch { }
+        }
+
+        private bool IsSystemBodyFolder(string featureName, string typeName)
+        {
+            string name = (featureName ?? "").Trim().ToLowerInvariant();
+            string type = (typeName ?? "").Trim().ToLowerInvariant();
+            if (type == "solidbodyfolder" || type == "surfacebodyfolder" || type == "bodyfolder")
+                return true;
+            if (name.StartsWith("solid bodies") || name.StartsWith("surface bodies"))
+                return true;
+            if (name == "history" || name == "annotations" || name == "sensors")
+                return true;
+            return false;
+        }
+
+        private string CleanFolderName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "";
+            return Regex.Replace(name.Trim(), @"\s+", " ");
+        }
+
+        private void TryMapBodiesFromFolder(IFeature folderFeature, List<string> folderPath, Dictionary<string, List<string>> map)
+        {
+            if (folderFeature == null) return;
+            object specific = null;
+            try { specific = folderFeature.GetSpecificFeature2(); } catch { }
+            if (specific == null) return;
+
+            object rawBodies = null;
+            try
+            {
+                dynamic dyn = specific;
+                rawBodies = dyn.GetBodies();
+            }
+            catch { }
+
+            foreach (object obj in ToObjectArray(rawBodies))
+            {
+                IBody2 body = obj as IBody2;
+                if (body == null) continue;
+                string bodyName = GetBodyDisplayName(body, 0);
+                if (string.IsNullOrWhiteSpace(bodyName)) continue;
+                if (!map.ContainsKey(bodyName) || folderPath.Count > map[bodyName].Count)
+                    map[bodyName] = new List<string>(folderPath);
+            }
+
+            // User-created SolidWorks body folders are commonly exposed as
+            // FeatureFolder objects rather than BodyFolder objects. In that case
+            // GetBodies() is unavailable, but GetFeatures() returns the contained
+            // BaseBody features whose names match IBody2.Name.
+            object rawFeatures = null;
+            try
+            {
+                dynamic dyn = specific;
+                rawFeatures = dyn.GetFeatures();
+            }
+            catch { }
+
+            foreach (object obj in ToObjectArray(rawFeatures))
+            {
+                IFeature feature = obj as IFeature;
+                TryMapBodyFeatureName(feature, folderPath, map);
+            }
+        }
+
+        private void TryMapBodyFeatureName(IFeature feature, List<string> folderPath, Dictionary<string, List<string>> map)
+        {
+            if (feature == null || folderPath == null || folderPath.Count == 0) return;
+
+            string typeName = "";
+            string featureName = "";
+            try { typeName = feature.GetTypeName2() ?? ""; } catch { }
+            try { featureName = feature.Name ?? ""; } catch { }
+
+            if (string.IsNullOrWhiteSpace(featureName)) return;
+            bool isBodyFeature = string.Equals(typeName, "BaseBody", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(typeName, "SurfaceBody", StringComparison.OrdinalIgnoreCase);
+            if (!isBodyFeature) return;
+
+            if (!map.ContainsKey(featureName) || folderPath.Count > map[featureName].Count)
+                map[featureName] = new List<string>(folderPath);
+        }
+
+        private IEnumerable<object> ToObjectArray(object value)
+        {
+            if (value == null) yield break;
+            if (value is object[] arr)
+            {
+                foreach (object item in arr) yield return item;
+                yield break;
+            }
+            if (value is Array a)
+            {
+                foreach (object item in a) yield return item;
+            }
+        }
+
+        private void WriteProcessBodiesJson(List<BodyProcessRecord> records, IModelDoc2 modelDoc, string glbFileName, string outputPath)
+        {
+            var groups = new Dictionary<string, List<BodyProcessRecord>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var r in records)
+            {
+                string key = (r.FolderPath != null && r.FolderPath.Count > 0)
+                    ? string.Join("/", r.FolderPath)
+                    : "__ungrouped__";
+                if (!groups.ContainsKey(key))
+                    groups[key] = new List<BodyProcessRecord>();
+                groups[key].Add(r);
+            }
+
+            var sb = new StringBuilder();
+            string filePath = "";
+            try { filePath = modelDoc.GetPathName() ?? ""; } catch { }
+            string fileName = string.IsNullOrWhiteSpace(filePath) ? "" : Path.GetFileName(filePath);
+
+            sb.AppendLine("{");
+            sb.AppendLine("  \"schemaVersion\": \"process_bodies.v1\",");
+            sb.AppendLine("  \"sourceType\": \"solidworks_multibody_part\",");
+            sb.AppendFormat("  \"fileName\": \"{0}\",\n", EscapeJson(fileName));
+            sb.AppendFormat("  \"filePath\": \"{0}\",\n", EscapeJson(filePath));
+            sb.AppendFormat("  \"extractionTimeUtc\": \"{0}\",\n", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+            sb.AppendFormat("  \"glbFile\": \"{0}\",\n", EscapeJson(glbFileName));
+            sb.AppendLine("  \"summary\": {");
+            sb.AppendFormat("    \"bodyCount\": {0},\n", records.Count);
+            sb.AppendFormat("    \"groupCount\": {0}\n", groups.Count);
+            sb.AppendLine("  },");
+
+            sb.AppendLine("  \"bodyGroups\": [");
+            int gIdx = 0;
+            foreach (var kvp in groups)
+            {
+                bool ungrouped = kvp.Key == "__ungrouped__";
+                var groupPath = ungrouped ? new List<string>() : kvp.Key.Split('/').ToList();
+                string displayName = ungrouped ? "Ungrouped Bodies" : groupPath.LastOrDefault() ?? kvp.Key;
+                string groupId = ungrouped ? "ungrouped_bodies" : Slugify(kvp.Key);
+                sb.AppendLine("    {");
+                sb.AppendFormat("      \"groupId\": \"{0}\",\n", EscapeJson(groupId));
+                sb.AppendFormat("      \"displayName\": \"{0}\",\n", EscapeJson(displayName));
+                sb.Append("      \"folderPath\": ");
+                AppendStringArray(sb, groupPath, 6);
+                sb.AppendLine(",");
+                sb.AppendLine("      \"bodyIds\": [");
+                for (int i = 0; i < kvp.Value.Count; i++)
+                {
+                    sb.AppendFormat("        \"{0}\"{1}\n", EscapeJson(kvp.Value[i].BodyId), i < kvp.Value.Count - 1 ? "," : "");
+                }
+                sb.AppendLine("      ],");
+                sb.AppendLine("      \"processRole\": \"\",");
+                sb.AppendLine("      \"sageExplanation\": \"\",");
+                sb.AppendLine("      \"operatorChecks\": []");
+                sb.Append("    }");
+                if (gIdx < groups.Count - 1) sb.Append(",");
+                sb.AppendLine();
+                gIdx++;
+            }
+            sb.AppendLine("  ],");
+
+            sb.AppendLine("  \"bodies\": [");
+            for (int i = 0; i < records.Count; i++)
+            {
+                var r = records[i];
+                sb.AppendLine("    {");
+                sb.AppendFormat("      \"bodyId\": \"{0}\",\n", EscapeJson(r.BodyId));
+                sb.AppendFormat("      \"bodyName\": \"{0}\",\n", EscapeJson(r.BodyName));
+                sb.AppendFormat("      \"bodyType\": \"{0}\",\n", EscapeJson(r.BodyType));
+                sb.AppendFormat("      \"glbNodeName\": \"{0}\",\n", EscapeJson(r.GlbNodeName));
+                sb.Append("      \"folderPath\": ");
+                AppendStringArray(sb, r.FolderPath ?? new List<string>(), 6);
+                sb.AppendLine(",");
+                sb.AppendFormat("      \"color\": \"{0}\",\n", EscapeJson(r.ColorHex));
+                sb.AppendFormat("      \"faceCount\": {0},\n", r.FaceCount);
+                sb.AppendFormat("      \"vertexCount\": {0},\n", r.VertexCount);
+                sb.AppendFormat("      \"triangleCount\": {0},\n", r.TriangleCount);
+                sb.Append("      \"boundingBox\": { \"min\": ");
+                AppendFloatArray(sb, r.BoundsMin);
+                sb.Append(", \"max\": ");
+                AppendFloatArray(sb, r.BoundsMax);
+                sb.AppendLine(" }");
+                sb.Append("    }");
+                if (i < records.Count - 1) sb.Append(",");
+                sb.AppendLine();
+            }
+            sb.AppendLine("  ]");
+            sb.AppendLine("}");
+
+            File.WriteAllText(outputPath, sb.ToString(), Encoding.UTF8);
+        }
+
+        private void AppendStringArray(StringBuilder sb, IList<string> values, int indentSpaces)
+        {
+            sb.Append("[");
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append("\"").Append(EscapeJson(values[i])).Append("\"");
+            }
+            sb.Append("]");
+        }
+
+        private void AppendFloatArray(StringBuilder sb, float[] values)
+        {
+            sb.Append("[");
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(values[i].ToString("G9", CultureInfo.InvariantCulture));
+            }
+            sb.Append("]");
         }
 
         /// <summary>

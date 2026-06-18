@@ -50,6 +50,9 @@ namespace SolidWorksExtractor.Models
         /// <summary>Export per-feature colored GLB for a single part?</summary>
         public bool ExportPartGlb { get; set; } = false;
 
+        /// <summary>Export one GLB node per visible body and a process-body sidecar JSON?</summary>
+        public bool ExportProcessBodies { get; set; } = false;
+
         /// <summary>Export FEA simulation results (stress-colored GLB + results JSON)?</summary>
         public bool ExportFea { get; set; } = false;
 

@@ -59,10 +59,49 @@ datasets/*.yaml
 runtime_metrics/
 # Server log files written at runtime
 runtime_logs/
+*.log
+*.out
+*.err
+debug.log
+uvicorn-*.log
+server_*.log
 # Pilot-bundle archives produced by scripts/collect-pilot-bundle.ps1
 pilot_diagnostics/
 # Raw packages copied in from the SOLIDWORKS bridge before sidecar install
 400S_Sorted_Library/_bridge_imports/
+
+# Local test and smoke-test output
+.pytest_cache/
+.pytest-basetemp-*/
+compare-smoke-*.png
+highlight-smoke-*.png
+racing_training_preview*.png
+training_*.png
+_drain*.png
+
+# Ad hoc local diagnostic scripts and scratch files
+_add_*.py
+_apply_*.py
+_capture_*.py
+_edit_*.py
+_plot*.py
+_probe_*.py
+_validate_*.py
+server_diff_check.txt
+start_uvicorn_8020.ps1
+
+# Large local/demo-library leftovers not required by the committed runtime demo
+demo_library/
+generated/training/process/cooling-tower/User Library-*
+generated/training/racing-bike/_front_wheel_reextract/
+generated/training/racing-bike/product_structure_review_*
+generated/training/racing-bike/product_structure_review_screenshots/
+generated/training/racing-bike/reclassification_model_package/
+generated/training/racing-bike/*reclassification_model_package.zip
+
+# Full local inspection libraries are development data, not app source.
+400S_Sorted_Library/
+400S_Unmatched_Files/
 
 # .NET build output -- SolidWorksExtractor.csproj writes bin/Debug/,
 # bin/Release/, obj/ on every `dotnet build`. Should never be tracked.

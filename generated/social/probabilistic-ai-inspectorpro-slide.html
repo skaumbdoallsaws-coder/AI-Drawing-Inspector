@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Probabilistic AI, Deterministic Engineering</title>
+  <style>
+    :root {
+      --bg-main: #dfe5ea;
+      --bg-panel: #eef2f5;
+      --bg-ribbon: #e3e8ed;
+      --bg-elevated: #f7f9fb;
+      --border: rgba(38,52,66,0.12);
+      --border-strong: rgba(38,52,66,0.18);
+      --shadow-color: rgba(26,36,46,0.14);
+      --text-primary: #1f2b35;
+      --text-secondary: #405363;
+      --text-muted: #596b7a;
+      --accent: #2b77bf;
+      --accent-strong: #155fa8;
+      --present: #00a86b;
+      --missing: #d9363e;
+      --partial: #d6a400;
+      --viewport-bg-center: #b7c3cc;
+      --viewport-bg-mid: #d2dbe3;
+      --viewport-bg-edge: #eef3f7;
+      --viewport-bg-gradient: linear-gradient(180deg, var(--viewport-bg-edge) 0%, var(--viewport-bg-mid) 28%, var(--viewport-bg-center) 50%, var(--viewport-bg-mid) 72%, var(--viewport-bg-edge) 100%);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: var(--bg-main);
+      color: var(--text-primary);
+      font-family: "Aptos", "Segoe UI", sans-serif;
+    }
+
+    .slide {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      padding: 76px 86px 64px;
+      background:
+        radial-gradient(circle at 12% 10%, rgba(43,119,191,0.18), transparent 32%),
+        radial-gradient(circle at 92% 16%, rgba(0,168,107,0.12), transparent 28%),
+        linear-gradient(145deg, #f8fafc 0%, #e6edf3 48%, #dbe3ea 100%);
+    }
+
+    .grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(60,76,92,0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(60,76,92,0.055) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.75), rgba(0,0,0,0.08));
+      pointer-events: none;
+    }
+
+    .topbar {
+      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 76px;
+      z-index: 1;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      font-size: 34px;
+      color: var(--text-primary);
+    }
+
+    .mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      box-shadow: 0 12px 28px rgba(43,119,191,0.26);
+      position: relative;
+    }
+
+    .mark:before, .mark:after {
+      content: "";
+      position: absolute;
+      background: rgba(255,255,255,0.92);
+      border-radius: 999px;
+    }
+
+    .mark:before {
+      width: 24px;
+      height: 6px;
+      left: 10px;
+      top: 12px;
+    }
+
+    .mark:after {
+      width: 6px;
+      height: 22px;
+      left: 19px;
+      top: 18px;
+    }
+
+    .eyebrow {
+      padding: 10px 16px;
+      border: 1px solid var(--border);
+      background: rgba(247,249,251,0.72);
+      border-radius: 999px;
+      color: var(--text-muted);
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .hero {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1.02fr 0.98fr;
+      gap: 62px;
+      align-items: center;
+    }
+
+    h1 {
+      margin: 0 0 26px;
+      font-size: 94px;
+      line-height: 0.96;
+      letter-spacing: -0.072em;
+      max-width: 880px;
+    }
+
+    .accent { color: var(--accent-strong); }
+
+    .lede {
+      margin: 0;
+      max-width: 760px;
+      font-size: 35px;
+      line-height: 1.22;
+      letter-spacing: -0.035em;
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .visual {
+      position: relative;
+      min-height: 520px;
+      display: grid;
+      grid-template-columns: 1fr 130px 1fr;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .card {
+      border: 1px solid var(--border-strong);
+      background: rgba(247,249,251,0.76);
+      box-shadow: 0 28px 70px var(--shadow-color);
+      border-radius: 34px;
+      padding: 34px;
+      min-height: 388px;
+      backdrop-filter: blur(8px);
+    }
+
+    .card h2 {
+      margin: 0 0 26px;
+      font-size: 33px;
+      letter-spacing: -0.04em;
+    }
+
+    .probability-stack {
+      display: grid;
+      gap: 17px;
+      margin-bottom: 30px;
+    }
+
+    .prob-row {
+      display: grid;
+      grid-template-columns: 140px 1fr 68px;
+      gap: 14px;
+      align-items: center;
+      font-size: 23px;
+      color: var(--text-secondary);
+      font-weight: 700;
+    }
+
+    .bar {
+      height: 16px;
+      border-radius: 999px;
+      background: #dce5ec;
+      overflow: hidden;
+      border: 1px solid rgba(38,52,66,0.08);
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), #6fa6d9);
+    }
+
+    .bar.alt span {
+      background: linear-gradient(90deg, var(--partial), #e8c95b);
+    }
+
+    .note {
+      margin: 0;
+      font-size: 25px;
+      line-height: 1.26;
+      color: var(--text-secondary);
+      font-weight: 650;
+      letter-spacing: -0.025em;
+    }
+
+    .gate {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .arrow {
+      width: 100px;
+      height: 2px;
+      background: var(--accent);
+      position: relative;
+    }
+
+    .arrow:after {
+      content: "";
+      position: absolute;
+      right: -4px;
+      top: -8px;
+      border-left: 14px solid var(--accent);
+      border-top: 9px solid transparent;
+      border-bottom: 9px solid transparent;
+    }
+
+    .gate-badge {
+      width: 114px;
+      height: 114px;
+      display: grid;
+      place-items: center;
+      border-radius: 30px;
+      background: var(--viewport-bg-gradient);
+      border: 1px solid rgba(38,52,66,0.18);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 22px 38px rgba(26,36,46,0.12);
+      color: var(--accent-strong);
+      font-size: 44px;
+      font-weight: 900;
+    }
+
+    .gate-label {
+      text-align: center;
+      font-size: 18px;
+      line-height: 1.1;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 800;
+    }
+
+    .checklist {
+      display: grid;
+      gap: 18px;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 14px;
+      align-items: start;
+      font-size: 25px;
+      line-height: 1.2;
+      color: var(--text-secondary);
+      font-weight: 700;
+      letter-spacing: -0.025em;
+    }
+
+    .dot {
+      width: 28px;
+      height: 28px;
+      margin-top: 1px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: white;
+      font-size: 18px;
+      font-weight: 900;
+      background: var(--present);
+    }
+
+    .dot.warn { background: var(--partial); }
+    .dot.stop { background: var(--missing); }
+
+    .footer {
+      position: absolute;
+      left: 86px;
+      right: 86px;
+      bottom: 58px;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 30px;
+      align-items: center;
+    }
+
+    .mantra {
+      padding: 22px 28px;
+      background: rgba(31,43,53,0.92);
+      color: white;
+      border-radius: 24px;
+      font-size: 31px;
+      font-weight: 800;
+      letter-spacing: -0.035em;
+      box-shadow: 0 28px 70px rgba(26,36,46,0.18);
+    }
+
+    .tag {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--accent-strong);
+      letter-spacing: -0.02em;
+    }
+  </style>
+</head>
+<body>
+  <main class="slide" aria-label="Probabilistic AI, deterministic engineering slide">
+    <div class="grid"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true"></div>
+        <div>InspectorPro</div>
+      </div>
+      <div class="eyebrow">Manufacturing AI Notes</div>
+    </header>
+
+    <section class="hero">
+      <div>
+        <h1>AI is <span class="accent">probabilistic.</span><br>Engineering needs proof.</h1>
+        <p class="lede">The real work is knowing where variation helps, and where deterministic, traceable validation must take over.</p>
+      </div>
+
+      <div class="visual">
+        <article class="card">
+          <h2>Probabilistic AI</h2>
+          <div class="probability-stack">
+            <div class="prob-row">
+              <span>Option A</span>
+              <div class="bar"><span style="width:70%"></span></div>
+              <span>70%</span>
+            </div>
+            <div class="prob-row">
+              <span>Option B</span>
+              <div class="bar alt"><span style="width:30%"></span></div>
+              <span>30%</span>
+            </div>
+          </div>
+          <p class="note">Useful for exploration, brainstorming, and design alternatives.</p>
+        </article>
+
+        <div class="gate" aria-hidden="true">
+          <div class="arrow"></div>
+          <div class="gate-badge">E</div>
+          <div class="gate-label">Evidence<br>Gate</div>
+          <div class="arrow"></div>
+        </div>
+
+        <article class="card">
+          <h2>Manufacturing decisions</h2>
+          <div class="checklist">
+            <div class="check"><span class="dot">✓</span><span>CAD, drawing, revision, and assembly evidence</span></div>
+            <div class="check"><span class="dot warn">!</span><span>Abstain when evidence is not enough</span></div>
+            <div class="check"><span class="dot stop">×</span><span>No unsupported inspection, fit, or tolerance claims</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="mantra">Probabilistic where creativity helps. Deterministic where correctness matters. Grounded always.</div>
+      <div class="tag">inspectorpro.ai</div>
+    </footer>
+  </main>
+</body>
+</html>

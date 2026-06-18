@@ -134,6 +134,7 @@ def _resolve_library_dir() -> Path:
         logger.warning("INSPECTORPRO_LIBRARY_DIR does not exist or is not a directory: %s", env_dir)
 
     candidates: List[Path] = [
+        REPO_ROOT / "demo_library",
         REPO_ROOT / _DEFAULT_LIBRARY_NAME,
         Path.cwd() / _DEFAULT_LIBRARY_NAME,
     ]
@@ -355,6 +356,123 @@ def _load_profile_if_present(part_number: str) -> Optional[dict]:
         return None
 
 
+def _ensure_inspector() -> Optional[SpatialInspector]:
+    """Return the process inspector, lazily creating it when startup was skipped.
+
+    Some demo launches run uvicorn with lifespan disabled to avoid optional
+    browser startup cost. In that mode the global inspector stays None, but the
+    first app screen still needs profile data.
+    """
+    global inspector
+    if inspector is not None:
+        return inspector
+    try:
+        inspector = SpatialInspector(library_dir=str(LIBRARY_DIR))
+        logger.info("SpatialInspector initialized lazily for profile access.")
+        return inspector
+    except Exception as e:
+        logger.warning("SpatialInspector unavailable; using disk profile fallback: %s", e)
+        return None
+
+
+def _profile_feature_count(data: dict) -> int:
+    features = data.get("features", [])
+    if isinstance(features, list):
+        return len(features)
+    if isinstance(features, dict):
+        items = features.get("items") or features.get("features") or []
+        return len(items) if isinstance(items, list) else 0
+    return 0
+
+
+def _list_part_profiles_from_disk() -> List[dict]:
+    """List inspection profiles directly from the library without API keys."""
+    profiles: List[dict] = []
+    library_dir = library_path()
+    seen_paths: set[Path] = set()
+    for profile_path in sorted(library_dir.rglob("*_inspection_profile.json")):
+        if profile_path in seen_paths:
+            continue
+        seen_paths.add(profile_path)
+        part_number = profile_path.name.replace("_inspection_profile.json", "")
+        try:
+            with open(profile_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.warning("Skipping unreadable profile %s: %s", profile_path, e)
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        pn = str(data.get("part_number") or part_number)
+        view_roots = [library_dir, profile_path.parent]
+        has_views = any((root / f"{pn}_view_front.png").exists() for root in view_roots)
+        entry = {
+            "part_number": pn,
+            "part_name": data.get("part_name") or data.get("name") or "",
+            "feature_count": _profile_feature_count(data),
+            "has_views": has_views,
+        }
+        source = data.get("source")
+        if source:
+            entry["source"] = source
+        profiles.append(entry)
+    return profiles
+
+
+def _list_assembly_profiles_from_disk() -> List[dict]:
+    """Expose assemblies in the same picker payload as inspection profiles."""
+    assemblies_dir = library_path("assemblies")
+    if not assemblies_dir.exists():
+        return []
+
+    profiles: List[dict] = []
+    for assembly_path in sorted(assemblies_dir.glob("*_assembly.json")):
+        assy_number = assembly_path.stem.replace("_assembly", "")
+        try:
+            with open(assembly_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.warning("Skipping unreadable assembly profile %s: %s", assembly_path, e)
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        identity = data.get("identity", {}) or {}
+        stats = data.get("statistics", {}) or {}
+        description = (
+            identity.get("description")
+            or (identity.get("customProperties") or {}).get("Description")
+            or assy_number
+        )
+        unique_count = stats.get("uniquePartCount")
+        if unique_count is None:
+            unique_count = len(data.get("partDataCache", {}) or {})
+        profiles.append({
+            "part_number": assy_number,
+            "part_name": description,
+            "feature_count": int(unique_count or 0),
+            "has_views": (assemblies_dir / f"{assy_number}_view_front.png").exists(),
+            "context_kind": "assembly",
+            "component_count": int(stats.get("totalComponents") or 0),
+            "unique_part_count": int(unique_count or 0),
+        })
+    return profiles
+
+
+def _merge_profile_entries(*profile_groups: List[dict]) -> List[dict]:
+    merged: Dict[str, dict] = {}
+    for profiles in profile_groups:
+        for profile in profiles or []:
+            part_number = str(profile.get("part_number") or "").strip()
+            if not part_number:
+                continue
+            # Prefer the first real inspection profile if a duplicate appears.
+            if part_number not in merged:
+                merged[part_number] = profile
+    return sorted(merged.values(), key=lambda p: str(p.get("part_number", "")))
+
+
 def _find_highlight_boxes_path(part_number: str, library_dir: str | Path) -> Optional[Path]:
     """Locate ``{part}_highlight_boxes.json`` in the inspection library."""
     safe_part_number = sanitize_part_number(part_number)
@@ -567,8 +685,12 @@ async def lifespan(app: FastAPI):
     """Initialize SpatialInspector and optional Playwright browser on startup."""
     global inspector, search_engine
     logger.info("Initializing SpatialInspector with library_dir=%r...", str(LIBRARY_DIR))
-    inspector = SpatialInspector(library_dir=str(LIBRARY_DIR))
-    logger.info("SpatialInspector initialized successfully.")
+    try:
+        inspector = SpatialInspector(library_dir=str(LIBRARY_DIR))
+        logger.info("SpatialInspector initialized successfully.")
+    except Exception as e:
+        inspector = None
+        logger.warning("SpatialInspector unavailable at startup; app will serve available static/demo routes only: %s", e)
 
     # Copy assembly files into library and build reverse-lookup maps
     try:
@@ -873,8 +995,13 @@ async def get_usage_metrics(
 async def list_profiles():
     """Return list of all available inspection profiles."""
     try:
-        profiles = inspector.list_profiles()
-        return profiles
+        active_inspector = _ensure_inspector()
+        part_profiles = (
+            active_inspector.list_profiles()
+            if active_inspector is not None
+            else _list_part_profiles_from_disk()
+        )
+        return _merge_profile_entries(part_profiles, _list_assembly_profiles_from_disk())
     except FileNotFoundError as e:
         logger.error(f"Library directory not found: {e}")
         raise HTTPException(status_code=500, detail="Inspection library not available")
@@ -986,9 +1113,8 @@ _request_extraction_lock = asyncio.Lock()
 # compat-export. Override via INSPECTORPKG_CLI env var. The default is
 # the Release build alongside the Week-9+ SOLIDWORKS extractor repo â€”
 # fragile to dev-machine layout, which is why it is overridable.
-_DEFAULT_INSPECTORPKG_CLI = (
-    r"C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\Projects"
-    r"\InspectorPro.SolidWorks\src\InspectorPro.PackageCli\bin\Release\net48\inspectorpkg.exe"
+_DEFAULT_INSPECTORPKG_CLI = str(
+    REPO_ROOT / "tools" / "inspectorpkg" / "inspectorpkg.exe"
 )
 
 
@@ -1003,13 +1129,11 @@ def _inspectorpkg_cli_path() -> Optional[str]:
 # assets the bridge add-in does NOT emit (GLB, view PNGs, feature-color
 # map, STL). Live in the AI-tool repo root, NOT inside this worktree.
 # Override paths via env when on a different dev-machine layout.
-_DEFAULT_SOLIDWORKS_EXTRACTOR_EXE = (
-    r"C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\Projects\AI-tool"
-    r"\SolidWorksExtractor\bin\Release\SolidWorksExtractor.exe"
+_DEFAULT_SOLIDWORKS_EXTRACTOR_EXE = str(
+    REPO_ROOT / "SolidWorksExtractor" / "bin" / "Release" / "SolidWorksExtractor.exe"
 )
-_DEFAULT_EXPORT_FORMATS_EXE = (
-    r"C:\Users\skaumb\OneDrive - continentalmachines.com\Desktop\Projects\AI-tool"
-    r"\scripts\ExportSolidWorksFormats.exe"
+_DEFAULT_EXPORT_FORMATS_EXE = str(
+    REPO_ROOT / "scripts" / "ExportSolidWorksFormats.exe"
 )
 
 
@@ -4349,27 +4473,100 @@ def _is_demo_batch_handoff_request(message: str) -> bool:
     )
 
 
-# Canonical 1030035 Rev A demo handoff instructions. Order is the
-# order operators see in the SolidWorks queue.
+# Canonical 1030035 Rev A demo handoff targets. Order is the order
+# operators see in the SolidWorks queue. The default values are used
+# only for the short canned prompt ("queue the caster demo handoffs").
+# If the operator supplies explicit values, those values must win.
 DEMO_BATCH_PN  = "1030035"
 DEMO_BATCH_REV = "revA"
-DEMO_BATCH_HANDOFFS: List[Dict[str, str]] = [
+DEMO_BATCH_TARGETS: List[Dict[str, str]] = [
     {
         "phrase":      "mounting plate",
-        "instruction": "set the mounting plate length to 150 mm",
         "title":       "mounting plate length",
+        "label":       "mounting plate length",
+        "default":     "150",
+        "defaultUnit": "mm",
     },
     {
         "phrase":      "mounting plate",
-        "instruction": "set the mounting plate thickness to 15 mm",
         "title":       "mounting plate thickness",
+        "label":       "mounting plate thickness",
+        "default":     "15",
+        "defaultUnit": "mm",
     },
     {
         "phrase":      "mounting slot",
-        "instruction": "set the mounting slot width to 10 mm",
         "title":       "mounting slot width",
+        "label":       "mounting slot width",
+        "default":     "10",
+        "defaultUnit": "mm",
     },
 ]
+
+
+def _demo_batch_dimension_overrides(message: str) -> Dict[str, Dict[str, str]]:
+    """Extract explicit caster demo batch values from the operator's
+    actual prompt. This prevents the canned demo fast-path from silently
+    replacing "set length to 114.3 mm" with the older demo default.
+    """
+    text = re.sub(r'\s+', ' ', str(message or "")).strip()
+    out: Dict[str, Dict[str, str]] = {}
+    if not text:
+        return out
+    unit_re = r'(mm|millimeters?|millimetres?|in|inch|inches)?'
+    for target in DEMO_BATCH_TARGETS:
+        label = re.escape(target["label"]).replace(r'\ ', r'\s+')
+        m = re.search(
+            rf'\b{label}\b(?:\s+(?:is|to|at|=|be|as|set|change|changed|into|back))*\s*'
+            rf'(?:to\s+)?([-+]?\d+(?:\.\d+)?)\s*{unit_re}\b',
+            text,
+            re.IGNORECASE,
+        )
+        if not m:
+            # Allow a little filler text between the label and the
+            # value, e.g. "mounting plate length should go back to
+            # 114.3 mm", but cap it so the next target's number is not
+            # accidentally captured.
+            m = re.search(
+                rf'\b{label}\b(?:(?!mounting\s+plate\s+length|mounting\s+plate\s+thickness|mounting\s+slot\s+width).){{0,80}}?'
+                rf'([-+]?\d+(?:\.\d+)?)\s*{unit_re}\b',
+                text,
+                re.IGNORECASE,
+            )
+        if not m:
+            continue
+        unit = (m.group(2) or target["defaultUnit"]).lower()
+        if unit in {"millimeter", "millimeters", "millimetre", "millimetres"}:
+            unit = "mm"
+        elif unit in {"inch", "inches"}:
+            unit = "in"
+        out[target["title"]] = {"value": m.group(1), "unit": unit}
+    return out
+
+
+def _demo_batch_handoffs_from_message(message: str) -> Tuple[List[Dict[str, str]], List[str]]:
+    text = re.sub(r'\s+', ' ', str(message or "")).strip().lower()
+    overrides = _demo_batch_dimension_overrides(message)
+    named_targets = [
+        target["title"] for target in DEMO_BATCH_TARGETS
+        if target["label"].lower() in text
+    ]
+    explicit_batch = bool(overrides) or bool(named_targets)
+    missing: List[str] = []
+    specs: List[Dict[str, str]] = []
+    for target in DEMO_BATCH_TARGETS:
+        override = overrides.get(target["title"])
+        if explicit_batch and not override:
+            missing.append(target["title"])
+            continue
+        value = override["value"] if override else target["default"]
+        unit  = override["unit"]  if override else target["defaultUnit"]
+        specs.append({
+            "phrase":      target["phrase"],
+            "instruction": f"set the {target['label']} to {value} {unit}",
+            "title":       target["title"],
+        })
+    return specs, missing
 
 
 def _semantic_region_handoff_payload_from_context(
@@ -4770,7 +4967,7 @@ def _semantic_region_cad_edit_handoff_chat_result(
     return result
 
 
-async def _semantic_region_demo_batch_chat_result(agent_type: str) -> Dict[str, Any]:
+async def _semantic_region_demo_batch_chat_result(agent_type: str, message: str = "") -> Dict[str, Any]:
     """Build the 1030035 Rev A demo handoff batch end-to-end:
     payload per instruction -> create_edit_session per payload ->
     batch-send to the SolidWorks Sage pane. Returns a concise chat
@@ -4800,17 +4997,37 @@ async def _semantic_region_demo_batch_chat_result(agent_type: str) -> Dict[str, 
             "tool_call_count": 0,
         }
 
+    handoff_specs, missing_values = _demo_batch_handoffs_from_message(message)
+    if missing_values:
+        return {
+            "response": (
+                "I found a multi-handoff request, but I will not fill in demo defaults "
+                "when you supplied custom values. Missing value(s): "
+                f"{', '.join(missing_values)}."
+            ),
+            "tool_calls":      [],
+            "tool_source":     "semantic_region_demo_batch_missing_values",
+            "tool_call_count": 0,
+            "demo_batch": {
+                "partNumber": safe_pn,
+                "revision":   safe_rev,
+                "missingValues": missing_values,
+            },
+        }
+
     created_session_ids: List[str] = []
     queued_titles:       List[str] = []
     failed_titles:       List[str] = []
     create_errors:       List[str] = []
+    highlight_features:  List[str] = []
+    highlight_regions:   List[Dict[str, Any]] = []
 
     # Build a payload + create-or-reuse session for each demo handoff.
     # We intentionally call the existing create_edit_session endpoint
     # via a synthetic _EditSessionCreateBody so duplicate-intent
     # dedup + identity validation behave EXACTLY the same as a
     # normal create. No shortcuts.
-    for spec in DEMO_BATCH_HANDOFFS:
+    for spec in handoff_specs:
         try:
             payload = _semantic_region_cad_edit_handoff_payload(
                 library_dir, safe_pn, safe_rev,
@@ -4822,6 +5039,16 @@ async def _semantic_region_demo_batch_chat_result(agent_type: str) -> Dict[str, 
                     f"{spec['title']}: phrase {spec['phrase']!r} did not resolve to a semantic region"
                 )
                 continue
+            target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+            for fid in target.get("cadFeatureIds") or []:
+                if isinstance(fid, str) and fid and fid not in highlight_features:
+                    highlight_features.append(fid)
+            for region in target.get("regions") or []:
+                if not isinstance(region, dict):
+                    continue
+                rid = region.get("regionId")
+                if rid and not any(r.get("regionId") == rid for r in highlight_regions):
+                    highlight_regions.append(region)
             create_body = _EditSessionCreateBody(handoffPayload=payload,
                                                   notes=f"Demo batch: {spec['title']}")
             create_result = await create_edit_session(create_body)
@@ -4867,7 +5094,8 @@ async def _semantic_region_demo_batch_chat_result(agent_type: str) -> Dict[str, 
     # Compose a concise chat reply. CAD internals (cadFeatureIds,
     # action names, sketch dim ids) stay out by default -- consistent
     # with the existing default handoff reply policy.
-    if sent_count == len(DEMO_BATCH_HANDOFFS):
+    expected_count = len(handoff_specs)
+    if sent_count == expected_count:
         response = (
             f"Queued {sent_count} SolidWorks handoffs for {safe_pn} Rev A: "
             f"{', '.join(queued_titles)}. "
@@ -4875,7 +5103,7 @@ async def _semantic_region_demo_batch_chat_result(agent_type: str) -> Dict[str, 
         )
     elif sent_count > 0:
         response = (
-            f"Queued {sent_count} of {len(DEMO_BATCH_HANDOFFS)} SolidWorks handoffs for {safe_pn} Rev A: "
+            f"Queued {sent_count} of {expected_count} SolidWorks handoffs for {safe_pn} Rev A: "
             f"{', '.join(queued_titles)}. "
             f"Failed: {', '.join(failed_titles) if failed_titles else '(none)'}. "
             "Review the queued items in the SolidWorks Sage pane."
@@ -4887,9 +5115,11 @@ async def _semantic_region_demo_batch_chat_result(agent_type: str) -> Dict[str, 
         )
 
     raw_calls: List[Dict[str, Any]] = []
-    # No highlight_features call -- the demo batch covers multiple
-    # regions, so highlighting any one would mislead. The SolidWorks
-    # queue UI lets the operator pick which to act on.
+    if highlight_features:
+        # The batch covers three approved demo targets. Highlight their
+        # union so InspectorPro visibly confirms the target set before
+        # SOLIDWORKS receives the one-at-a-time execution queue.
+        raw_calls.append({"name": "highlight_features", "args": {"feature_ids": highlight_features}})
     guarded, warnings = apply_tool_guardrails(
         raw_calls, agent_type, "semantic_region_demo_batch_direct",
     )
@@ -4905,7 +5135,10 @@ async def _semantic_region_demo_batch_chat_result(agent_type: str) -> Dict[str, 
             "failedCount":     len(failed_titles) + max(0, len(created_session_ids) - sent_count),
             "createErrors":    create_errors,
             "sendResults":     send_results,
+            "instructions":     [spec["instruction"] for spec in handoff_specs],
         },
+        "highlight_features":   highlight_features,
+        "highlight_regions":    highlight_regions,
         "tool_calls":           guarded,
         "tool_source":          "semantic_region_demo_batch_direct",
         "tool_call_count":      len(guarded),
@@ -9651,6 +9884,310 @@ def _profile_builder_write_json_atomic(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+# ── Training: machinist-coach guided-assembly narration ──
+# Turns the deterministic guided build steps (real part names + sequence) into
+# natural, shop-floor narration written by the LLM. One paragraph PER step so
+# the 3D walkthrough still lights/moves exactly one step's parts per segment.
+TRAINING_NARRATION_MODEL_DEFAULT = (
+    # Opus for the richest, most varied coaching voice; overridable via env.
+    os.getenv("INSPECTORPRO_TRAINING_NARRATION_MODEL") or "claude-opus-4-8"
+)
+
+TRAINING_NARRATION_SYSTEM_PROMPT = (
+    "You are an experienced machinist coaching a shop floor worker through an "
+    "assembly procedure. Narrate each step the way a knowledgeable coworker would "
+    "— like you're standing right next to them at the bench. Use natural, "
+    "conversational language. Never say \"Step 1\" or \"Step 2\" or number "
+    "anything. Instead, use smooth transitions like \"Alright, let's start "
+    "by...\", \"Once that's in place...\", \"Go ahead and...\", \"Now you're "
+    "looking for...\", \"Before we move on...\", \"Last thing to check is...\", "
+    "etc.\n"
+    "Keep instructions clear and practical — focus on what the worker's hands "
+    "should be doing, what to look for visually, and what \"good\" feels or looks "
+    "like. If something needs to seat cleanly or gaps need to be even, say that "
+    "the way a pro would say it on the floor, not like a manual. Keep each step's "
+    "narration to 2-4 sentences. No bullet points. No headers. Just talk them "
+    "through it.\n"
+    "Use the exact part names you are given. Do not invent torque values, tools, "
+    "fasteners, adhesives, or safety claims that are not provided.\n"
+    "Match your words to WHAT each step adds (the step list says which):\n"
+    "- A COMPONENT is a single raw part — you build the assembly up from it: fit it, "
+    "seat it, line it up, fasten it. Call it a piece, part, or component.\n"
+    "- A SUBASSEMBLY is a whole unit that is ALREADY assembled before this build. Do "
+    "NOT build it now or mention its inner parts — bring the finished unit in and "
+    "install it, mate it, or set it into place as one piece. Call it a subassembly or "
+    "unit, never a 'piece' or 'part'.\n"
+    "- A MODULE is a whole major section that is ALREADY built — install or mate the "
+    "finished module. Call it a module or major section, never a 'piece' or 'part'.\n"
+    "Components are raw and get built up; subassemblies and modules arrive complete and "
+    "get set into place as a whole — never describe assembling their insides.\n"
+    "On the FIRST step the finished, fully-assembled unit is already on screen — point "
+    "at it as the completed result they are working toward. Never say the parts are "
+    "'laid out on the bench', that anything will 'light up as it comes in', or that you "
+    "are starting from loose pieces; nothing is laid out, the complete unit is right "
+    "there.\n"
+    "If a step notes a name is still being confirmed, mention going by the shape at most "
+    "ONCE in the whole walkthrough; say every other name plainly and confidently."
+)
+
+
+class TrainingNarrationStep(BaseModel):
+    kind: str = "mid_join"                # layout | first_join | mid_join | final_join | final_check
+    name: Optional[str] = None            # spoken name of the piece/group for this step
+    names: List[str] = []                 # individual piece names (layout / multi-part group)
+    isFirst: bool = False
+    isFinal: bool = False
+    multiPart: bool = False
+    isSubassembly: bool = False           # step adds a whole subassembly/module
+    reviewRequired: bool = False
+    purpose: Optional[str] = None         # what this unit is/does (de-generic narration)
+
+
+class TrainingNarrationBody(BaseModel):
+    nodeName: str
+    steps: List[TrainingNarrationStep]
+    model: Optional[str] = None
+    traineeName: Optional[str] = None     # coach addresses this worker by name
+    buildKind: Optional[str] = None       # component | subassembly | module (vocabulary)
+
+
+# Vocabulary varies by what each step ADDS (one level below the build node):
+# component build -> raw parts (fit/seat); subassembly/module build -> whole
+# PRE-BUILT units (install/mate, don't touch their insides).
+_TRAINING_KIND_FRAMING = {
+    "component": "BUILD KIND: you are assembling the {asm} from individual raw COMPONENTS — each step adds one part that you fit and seat by hand.",
+    "subassembly": "BUILD KIND: you are assembling the {asm} from whole PRE-BUILT SUBASSEMBLIES — each step brings in one finished subassembly and sets it into place as a unit. Never call them 'pieces', and never build their insides here.",
+    "module": "BUILD KIND: you are assembling the {asm} from whole PRE-BUILT MODULES (major sections) — each step brings in one finished module and mates it. Never call them 'pieces', and never build their insides here.",
+}
+_TRAINING_KIND_NOUN = {"component": "PIECE", "subassembly": "SUBASSEMBLY", "module": "MODULE"}
+
+
+def _build_training_narration_user_prompt(
+    node_name: str, steps: List["TrainingNarrationStep"], build_kind: str = "component"
+) -> str:
+    bk = build_kind if build_kind in ("component", "subassembly", "module") else "component"
+    noun = _TRAINING_KIND_NOUN[bk]
+    noun_l = noun.lower()
+    arriving = "one " + ("finished " if bk != "component" else "") + noun_l + " at a time"
+    lines = [
+        f"Assembly: {node_name}",
+        _TRAINING_KIND_FRAMING[bk].format(asm=node_name),
+        f"This walkthrough has {len(steps)} steps, in order. Write one short "
+        "narration for EACH step, in the same order.",
+        "",
+        "BE SPECIFIC, NOT GENERIC. Most steps carry a 'WHAT IT IS:' line — a true "
+        "description of that unit (what it is, what it does, what it looks like). Ground "
+        "each narration in it and lead with what makes THIS unit distinct. Do NOT reuse "
+        "the same 'bring it in, set it in place, make sure it's flush, give it a wiggle, "
+        "no play' shape across steps — vary the action and what you check to fit the "
+        "actual part. Never invent specifics (sizes, torque, fasteners, mating details) "
+        "that are not given in WHAT IT IS.",
+        "",
+        "WHAT IT IS may carry internal engineering notes (how a part was identified or "
+        "classified — 'assigned', 'remains uncertain', 'Evidence:', 'reads as', "
+        "'Operator confirmed', 'review removed', internal codes like RB-19). NEVER voice "
+        "any of that: do not say anything is uncertain, unconfirmed, 'assigned', under "
+        "review, or identified by its shape, and never read out part codes. Speak only "
+        "the physical reality — shape, size, colour, what it is, where it goes.",
+        "",
+        "Steps:",
+    ]
+    caveat_used = False
+    for i, s in enumerate(steps):
+        n = i + 1
+        purpose = (getattr(s, "purpose", None) or "").strip()
+        if s.kind == "layout":
+            # The viewer is showing the FINISHED unit. Forbid the bench-layout opener.
+            goal = (
+                f"{n}. SHOW THE GOAL — the 3D viewer is RIGHT NOW showing the finished, "
+                f"fully assembled {node_name}, already built. Tell them THIS is the "
+                f"completed result they are working toward, have them take a quick look "
+                f"at the unit on screen, then say you will build it up {arriving}. Do NOT "
+                f"say the parts are laid out on the bench, do NOT say anything will "
+                f"'light up' as it comes in, do NOT start from loose pieces — nothing is "
+                f"laid out, the finished unit is on screen. Do NOT list or name the "
+                f"individual parts."
+            )
+            if purpose:
+                goal += (
+                    f" In a few words, from WHAT IT IS, tell them what this {noun_l} is and "
+                    f"the job it does in the machine."
+                )
+            lines.append(goal)
+            if purpose:
+                lines.append(f"   WHAT IT IS: {purpose}")
+        elif s.kind == "final_check":
+            lines.append(
+                f"{n}. FINAL LOOK — step back and review the finished {node_name}; "
+                "confirm it reads as one clean assembly with even gaps and edges "
+                "that line up."
+            )
+        else:
+            label = s.name or f"the next {noun_l}"
+            if s.isFirst:
+                tag = f"FIRST {noun} (the anchor — everything else references off it)"
+            elif s.isFinal:
+                tag = f"LAST {noun}"
+            else:
+                tag = f"NEXT {noun}"
+            action = "bring in and seat" if bk == "component" else "bring in and install"
+            lines.append(f"{n}. {tag} — {action} the {label}.")
+            if purpose:
+                lines.append(f"   WHAT IT IS: {purpose}")
+            if bk in ("subassembly", "module"):
+                if purpose:
+                    lines.append(
+                        f"   Make this step specific to the {label}: from WHAT IT IS, tell "
+                        f"them what this {noun_l} is and the job it does (and roughly where "
+                        f"it sits if that's clear). You may name its one or two defining "
+                        f"features, but do NOT recite its full parts list and do NOT build "
+                        f"its insides."
+                    )
+                else:
+                    lines.append(
+                        f"   This is a complete pre-built {noun_l} — refer to it by name "
+                        f"only and set the whole finished unit into place; do NOT mention "
+                        f"or list its individual parts."
+                    )
+            elif s.multiPart and s.names:
+                grp = (
+                    "   This is a group of parts: "
+                    + ", ".join([p for p in s.names if p])
+                    + " — fit and seat them together."
+                )
+                if purpose:
+                    grp += " From WHAT IT IS, say what they are or what they look like."
+                lines.append(grp)
+            elif purpose:
+                lines.append(
+                    f"   From WHAT IT IS, describe the {label} by what it is — its shape or "
+                    f"look and where it goes — keep it specific to THIS part."
+                )
+            # Name caveat: only for raw-component builds, and at most ONCE per walkthrough.
+            if bk == "component" and s.reviewRequired and not caveat_used:
+                lines.append(
+                    "   (This part's name is still being finalized — tell them to go by the "
+                    "shape and where it fits; mention this once, lightly.)"
+                )
+                caveat_used = True
+    lines.append("")
+    lines.append(
+        'Return ONLY a JSON object of the form {"narration": ["...", "..."]} '
+        f"containing exactly {len(steps)} strings, one per step, in the same "
+        "order. Each string is the spoken narration for that step (2-4 sentences, "
+        "no numbering, no headers, no markdown)."
+    )
+    return "\n".join(lines)
+
+
+def _clean_training_narration(narration: list) -> List[str]:
+    """Position-preserving cleanup of the model's narration array.
+
+    Keeps exactly one slot per returned element (non-strings/None -> ""), and
+    never compacts. The frontend maps narration[i] -> step[i] and keeps its
+    template wording for any empty slot, so dropping a blank here would shift
+    every later step onto the wrong narration.
+    """
+    return [(str(x).strip() if x is not None else "") for x in narration]
+
+
+def _generate_training_narration(
+    node_name: str, steps: List["TrainingNarrationStep"], model: Optional[str],
+    trainee_name: Optional[str] = None, build_kind: str = "component",
+) -> Tuple[List[str], str]:
+    try:
+        import anthropic
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Anthropic SDK not installed")
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    selected_model = (model or TRAINING_NARRATION_MODEL_DEFAULT).strip()
+    client = anthropic.Anthropic(api_key=api_key)
+    user_prompt = _build_training_narration_user_prompt(node_name, steps, build_kind)
+
+    # When a trainee name is given, have the coach address them by name — warmly
+    # and occasionally, the way a mentor does on the floor (never every sentence).
+    system_prompt = TRAINING_NARRATION_SYSTEM_PROMPT
+    _name = (trainee_name or "").strip()
+    if _name:
+        system_prompt = system_prompt + (
+            f"\nThe worker you are coaching is named {_name}. Address them by name "
+            f"naturally and warmly, like a mentor standing next to them — for "
+            f"example \"Alright {_name}, let's start with...\", \"Nice work, "
+            f"{_name}.\", or \"{_name}, before we move on...\". Use their name in "
+            f"the opening step, the final review, and a couple of steps in between "
+            f"— but never in every sentence, so it stays natural and personal."
+        )
+
+    with time_block() as _elapsed_ms:
+        try:
+            response = client.messages.create(
+                model=selected_model,
+                max_tokens=2000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+        except Exception as ex:
+            status, error_type = classify_exception_status(ex)
+            record_anthropic_call(
+                model=selected_model, response=None, latency_ms=_elapsed_ms(),
+                status=status, errorType=error_type,
+                route="/api/training/guided-narration",
+                workflow="training_narration", agentType="training_narration",
+            )
+            raise
+
+    record_anthropic_call(
+        model=selected_model, response=response, latency_ms=_elapsed_ms(),
+        route="/api/training/guided-narration",
+        workflow="training_narration", agentType="training_narration",
+    )
+
+    response_text = ""
+    for block in getattr(response, "content", []) or []:
+        if hasattr(block, "text"):
+            response_text += block.text
+    data = _extract_json_object(response_text)
+    narration = data.get("narration")
+    if not isinstance(narration, list):
+        raise ValueError("model did not return a narration array")
+    cleaned = _clean_training_narration(narration)
+    return cleaned, selected_model
+
+
+@app.post("/api/training/guided-narration")
+async def training_guided_narration(body: TrainingNarrationBody):
+    """Generate natural machinist-coach narration for a guided assembly.
+
+    Returns one narration string per step (same order). The frontend keeps its
+    built-in wording for any step the model omits, so a partial/failed response
+    degrades gracefully rather than blanking the walkthrough.
+    """
+    if not body.steps:
+        raise HTTPException(status_code=400, detail="steps is required")
+    try:
+        narration, model_used = _generate_training_narration(
+            (body.nodeName or "this assembly").strip(), body.steps, body.model,
+            body.traineeName, (body.buildKind or "component"),
+        )
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.error("training.guided_narration failed node=%s msg=%s", body.nodeName, ex)
+        raise HTTPException(status_code=502, detail=f"Narration generation failed: {ex}")
+
+    return {
+        "success": True,
+        "nodeName": body.nodeName,
+        "model": model_used,
+        "stepCount": len(body.steps),
+        "narration": narration,
+    }
+
+
 @app.get("/api/profile-builder/context/{partNumber}")
 async def profile_builder_context(partNumber: str, revision: Optional[str] = Query(default=None)):
     safe_pn = sanitize_part_number(partNumber)
@@ -10113,6 +10650,11 @@ async def get_profile_details(part_number: str):
     # Try to find the inspection profile JSON on disk
     profile_path = _resolve_profile_path(safe_pn)
     if profile_path is None:
+        if safe_pn not in assembly_profiles:
+            try:
+                _load_assembly_profiles()
+            except Exception:
+                logger.exception("Failed to refresh assembly profiles while resolving profile details for %s", safe_pn)
         assy_data = assembly_profiles.get(safe_pn)
         if assy_data:
             ident = assy_data.get("identity", {}) or {}
@@ -11349,6 +11891,12 @@ async def get_assembly_context(part_number: str):
     safe_pn = re.sub(r'[^\w\-]', '', part_number)
     if not safe_pn:
         raise HTTPException(status_code=400, detail="Invalid part number")
+
+    if safe_pn not in assembly_part_lookup and safe_pn not in assembly_profiles:
+        try:
+            _load_assembly_profiles()
+        except Exception:
+            logger.exception("Failed to refresh assembly profiles while resolving %s", safe_pn)
 
     # Accept either:
     # 1. a member part number that maps back to an assembly, or
@@ -14400,7 +14948,12 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         hl_parts = paused.get("current_highlight_parts", [])
         if hl_parts:
             pw_lines.append(f"  Currently highlighted parts: {', '.join(hl_parts)}")
-        pw_lines.append("Answer the user's question concisely (max 3 sentences). They may say 'continue' to resume the tour.")
+        pw_lines.append(
+            "The operator is mid-build with their hands busy. Answer in 1-2 short, plain "
+            "shop-floor sentences: just what they need to keep working, unless they "
+            "explicitly ask for more detail. Do not restate the step or pad the answer. "
+            "They may say 'continue' to resume the tour."
+        )
         parts.append("\n".join(pw_lines))
 
     # â”€â”€ COMPARE â”€â”€
@@ -14964,7 +15517,7 @@ async def agent_chat(request: AgentChatRequest):
         # accidentally route to the single-handoff path -- the demo
         # request would otherwise build only the first handoff.
         if request.agent_type == "deviation-analyst" and _is_demo_batch_handoff_request(request.message):
-            return await _semantic_region_demo_batch_chat_result(request.agent_type)
+            return await _semantic_region_demo_batch_chat_result(request.agent_type, request.message)
 
         if request.agent_type == "deviation-analyst" and _is_semantic_prepare_handoff_request(request.message):
             edit_handoff_payload = _semantic_region_edit_handoff_payload_from_context(ctx, request.message)
@@ -16732,7 +17285,7 @@ async def serve_geometry_diff_artifact(part_number: str, rev_pair: str, filename
 # Per-agent voice mapping (ElevenLabs voice IDs)
 AGENT_VOICE_MAP = {
     "inspector":         os.getenv("ELEVENLABS_VOICE_IRIS",  "21m00Tcm4TlvDq8ikWAM"),  # Rachel
-    "deviation-analyst": os.getenv("ELEVENLABS_VOICE_SAGE",  "gs0tAILXbY5DNrJrsM6F"),
+    "deviation-analyst": os.getenv("ELEVENLABS_VOICE_SAGE",  "s3TPKV1kjDlVtZbl4Ksh"),
     "parts-finder":      os.getenv("ELEVENLABS_VOICE_SCOUT", "AZnzlk1XvdvUeBnXmlld"),  # Domi
 }
 
@@ -16967,3 +17520,4 @@ app.mount("/generated", StaticFiles(directory="generated"), name="generated")
 
 # Mount static files directory (must be after specific routes)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+

@@ -11050,6 +11050,9 @@
             assyGltfScene: null, // pristine cached gltf.scene (never rendered directly)
             assyLiveScene: null, // clone currently attached to Three.js scene
             assyPartMeshMap: null, // partNumber -> [mesh] rebuilt on each scene attach
+            facilityLayoutGridHelper: null,
+            facilityLayoutZoneOverlayGroup: null, // THREE.Group of translucent floor-zone overlays
+            facilityLayoutRouteGroup: null, // THREE.Group of the flow-route line + markers (child of assyLiveScene)
             partExplorerSelectedParts: new Set(), // selected part numbers
             partExplorerAgentParts: new Set(), // parts highlighted by agent (cleared on next response)
             activeAssemblyConfig: null, // name of active config preset, or null
@@ -11092,6 +11095,7 @@
         const TRAINING_TYPES = [
             { value: 'assembly',       label: 'Assembly Training' },
             { value: 'plant_process',  label: 'Plant / Process Explanation' },
+            { value: 'facility_layout',label: 'Facility Layout' },
             { value: 'service',        label: 'Service Training' },
             { value: 'maintenance',    label: 'Maintenance Training' },
             { value: 'troubleshooting',label: 'Troubleshooting' },
@@ -11106,6 +11110,7 @@
         const TRAINING_PROMPT_CHIPS = {
             assembly:        ['First-time install', 'Subassembly buildup', 'Final torque sequence'],
             plant_process:   ['Process overview', 'Operator walkdown', 'Flow path explanation'],
+            facility_layout: ['Storage capacity', 'Aisle review', 'Rack row lookup'],
             service:         ['Routine service interval', 'Replace wear part', 'Clean and reset'],
             maintenance:     ['Scheduled inspection', 'Lubrication points', 'Filter / fluid change'],
             troubleshooting: ['Will not start', 'Unusual noise', 'Leak isolation'],
@@ -11123,6 +11128,7 @@
         const COOLING_TOWER_PROCESS_GLB_URL = '/generated/training/process/cooling-tower/cooling_tower_body.glb';
         const COOLING_TOWER_PROCESS_BODIES_URL = '/generated/training/process/cooling-tower/cooling_tower_process_bodies.json';
         const COOLING_TOWER_FLOW_PATHS_URL = '/generated/training/process/cooling-tower/cooling_tower_flow_paths.json';
+        const FACILITY_LAYOUT_GLB_URL = '/generated/training/facility-layout/Assem3_colored.glb?v=20260625-real-geometry-2';
         const COOLING_TOWER_PROCESS_ZONES = [
             {
                 id: 'overview',
@@ -11225,6 +11231,41 @@
             plantProcessGroupFilter: '',
             plantProcessIsolateSelection: false,
             plantProcessActiveZone: 'overview',
+            facilityLayoutSemanticUrl: '/api/training/facility-layout/semantic',
+            facilityLayoutCapacityUrl: '/api/training/facility-layout/capacity',
+            facilityLayoutRouteUrl: '/api/training/facility-layout/route',
+            facilityLayoutAnalysisUrl: '/api/training/facility-layout/layout-analysis',
+            facilityLayoutGlbUrl: FACILITY_LAYOUT_GLB_URL,
+            facilityLayoutData: null,
+            facilityLayoutLoadPromise: null,
+            facilityLayoutError: null,
+            facilityLayoutSelectedRowId: '',
+            facilityLayoutSelectedGroupIds: [],
+            facilityLayoutSelectedZoneIds: [],
+            facilityLayoutSelectedRackFootprintIds: [],
+            facilityLayoutRouteStart: '',
+            facilityLayoutRouteEnd: '',
+            facilityLayoutRoute: null,
+            facilityLayoutRouteLoading: false,
+            facilityLayoutRouteError: null,
+            facilityLayoutAnalysis: null,
+            facilityLayoutAnalysisLoading: false,
+            facilityLayoutAnalysisAttempted: false,
+            facilityLayoutAnalysisError: null,
+            facilityLayoutGroupFilter: '',
+            facilityLayoutIsolateSelection: false,
+            facilityLayoutShowGrid: true,
+            facilityLayoutCapacityInputs: {
+                row: '',
+                length: 24,
+                depth: 18,
+                height: 12,
+                clearance: 1,
+                unit: 'in',
+            },
+            facilityLayoutCapacityResult: null,
+            facilityLayoutCapacityLoading: false,
+            facilityLayoutCapacityError: null,
             processMap: null,
             uniqueItems: null,
             subassemblyVisuals: null,
@@ -11909,6 +11950,7 @@
 
                 if (res.ok) {
                     state.faiDrawingMap = await res.json();
+                    state.faiDimensionDescriptions = state.faiDrawingMap?.dimension_descriptions || null;
                     state.faiDrawingMapPn = safePn;
                     state.faiDrawingMapRevision = state.faiDrawingMap?.revision || safeRev || null;
                     state.faiMapLoadError = null;
@@ -11916,6 +11958,7 @@
                     state.faiCharacteristicsSourceKey = '';
                 } else if (res.status === 404) {
                     state.faiDrawingMap = null;
+                    state.faiDimensionDescriptions = null;
                     state.faiDrawingMapPn = safePn;
                     state.faiDrawingMapRevision = safeRev || null;
                     state.faiMapLoadError = 'not_found';
@@ -12841,7 +12884,7 @@
                         const meta = {
                             annotationType: ann?.annotationType,
                             viewName: ann?.viewName || view?.viewName || '',
-                            dimensionText: ann?.dimensionText || '',
+                            dimensionText: ann?.dimensionText || ann?.gtolText || ann?.noteText || '',
                         };
                         keys.forEach(k => { if (!annotationMeta[k]) annotationMeta[k] = meta; });
                     });
@@ -12851,12 +12894,13 @@
             // If highlight_boxes exist, use them; otherwise fall back to drawing map annotations
             let sourceAnnotations = hlAnnotations;
             if (!sourceAnnotations.length && drawingMapSheets.length) {
-                // Synthesize from drawing map: extract displayDimension annotations with position info
+                // Synthesize from drawing map: extract dimension annotations with position info.
+                // Older maps used displayDimension; the SolidWorks intake map uses dimension.
                 const synth = [];
                 sheetScope.forEach(sheet => {
                     (sheet?.views || []).forEach(view => {
                         (view?.annotations || []).forEach(ann => {
-                            if (ann?.annotationType !== 'displayDimension') return;
+                            if (ann?.annotationType !== 'displayDimension' && ann?.annotationType !== 'dimension') return;
                             synth.push({
                                 annotationName: ann.annotationName,
                                 viewName: ann.viewName || view.viewName || '',
@@ -12879,7 +12923,7 @@
 
             // Keep highlightable annotation types (dimensions, balloons with text, gtol)
             // Exclude bare view labels (note type with no dimension text/value)
-            const highlightableTypes = new Set(['displayDimension', 'balloon', 'gtol']);
+            const highlightableTypes = new Set(['displayDimension', 'dimension', 'balloon', 'gtol']);
             const dimensions = visible.filter(ann => {
                 const keys = _buildHighlightLookupKeys(ann?.annotationName, ann?.viewName);
                 const meta = keys.find(k => annotationMeta[k]) ? annotationMeta[keys.find(k => annotationMeta[k])] : null;
@@ -12913,7 +12957,11 @@
                 const keys = _buildHighlightLookupKeys(ann?.annotationName, ann?.viewName);
                 const primaryKey = sheetPrefix + (keys[0] || '');
                 const feature = keys.map(k => featureLookup[k]).find(Boolean) || null;
-                const meta = keys.map(k => annotationMeta[k]).find(Boolean) || {};
+                const meta = keys.map(k => annotationMeta[k]).find(Boolean) || {
+                    annotationType: ann?.annotationType,
+                    viewName,
+                    dimensionText: ann?.dimensionText || ann?.gtolText || ann?.noteText || ann?.label || '',
+                };
                 const descKey = viewName + '/' + (ann?.annotationName || '');
                 groups[viewName].push({
                     annotationName: ann?.annotationName || '',
@@ -12932,7 +12980,7 @@
         function renderDimExplorerPanel(drawingDiv) {
             const hlData = state.results?.highlight_boxes;
             const hasDmDims = state.results?.drawing_map?.sheets?.some(s =>
-                s?.views?.some(v => v?.annotations?.some(a => a?.annotationType === 'displayDimension'))
+                s?.views?.some(v => v?.annotations?.some(a => a?.annotationType === 'displayDimension' || a?.annotationType === 'dimension'))
             );
             if (!hlData && !hasDmDims) return;
 
@@ -13154,7 +13202,7 @@
             const hlRender = hlData?.render || {};
 
             // Build drawing-map metadata lookup unconditionally.
-            // For displayDimension annotations, drawing-map text geometry is the
+            // For dimension annotations, drawing-map text geometry is the
             // primary source â€” it is deterministic and immune to VLM box swaps.
             const dmSheets = state.results?.drawing_map?.sheets || [];
             const dmSheetW = _coerceNumber(state.results?.drawing_map?.sheetWidth);
@@ -13225,11 +13273,11 @@
                 // Resolve drawing-map metadata entry
                 const dmMatch = dmMetaByKey.get(selectedKey) || null;
 
-                // Priority: drawing-map text geometry for displayDimension,
+                // Priority: drawing-map text geometry for dimensions,
                 //           VLM box for everything else, drawing-map as last fallback
                 let rect;
                 let pad = 6;
-                if (dmMatch && dmMatch.annotationType === 'displayDimension' && dmMatch.synthesizedBox) {
+                if (dmMatch && (dmMatch.annotationType === 'displayDimension' || dmMatch.annotationType === 'dimension') && dmMatch.synthesizedBox) {
                     rect = _sheetRectToPixels(dmMatch.synthesizedBox, dmSheetW, dmSheetH, imageWidth, imageHeight);
                     if (rect) {
                         pad = 12; // text-only bounds need larger padding
@@ -13246,7 +13294,7 @@
                         const hlViewName = (hlMatch.viewName || '').trim();
                         const dmViewName = (dmMatch.viewName || '').trim();
                         if (hlAnnName && dmAnnName && (hlAnnName !== dmAnnName || hlViewName !== dmViewName)) {
-                            console.warn('[DimHighlight] displayDimension identity mismatch', {
+                            console.warn('[DimHighlight] dimension identity mismatch', {
                                 selectedKey,
                                 drawingMap: dmAnnName + ' / ' + dmViewName,
                                 highlightBox: hlAnnName + ' / ' + hlViewName,
@@ -13254,7 +13302,7 @@
                         }
                     }
                 } else if (hlMatch) {
-                    // Non-displayDimension (balloon, note, gtol) or no drawing-map geometry
+                    // Non-dimension annotation (balloon, note, gtol) or no drawing-map geometry
                     rect = _highlightEntryToPixels(hlMatch, hlRender, imageWidth, imageHeight);
                 } else if (dmMatch && dmMatch.synthesizedBox) {
                     // Pure drawing-map fallback (no VLM boxes at all)
@@ -14016,7 +14064,7 @@
                             if (!keys.length) return;
                             const meta = {
                                 annotationType: annotation?.annotationType,
-                                dimensionText: annotation?.dimensionText,
+                                dimensionText: annotation?.dimensionText || annotation?.gtolText || annotation?.noteText || '',
                                 viewName: annotation?.viewName || view?.viewName || '',
                             };
                             keys.forEach(key => {
@@ -14027,7 +14075,7 @@
                         });
                     });
                 });
-                const highlightableTypes = new Set(['displayDimension', 'balloon', 'note', 'gtol']);
+                const highlightableTypes = new Set(['displayDimension', 'dimension', 'balloon', 'note', 'gtol']);
                 const dimensionAnnotations = visibleAnnotations.filter(annotation => {
                     const keys = _buildHighlightLookupKeys(annotation?.annotationName, annotation?.viewName);
                     const meta = keys.find(key => drawingAnnotationMeta[key]) ? drawingAnnotationMeta[keys.find(key => drawingAnnotationMeta[key])] : null;
@@ -14233,7 +14281,7 @@
 
                     }
 
-                    // Build supporting annotation map: other displayDimensions in views
+                    // Build supporting annotation map: other dimensions in views
                     // that already have a primary feature mapping. This fills in related
                     // green dimensions without reintroducing cross-view false positives.
                     const supportingByAnnotationKey = {};
@@ -14253,7 +14301,7 @@
                             });
                         });
 
-                        // For each view with primaries, link unmapped displayDimensions as supporting
+                        // For each view with primaries, link unmapped dimensions as supporting
                         const supportSheetScope = notesCurrentSheet ? [notesCurrentSheet] : notesDmSheets;
                         supportSheetScope.forEach(sheet => {
                             const sp = sheet.sheetName ? sheet.sheetName + '/' : '';
@@ -14266,7 +14314,7 @@
                                 const bestFeature = vPrimaries.find(fp => fp.status === 'PRESENT') || vPrimaries[0];
 
                                 (view.annotations || []).forEach(ann => {
-                                    if (ann.annotationType !== 'displayDimension') return;
+                                    if (ann.annotationType !== 'displayDimension' && ann.annotationType !== 'dimension') return;
                                     // Skip if already a primary match
                                     const sKeys = _buildStrictHighlightLookupKeys(ann.annotationName, vn);
                                     const alreadyPrimary = sKeys.some(k =>
@@ -14850,6 +14898,60 @@
             }
         }
 
+        function _lookupFaiDimensionDetail(sheetIndex, viewName, annotationName) {
+            const details = _getFaiResultContext()?.dimension_descriptions?.dimensionDetails;
+            if (!Array.isArray(details)) return null;
+            const sheetKey = `${sheetIndex}|${viewName}/${annotationName}`;
+            const fallbackKey = `${viewName}/${annotationName}`;
+            return details.find(d =>
+                d?.stableKey === sheetKey ||
+                d?.fallbackKey === fallbackKey ||
+                (
+                    Number(d?.sheetIndex) === Number(sheetIndex) &&
+                    d?.viewName === viewName &&
+                    d?.annotationName === annotationName
+                )
+            ) || null;
+        }
+
+        function _parseFaiNominalFromText(text) {
+            let raw = String(text || '').trim();
+            if (!raw) return null;
+
+            raw = raw
+                .replace(/<MOD-DIAM>/g, ' ')
+                .replace(/[Ø⌀]/g, ' ')
+                .replace(/&deg;|°/gi, ' deg ')
+                .replace(/[(),]/g, ' ');
+
+            // Drawing callouts like "8X 45.00 deg" use the first number as
+            // quantity, not the measured characteristic value.
+            raw = raw.replace(/^\s*\d+\s*[xX]\s+/, '');
+
+            const matches = raw.match(/[+-]?\d+(?:\.\d+)?/g) || [];
+            const values = matches.map(v => Number(v)).filter(Number.isFinite);
+            if (!values.length) return null;
+
+            const hasLimitSeparator = /[\/\\]/.test(raw) || /\n/.test(String(text || ''));
+            if (hasLimitSeparator && values.length >= 2) {
+                const lower = Math.min(values[0], values[1]);
+                const upper = Math.max(values[0], values[1]);
+                return {
+                    nominalMm: lower,
+                    tolPlusMm: upper - lower,
+                    tolMinusMm: 0,
+                    source: 'limit_text_lower',
+                };
+            }
+
+            return {
+                nominalMm: values[0],
+                tolPlusMm: null,
+                tolMinusMm: null,
+                source: 'dimension_text',
+            };
+        }
+
         function buildFaiCharacteristics() {
             const ctx = _getFaiResultContext();
             const dm = ctx?.drawing_map;
@@ -14863,14 +14965,24 @@
             dm.sheets.forEach((sheet, sheetIndex) => {
                 (sheet.views || []).forEach(view => {
                     (view.annotations || []).forEach(ann => {
-                        if (ann.annotationType !== 'displayDimension') return;
+                        if (ann.annotationType !== 'displayDimension' && ann.annotationType !== 'dimension') return;
                         if (ann.isDangling) return;
                         if (ann.visible === false) return;
                         const key = `${sheetIndex}|${view.viewName}|${ann.annotationName}`;
+                        const detail = _lookupFaiDimensionDetail(sheetIndex, view.viewName, ann.annotationName);
                         const nominalM = _coerceNumber(ann.dimensionValue);
-                        const nominalMm = nominalM !== null ? nominalM * 1000 : null;
-                        const tolPlusMm = (_coerceNumber(ann.tolerancePlus) || 0) * 1000;
-                        const tolMinusMm = (_coerceNumber(ann.toleranceMinus) || 0) * 1000;
+                        const parsedNominal = nominalM === null
+                            ? _parseFaiNominalFromText(detail?.drawingText || ann.dimensionText || '')
+                            : null;
+                        const nominalMm = nominalM !== null ? nominalM * 1000 : (parsedNominal?.nominalMm ?? null);
+                        const rawTolPlus = _coerceNumber(ann.tolerancePlus);
+                        const rawTolMinus = _coerceNumber(ann.toleranceMinus);
+                        let tolPlusMm = (rawTolPlus || 0) * 1000;
+                        let tolMinusMm = (rawTolMinus || 0) * 1000;
+                        if (nominalM === null && parsedNominal?.source === 'limit_text_lower' && rawTolPlus === null && rawTolMinus === null) {
+                            tolPlusMm = parsedNominal.tolPlusMm || 0;
+                            tolMinusMm = 0;
+                        }
                         const pos = ann.positionSheet || {};
                         raw.push({
                             key,
@@ -14878,10 +14990,11 @@
                             viewName: view.viewName,
                             viewType: view.viewType || 'Named',
                             annotationName: ann.annotationName,
-                            dimensionText: ann.dimensionText || '',
+                            dimensionText: detail?.drawingText || ann.dimensionText || '',
                             dimensionType: ann.dimensionType || '',
                             description: _lookupFaiDescription(sheetIndex, view.viewName, ann.annotationName),
                             nominalMm,
+                            nominalSource: nominalM !== null ? 'drawing_map_value' : (parsedNominal?.source || ''),
                             tolPlusMm,
                             tolMinusMm,
                             isReference: !!ann.isReference,
@@ -17446,10 +17559,16 @@
                 gView.appendChild(hlBtn);
                 const isoBtn = _ribbonIconBtn('trainingIsolate', 'Isolate');
                 isoBtn.dataset.trainingIsolateBtn = 'true';
-                isoBtn.title = (_trainIsPlantProcessMode() && trainingState.plantProcessIsolateSelection)
-                    ? 'Show the surrounding plant again'
-                    : (_trainIsPlantProcessMode() ? 'Hide every non-selected plant group completely' : 'Isolate parts of current step');
-                if (_trainIsPlantProcessMode() && trainingState.plantProcessIsolateSelection) {
+                const _isoPlantMode = _trainIsPlantProcessMode();
+                const _isoFacilityMode = _trainIsFacilityLayoutMode();
+                const _isoActive = (_isoPlantMode && trainingState.plantProcessIsolateSelection)
+                    || (_isoFacilityMode && trainingState.facilityLayoutIsolateSelection);
+                isoBtn.title = _isoActive
+                    ? (_isoFacilityMode ? 'Show the rest of the facility again' : 'Show the surrounding plant again')
+                    : (_isoPlantMode
+                        ? 'Hide every non-selected plant group completely'
+                        : (_isoFacilityMode ? 'Hide every non-selected facility group completely' : 'Isolate parts of current step'));
+                if (_isoActive) {
                     isoBtn.classList.add('active');
                 }
                 isoBtn.addEventListener('click', () => {
@@ -19180,7 +19299,11 @@
             _trainMountViewer();
             // Render the current step into the playback panel (if any)
             _trainRenderPlaybackPanel();
-            _trainEnsureProcessMapLoaded();
+            if (_trainIsFacilityLayoutMode()) {
+                _trainEnsureFacilityLayoutLoaded();
+            } else {
+                _trainEnsureProcessMapLoaded();
+            }
         }
 
         // ── Train tab: rail builders ──
@@ -19239,6 +19362,321 @@
 
         function _trainIsPlantProcessMode() {
             return trainingState.type === 'plant_process' || _trainIsPlantProcessProcedure(trainingState.procedure);
+        }
+
+        function _trainIsFacilityLayoutMode() {
+            return trainingState.type === 'facility_layout'
+                || (trainingState.procedure && trainingState.procedure.trainingType === 'facility_layout');
+        }
+
+        function _trainFacilitySemantic() {
+            return trainingState.facilityLayoutData && trainingState.facilityLayoutData.semantic
+                ? trainingState.facilityLayoutData.semantic
+                : null;
+        }
+
+        function _trainFacilityRows() {
+            const semantic = _trainFacilitySemantic();
+            return semantic && Array.isArray(semantic.rackRows) ? semantic.rackRows : [];
+        }
+
+        function _trainFacilityAssets() {
+            const semantic = _trainFacilitySemantic();
+            return semantic && Array.isArray(semantic.materialHandlingAssets) ? semantic.materialHandlingAssets : [];
+        }
+
+        function _trainFacilityAisles() {
+            const semantic = _trainFacilitySemantic();
+            return semantic && Array.isArray(semantic.aisles) ? semantic.aisles : [];
+        }
+
+        // Operating zones = the open operating-floor aisles between the rack footprints.
+        // FLOOR OVERLAYS ONLY, decoupled from CAD geometry. This list is the stable, selectable
+        // set (so the panel populates before the GLB loads); the geometry is derived from the
+        // rack-row footprints at paint time — see _trainFacilityOperatingZoneGeom.
+        function _trainFacilityOperatingZones() {
+            return [
+                { id: 'op_zone_west',   kind: 'operating_zone', label: 'Zone 1 · West aisle',         meta: 'operating aisle' },
+                { id: 'op_zone_north',  kind: 'operating_zone', label: 'Zone 2 · North aisle (A-B)',  meta: 'operating aisle' },
+                { id: 'op_zone_center', kind: 'operating_zone', label: 'Zone 3 · Center aisle (B-C)', meta: 'operating aisle' },
+                { id: 'op_zone_south',  kind: 'operating_zone', label: 'Zone 4 · South aisle (C-D)',  meta: 'operating aisle' },
+            ];
+        }
+
+        // Rack footprints = the floor area directly under each rack chain. One entry per
+        // rack row (all 5 chains). The overlay geometry is taken from the actual GLB rack
+        // meshes at paint time (see _trainFacilityRowMeshBoundsXZ); this list is just the
+        // stable, selectable set, so the panel populates even before the GLB has loaded.
+        function _trainFacilityRackFootprints() {
+            return _trainFacilityRows().map(r => ({
+                id: r.id,
+                kind: 'rack_footprint',
+                label: (r.displayName || r.id.replace(/^Rack_Row_/, '').replace(/_/g, ' ')) + ' rack',
+                meta: `${r.rackCount || 0} racks`,
+            }));
+        }
+
+        // World-space x/z bounding box of a rack row's GLB meshes — the exact area under
+        // that rack chain. Returns null until the GLB mesh map is ready.
+        function _trainFacilityRowMeshBoundsXZ(rowId) {
+            if (!state.assyPartMeshMap || !window.THREE) return null;
+            const row = _trainFacilityRows().find(r => r && r.id === rowId);
+            if (!row) return null;
+            const names = (row.rackInstances || []).map(i => i && i.componentName).filter(Boolean);
+            if (!names.length) return null;
+            const box = new THREE.Box3();
+            let any = false;
+            Object.keys(state.assyPartMeshMap).forEach(k => {
+                if (!names.some(n => _trainFacilityMeshKeyMatchesTarget(k, n))) return;
+                (state.assyPartMeshMap[k] || []).forEach(m => { if (m) { box.expandByObject(m); any = true; } });
+            });
+            if (!any || box.isEmpty()) return null;
+            return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, primaryAxis: row.primaryAxis };
+        }
+
+        // Operating-zone rectangles derived from the rack-row GLB footprints, so the aisles
+        // meet the rack edges exactly and never overlap them. Returns a map keyed by the
+        // operating-zone ids, or null until the GLB rack meshes are ready.
+        //  - horizontal aisles (north/center/south) fill the z-gap between consecutive rack
+        //    rows and span the inner (middle-rack) x-extent, so they stop at the west aisle.
+        //  - the west aisle fills the x-gap between the west rack and the middle racks, and
+        //    spans the z-gap between the north and south rack rows.
+        function _trainFacilityOperatingZoneGeom() {
+            if (!state.assyPartMeshMap || !window.THREE) return null;
+            const horiz = [], vert = [];
+            _trainFacilityRows().forEach(r => {
+                const b = _trainFacilityRowMeshBoundsXZ(r.id);
+                if (!b) return;
+                (r.primaryAxis === 'z' ? vert : horiz).push(b);
+            });
+            if (horiz.length < 2) return null;
+            horiz.sort((a, b) => (a.minZ + a.maxZ) - (b.minZ + b.maxZ)); // north -> south
+            const inner = horiz.length > 2 ? horiz.slice(1, -1) : horiz;
+            const midMinX = Math.max(...inner.map(b => b.minX)); // narrowest common x-span
+            const midMaxX = Math.min(...inner.map(b => b.maxX));
+            const gapZone = (a, b) => ({ minX: midMinX, maxX: midMaxX, minZ: a.maxZ, maxZ: b.minZ });
+            const out = {};
+            if (horiz[0] && horiz[1]) out.op_zone_north = gapZone(horiz[0], horiz[1]);
+            if (horiz[1] && horiz[2]) out.op_zone_center = gapZone(horiz[1], horiz[2]);
+            if (horiz[2] && horiz[3]) out.op_zone_south = gapZone(horiz[2], horiz[3]);
+            if (vert.length) {
+                const west = vert.slice().sort((a, b) => b.maxX - a.maxX)[0]; // nearest to centre
+                out.op_zone_west = { minX: west.maxX, maxX: midMinX, minZ: horiz[0].maxZ, maxZ: horiz[horiz.length - 1].minZ };
+            }
+            return out;
+        }
+
+        function _trainFacilitySelectedZoneIds() {
+            return Array.isArray(trainingState.facilityLayoutSelectedZoneIds)
+                ? trainingState.facilityLayoutSelectedZoneIds
+                : [];
+        }
+
+        function _trainFacilitySelectedRackFootprintIds() {
+            return Array.isArray(trainingState.facilityLayoutSelectedRackFootprintIds)
+                ? trainingState.facilityLayoutSelectedRackFootprintIds
+                : [];
+        }
+
+        function _trainFacilityGroups() {
+            const groups = [];
+            _trainFacilityRows().forEach(row => {
+                if (!row || !row.id) return;
+                groups.push({
+                    id: row.id,
+                    kind: 'rack_row',
+                    displayName: row.displayName || row.id,
+                    meta: `${row.rackCount || 0} racks`,
+                    componentNames: (Array.isArray(row.rackInstances) ? row.rackInstances : [])
+                        .map(item => item && item.componentName)
+                        .filter(Boolean),
+                    source: row,
+                });
+            });
+            _trainFacilityAssets().forEach(asset => {
+                if (!asset || !asset.id) return;
+                groups.push({
+                    id: asset.id,
+                    kind: asset.kind || 'asset',
+                    displayName: asset.displayName || asset.id,
+                    meta: asset.kind || 'asset',
+                    componentNames: asset.componentName ? [asset.componentName] : [],
+                    source: asset,
+                });
+            });
+            return groups;
+        }
+
+        function _trainFacilityGroupById(groupId) {
+            return _trainFacilityGroups().find(g => g.id === groupId) || null;
+        }
+
+        function _trainFacilitySelectedGroupIds() {
+            return Array.isArray(trainingState.facilityLayoutSelectedGroupIds)
+                ? trainingState.facilityLayoutSelectedGroupIds
+                : [];
+        }
+
+        function _trainFacilitySelectedGroups() {
+            const selected = new Set(_trainFacilitySelectedGroupIds());
+            return _trainFacilityGroups().filter(group => selected.has(group.id));
+        }
+
+        function _trainSetFacilityLayoutGroupSelected(groupId, selected) {
+            if (!groupId) return;
+            const ids = new Set(_trainFacilitySelectedGroupIds());
+            if (selected) ids.add(groupId);
+            else ids.delete(groupId);
+            trainingState.facilityLayoutSelectedGroupIds = Array.from(ids);
+            if (!trainingState.facilityLayoutSelectedGroupIds.length) {
+                trainingState.facilityLayoutIsolateSelection = false;
+            }
+
+            const rowIds = _trainFacilityRows().map(row => row && row.id).filter(Boolean);
+            const selectedRowIds = [];
+            trainingState.facilityLayoutSelectedGroupIds.forEach(id => {
+                if (rowIds.includes(id) && !selectedRowIds.includes(id)) {
+                    selectedRowIds.push(id);
+                }
+            });
+            if (selectedRowIds.length) {
+                trainingState.facilityLayoutSelectedRowId = selectedRowIds[0];
+                trainingState.facilityLayoutCapacityInputs.row = selectedRowIds[0];
+            } else {
+                trainingState.facilityLayoutSelectedRowId = '';
+                trainingState.facilityLayoutCapacityInputs.row = '';
+            }
+            _trainApplyFacilityLayoutHighlight();
+            _trainUpdateFacilityViewerCaption();
+            _trainRefreshPlantProcessIsolateControls();
+        }
+
+        function _trainToggleFacilityLayoutIsolation() {
+            const hasSelection = _trainFacilitySelectedGroupIds().length > 0;
+            trainingState.facilityLayoutIsolateSelection = hasSelection
+                ? !trainingState.facilityLayoutIsolateSelection
+                : false;
+            _trainApplyFacilityLayoutHighlight();
+            _trainUpdateFacilityViewerCaption();
+            _trainRefreshPlantProcessIsolateControls();
+            const body = document.getElementById('trainSetupBody');
+            if (body) _trainRenderSetupBody(body);
+        }
+
+        // Zone Explorer selection setters. These mutate ONLY the floor-overlay state and
+        // repaint overlays — they never touch facilityLayoutSelectedGroupIds or call the CAD
+        // highlight, keeping operating-zone/rack-footprint selection fully decoupled from CAD.
+        function _trainSetFacilityLayoutZoneSelected(zoneId, selected) {
+            if (!zoneId) return;
+            const ids = new Set(_trainFacilitySelectedZoneIds());
+            if (selected) ids.add(zoneId);
+            else ids.delete(zoneId);
+            trainingState.facilityLayoutSelectedZoneIds = Array.from(ids);
+            _trainApplyFacilityZoneOverlays();
+            _trainUpdateFacilityViewerCaption();
+        }
+
+        function _trainSetFacilityLayoutRackFootprintSelected(footprintId, selected) {
+            if (!footprintId) return;
+            const ids = new Set(_trainFacilitySelectedRackFootprintIds());
+            if (selected) ids.add(footprintId);
+            else ids.delete(footprintId);
+            trainingState.facilityLayoutSelectedRackFootprintIds = Array.from(ids);
+            _trainApplyFacilityZoneOverlays();
+            _trainUpdateFacilityViewerCaption();
+        }
+
+        function _trainClearFacilityZoneSelections() {
+            trainingState.facilityLayoutSelectedZoneIds = [];
+            trainingState.facilityLayoutSelectedRackFootprintIds = [];
+            _trainApplyFacilityZoneOverlays();
+            _trainUpdateFacilityViewerCaption();
+        }
+
+        function _trainFacilitySelectedRow() {
+            const rows = _trainFacilityRows();
+            const selected = trainingState.facilityLayoutSelectedRowId;
+            return rows.find(r => r && r.id === selected) || null;
+        }
+
+        function _trainEnsureFacilityLayoutLoaded() {
+            if (trainingState.facilityLayoutData) return Promise.resolve(trainingState.facilityLayoutData);
+            if (trainingState.facilityLayoutLoadPromise) return trainingState.facilityLayoutLoadPromise;
+            trainingState.facilityLayoutError = null;
+            trainingState.facilityLayoutLoadPromise = fetch(trainingState.facilityLayoutSemanticUrl, { cache: 'no-store' })
+                .then(res => {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(data => {
+                    trainingState.facilityLayoutData = data;
+                    return data;
+                })
+                .catch(err => {
+                    trainingState.facilityLayoutError = err && err.message ? err.message : String(err);
+                    return null;
+                })
+                .finally(() => {
+                    trainingState.facilityLayoutLoadPromise = null;
+                    _trainAppendFacilityLayoutPanelRefresh();
+                    if (_trainIsFacilityLayoutMode()) {
+                        _trainRenderFacilityLayoutViewer();
+                        _trainApplyFacilityLayoutHighlight();
+                        _trainUpdateFacilityViewerCaption();
+                    }
+                });
+            _trainAppendFacilityLayoutPanelRefresh();
+            _trainRenderFacilityLayoutViewer();
+            return trainingState.facilityLayoutLoadPromise;
+        }
+
+        function _trainFacilityCapacityPayloadFromState() {
+            const src = trainingState.facilityLayoutCapacityInputs || {};
+            const num = (v, fallback) => {
+                const n = Number(v);
+                return Number.isFinite(n) ? n : fallback;
+            };
+            return {
+                row: src.row || trainingState.facilityLayoutSelectedRowId || '',
+                length: num(src.length, 24),
+                depth: num(src.depth, 18),
+                height: src.height === '' || src.height === null || src.height === undefined ? null : num(src.height, 12),
+                clearance: num(src.clearance, 0),
+                unit: src.unit || 'in',
+            };
+        }
+
+        async function _trainRunFacilityCapacity() {
+            trainingState.facilityLayoutCapacityLoading = true;
+            trainingState.facilityLayoutCapacityError = null;
+            _trainAppendFacilityLayoutPanelRefresh();
+            try {
+                const res = await fetch(trainingState.facilityLayoutCapacityUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(_trainFacilityCapacityPayloadFromState()),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+                trainingState.facilityLayoutCapacityResult = data.result || data;
+                if (trainingState.facilityLayoutCapacityResult
+                    && Array.isArray(trainingState.facilityLayoutCapacityResult.rows)
+                    && trainingState.facilityLayoutCapacityResult.rows.length === 1) {
+                    trainingState.facilityLayoutSelectedRowId = trainingState.facilityLayoutCapacityResult.rows[0].rowId || trainingState.facilityLayoutSelectedRowId;
+                    if (trainingState.facilityLayoutSelectedRowId) {
+                        const ids = new Set(_trainFacilitySelectedGroupIds());
+                        ids.add(trainingState.facilityLayoutSelectedRowId);
+                        trainingState.facilityLayoutSelectedGroupIds = Array.from(ids);
+                    }
+                }
+                _trainRenderFacilityLayoutViewer();
+                _trainApplyFacilityLayoutHighlight();
+            } catch (err) {
+                trainingState.facilityLayoutCapacityError = err && err.message ? err.message : String(err);
+            } finally {
+                trainingState.facilityLayoutCapacityLoading = false;
+                _trainAppendFacilityLayoutPanelRefresh();
+            }
         }
 
         function _trainPlantProcessZoneById(zoneId) {
@@ -19525,12 +19963,16 @@
 
         function _trainRefreshPlantProcessIsolateControls() {
             const plantMode = _trainIsPlantProcessMode();
-            const active = plantMode && !!trainingState.plantProcessIsolateSelection;
+            const facilityMode = _trainIsFacilityLayoutMode();
+            const active = (plantMode && !!trainingState.plantProcessIsolateSelection)
+                || (facilityMode && !!trainingState.facilityLayoutIsolateSelection);
             document.querySelectorAll('[data-training-isolate-btn="true"]').forEach(btn => {
                 btn.classList.toggle('active', active);
                 btn.title = active
-                    ? 'Show the surrounding plant again'
-                    : (plantMode ? 'Hide every non-selected plant group completely' : 'Isolate parts of current step');
+                    ? (facilityMode ? 'Show the rest of the facility again' : 'Show the surrounding plant again')
+                    : (plantMode
+                        ? 'Hide every non-selected plant group completely'
+                        : (facilityMode ? 'Hide every non-selected facility group completely' : 'Isolate parts of current step'));
             });
         }
 
@@ -19952,7 +20394,9 @@
         } catch (_) {}
 
         function _trainApplyTrainingTypeDefaults(prevType) {
-            if (prevType && ((prevType === 'plant_process') !== (trainingState.type === 'plant_process'))) {
+            const wasSpecial = prevType === 'plant_process' || prevType === 'facility_layout';
+            const isSpecial = trainingState.type === 'plant_process' || trainingState.type === 'facility_layout';
+            if (prevType && (wasSpecial || isSpecial) && prevType !== trainingState.type) {
                 trainingState.procedure = null;
                 trainingState.currentStepIndex = 0;
                 trainingState._playbackStarted = false;
@@ -19969,9 +20413,23 @@
                 trainingState.plantProcessActiveZone = trainingState.plantProcessActiveZone || 'overview';
                 try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
                 try { _trainRenderPlantProcessDiagram(trainingState.plantProcessActiveZone); } catch (_) {}
+            } else if (trainingState.type === 'facility_layout') {
+                if (!trainingState.targetComponent || prevType !== 'facility_layout') {
+                    trainingState.targetComponent = 'Facility Layout';
+                }
+                if (!trainingState.goal || prevType !== 'facility_layout') {
+                    trainingState.goal = 'Answer facility layout, rack row, aisle, and storage capacity questions.';
+                }
+                trainingState.viewportMode = 'facility_layout';
+                try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
+                try { _trainEnsureFacilityLayoutLoaded(); } catch (_) {}
+                try { _trainRenderFacilityLayoutViewer(); } catch (_) {}
             } else if (prevType === 'plant_process') {
                 trainingState.viewportMode = 'structure';
                 trainingState.plantProcessActiveZone = 'overview';
+                try { _trainRenderProcessDiagram(); } catch (_) {}
+            } else if (prevType === 'facility_layout') {
+                trainingState.viewportMode = 'structure';
                 try { _trainRenderProcessDiagram(); } catch (_) {}
             }
         }
@@ -20049,10 +20507,11 @@
             // Target Component
             const compField = document.createElement('div'); compField.className = 'train-field';
             const isPlantProcess = trainingState.type === 'plant_process';
-            compField.innerHTML = `<div class="train-field-label">${isPlantProcess ? 'Plant / Process' : 'Target Component'}</div>`;
+            const isFacilityLayout = trainingState.type === 'facility_layout';
+            compField.innerHTML = `<div class="train-field-label">${isPlantProcess ? 'Plant / Process' : (isFacilityLayout ? 'Facility Layout' : 'Target Component')}</div>`;
             const compInput = document.createElement('input');
             compInput.type = 'text';
-            compInput.placeholder = isPlantProcess ? 'Cooling tower process' : 'Subassembly or part';
+            compInput.placeholder = isPlantProcess ? 'Cooling tower process' : (isFacilityLayout ? 'Warehouse / rack layout' : 'Subassembly or part');
             compInput.value = trainingState.targetComponent || '';
             compInput.addEventListener('input', () => { trainingState.targetComponent = compInput.value; });
             compField.appendChild(compInput);
@@ -20094,6 +20553,8 @@
             body.appendChild(processDivider);
             if (trainingState.type === 'plant_process') {
                 _trainAppendPlantProcessPanel(body);
+            } else if (trainingState.type === 'facility_layout') {
+                _trainAppendFacilityLayoutPanel(body);
             } else {
                 _trainAppendProcessStructurePanel(body);
             }
@@ -20409,6 +20870,474 @@
         function _trainAppendPlantProcessPanelRefresh() {
             const body = document.getElementById('trainSetupBody');
             if (body && trainingState.type === 'plant_process') {
+                _trainRenderSetupBody(body);
+            }
+        }
+
+        function _trainAppendFacilityLayoutPanel(body) {
+            const wrap = document.createElement('div');
+            wrap.className = 'train-plant-setup-panel';
+            wrap.id = 'trainFacilityLayoutPanel';
+
+            const title = document.createElement('div');
+            title.className = 'train-plant-setup-title';
+            title.textContent = 'Facility Layout Intelligence';
+            wrap.appendChild(title);
+
+            const copy = document.createElement('div');
+            copy.className = 'train-plant-setup-copy';
+            copy.textContent = 'Rack rows, forklifts, aisles, and storage capacity are loaded from the SolidWorks facility semantic JSON.';
+            wrap.appendChild(copy);
+
+            if (!trainingState.facilityLayoutData && !trainingState.facilityLayoutError) {
+                const loading = document.createElement('div');
+                loading.className = 'train-process-empty';
+                loading.textContent = 'Loading facility layout semantics...';
+                wrap.appendChild(loading);
+                _trainEnsureFacilityLayoutLoaded();
+            }
+
+            if (trainingState.facilityLayoutError) {
+                const err = document.createElement('div');
+                err.className = 'train-process-empty';
+                err.textContent = `Facility layout unavailable: ${trainingState.facilityLayoutError}`;
+                wrap.appendChild(err);
+            }
+
+            const semantic = _trainFacilitySemantic();
+            const rows = _trainFacilityRows();
+            const assets = _trainFacilityAssets();
+            const aisles = _trainFacilityAisles();
+
+            if (semantic) {
+                const summary = document.createElement('div');
+                summary.className = 'train-plant-group-summary';
+                const facilityName = semantic.facility && (semantic.facility.displayName || semantic.facility.id);
+                summary.textContent = `${facilityName || 'Facility'} · ${rows.length} rack rows · ${assets.length} forklifts · ${aisles.length} inferred aisles`;
+                wrap.appendChild(summary);
+
+                const explorerTitle = document.createElement('div');
+                explorerTitle.className = 'train-plant-flow-title';
+                explorerTitle.textContent = 'Facility Explorer';
+                wrap.appendChild(explorerTitle);
+
+                const filter = document.createElement('input');
+                filter.className = 'train-plant-group-filter';
+                filter.type = 'search';
+                filter.placeholder = 'Filter rack rows or forklifts';
+                filter.value = trainingState.facilityLayoutGroupFilter || '';
+                filter.addEventListener('input', () => {
+                    trainingState.facilityLayoutGroupFilter = filter.value || '';
+                    _trainAppendFacilityLayoutPanelRefresh();
+                });
+                wrap.appendChild(filter);
+
+                const selected = new Set(_trainFacilitySelectedGroupIds());
+                const q = String(trainingState.facilityLayoutGroupFilter || '').trim().toLowerCase();
+                const groups = _trainFacilityGroups();
+                const shownGroups = q
+                    ? groups.filter(group => {
+                        const haystack = `${group.displayName || ''} ${group.id || ''} ${group.kind || ''} ${group.meta || ''}`.toLowerCase();
+                        return haystack.includes(q);
+                    })
+                    : groups;
+
+                const groupActions = document.createElement('div');
+                groupActions.className = 'train-plant-group-actions';
+                const isolateBtn = document.createElement('button');
+                isolateBtn.type = 'button';
+                isolateBtn.className = 'train-secondary-btn' + (trainingState.facilityLayoutIsolateSelection ? ' active' : '');
+                isolateBtn.textContent = trainingState.facilityLayoutIsolateSelection ? 'Show Context' : 'Isolate Selection';
+                isolateBtn.disabled = selected.size === 0;
+                isolateBtn.title = trainingState.facilityLayoutIsolateSelection
+                    ? 'Show the rest of the facility again'
+                    : 'Hide every non-selected facility group completely';
+                isolateBtn.addEventListener('click', () => _trainToggleFacilityLayoutIsolation());
+                groupActions.appendChild(isolateBtn);
+                const gridBtn = document.createElement('button');
+                gridBtn.type = 'button';
+                gridBtn.className = 'train-secondary-btn' + (trainingState.facilityLayoutShowGrid ? ' active' : '');
+                gridBtn.textContent = trainingState.facilityLayoutShowGrid ? 'Grid On' : 'Grid Off';
+                gridBtn.title = trainingState.facilityLayoutShowGrid
+                    ? 'Hide the facility floor grid'
+                    : 'Show the facility floor grid';
+                gridBtn.addEventListener('click', () => {
+                    trainingState.facilityLayoutShowGrid = !trainingState.facilityLayoutShowGrid;
+                    _trainUpdateFacilityLayoutGrid();
+                    _trainUpdateFacilityViewerCaption();
+                    _trainAppendFacilityLayoutPanelRefresh();
+                });
+                groupActions.appendChild(gridBtn);
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.className = 'train-secondary-btn';
+                clearBtn.textContent = 'Clear CAD Highlight';
+                clearBtn.title = 'Clear rack/forklift mesh highlighting (does not affect floor overlays)';
+                clearBtn.disabled = selected.size === 0;
+                clearBtn.addEventListener('click', () => {
+                    trainingState.facilityLayoutSelectedGroupIds = [];
+                    trainingState.facilityLayoutSelectedRowId = '';
+                    trainingState.facilityLayoutCapacityInputs.row = '';
+                    trainingState.facilityLayoutIsolateSelection = false;
+                    _trainApplyFacilityLayoutHighlight();
+                    _trainUpdateFacilityViewerCaption();
+                    _trainRefreshPlantProcessIsolateControls();
+                    _trainAppendFacilityLayoutPanelRefresh();
+                });
+                groupActions.appendChild(clearBtn);
+                const showBtn = document.createElement('button');
+                showBtn.type = 'button';
+                showBtn.className = 'train-secondary-btn';
+                showBtn.textContent = 'Show 3D Layout';
+                showBtn.addEventListener('click', () => _trainRenderFacilityLayoutViewer());
+                groupActions.appendChild(showBtn);
+                wrap.appendChild(groupActions);
+
+                const groupList = document.createElement('div');
+                groupList.className = 'train-plant-group-list';
+                shownGroups.forEach(group => {
+                    const row = document.createElement('label');
+                    row.className = 'train-plant-group-row' + (selected.has(group.id) ? ' active' : '');
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.checked = selected.has(group.id);
+                    cb.addEventListener('change', () => {
+                        _trainSetFacilityLayoutGroupSelected(group.id, cb.checked);
+                        _trainAppendFacilityLayoutPanelRefresh();
+                    });
+                    const name = document.createElement('span');
+                    name.className = 'train-plant-group-name';
+                    name.textContent = group.displayName || group.id;
+                    const count = document.createElement('span');
+                    count.className = 'train-plant-group-count';
+                    count.textContent = group.kind === 'rack_row'
+                        ? `${group.meta} · ${group.componentNames.length} instances`
+                        : String(group.meta || group.kind || '').replace(/_/g, ' ');
+                    row.appendChild(cb);
+                    row.appendChild(name);
+                    row.appendChild(count);
+                    groupList.appendChild(row);
+                });
+                if (!shownGroups.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'train-process-empty';
+                    empty.textContent = 'No facility groups match the filter.';
+                    groupList.appendChild(empty);
+                }
+                wrap.appendChild(groupList);
+
+                // ---- Zone Explorer: floor overlays only, decoupled from CAD highlighting ----
+                const zoneTitle = document.createElement('div');
+                zoneTitle.className = 'train-plant-flow-title';
+                zoneTitle.textContent = 'Zone Explorer';
+                wrap.appendChild(zoneTitle);
+
+                const zoneNote = document.createElement('div');
+                zoneNote.className = 'train-plant-flow-note';
+                zoneNote.textContent = 'Selections paint translucent floor overlays only — they do not recolor CAD geometry. Violet = operating zones · amber = rack footprints.';
+                wrap.appendChild(zoneNote);
+
+                const selectedZoneIds = new Set(_trainFacilitySelectedZoneIds());
+                const selectedFootprintIds = new Set(_trainFacilitySelectedRackFootprintIds());
+
+                const zoneActions = document.createElement('div');
+                zoneActions.className = 'train-plant-group-actions';
+                const clearZonesBtn = document.createElement('button');
+                clearZonesBtn.type = 'button';
+                clearZonesBtn.className = 'train-secondary-btn';
+                clearZonesBtn.textContent = 'Clear Zones';
+                clearZonesBtn.title = 'Remove all operating-zone and rack-footprint floor overlays';
+                clearZonesBtn.disabled = selectedZoneIds.size === 0 && selectedFootprintIds.size === 0;
+                clearZonesBtn.addEventListener('click', () => {
+                    _trainClearFacilityZoneSelections();
+                    _trainAppendFacilityLayoutPanelRefresh();
+                });
+                zoneActions.appendChild(clearZonesBtn);
+                wrap.appendChild(zoneActions);
+
+                const makeOverlayRow = (item, isSelected, onToggle) => {
+                    const row = document.createElement('label');
+                    row.className = 'train-plant-group-row' + (isSelected ? ' active' : '');
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.checked = isSelected;
+                    cb.addEventListener('change', () => {
+                        onToggle(item.id, cb.checked);
+                        _trainAppendFacilityLayoutPanelRefresh();
+                    });
+                    const name = document.createElement('span');
+                    name.className = 'train-plant-group-name';
+                    name.textContent = item.label || item.id;
+                    const count = document.createElement('span');
+                    count.className = 'train-plant-group-count';
+                    count.textContent = String(item.meta || '').replace(/_/g, ' ');
+                    row.appendChild(cb);
+                    row.appendChild(name);
+                    row.appendChild(count);
+                    return row;
+                };
+                const subtitleStyle = 'font-weight:700;font-size:11px;color:var(--text-secondary);margin:8px 0 4px;text-transform:uppercase;letter-spacing:0.04em;';
+
+                const opTitle = document.createElement('div');
+                opTitle.style.cssText = subtitleStyle;
+                opTitle.textContent = 'Operating Zones';
+                wrap.appendChild(opTitle);
+                const zoneList = document.createElement('div');
+                zoneList.className = 'train-plant-group-list';
+                const operatingZones = _trainFacilityOperatingZones();
+                operatingZones.forEach(zone => {
+                    zoneList.appendChild(makeOverlayRow(zone, selectedZoneIds.has(zone.id), _trainSetFacilityLayoutZoneSelected));
+                });
+                if (!operatingZones.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'train-process-empty';
+                    empty.textContent = 'No operating zones defined.';
+                    zoneList.appendChild(empty);
+                }
+                wrap.appendChild(zoneList);
+
+                const fpTitle = document.createElement('div');
+                fpTitle.style.cssText = subtitleStyle;
+                fpTitle.textContent = 'Rack Footprints';
+                wrap.appendChild(fpTitle);
+                const footprintList = document.createElement('div');
+                footprintList.className = 'train-plant-group-list';
+                const rackFootprints = _trainFacilityRackFootprints();
+                rackFootprints.forEach(fp => {
+                    footprintList.appendChild(makeOverlayRow(fp, selectedFootprintIds.has(fp.id), _trainSetFacilityLayoutRackFootprintSelected));
+                });
+                if (!rackFootprints.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'train-process-empty';
+                    empty.textContent = 'No rack footprints defined.';
+                    footprintList.appendChild(empty);
+                }
+                wrap.appendChild(footprintList);
+
+                // ---- Flow Route: server-side routing, overlay parented under the model group ----
+                const routeTitle = document.createElement('div');
+                routeTitle.className = 'train-plant-flow-title';
+                routeTitle.textContent = 'Flow Route';
+                wrap.appendChild(routeTitle);
+
+                const routeEndpoints = [].concat(
+                    _trainFacilityAssets().map(a => ({ id: a.id, label: a.displayName || a.id, group: 'Forklifts' })),
+                    _trainFacilityRows().map(r => ({ id: r.id, label: r.displayName || r.id, group: 'Rack rows' }))
+                );
+                if (routeEndpoints.length) {
+                    if (!trainingState.facilityLayoutRouteStart) {
+                        trainingState.facilityLayoutRouteStart = (routeEndpoints.find(e => e.group === 'Forklifts') || routeEndpoints[0]).id;
+                    }
+                    if (!trainingState.facilityLayoutRouteEnd) {
+                        trainingState.facilityLayoutRouteEnd = (routeEndpoints.find(e => e.group === 'Rack rows') || routeEndpoints[routeEndpoints.length - 1]).id;
+                    }
+                }
+                const makeRouteSelect = (value, onChange) => {
+                    const sel = document.createElement('select');
+                    sel.style.cssText = 'width:100%;margin:2px 0;';
+                    let currentGroup = null;
+                    routeEndpoints.forEach(ep => {
+                        if (ep.group !== currentGroup) {
+                            currentGroup = ep.group;
+                            const og = document.createElement('optgroup'); og.label = ep.group; sel.appendChild(og);
+                        }
+                        const opt = document.createElement('option');
+                        opt.value = ep.id; opt.textContent = ep.label;
+                        if (ep.id === value) opt.selected = true;
+                        sel.lastChild.appendChild(opt);
+                    });
+                    sel.addEventListener('change', () => onChange(sel.value));
+                    return sel;
+                };
+                const routeGrid = document.createElement('div');
+                routeGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0;';
+                const startField = document.createElement('label'); startField.className = 'train-field'; startField.style.margin = '0';
+                startField.innerHTML = '<div class="train-field-label">From</div>';
+                startField.appendChild(makeRouteSelect(trainingState.facilityLayoutRouteStart, v => { trainingState.facilityLayoutRouteStart = v; }));
+                const endField = document.createElement('label'); endField.className = 'train-field'; endField.style.margin = '0';
+                endField.innerHTML = '<div class="train-field-label">To</div>';
+                endField.appendChild(makeRouteSelect(trainingState.facilityLayoutRouteEnd, v => { trainingState.facilityLayoutRouteEnd = v; }));
+                routeGrid.appendChild(startField); routeGrid.appendChild(endField);
+                wrap.appendChild(routeGrid);
+
+                const routeActions = document.createElement('div');
+                routeActions.className = 'train-plant-group-actions';
+                const findBtn = document.createElement('button');
+                findBtn.type = 'button'; findBtn.className = 'train-secondary-btn primary';
+                findBtn.textContent = trainingState.facilityLayoutRouteLoading ? 'Routing...' : 'Find Route';
+                findBtn.disabled = !!trainingState.facilityLayoutRouteLoading || routeEndpoints.length < 2;
+                findBtn.addEventListener('click', () => _trainRunFacilityRoute());
+                routeActions.appendChild(findBtn);
+                const clearRouteBtn = document.createElement('button');
+                clearRouteBtn.type = 'button'; clearRouteBtn.className = 'train-secondary-btn';
+                clearRouteBtn.textContent = 'Clear Route';
+                clearRouteBtn.disabled = !trainingState.facilityLayoutRoute;
+                clearRouteBtn.addEventListener('click', () => _trainClearFacilityRoute());
+                routeActions.appendChild(clearRouteBtn);
+                wrap.appendChild(routeActions);
+
+                if (trainingState.facilityLayoutRouteError) {
+                    const rerr = document.createElement('div');
+                    rerr.className = 'train-process-empty';
+                    rerr.textContent = trainingState.facilityLayoutRouteError;
+                    wrap.appendChild(rerr);
+                }
+                const _route = trainingState.facilityLayoutRoute;
+                if (_route) {
+                    const card = document.createElement('div');
+                    card.className = 'train-plant-flow-note';
+                    card.style.cssText = 'margin-top:6px;';
+                    const head = document.createElement('div');
+                    head.style.cssText = 'font-weight:700;color:var(--text-primary);margin-bottom:4px;';
+                    const via = (_route.aisleLabels || []).join(' → ') || 'direct';
+                    head.textContent = `${_route.etaText ? _route.etaText + ' · ' : ''}${_route.distanceMeters} m · via ${via}`;
+                    card.appendChild(head);
+                    (_route.steps || []).forEach(st => {
+                        const line = document.createElement('div');
+                        line.style.cssText = 'font-size:11px;color:var(--text-secondary);line-height:1.5;';
+                        line.textContent = st.distanceMeters ? `• ${st.text} (${st.distanceMeters} m)` : `• ${st.text}`;
+                        card.appendChild(line);
+                    });
+                    if (_route.speedAssumptionMps) {
+                        const assume = document.createElement('div');
+                        assume.style.cssText = 'font-size:10px;color:var(--text-secondary);opacity:0.7;margin-top:3px;';
+                        assume.textContent = `Time assumes ${_route.speedAssumptionMps} m/s forklift speed.`;
+                        card.appendChild(assume);
+                    }
+                    wrap.appendChild(card);
+                }
+
+                // Layout decision-support insight (what-if east cross-aisle)
+                const _analysis = trainingState.facilityLayoutAnalysis;
+                if (_analysis && _analysis.ok && _analysis.headline) {
+                    const insight = document.createElement('div');
+                    insight.className = 'train-plant-flow-note';
+                    insight.style.cssText = 'margin-top:6px;border-left:3px solid var(--present, #2da4e8);padding-left:7px;';
+                    const il = document.createElement('div');
+                    il.style.cssText = 'font-weight:700;font-size:11px;color:var(--text-primary);';
+                    il.textContent = 'Layout insight';
+                    const ib = document.createElement('div');
+                    ib.style.cssText = 'font-size:11px;color:var(--text-secondary);';
+                    ib.textContent = _analysis.headline;
+                    insight.appendChild(il); insight.appendChild(ib);
+                    wrap.appendChild(insight);
+                } else if (!_analysis && !trainingState.facilityLayoutAnalysisAttempted) {
+                    _trainEnsureFacilityAnalysis();
+                }
+
+                const selectedRow = _trainFacilitySelectedRow();
+                if (selectedRow) {
+                    const env = selectedRow.rackEnvelopeEstimate || {};
+                    const usable = env.typicalRackUsableEnvelopeMeters || {};
+                    const rowNote = document.createElement('div');
+                    rowNote.className = 'train-plant-flow-note';
+                    rowNote.textContent =
+                        `${selectedRow.rackCount || 0} racks · ${env.estimatedShelfLevelsTotal || 0} estimated shelf levels · typical envelope `
+                        + `${Number(usable.alongRow || 0).toFixed(2)}m x ${Number(usable.crossRowDepth || 0).toFixed(2)}m`;
+                    wrap.appendChild(rowNote);
+                }
+
+                const capTitle = document.createElement('div');
+                capTitle.className = 'train-plant-flow-title';
+                capTitle.textContent = 'Capacity Estimate';
+                wrap.appendChild(capTitle);
+
+                const inputGrid = document.createElement('div');
+                inputGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0;';
+                const makeNumberField = (key, label, placeholder) => {
+                    const field = document.createElement('label');
+                    field.className = 'train-field';
+                    field.style.margin = '0';
+                    const lbl = document.createElement('div');
+                    lbl.className = 'train-field-label';
+                    lbl.textContent = label;
+                    const inp = document.createElement('input');
+                    inp.type = 'number';
+                    inp.step = '0.01';
+                    inp.placeholder = placeholder;
+                    inp.value = trainingState.facilityLayoutCapacityInputs[key] ?? '';
+                    inp.addEventListener('input', () => {
+                        trainingState.facilityLayoutCapacityInputs[key] = inp.value;
+                    });
+                    field.appendChild(lbl);
+                    field.appendChild(inp);
+                    return field;
+                };
+                inputGrid.appendChild(makeNumberField('length', 'Length', '24'));
+                inputGrid.appendChild(makeNumberField('depth', 'Depth', '18'));
+                inputGrid.appendChild(makeNumberField('height', 'Height', '12'));
+                inputGrid.appendChild(makeNumberField('clearance', 'Clearance', '1'));
+                wrap.appendChild(inputGrid);
+
+                const unitField = document.createElement('div');
+                unitField.className = 'train-field';
+                unitField.innerHTML = '<div class="train-field-label">Unit</div>';
+                const unitSel = document.createElement('select');
+                ['in', 'ft', 'mm', 'cm', 'm'].forEach(unit => {
+                    const opt = document.createElement('option');
+                    opt.value = unit;
+                    opt.textContent = unit;
+                    if (unit === trainingState.facilityLayoutCapacityInputs.unit) opt.selected = true;
+                    unitSel.appendChild(opt);
+                });
+                unitSel.addEventListener('change', () => {
+                    trainingState.facilityLayoutCapacityInputs.unit = unitSel.value;
+                });
+                unitField.appendChild(unitSel);
+                wrap.appendChild(unitField);
+
+                const actions = document.createElement('div');
+                actions.className = 'train-plant-group-actions';
+                const calcBtn = document.createElement('button');
+                calcBtn.type = 'button';
+                calcBtn.className = 'train-secondary-btn primary';
+                calcBtn.textContent = trainingState.facilityLayoutCapacityLoading ? 'Calculating...' : 'Calculate Capacity';
+                calcBtn.disabled = !!trainingState.facilityLayoutCapacityLoading;
+                calcBtn.addEventListener('click', () => _trainRunFacilityCapacity());
+                actions.appendChild(calcBtn);
+                const boardBtn = document.createElement('button');
+                boardBtn.type = 'button';
+                boardBtn.className = 'train-secondary-btn';
+                boardBtn.textContent = 'Show 3D Layout';
+                boardBtn.addEventListener('click', () => _trainRenderFacilityLayoutViewer());
+                actions.appendChild(boardBtn);
+                wrap.appendChild(actions);
+
+                if (trainingState.facilityLayoutCapacityError) {
+                    const err = document.createElement('div');
+                    err.className = 'train-process-empty';
+                    err.textContent = trainingState.facilityLayoutCapacityError;
+                    wrap.appendChild(err);
+                }
+
+                const result = trainingState.facilityLayoutCapacityResult;
+                if (result && Array.isArray(result.rows)) {
+                    const resultBox = document.createElement('div');
+                    resultBox.className = 'train-process-empty';
+                    resultBox.style.textAlign = 'left';
+                    const total = document.createElement('div');
+                    total.style.cssText = 'font-weight:800;color:var(--text-primary);margin-bottom:6px;';
+                    total.textContent = `${result.estimatedTotalBoxes || 0} boxes estimated`;
+                    resultBox.appendChild(total);
+                    result.rows.forEach(row => {
+                        const line = document.createElement('div');
+                        line.textContent = `${row.rowId}: ${row.estimatedTotalBoxes || 0} boxes across ${row.rackCount || 0} racks`;
+                        resultBox.appendChild(line);
+                    });
+                    const note = document.createElement('div');
+                    note.style.cssText = 'margin-top:6px;color:var(--text-secondary);font-size:11px;';
+                    note.textContent = 'Planning estimate from CAD-derived rack envelopes; confirm rack specs and clearance rules before production use.';
+                    resultBox.appendChild(note);
+                    wrap.appendChild(resultBox);
+                }
+            }
+
+            body.appendChild(wrap);
+        }
+
+        function _trainAppendFacilityLayoutPanelRefresh() {
+            const body = document.getElementById('trainSetupBody');
+            if (body && trainingState.type === 'facility_layout') {
                 _trainRenderSetupBody(body);
             }
         }
@@ -22153,10 +23082,172 @@
             return btn;
         }
 
+        function _trainRenderFacilityLayoutBoard() {
+            return _trainRenderFacilityLayoutViewer();
+        }
+
+        function _trainRenderFacilityLayoutSummaryBoard() {
+            const host = document.getElementById('trainViewportHost');
+            if (!host) return false;
+            if (!_trainIsFacilityLayoutMode()) return false;
+
+            host.innerHTML = '';
+            const diagram = document.createElement('div');
+            diagram.className = 'train-process-diagram';
+            diagram.id = 'trainFacilityLayoutBoard';
+            host.appendChild(diagram);
+
+            const board = document.createElement('div');
+            board.className = 'train-process-board';
+            diagram.appendChild(board);
+
+            const head = document.createElement('div');
+            head.className = 'train-process-board-head';
+            const headCopy = document.createElement('div');
+            const title = document.createElement('div');
+            title.className = 'train-process-board-title';
+            title.textContent = 'Facility Layout';
+            const sub = document.createElement('div');
+            sub.className = 'train-process-board-subtitle';
+            sub.textContent = 'Rack rows, forklifts, inferred aisles, and capacity estimates from SolidWorks semantic extraction.';
+            headCopy.appendChild(title);
+            headCopy.appendChild(sub);
+            const stamp = document.createElement('div');
+            stamp.className = 'train-process-board-stamp';
+            stamp.textContent = 'Semantic Draft';
+            head.appendChild(headCopy);
+            head.appendChild(stamp);
+            board.appendChild(head);
+
+            if (!trainingState.facilityLayoutData && !trainingState.facilityLayoutError) {
+                const empty = document.createElement('div');
+                empty.className = 'train-viewport-empty';
+                empty.textContent = 'Loading facility layout semantics...';
+                board.appendChild(empty);
+                _trainEnsureFacilityLayoutLoaded();
+                return true;
+            }
+            if (trainingState.facilityLayoutError) {
+                const empty = document.createElement('div');
+                empty.className = 'train-viewport-empty';
+                empty.textContent = `Facility layout unavailable: ${trainingState.facilityLayoutError}`;
+                board.appendChild(empty);
+                return true;
+            }
+
+            const semantic = _trainFacilitySemantic();
+            const rows = _trainFacilityRows();
+            const assets = _trainFacilityAssets();
+            const aisles = _trainFacilityAisles();
+            const summaryGrid = document.createElement('div');
+            summaryGrid.style.cssText = 'display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin:12px 0;';
+            [
+                ['Rack rows', rows.length],
+                ['Forklifts', assets.length],
+                ['Inferred aisles', aisles.length],
+                ['Total racks', rows.reduce((sum, r) => sum + Number(r.rackCount || 0), 0)],
+            ].forEach(([label, value]) => {
+                const card = document.createElement('div');
+                card.className = 'train-diagram-card';
+                card.style.cssText = 'padding:12px;min-height:auto;';
+                const val = document.createElement('div');
+                val.style.cssText = 'font-size:22px;font-weight:900;color:var(--accent);line-height:1;';
+                val.textContent = value;
+                const lab = document.createElement('div');
+                lab.style.cssText = 'font-size:11px;color:var(--text-secondary);margin-top:4px;';
+                lab.textContent = label;
+                card.appendChild(val);
+                card.appendChild(lab);
+                summaryGrid.appendChild(card);
+            });
+            board.appendChild(summaryGrid);
+
+            const rowsTitle = document.createElement('div');
+            rowsTitle.className = 'train-plant-flow-title';
+            rowsTitle.textContent = 'Rack Rows';
+            board.appendChild(rowsTitle);
+
+            const rowsGrid = document.createElement('div');
+            rowsGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;';
+            rows.forEach(row => {
+                const selected = row.id === trainingState.facilityLayoutSelectedRowId;
+                const env = row.rackEnvelopeEstimate || {};
+                const usable = env.typicalRackUsableEnvelopeMeters || {};
+                const card = document.createElement('button');
+                card.type = 'button';
+                card.className = 'train-diagram-card' + (selected ? ' selected' : '');
+                card.style.cssText = 'text-align:left;padding:12px;min-height:126px;';
+                card.addEventListener('click', () => {
+                    trainingState.facilityLayoutSelectedRowId = row.id;
+                    trainingState.facilityLayoutCapacityInputs.row = row.id;
+                    _trainAppendFacilityLayoutPanelRefresh();
+                    _trainRenderFacilityLayoutBoard();
+                });
+                const name = document.createElement('div');
+                name.className = 'train-diagram-card-name';
+                name.textContent = row.displayName || row.id;
+                const meta = document.createElement('div');
+                meta.className = 'train-diagram-card-meta';
+                meta.textContent = `${row.rackCount || 0} racks · ${env.estimatedShelfLevelsTotal || 0} shelf levels · ${row.orientation || 'orientation unknown'}`;
+                const dims = document.createElement('div');
+                dims.style.cssText = 'font-size:11px;color:var(--text-secondary);margin-top:8px;';
+                dims.textContent = `Typical envelope: ${Number(usable.alongRow || 0).toFixed(2)}m x ${Number(usable.crossRowDepth || 0).toFixed(2)}m`;
+                card.appendChild(name);
+                card.appendChild(meta);
+                card.appendChild(dims);
+                rowsGrid.appendChild(card);
+            });
+            board.appendChild(rowsGrid);
+
+            const assetsTitle = document.createElement('div');
+            assetsTitle.className = 'train-plant-flow-title';
+            assetsTitle.style.marginTop = '14px';
+            assetsTitle.textContent = 'Material Handling';
+            board.appendChild(assetsTitle);
+
+            const assetLine = document.createElement('div');
+            assetLine.className = 'train-plant-flow-note';
+            assetLine.textContent = assets.map(a => a.displayName || a.id).join(' · ') || 'No forklifts listed.';
+            board.appendChild(assetLine);
+
+            const cap = trainingState.facilityLayoutCapacityResult;
+            if (cap && Array.isArray(cap.rows)) {
+                const capTitle = document.createElement('div');
+                capTitle.className = 'train-plant-flow-title';
+                capTitle.style.marginTop = '14px';
+                capTitle.textContent = 'Latest Capacity Estimate';
+                board.appendChild(capTitle);
+                const capBox = document.createElement('div');
+                capBox.className = 'train-process-empty';
+                capBox.style.textAlign = 'left';
+                capBox.innerHTML = '';
+                const total = document.createElement('div');
+                total.style.cssText = 'font-size:20px;font-weight:900;color:var(--accent);';
+                total.textContent = `${cap.estimatedTotalBoxes || 0} boxes`;
+                capBox.appendChild(total);
+                cap.rows.forEach(row => {
+                    const line = document.createElement('div');
+                    line.textContent = `${row.rowId}: ${row.estimatedTotalBoxes || 0}`;
+                    capBox.appendChild(line);
+                });
+                board.appendChild(capBox);
+            }
+
+            if (semantic && Array.isArray(semantic.globalAssumptions) && semantic.globalAssumptions.length) {
+                const note = document.createElement('div');
+                note.className = 'train-plant-flow-note';
+                note.style.marginTop = '12px';
+                note.textContent = semantic.globalAssumptions[semantic.globalAssumptions.length - 1];
+                board.appendChild(note);
+            }
+            return true;
+        }
+
         function _trainRenderProcessDiagram() {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
             if (trainingState.viewportMode === 'assembly3d') return false;
+            if (_trainIsFacilityLayoutMode()) return _trainRenderFacilityLayoutViewer();
             if (!trainingState.processMap && !trainingState.processMapLoading && !trainingState.processMapError) return false;
 
             host.innerHTML = '';
@@ -22393,6 +23484,568 @@
             }
         }
 
+        function _trainFacilitySelectedComponentNames() {
+            const names = [];
+            _trainFacilitySelectedGroups().forEach(group => {
+                (Array.isArray(group.componentNames) ? group.componentNames : []).forEach(name => {
+                    if (name && !names.includes(name)) names.push(name);
+                });
+            });
+            return names;
+        }
+
+        function _trainFacilityMeshKeyMatchesTarget(meshKey, targetName) {
+            const key = String(meshKey || '').trim().toLowerCase();
+            const target = String(targetName || '').trim().toLowerCase();
+            if (!key || !target) return false;
+            return key === target
+                || key.startsWith(target + '/')
+                || key.startsWith(target + '\\');
+        }
+
+        function _trainFacilityHighlightedMeshKeys() {
+            const targets = _trainFacilitySelectedComponentNames();
+            const meshMap = state.assyPartMeshMap || {};
+            const keys = new Set();
+            if (!targets.length) return keys;
+            Object.keys(meshMap).forEach(meshKey => {
+                if (targets.some(target => _trainFacilityMeshKeyMatchesTarget(meshKey, target))) {
+                    keys.add(meshKey);
+                }
+            });
+            return keys;
+        }
+
+        function _trainRenderFacilityLayoutViewer() {
+            const host = document.getElementById('trainViewportHost');
+            if (!host) return false;
+            if (!_trainIsFacilityLayoutMode()) return false;
+            trainingState.viewportMode = 'facility_layout';
+            if (!trainingState.facilityLayoutData && !trainingState.facilityLayoutLoadPromise) {
+                _trainEnsureFacilityLayoutLoaded();
+            }
+            return _trainMountFacilityLayoutViewer();
+        }
+
+        function _trainMountFacilityLayoutViewer() {
+            const host = document.getElementById('trainViewportHost');
+            if (!host) return false;
+            const desiredViewerId = '__facility_layout_assem3__';
+            const existing = document.getElementById('assy-3d-container');
+            state._assyAutoRotate = false;
+            if (existing && state.assyRenderer && trainingState.activeViewerNodeId === desiredViewerId) {
+                _trainNeutralizeFacilityViewerMaterials();
+                _trainUpdateFacilityLayoutGrid();
+                _trainApplyFacilityLayoutHighlight();
+                _trainApplyFacilityZoneOverlays();
+                _trainDrawFacilityRouteFromState();
+                _trainUpdateFacilityViewerCaption();
+                return true;
+            }
+
+            _trainDisposeLiveAssemblyViewer();
+            host.innerHTML = '';
+
+            const inner = document.createElement('div');
+            inner.id = 'assy-3d-container';
+            inner.style.cssText = 'position:absolute;inset:0;background:var(--viewport-bg-gradient);';
+            host.appendChild(inner);
+
+            const caption = document.createElement('div');
+            caption.id = 'trainFacilityViewerCaption';
+            caption.className = 'train-plant-viewer-caption';
+            host.appendChild(caption);
+
+            const glbUrl = trainingState.facilityLayoutGlbUrl || FACILITY_LAYOUT_GLB_URL;
+            trainingState.activeViewerNodeId = desiredViewerId;
+            trainingState.activeViewerAsset = {
+                nodeId: desiredViewerId,
+                glbUrl,
+            };
+            trainingState.activeViewerPartIds = null;
+            trainingState.activeViewerExtract = null;
+            trainingState.activeViewerExtractPromise = null;
+
+            if (typeof _initAssembly3DScene !== 'function') {
+                inner.innerHTML = '<div class="train-viewport-empty">No 3D layout viewer available</div>';
+                return false;
+            }
+
+            try {
+                _initAssembly3DScene(inner, 'facility-layout', {
+                    glbUrl,
+                    cacheKey: 'training-facility-layout-assem3-real-geometry-2',
+                    meshMapMode: 'node_name',
+                    suppressPartExplorer: true,
+                    onPostLoad: () => {
+                        _trainNeutralizeFacilityViewerMaterials();
+                        _trainUpdateFacilityLayoutGrid();
+                        _trainApplyFacilityLayoutHighlight();
+                        _trainApplyFacilityZoneOverlays();
+                        _trainDrawFacilityRouteFromState();
+                        _trainUpdateFacilityViewerCaption();
+                    },
+                });
+                _trainUpdateFacilityViewerCaption();
+                return true;
+            } catch (e) {
+                console.warn('Facility layout viewer init failed:', e);
+                inner.innerHTML = '<div class="train-viewport-empty">Unable to load facility layout 3D model</div>';
+                return false;
+            }
+        }
+
+        // Build one translucent floor overlay (fill + outline) for a polygon of {x,z}
+        // points laid flat on the CAD x/z plane at height floorY (y is vertical).
+        function _trainFacilityFloorPolygonToOverlay(polygon, floorY, opts) {
+            if (!window.THREE || !Array.isArray(polygon) || polygon.length < 3) return null;
+            const o = opts || {};
+            const fill = (o.fill !== undefined) ? o.fill : 0x8b5cf6;
+            const fillOpacity = (o.fillOpacity !== undefined) ? o.fillOpacity : 0.2;
+            const group = new THREE.Group();
+            group.userData._isFacilityZoneOverlay = true;
+
+            const verts = [];
+            for (let i = 1; i < polygon.length - 1; i++) {
+                const a = polygon[0], b = polygon[i], c = polygon[i + 1];
+                verts.push(a.x, floorY, a.z, b.x, floorY, b.z, c.x, floorY, c.z);
+            }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+            geom.computeVertexNormals();
+            const fillMat = new THREE.MeshBasicMaterial({
+                color: fill,
+                transparent: true,
+                opacity: fillOpacity,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+                depthTest: true,
+                toneMapped: false,
+            });
+            const mesh = new THREE.Mesh(geom, fillMat);
+            mesh.userData._isFacilityZoneOverlay = true;
+            mesh.renderOrder = -6;
+            group.add(mesh);
+            return group;
+        }
+
+        function _trainDisposeFacilityZoneOverlays() {
+            const group = state.facilityLayoutZoneOverlayGroup;
+            if (!group) return;
+            try {
+                if (group.parent) group.parent.remove(group);
+                group.traverse(obj => {
+                    if (!obj) return;
+                    if (obj.geometry) { try { obj.geometry.dispose(); } catch (_) {} }
+                    if (Array.isArray(obj.material)) {
+                        obj.material.forEach(mat => { try { mat.dispose(); } catch (_) {} });
+                    } else if (obj.material) {
+                        try { obj.material.dispose(); } catch (_) {}
+                    }
+                });
+            } catch (_) {}
+            state.facilityLayoutZoneOverlayGroup = null;
+        }
+
+        // Repaint floor overlays from the current zone/footprint selection. Independent of
+        // CAD mesh highlighting and the floor grid; always disposes the prior overlay group.
+        function _trainApplyFacilityZoneOverlays() {
+            if (!window.THREE || !state.assyScene || !state.assyLiveScene || !_trainIsFacilityLayoutMode()) {
+                _trainDisposeFacilityZoneOverlays();
+                return;
+            }
+            const selectedZoneIds = new Set(_trainFacilitySelectedZoneIds());
+            const selectedFootprintIds = new Set(_trainFacilitySelectedRackFootprintIds());
+            _trainDisposeFacilityZoneOverlays();
+            if (!selectedZoneIds.size && !selectedFootprintIds.size) return;
+
+            const box = new THREE.Box3().setFromObject(state.assyLiveScene);
+            const baseY = box.isEmpty() ? 0 : box.min.y;
+            const overlayGroup = new THREE.Group();
+            overlayGroup.name = 'facility-zone-overlays';
+            overlayGroup.userData._isFacilityZoneOverlay = true;
+
+            // Operating zones (violet): the open aisles between rack footprints, derived from
+            // the GLB rack-row bounds so they meet rack edges without overlapping. Just above
+            // the grid.
+            if (selectedZoneIds.size) {
+                const geom = _trainFacilityOperatingZoneGeom() || {};
+                _trainFacilityOperatingZones().forEach(z => {
+                    if (!selectedZoneIds.has(z.id)) return;
+                    const r = geom[z.id];
+                    if (!r || !(r.maxZ > r.minZ) || !(r.maxX > r.minX)) return;
+                    const poly = [
+                        { x: r.minX, z: r.minZ }, { x: r.maxX, z: r.minZ },
+                        { x: r.maxX, z: r.maxZ }, { x: r.minX, z: r.maxZ },
+                    ];
+                    const overlay = _trainFacilityFloorPolygonToOverlay(poly, baseY + 0.006, {
+                        fill: 0x8b5cf6, fillOpacity: 0.2, line: 0x6d28d9, lineOpacity: 0.85,
+                    });
+                    if (overlay) overlayGroup.add(overlay);
+                });
+            }
+
+            // Rack footprints (amber): the exact area under each selected rack chain, taken
+            // straight from the GLB rack meshes (already world space — no offset), a hair
+            // higher so they read on top where they overlap an operating zone.
+            if (selectedFootprintIds.size) {
+                _trainFacilityRows().forEach(r => {
+                    if (!selectedFootprintIds.has(r.id)) return;
+                    const b = _trainFacilityRowMeshBoundsXZ(r.id);
+                    if (!b) return;
+                    const poly = [
+                        { x: b.minX, z: b.minZ }, { x: b.maxX, z: b.minZ },
+                        { x: b.maxX, z: b.maxZ }, { x: b.minX, z: b.maxZ },
+                    ];
+                    const overlay = _trainFacilityFloorPolygonToOverlay(poly, baseY + 0.008, {
+                        fill: 0xf59e0b, fillOpacity: 0.2, line: 0xb45309, lineOpacity: 0.9,
+                    });
+                    if (overlay) overlayGroup.add(overlay);
+                });
+            }
+
+            if (!overlayGroup.children.length) return;
+            state.assyScene.add(overlayGroup);
+            state.facilityLayoutZoneOverlayGroup = overlayGroup;
+        }
+
+        function _trainDisposeFacilityRoute() {
+            const group = state.facilityLayoutRouteGroup;
+            if (!group) return;
+            try {
+                if (group.parent) group.parent.remove(group);
+                group.traverse(obj => {
+                    if (!obj) return;
+                    if (obj.geometry) { try { obj.geometry.dispose(); } catch (_) {} }
+                    if (Array.isArray(obj.material)) obj.material.forEach(m => { try { m.dispose(); } catch (_) {} });
+                    else if (obj.material) { try { obj.material.dispose(); } catch (_) {} }
+                });
+            } catch (_) {}
+            state.facilityLayoutRouteGroup = null;
+        }
+
+        // Draw the route polyline + start/end markers as a CHILD of the recentered model group
+        // (state.assyLiveScene), so semantic/GLB coordinates render in the same place as the
+        // racks without any offset math (per the coordinate contract's rendererNote).
+        function _trainDrawFacilityRoute(result) {
+            _trainDisposeFacilityRoute();
+            if (!window.THREE || !state.assyLiveScene || !result
+                || !Array.isArray(result.routePolyline) || result.routePolyline.length < 2) return;
+            const lift = 0.18; // raise slightly above the floor so the route reads clearly
+            const pts = result.routePolyline.map(p => new THREE.Vector3(Number(p.x), Number(p.y) + lift, Number(p.z)));
+            const mkMat = (color) => new THREE.MeshBasicMaterial({
+                color, transparent: true, opacity: 0.96, depthTest: false, depthWrite: false, toneMapped: false,
+            });
+            const group = new THREE.Group();
+            group.name = 'facility-flow-route';
+            group.userData._isFacilityRoute = true;
+
+            const segMat = mkMat(0x22c55e); // route line: green
+            const up = new THREE.Vector3(0, 1, 0);
+            for (let i = 0; i < pts.length - 1; i++) {
+                const a = pts[i], b = pts[i + 1];
+                const dir = new THREE.Vector3().subVectors(b, a);
+                const len = dir.length();
+                if (len < 1e-4) continue;
+                const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, len, 10), segMat);
+                seg.position.copy(a).add(b).multiplyScalar(0.5);
+                seg.quaternion.setFromUnitVectors(up, dir.clone().normalize());
+                seg.renderOrder = 5;
+                seg.userData._isFacilityRoute = true;
+                group.add(seg);
+            }
+            for (let i = 1; i < pts.length - 1; i++) {  // smooth the corners
+                const j = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), segMat);
+                j.position.copy(pts[i]); j.renderOrder = 5; j.userData._isFacilityRoute = true;
+                group.add(j);
+            }
+            const marker = (point, color) => {
+                const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 18), mkMat(color));
+                m.position.copy(point); m.renderOrder = 6; m.userData._isFacilityRoute = true;
+                return m;
+            };
+            group.add(marker(pts[0], 0x15803d));               // start: dark green
+            group.add(marker(pts[pts.length - 1], 0xdc2626));  // end: red
+
+            state.assyLiveScene.add(group);
+            state.facilityLayoutRouteGroup = group;
+        }
+
+        function _trainDrawFacilityRouteFromState() {
+            if (trainingState.facilityLayoutRoute) _trainDrawFacilityRoute(trainingState.facilityLayoutRoute);
+        }
+
+        function _trainClearFacilityRoute() {
+            trainingState.facilityLayoutRoute = null;
+            trainingState.facilityLayoutRouteError = null;
+            _trainDisposeFacilityRoute();
+            _trainAppendFacilityLayoutPanelRefresh();
+        }
+
+        async function _trainRunFacilityRoute() {
+            const start = trainingState.facilityLayoutRouteStart;
+            const end = trainingState.facilityLayoutRouteEnd;
+            if (!start || !end || start === end) {
+                trainingState.facilityLayoutRouteError = 'Pick a different start and end.';
+                _trainAppendFacilityLayoutPanelRefresh();
+                return;
+            }
+            trainingState.facilityLayoutRouteLoading = true;
+            trainingState.facilityLayoutRouteError = null;
+            _trainAppendFacilityLayoutPanelRefresh();
+            try {
+                const res = await fetch(trainingState.facilityLayoutRouteUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start, end }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+                const route = data.result || data;
+                // Coordinate-contract guard: the route was computed against a GLB asset; refuse to
+                // draw if it doesn't match the asset the loaded semantic was authored for (stale pair).
+                const routeSha = route && route.coordinateFrame && route.coordinateFrame.glbSha256;
+                const loadedSha = (((_trainFacilitySemantic() || {}).layoutMap || {}).coordinateFrame || {}).glbAsset;
+                const loadedShaVal = loadedSha && loadedSha.sha256;
+                if (routeSha && loadedShaVal && routeSha !== loadedShaVal) {
+                    throw new Error('Route was computed against a different facility asset than is loaded (stale GLB/semantic pair); not drawing.');
+                }
+                trainingState.facilityLayoutRoute = route;
+                _trainDrawFacilityRoute(trainingState.facilityLayoutRoute);
+            } catch (err) {
+                trainingState.facilityLayoutRouteError = err && err.message ? err.message : String(err);
+                trainingState.facilityLayoutRoute = null;
+                _trainDisposeFacilityRoute();
+            } finally {
+                trainingState.facilityLayoutRouteLoading = false;
+                _trainAppendFacilityLayoutPanelRefresh();
+            }
+        }
+
+        async function _trainEnsureFacilityAnalysis() {
+            // Fetch at most once per session; a failure must not re-trigger on every panel render.
+            if (trainingState.facilityLayoutAnalysisAttempted || trainingState.facilityLayoutAnalysisLoading) return;
+            trainingState.facilityLayoutAnalysisAttempted = true;
+            trainingState.facilityLayoutAnalysisLoading = true;
+            trainingState.facilityLayoutAnalysisError = null;
+            try {
+                const res = await fetch(trainingState.facilityLayoutAnalysisUrl, { cache: 'no-store' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+                trainingState.facilityLayoutAnalysis = (data && data.result) ? data.result : (data || null);
+            } catch (err) {
+                trainingState.facilityLayoutAnalysis = null;
+                trainingState.facilityLayoutAnalysisError = err && err.message ? err.message : String(err);
+            } finally {
+                trainingState.facilityLayoutAnalysisLoading = false;
+                _trainAppendFacilityLayoutPanelRefresh();
+            }
+        }
+
+        function _trainDisposeFacilityLayoutGrid() {
+            const grid = state.facilityLayoutGridHelper;
+            if (!grid) return;
+            try {
+                if (grid.parent) grid.parent.remove(grid);
+                if (Array.isArray(grid.material)) {
+                    grid.material.forEach(mat => { try { mat.dispose(); } catch (_) {} });
+                } else if (grid.material) {
+                    try { grid.material.dispose(); } catch (_) {}
+                }
+                if (grid.geometry) {
+                    try { grid.geometry.dispose(); } catch (_) {}
+                }
+            } catch (_) {}
+            state.facilityLayoutGridHelper = null;
+        }
+
+        function _trainUpdateFacilityLayoutGrid() {
+            if (!window.THREE || !state.assyScene || !state.assyLiveScene) {
+                _trainDisposeFacilityLayoutGrid();
+                return;
+            }
+            if (!_trainIsFacilityLayoutMode() || !trainingState.facilityLayoutShowGrid) {
+                _trainDisposeFacilityLayoutGrid();
+                return;
+            }
+
+            const box = new THREE.Box3().setFromObject(state.assyLiveScene);
+            if (box.isEmpty()) {
+                _trainDisposeFacilityLayoutGrid();
+                return;
+            }
+            const sizeVec = new THREE.Vector3();
+            const center = new THREE.Vector3();
+            box.getSize(sizeVec);
+            box.getCenter(center);
+            const span = Math.max(sizeVec.x || 1, sizeVec.z || 1);
+            const gridSize = Math.max(4, span * 5.5);
+            const divisions = Math.max(24, Math.min(120, Math.round(gridSize / 0.5)));
+            const floorY = box.min.y + 0.002;
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const majorColor = isDark ? 0x587184 : 0x8299a8;
+            const minorColor = isDark ? 0x354958 : 0xb1c0c9;
+
+            const needsRebuild = !state.facilityLayoutGridHelper
+                || Math.abs((state.facilityLayoutGridHelper.userData.gridSize || 0) - gridSize) > 0.01
+                || state.facilityLayoutGridHelper.userData.divisions !== divisions;
+            if (needsRebuild) {
+                _trainDisposeFacilityLayoutGrid();
+                const helper = new THREE.GridHelper(gridSize, divisions, majorColor, minorColor);
+                helper.name = 'facility-layout-floor-grid';
+                helper.userData.gridSize = gridSize;
+                helper.userData.divisions = divisions;
+                helper.userData._facilityFloorGrid = true;
+                const materials = Array.isArray(helper.material) ? helper.material : [helper.material];
+                materials.forEach((mat, idx) => {
+                    if (!mat) return;
+                    mat.transparent = true;
+                    mat.opacity = idx === 0 ? 0.34 : 0.22;
+                    mat.depthWrite = false;
+                    mat.depthTest = true;
+                    mat.toneMapped = false;
+                    mat.needsUpdate = true;
+                });
+                helper.renderOrder = -10;
+                state.assyScene.add(helper);
+                state.facilityLayoutGridHelper = helper;
+            }
+
+            const grid = state.facilityLayoutGridHelper;
+            if (grid) {
+                const materials = Array.isArray(grid.material) ? grid.material : [grid.material];
+                materials.forEach((mat, idx) => {
+                    if (!mat) return;
+                    if (mat.color) mat.color.set(idx === 0 ? majorColor : minorColor);
+                    mat.opacity = idx === 0 ? 0.34 : 0.22;
+                    mat.transparent = true;
+                    mat.depthWrite = false;
+                    mat.depthTest = true;
+                    mat.toneMapped = false;
+                    mat.needsUpdate = true;
+                });
+                grid.position.set(center.x, floorY, center.z);
+                grid.visible = !!trainingState.facilityLayoutShowGrid;
+            }
+        }
+
+        function _trainNeutralizeFacilityViewerMaterials() {
+            if (!state.assyLiveScene || !window.THREE) return;
+            const base = new THREE.Color(0x8f9aa3);
+            const alt = new THREE.Color(0xb4bdc4);
+            let idx = 0;
+            state.assyLiveScene.traverse(mesh => {
+                if (!mesh || !mesh.isMesh || !mesh.material) return;
+                if (mesh.userData && mesh.userData._isFacilityRoute) return; // leave route overlay colors alone
+                const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                materials.forEach(mat => {
+                    if (!mat) return;
+                    if (!mat.userData) mat.userData = {};
+                    if (!mat.userData._facilityNeutralColor && mat.color) {
+                        mat.userData._facilityNeutralColor = base.clone().lerp(alt, 0.12 + ((idx % 9) * 0.035));
+                    }
+                    if (mat.color && mat.userData._facilityNeutralColor) {
+                        mat.color.copy(mat.userData._facilityNeutralColor);
+                    }
+                    if (mat.emissive) {
+                        if (!mat.userData._facilityNeutralEmissive) {
+                            mat.userData._facilityNeutralEmissive = new THREE.Color(0x000000);
+                        }
+                        mat.emissive.copy(mat.userData._facilityNeutralEmissive);
+                        mat.emissiveIntensity = 0;
+                    }
+                    if (mat.isMeshStandardMaterial) {
+                        mat.metalness = 0.28;
+                        mat.roughness = 0.36;
+                    }
+                    mat.wireframe = false;
+                    mat.opacity = mesh.userData._origOpacity ?? mat.opacity ?? 1;
+                    mat.transparent = mesh.userData._origTransparent ?? mat.transparent ?? false;
+                    mat.depthWrite = mesh.userData._origDepthWrite ?? mat.depthWrite ?? true;
+                    mat.needsUpdate = true;
+                    idx++;
+                });
+            });
+        }
+
+        function _trainApplyFacilityLayoutHighlight() {
+            if (!state.assyPartMeshMap || !window.THREE) return;
+            const highlightedKeys = _trainFacilityHighlightedMeshKeys();
+            const hasHighlight = highlightedKeys.size > 0;
+            const highlightedMeshes = new Set();
+            highlightedKeys.forEach(key => {
+                (state.assyPartMeshMap[key] || []).forEach(mesh => {
+                    if (mesh) highlightedMeshes.add(mesh);
+                });
+            });
+            const isolate = !!trainingState.facilityLayoutIsolateSelection && highlightedMeshes.size > 0;
+            const highlightColor = new THREE.Color(0x4fc3f7);
+            const seenMeshes = new Set();
+            Object.values(state.assyPartMeshMap).forEach(meshes => {
+                (meshes || []).forEach(mesh => {
+                    if (!mesh || !mesh.material) return;
+                    if (seenMeshes.has(mesh)) return;
+                    seenMeshes.add(mesh);
+                    const highlighted = highlightedMeshes.has(mesh);
+                    mesh.visible = isolate ? highlighted : true;
+                    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                    materials.forEach(mat => {
+                        if (!mat) return;
+                        if (mat.color) {
+                            if (highlighted) {
+                                mat.color.copy(highlightColor);
+                            } else if (mat.userData && mat.userData._facilityNeutralColor) {
+                                mat.color.copy(mat.userData._facilityNeutralColor);
+                            }
+                        }
+                        if (mat.emissive) {
+                            if (hasHighlight && highlighted) {
+                                mat.emissive.copy(highlightColor);
+                                mat.emissiveIntensity = 0.46;
+                            } else {
+                                mat.emissive.set(0x000000);
+                                mat.emissiveIntensity = 0;
+                            }
+                        }
+                        mat.opacity = mesh.userData._origOpacity ?? mat.opacity ?? 1;
+                        mat.transparent = mesh.userData._origTransparent ?? mat.transparent ?? false;
+                        mat.depthWrite = mesh.userData._origDepthWrite ?? mat.depthWrite ?? true;
+                        mat.needsUpdate = true;
+                    });
+                });
+            });
+        }
+
+        function _trainUpdateFacilityViewerCaption() {
+            const caption = document.getElementById('trainFacilityViewerCaption');
+            if (!caption) return;
+            const semantic = _trainFacilitySemantic();
+            const rows = _trainFacilityRows();
+            const assets = _trainFacilityAssets();
+            const selectedGroups = _trainFacilitySelectedGroups();
+            const zoneCount = _trainFacilitySelectedZoneIds().length;
+            const footprintCount = _trainFacilitySelectedRackFootprintIds().length;
+            const gridLabel = trainingState.facilityLayoutShowGrid ? 'floor grid on' : 'floor grid off';
+            // Overlay segment is appended only when zone/footprint overlays are active.
+            const overlayLabel = (zoneCount || footprintCount)
+                ? ` · ${zoneCount} operating zone${zoneCount === 1 ? '' : 's'} + ${footprintCount} rack footprint${footprintCount === 1 ? '' : 's'} overlaid`
+                : '';
+            if (!selectedGroups.length) {
+                const facilityName = (semantic && semantic.facility && (semantic.facility.displayName || semantic.facility.id)) || 'Facility Layout';
+                caption.innerHTML = `<strong>${facilityName}</strong><span>${rows.length || 0} rack rows · ${assets.length || 0} forklifts · layout in gray · ${gridLabel}${overlayLabel}</span>`;
+                return;
+            }
+            const targets = _trainFacilitySelectedComponentNames();
+            const matched = _trainFacilityHighlightedMeshKeys().size;
+            const label = selectedGroups
+                .map(group => group.displayName || group.id)
+                .slice(0, 2)
+                .join(' + ');
+            const contextLabel = trainingState.facilityLayoutIsolateSelection && matched > 0
+                ? 'surrounding facility hidden'
+                : 'surrounding facility stays visible';
+            caption.innerHTML = `<strong>${label}${selectedGroups.length > 2 ? ` +${selectedGroups.length - 2}` : ''}</strong><span>${targets.length} SolidWorks instances selected · ${matched} GLB mesh groups highlighted cyan · ${contextLabel} · ${gridLabel}${overlayLabel}</span>`;
+        }
         function _trainNeutralizePlantViewerMaterials() {
             if (!state.assyLiveScene || !window.THREE) return;
             const base = new THREE.Color(0x9ca8b0);
@@ -23124,6 +24777,9 @@
 
         function _trainDisposeLiveAssemblyViewer() {
             try { _trainDisposeFlowVisualization(); } catch (_) {}
+            try { _trainDisposeFacilityLayoutGrid(); } catch (_) {}
+            try { _trainDisposeFacilityZoneOverlays(); } catch (_) {}
+            try { _trainDisposeFacilityRoute(); } catch (_) {}
             if (state.assyAnimationId) {
                 cancelAnimationFrame(state.assyAnimationId);
                 state.assyAnimationId = null;
@@ -23155,7 +24811,8 @@
 
         function _trainShowProcessBoard() {
             const plantMode = _trainIsPlantProcessMode();
-            trainingState.viewportMode = plantMode ? 'plant_process' : 'structure';
+            const facilityMode = _trainIsFacilityLayoutMode();
+            trainingState.viewportMode = plantMode ? 'plant_process' : (facilityMode ? 'facility_layout' : 'structure');
             trainingState.pendingStepVisualState = null;
             if (trainingState.pendingStepVisualTimer) {
                 clearTimeout(trainingState.pendingStepVisualTimer);
@@ -23169,6 +24826,7 @@
             const infoCard = document.getElementById('trainViewportInfoCard');
             if (infoCard) infoCard.style.display = 'none';
             if (plantMode) _trainRenderPlantProcessDiagram();
+            else if (facilityMode) _trainRenderFacilityLayoutViewer();
             else _trainRenderProcessDiagram();
         }
         window._trainingShowProcessBoard = () => _trainShowProcessBoard();
@@ -23248,6 +24906,11 @@
         function _trainEnsureLiveAssemblyViewer(stepLike) {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
+            if (_trainIsFacilityLayoutMode()) {
+                trainingState.viewportMode = 'facility_layout';
+                _trainRenderFacilityLayoutViewer();
+                return true;
+            }
             if (_trainIsPlantProcessMode()) {
                 trainingState.viewportMode = 'plant_process';
                 _trainRenderPlantProcessDiagram(_trainPlantProcessZoneIdFromStep(stepLike));
@@ -23502,6 +25165,11 @@
         function _trainMountViewer() {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
+
+            if (trainingState.viewportMode === 'facility_layout' || _trainIsFacilityLayoutMode()) {
+                _trainRenderFacilityLayoutViewer();
+                return true;
+            }
 
             if (trainingState.viewportMode === 'plant_process' || _trainIsPlantProcessMode()) {
                 _trainRenderPlantProcessDiagram(trainingState.plantProcessActiveZone || 'overview');
@@ -24406,6 +26074,83 @@
             };
         }
 
+        function _trainBuildFacilityLayoutProcedure(role) {
+            const semantic = _trainFacilitySemantic();
+            const rows = _trainFacilityRows();
+            const assets = _trainFacilityAssets();
+            const aisles = _trainFacilityAisles();
+            const target = trainingState.targetComponent || 'Facility Layout';
+            const selectedRow = _trainFacilitySelectedRow();
+            const rowSummary = rows.map(r => `${r.displayName || r.id}: ${r.rackCount || 0} racks`).join('; ');
+            const selectedEnv = selectedRow && selectedRow.rackEnvelopeEstimate
+                ? selectedRow.rackEnvelopeEstimate
+                : null;
+            const selectedUsable = selectedEnv && selectedEnv.typicalRackUsableEnvelopeMeters
+                ? selectedEnv.typicalRackUsableEnvelopeMeters
+                : null;
+            const cap = trainingState.facilityLayoutCapacityResult;
+            const capText = cap
+                ? `The latest capacity estimate is ${cap.estimatedTotalBoxes || 0} boxes for the current query.`
+                : 'Run a capacity estimate by entering box dimensions in the Facility Layout panel.';
+            const steps = [
+                {
+                    title: 'Start with the full facility layout',
+                    evidenceLevel: 'cad_known',
+                    instruction: `Use the ${target} as the operating map. The SolidWorks extraction identified ${rows.length} rack rows, ${assets.length} forklifts, and ${aisles.length} inferred aisles from the saved FeatureManager folder structure.`,
+                    verificationCheck: 'The trainee can identify the major rack rows and material-handling assets.',
+                },
+                {
+                    title: 'Review rack row grouping',
+                    evidenceLevel: 'cad_known',
+                    instruction: rowSummary
+                        ? `Review the rack rows as semantic groups rather than individual CAD files. Current rack grouping is: ${rowSummary}.`
+                        : 'Review the rack rows as semantic groups rather than individual CAD files.',
+                    verificationCheck: 'The trainee understands that row names come from SolidWorks folder groups.',
+                },
+                {
+                    title: 'Check the selected row envelope',
+                    evidenceLevel: 'inferred',
+                    instruction: selectedRow
+                        ? `Focus on ${selectedRow.displayName || selectedRow.id}. It has ${selectedRow.rackCount || 0} racks and about ${selectedEnv?.estimatedShelfLevelsTotal || 0} estimated shelf levels. The typical rack envelope is roughly ${Number(selectedUsable?.alongRow || 0).toFixed(2)} meters along the row by ${Number(selectedUsable?.crossRowDepth || 0).toFixed(2)} meters deep.`
+                        : 'Select a rack row to review its estimated usable envelope and shelf-level count.',
+                    verificationCheck: 'The trainee can explain which row is selected and what envelope assumptions are being used.',
+                },
+                {
+                    title: 'Use capacity as an estimate',
+                    evidenceLevel: 'inferred',
+                    instruction: `${capText} Treat this as a planning estimate because rack member thickness, plywood shelves, and clearance rules still need confirmation.`,
+                    verificationCheck: 'The trainee can state what inputs are needed before using the estimate in production.',
+                },
+                {
+                    title: 'Final layout review',
+                    evidenceLevel: 'needs_manual',
+                    instruction: 'Finish by reviewing aisle access, forklift locations, and the selected rack row assumptions. Any production decision should be checked against the real rack specifications, local safety rules, and confirmed box or pallet dimensions.',
+                    verificationCheck: 'The trainee understands what the AI can infer from CAD and what still requires site validation.',
+                },
+            ].map(step => ({
+                highlightParts: [],
+                cameraFocus: [],
+                isolateParts: [],
+                explodeLevel: null,
+                caution: step.evidenceLevel === 'needs_manual'
+                    ? 'Confirm site-specific safety, clearance, and rack loading rules before production use.'
+                    : '',
+                toolsAndDocsRequired: step.evidenceLevel === 'needs_manual' ? 'Rack specifications, site layout rules, and approved safety procedure.' : '',
+                whatCanGoWrong: 'Using a centerline CAD estimate as final capacity can overstate usable space if clearances, shelf thickness, or rack limits are ignored.',
+                transcript: `${step.title}. ${step.instruction}`,
+                ...step,
+            }));
+
+            return {
+                title: `Facility layout review - ${(semantic && semantic.facility && semantic.facility.displayName) || target}`,
+                trainingType: 'facility_layout',
+                targetRole: role,
+                targetComponent: target,
+                source: 'facility_layout_semantic',
+                steps,
+            };
+        }
+
         function _trainBuildMockProcedure() {
             const t = trainingState.type || 'service';
             const role = trainingState.targetRole || 'technician';
@@ -24420,9 +26165,13 @@
             if (t === 'plant_process') {
                 return _trainBuildCoolingTowerProcessProcedure(role);
             }
+            if (t === 'facility_layout') {
+                return _trainBuildFacilityLayoutProcedure(role);
+            }
 
             const titleByType = {
                 assembly:        `Assembly procedure — ${target}`,
+                facility_layout: `Facility layout review — ${target}`,
                 service:         `Service procedure — ${target}`,
                 maintenance:     `Maintenance procedure — ${target}`,
                 troubleshooting: `Troubleshooting procedure — ${target}`,
@@ -25060,6 +26809,10 @@
                 _trainTogglePlantProcessIsolation();
                 return;
             }
+            if (_trainIsFacilityLayoutMode()) {
+                _trainToggleFacilityLayoutIsolation();
+                return;
+            }
             const proc = trainingState.procedure;
             if (!proc || !proc.steps?.length) return;
             const step = proc.steps[trainingState.currentStepIndex || 0];
@@ -25106,6 +26859,16 @@
                 _trainUpdatePlantViewerCaption();
                 _trainRefreshPlantProcessIsolateControls();
                 _trainAppendPlantProcessPanelRefresh();
+                const b = document.getElementById('trainStepBadge');
+                if (b) { b.classList.remove('visible'); b.innerHTML = ''; }
+                return;
+            }
+            if (_trainIsFacilityLayoutMode()) {
+                trainingState.facilityLayoutIsolateSelection = false;
+                _trainApplyFacilityLayoutHighlight();
+                _trainUpdateFacilityViewerCaption();
+                _trainRefreshPlantProcessIsolateControls();
+                _trainAppendFacilityLayoutPanelRefresh();
                 const b = document.getElementById('trainStepBadge');
                 if (b) { b.classList.remove('visible'); b.innerHTML = ''; }
                 return;
@@ -29958,7 +31721,20 @@
                         if (p.name) names.push(p.name);
                         p = p.parent;
                     }
-                    partNum = names.find(n => /^body_\d+__/i.test(n)) || names[0] || null;
+                    const bodyNames = names.filter(n => /^body_\d+__/i.test(n));
+                    const aliases = bodyNames.length
+                        ? bodyNames
+                        : names.filter(n => {
+                            const value = String(n || '').trim();
+                            if (!value) return false;
+                            return !/^(scene|root|node|mesh|object|group|semantic_box)$/i.test(value)
+                                && !/^mesh[_\-\s]?\d*$/i.test(value);
+                        });
+                    Array.from(new Set(aliases)).forEach(alias => {
+                        if (!partMeshMap[alias]) partMeshMap[alias] = [];
+                        partMeshMap[alias].push(child);
+                    });
+                    partNum = null;
                 } else {
                     // Walk up from parent to find first named ancestor (MeshGroup = partFilename)
                     let ancestorName = '';
@@ -38491,6 +40267,89 @@
                 return '';
             }
 
+            // Mode-aware Sage: a compact, FACTUAL contract describing which tab/
+            // mode the user is in plus the live selected state for that mode.
+            // The backend (MODE_CONTRACTS in server.py) owns the reasoning
+            // wording, tool expectations, and "do not invent" guidance — the
+            // frontend only sends facts. Increment 2 populates state for
+            // facility_layout and plant_process; other modes still report
+            // mode/tab so Sage is at least tab-aware.
+            function buildModeContract() {
+                const tab = state.activeTab || null;
+                let mode = tab;
+                let submode = null;
+                const st = {};
+                try {
+                    if (tab === 'training') {
+                        mode = trainingState.type || 'training';
+                        if (mode === 'facility_layout') {
+                            const fl = trainingState;
+                            st.selected_row_id = fl.facilityLayoutSelectedRowId || null;
+                            st.selected_rack_ids = Array.isArray(fl.facilityLayoutSelectedGroupIds) ? fl.facilityLayoutSelectedGroupIds.slice(0, 20) : [];
+                            st.selected_zone_ids = Array.isArray(fl.facilityLayoutSelectedZoneIds) ? fl.facilityLayoutSelectedZoneIds.slice(0, 20) : [];
+                            st.selected_footprint_ids = Array.isArray(fl.facilityLayoutSelectedRackFootprintIds) ? fl.facilityLayoutSelectedRackFootprintIds.slice(0, 20) : [];
+                            const r = fl.facilityLayoutRoute;
+                            if (r && r.ok) {
+                                st.route = {
+                                    start_label: (r.start && r.start.label) || null,
+                                    end_label: (r.end && r.end.label) || null,
+                                    distance_m: (r.distanceMeters != null) ? r.distanceMeters : null,
+                                    eta_text: r.etaText || null,
+                                    via_aisles: Array.isArray(r.aisleLabels) ? r.aisleLabels.slice(0, 8) : [],
+                                    step_count: Array.isArray(r.steps) ? r.steps.length : null,
+                                    // Stale guard: the route result must match the current From/To
+                                    // selectors, or the backend will flag it as not-current.
+                                    matches_current_selection: !!(r.start && r.end
+                                        && String(r.start.id) === String(fl.facilityLayoutRouteStart)
+                                        && String(r.end.id) === String(fl.facilityLayoutRouteEnd)),
+                                };
+                            }
+                            const an = fl.facilityLayoutAnalysis;
+                            if (an && an.ok) {
+                                st.analysis = {
+                                    headline: an.headline || null,
+                                    reduction_percent: (an.reductionPercent != null) ? an.reductionPercent : null,
+                                };
+                            }
+                            const cap = fl.facilityLayoutCapacityResult;
+                            if (cap && Array.isArray(cap.rows)) {
+                                st.capacity = {
+                                    estimated_total_boxes: cap.estimatedTotalBoxes || 0,
+                                    row_count: cap.rows.length,
+                                    rows: cap.rows.slice(0, 12).map(rw => ({
+                                        row_id: rw.rowId, boxes: rw.estimatedTotalBoxes || 0, racks: rw.rackCount || 0,
+                                    })),
+                                };
+                            }
+                        } else if (mode === 'plant_process') {
+                            const pp = trainingState;
+                            const zoneId = pp.plantProcessActiveZone || null;
+                            submode = zoneId;
+                            let zoneDef = null;
+                            try { zoneDef = (COOLING_TOWER_PROCESS_ZONES || []).find(z => z && z.id === zoneId) || null; } catch (_) { zoneDef = null; }
+                            st.active_zone = zoneId ? { id: zoneId, label: (zoneDef && zoneDef.label) || zoneId } : null;
+                            try {
+                                st.available_zones = (COOLING_TOWER_PROCESS_ZONES || []).map(z => ({ id: z.id, label: z.label }));
+                            } catch (_) { st.available_zones = []; }
+                            st.active_flow_ids = Array.isArray(pp.plantProcessActiveFlowIds) ? pp.plantProcessActiveFlowIds.slice(0, 20) : [];
+                            st.selected_group_ids = Array.isArray(pp.plantProcessSelectedGroupIds) ? pp.plantProcessSelectedGroupIds.slice(0, 20) : [];
+                        }
+                    } else if (tab === 'report') {
+                        // FAI is "active" when characteristics have been extracted;
+                        // otherwise this is the plain inspection report. The FAI
+                        // characteristics / inspection facts already flow via the
+                        // existing att.inspection section, so no state is duplicated here.
+                        const faiActive = Array.isArray(state.faiCharacteristics) && state.faiCharacteristics.length > 0;
+                        mode = faiActive ? 'report_fai' : 'report';
+                    }
+                    // drawing / 3dmodel / assembly keep mode = activeTab (set above);
+                    // their facts already flow via the drawing/selection/assembly sections.
+                } catch (e) {
+                    console.warn('[ModeContract] build failed', e);
+                }
+                return { contract_version: 1, tab, mode: mode || null, submode, state: st };
+            }
+
             function buildAgentAttachments(agentType) {
                 const att = { schema_version: 1 };
 
@@ -38499,6 +40358,10 @@
                     agent: agentType || currentAgent,
                     active_tab: state.activeTab || null,
                 };
+                // MODE CONTRACT (mode-aware Sage): facts only — see buildModeContract().
+                const _modeContract = buildModeContract();
+                att.session.active_mode = _modeContract.mode;
+                att.session.mode_contract = _modeContract;
 
                 // USER — display name only (used by sales-coaching mode for
                 // a personalised opener). Empty string if no name available.

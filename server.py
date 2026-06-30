@@ -19,6 +19,7 @@ import sqlite3
 import threading
 import time
 import asyncio
+import importlib.util
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -1010,11 +1011,75 @@ async def list_profiles():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _drawing_alias_key(value: Any) -> str:
+    """Normalize a drawing/model filename to a loose alias key."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    stem = Path(value.strip()).stem
+    return re.sub(r"[^a-z0-9]", "", stem.lower())
+
+
+def _detect_part_number_from_drawing_alias(filename: str) -> Optional[dict]:
+    """Resolve uploaded drawing filenames that do not contain a numeric PN.
+
+    Intake drawings often keep descriptive CAD filenames, while the library
+    stores them under a generated part number. Drawing maps preserve the
+    original drawing/model path, so use those fields as aliases for upload
+    auto-detection.
+    """
+    target_key = _drawing_alias_key(filename)
+    if not target_key:
+        return None
+
+    library_dir = library_path()
+    for map_path in sorted(library_dir.rglob("*_drawing_map.json")):
+        safe_pn = sanitize_part_number(map_path.name.replace("_drawing_map.json", ""))
+        if not safe_pn:
+            continue
+        try:
+            doc = json.loads(map_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+
+        part_no = sanitize_part_number(str(doc.get("partNumber") or safe_pn))
+        if not part_no or _resolve_profile_path(part_no) is None:
+            continue
+
+        aliases = {
+            safe_pn,
+            f"{safe_pn}_drawing",
+            doc.get("fileName"),
+            doc.get("filePath"),
+            doc.get("referencedModelPath"),
+        }
+        for sheet in doc.get("sheets") or []:
+            if not isinstance(sheet, dict):
+                continue
+            for view in sheet.get("views") or []:
+                if isinstance(view, dict):
+                    aliases.add(view.get("referencedFile"))
+
+        if target_key in {_drawing_alias_key(alias) for alias in aliases}:
+            return {
+                "part_number": part_no,
+                "match_type": "drawing_alias",
+                "candidate": Path(filename or "").stem,
+            }
+    return None
+
+
 @app.get("/api/detect-pn")
 async def detect_part_number(filename: str = Query(..., description="Filename to detect part number from")):
     """Auto-detect part number from a filename."""
     try:
-        result = inspector.detect_part_number(filename)
+        active_inspector = _ensure_inspector()
+        result = (
+            active_inspector.detect_part_number(filename)
+            if active_inspector is not None
+            else {"part_number": None, "match_type": None, "candidate": None}
+        )
         if not result.get("part_number"):
             stem = Path(filename or "").stem
             raw_candidates = [stem]
@@ -1023,6 +1088,12 @@ async def detect_part_number(filename: str = Query(..., description="Filename to
                 candidate = re.sub(r"[^\w\-]", "", raw or "")
                 if not candidate:
                     continue
+                if _resolve_profile_path(candidate) is not None:
+                    return {
+                        "part_number": candidate,
+                        "match_type": "profile_direct",
+                        "candidate": candidate,
+                    }
                 if candidate in assembly_profiles:
                     return {
                         "part_number": candidate,
@@ -1038,6 +1109,16 @@ async def detect_part_number(filename: str = Query(..., description="Filename to
                             "match_type": "assembly_direct",
                             "candidate": candidate,
                         }
+                stripped = re.sub(r"(?i)(?:[_-]?drawing|[_-]?print|[_-]?dwg)$", "", candidate)
+                if stripped and stripped != candidate and _resolve_profile_path(stripped) is not None:
+                    return {
+                        "part_number": stripped,
+                        "match_type": "profile_direct",
+                        "candidate": candidate,
+                    }
+            alias_match = _detect_part_number_from_drawing_alias(filename)
+            if alias_match:
+                return alias_match
         return result
     except ValueError as e:
         logger.warning(f"Invalid filename for detection: '{filename}': {e}")
@@ -1084,6 +1165,14 @@ async def get_drawing_map(part_number: str, revision: Optional[str] = Query(None
                 status_code=404,
                 detail=f"No drawing map found for part number '{safe_pn}'{rev_msg}",
             )
+        dd_path = _find_dimension_descriptions_path(safe_pn, LIBRARY_DIR)
+        if dd_path is not None and isinstance(drawing_map, dict):
+            try:
+                drawing_map = dict(drawing_map)
+                with open(dd_path, "r", encoding="utf-8-sig") as df:
+                    drawing_map["dimension_descriptions"] = json.load(df)
+            except Exception as e:
+                logger.warning(f"Failed to load dimension descriptions for drawing map: {e}")
         return drawing_map
     except HTTPException:
         raise
@@ -3530,7 +3619,14 @@ def _intake_enrich_run_subprocess_sync(argv: list, timeout_s: float = 180.0) -> 
     without the operator having to dig through server logs."""
     import subprocess
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_s,
+        )
         return {
             "argv":     argv,
             "rc":       proc.returncode,
@@ -3743,8 +3839,11 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
             ),
         )
 
-    # Locate the two binaries; either missing is a hard 500 with a
-    # remediation hint pointing at the env-override variables.
+    # Locate the visual extractor. Missing GLB/view extraction is a
+    # hard failure because the 3D tab needs the colored GLB. The STL
+    # helper is optional; the frontend falls back to STL only when GLB
+    # is absent, so do not block enrichment just because that legacy
+    # helper is not present in this checkout.
     extractor_exe = _solidworks_extractor_exe_path()
     if not extractor_exe:
         raise HTTPException(
@@ -3755,14 +3854,15 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
             ),
         )
     formats_exe = _export_formats_exe_path()
+    formats_warning = None
     if not formats_exe:
-        raise HTTPException(
-            status_code=500,
-            detail=(
+        formats_warning = {
+            "code":    "stl_export_skipped",
+            "message": (
                 f"ExportSolidWorksFormats.exe not found. Default: {_DEFAULT_EXPORT_FORMATS_EXE}. "
-                "Set EXPORT_FORMATS_EXE env var to override."
+                "STL export was skipped; GLB/view enrichment can still succeed."
             ),
-        )
+        }
 
     async with _library_intake_enrich_lock:
         # Subprocess work happens in a thread so the event loop stays
@@ -3770,12 +3870,14 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
         # avoid filename collisions between the two runs.
         import tempfile
         warnings: List[Dict[str, str]] = []
+        if formats_warning:
+            warnings.append(formats_warning)
         files_added: List[str] = []
         files_skipped: List[str] = []
 
         def _sync_enrich() -> dict:
             extractor_tmp = Path(tempfile.mkdtemp(prefix="iw-enrich-glb-"))
-            formats_tmp   = Path(tempfile.mkdtemp(prefix="iw-enrich-stl-"))
+            formats_tmp   = Path(tempfile.mkdtemp(prefix="iw-enrich-stl-")) if formats_exe else None
             try:
                 # OLD extractor produces a part.json next to the visuals;
                 # we point its --output at a junk path inside the temp dir
@@ -3792,15 +3894,25 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
                 ]
                 extractor_run = _intake_enrich_run_subprocess_sync(extractor_argv, timeout_s=180.0)
 
-                # ExportSolidWorksFormats CLI: <part.sldprt> <output-dir>
-                formats_argv = [formats_exe, str(source_path), str(formats_tmp)]
-                stl_run = _intake_enrich_run_subprocess_sync(formats_argv, timeout_s=120.0)
+                if formats_exe and formats_tmp is not None:
+                    # ExportSolidWorksFormats CLI: <part.sldprt> <output-dir>
+                    formats_argv = [formats_exe, str(source_path), str(formats_tmp)]
+                    stl_run = _intake_enrich_run_subprocess_sync(formats_argv, timeout_s=120.0)
+                else:
+                    stl_run = {
+                        "argv":     [],
+                        "rc":       0,
+                        "stdout":   "",
+                        "stderr":   "ExportSolidWorksFormats.exe not found; STL export skipped.",
+                        "timedOut": False,
+                        "skipped":  True,
+                    }
 
                 # Rename + collect from BOTH temp dirs so per-part-pn
                 # outputs land with canonical {pn}_* names regardless
                 # of what the OLD extractor decided to name them.
                 renamed_extractor = _intake_rename_visuals_to_pn(extractor_tmp, safe_pn)
-                renamed_formats   = _intake_rename_visuals_to_pn(formats_tmp,   safe_pn)
+                renamed_formats   = _intake_rename_visuals_to_pn(formats_tmp,   safe_pn) if formats_tmp is not None else []
 
                 # Sidecar target directory: drop into part/ so the
                 # wizard's existing _intake_visual_assets_in_sidecar
@@ -3810,6 +3922,11 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
 
                 copied = []
                 expected_visual_names = set(_intake_visual_asset_filenames(safe_pn))
+                if not formats_exe:
+                    expected_visual_names = {
+                        n for n in expected_visual_names
+                        if not n.lower().endswith(".stl")
+                    }
                 for src in renamed_extractor + renamed_formats:
                     if src.name not in expected_visual_names:
                         # Stray non-visual file the rename pass left
@@ -3859,7 +3976,8 @@ async def library_intake_enrich_visuals(body: IntakeEnrichVisualsBody):
                 # Best-effort temp cleanup; if SOLIDWORKS still holds a
                 # handle on something this can fail silently.
                 shutil.rmtree(extractor_tmp, ignore_errors=True)
-                shutil.rmtree(formats_tmp,   ignore_errors=True)
+                if formats_tmp is not None:
+                    shutil.rmtree(formats_tmp, ignore_errors=True)
 
         result = await asyncio.to_thread(_sync_enrich)
 
@@ -10188,6 +10306,162 @@ async def training_guided_narration(body: TrainingNarrationBody):
     }
 
 
+class FacilityCapacityBody(BaseModel):
+    row: Optional[str] = None
+    length: float
+    depth: float
+    height: Optional[float] = None
+    clearance: float = 0.0
+    unit: str = "in"
+
+
+class FacilityRouteBody(BaseModel):
+    start: str
+    end: str
+    options: Optional[Dict[str, Any]] = None
+
+
+_FACILITY_UNIT_TO_METERS = {
+    "m": 1.0,
+    "meter": 1.0,
+    "meters": 1.0,
+    "mm": 0.001,
+    "millimeter": 0.001,
+    "millimeters": 0.001,
+    "cm": 0.01,
+    "centimeter": 0.01,
+    "centimeters": 0.01,
+    "in": 0.0254,
+    "inch": 0.0254,
+    "inches": 0.0254,
+    "ft": 0.3048,
+    "foot": 0.3048,
+    "feet": 0.3048,
+}
+
+
+def _facility_layout_semantic_path() -> Path:
+    configured = (os.getenv("INSPECTORPRO_FACILITY_LAYOUT_SEMANTIC") or "").strip()
+    return Path(configured) if configured else REPO_ROOT / "facility_layout_semantic.json"
+
+
+def _load_facility_layout_semantic() -> Dict[str, Any]:
+    path = _facility_layout_semantic_path()
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Facility layout semantic JSON not found at {path}",
+        )
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as ex:
+        raise HTTPException(status_code=500, detail=f"Facility semantic JSON is invalid: {ex}")
+
+
+def _facility_box_payload(body: FacilityCapacityBody) -> Dict[str, Any]:
+    unit = (body.unit or "in").strip().lower()
+    factor = _FACILITY_UNIT_TO_METERS.get(unit)
+    if factor is None:
+        supported = ", ".join(sorted(_FACILITY_UNIT_TO_METERS.keys()))
+        raise HTTPException(status_code=400, detail=f"Unsupported unit '{body.unit}'. Supported: {supported}")
+    if body.length <= 0 or body.depth <= 0:
+        raise HTTPException(status_code=400, detail="length and depth must be greater than zero")
+    if body.height is not None and body.height <= 0:
+        raise HTTPException(status_code=400, detail="height must be greater than zero when provided")
+    if body.clearance < 0:
+        raise HTTPException(status_code=400, detail="clearance cannot be negative")
+
+    return {
+        "input": {
+            "lengthAlongRow": body.length,
+            "depthCrossRow": body.depth,
+            "height": body.height,
+            "clearance": body.clearance,
+            "unit": unit,
+        },
+        "meters": {
+            "lengthAlongRow": body.length * factor,
+            "depthCrossRow": body.depth * factor,
+            "height": body.height * factor if body.height is not None else None,
+            "clearance": body.clearance * factor,
+        },
+    }
+
+
+def _facility_capacity_module():
+    module_path = REPO_ROOT / "tools" / "facility_capacity_query.py"
+    spec = importlib.util.spec_from_file_location("facility_capacity_query", module_path)
+    if spec is None or spec.loader is None:
+        raise HTTPException(status_code=500, detail=f"Cannot load facility capacity module at {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@app.get("/api/training/facility-layout/semantic")
+async def training_facility_layout_semantic():
+    """Return the generated facility semantic layer for Training > Facility Layout."""
+    semantic = _load_facility_layout_semantic()
+    return {
+        "success": True,
+        "path": str(_facility_layout_semantic_path()),
+        "semantic": semantic,
+    }
+
+
+@app.post("/api/training/facility-layout/capacity")
+async def training_facility_layout_capacity(body: FacilityCapacityBody):
+    """Estimate rack-row storage capacity from the facility semantic JSON."""
+    semantic = _load_facility_layout_semantic()
+    module = _facility_capacity_module()
+    result = module.build_capacity_result(semantic, body.row, _facility_box_payload(body))
+    return {
+        "success": True,
+        "result": result,
+    }
+
+
+def _facility_routing_module():
+    module_path = REPO_ROOT / "tools" / "facility_routing.py"
+    spec = importlib.util.spec_from_file_location("facility_routing", module_path)
+    if spec is None or spec.loader is None:
+        raise HTTPException(status_code=500, detail=f"Cannot load facility routing module at {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@app.post("/api/training/facility-layout/route")
+async def training_facility_layout_route(body: FacilityRouteBody):
+    """Shortest flow route between facility endpoints (forklifts, rack rows, aisle junctions).
+
+    Deterministic Dijkstra over the seed pathGraph. Coordinates are in the SolidWorks/GLB
+    frame (identity transform per the coordinate contract); the route polyline is NOT
+    pre-recentered for the viewer.
+    """
+    semantic = _load_facility_layout_semantic()
+    module = _facility_routing_module()
+    result = module.build_route_result(semantic, body.start, body.end, body.options)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Could not compute route")
+    return {
+        "success": True,
+        "result": result,
+    }
+
+
+@app.get("/api/training/facility-layout/layout-analysis")
+async def training_facility_layout_layout_analysis():
+    """What-if layout analysis (e.g. travel saved by adding an east cross-aisle)."""
+    semantic = _load_facility_layout_semantic()
+    module = _facility_routing_module()
+    result = module.build_layout_analysis(semantic, None)
+    return {
+        "success": True,
+        "result": result,
+    }
+
+
 @app.get("/api/profile-builder/context/{partNumber}")
 async def profile_builder_context(partNumber: str, revision: Optional[str] = Query(default=None)):
     safe_pn = sanitize_part_number(partNumber)
@@ -14523,6 +14797,25 @@ def normalize_agent_context(ctx: dict) -> dict:
         if session.get("paused_walkthrough"):
             flat.setdefault("paused_walkthrough", session["paused_walkthrough"])
 
+        # Session: active tab + mode contract (mode-aware Sage). The frontend
+        # sends only facts (attachments.session.mode_contract). The durable
+        # per-mode reasoning contract lives in MODE_CONTRACTS on the server, so
+        # nothing reasoning-related is shipped per request. active_tab was
+        # previously sent and silently dropped here; now it is preserved.
+        mode_contract = session.get("mode_contract") or {}
+        active_tab = session.get("active_tab") or mode_contract.get("tab")
+        if active_tab:
+            flat.setdefault("active_tab", active_tab)
+        active_mode = session.get("active_mode") or mode_contract.get("mode")
+        if active_mode:
+            flat.setdefault("active_mode", active_mode)
+        if mode_contract:
+            flat.setdefault("mode_contract", mode_contract)
+            if mode_contract.get("submode"):
+                flat.setdefault("mode_submode", mode_contract["submode"])
+            if mode_contract.get("state"):
+                flat.setdefault("mode_state", mode_contract["state"])
+
     # â”€â”€ Drawing classification injection (Phase 2) â”€â”€
     # If the frontend already populated the classification fields directly on
     # attachments.drawing (Phase 3 cache hit), reuse them as-is. Otherwise
@@ -14572,6 +14865,218 @@ def normalize_agent_context(ctx: dict) -> dict:
     return {"attachments": attachments, "flat": flat}
 
 
+# -- Mode-aware Sage (mode contract) ----------------------------------------
+# Frontend sends FACTS only (active_mode + selected state in
+# attachments.session.mode_contract). The durable reasoning contract -- how to
+# reason, which deterministic endpoints produce the numbers, and what NOT to do
+# -- lives here so it is versioned server-side and never bloats the per-request
+# payload. Increment 2 implements two modes; any other mode falls through to a
+# one-line [MODE] echo with no addendum.
+MODE_CONTRACTS = {
+    "facility_layout": {
+        "label": "Facility Layout",
+        "reasoning_focus": [
+            "racks, rack rows, aisles, operating/working zones, and storage capacity",
+            "clearances, material flow, forklift movement, and route distance/time",
+            "loading/unloading points and layout trade-offs",
+        ],
+        "tools": [
+            "route distance/ETA/aisle-path come from the deterministic /facility-layout/route engine",
+            "the layout trade-off percentage comes from /facility-layout/layout-analysis (east cross-aisle what-if)",
+            "rack capacity comes from /facility-layout/capacity",
+        ],
+        "avoid": [
+            "Do NOT invent route distances, ETAs, capacities, or rack counts. Cite the numbers in the [FACILITY LAYOUT] block, or say they have not been computed yet.",
+            "Do NOT use plant-process or troubleshooting framing (utilities, operating sequence, equipment faults) unless the user explicitly asks to compare modes.",
+        ],
+    },
+    "plant_process": {
+        "label": "Plant / Process Explanation",
+        "reasoning_focus": [
+            "process flow, operating sequence, and equipment function",
+            "utilities, safety context, troubleshooting, and operator walkdown",
+            "what each process zone and equipment group does, and how flow moves between them",
+        ],
+        "tools": [
+            "the active process zone, available zones, selected equipment groups, and active flow paths are provided in the [PLANT PROCESS] block; reason from those",
+        ],
+        "avoid": [
+            "Do NOT use facility-layout routing language (aisle distance, forklift route, rack capacity, layout trade-offs) unless the user explicitly asks to compare modes.",
+            "Do NOT present a training explanation as a released operating procedure.",
+        ],
+    },
+    # -- Increment 3: drawing / 3dmodel / assembly / report(+FAI). The facts for
+    # these modes already flow via the existing [DRAWING MODE], [SELECTION],
+    # [INSPECTION], and assembly context sections, so these contracts add the
+    # reasoning style + "do not invent" guardrails only (no duplicated state).
+    "drawing": {
+        "label": "Drawing / Inspection",
+        "reasoning_focus": [
+            "drawing callouts, dimensions, tolerances, and GD&T against ASME Y14.5 expectations",
+            "missing, partial, or discrepant callouts and which views should carry them",
+            "highlightable dimensions/features and FAI characteristics on the drawing",
+        ],
+        "tools": [
+            "the [DRAWING MODE] block lists the drawing type, workflow, and preferred overlay/highlight actions",
+            "selected and available dimensions are provided in the context; highlight by referencing them",
+        ],
+        "avoid": [
+            "Do NOT invent dimensions, tolerances, or callouts that are not in the drawing/selection context.",
+            "Do NOT use facility-layout or plant-process framing here.",
+        ],
+    },
+    "3dmodel": {
+        "label": "3D Model",
+        "reasoning_focus": [
+            "CAD features and part geometry on the currently visible revision",
+            "feature highlighting and part revision compare (added / removed / modified features)",
+            "what each feature is and how it relates to the inspection callouts",
+        ],
+        "tools": [
+            "highlight features against the active revision; available CAD features are listed in the context",
+            "part feature compare (revA/revB) results are provided when a compare is active",
+        ],
+        "avoid": [
+            "Do NOT invent features that are not in the available CAD features for the active revision.",
+            "Do NOT use facility-layout or plant-process framing here.",
+        ],
+    },
+    "assembly": {
+        "label": "Assembly",
+        "reasoning_focus": [
+            "parts, mates, and neighboring components; assembly function and how parts fit together",
+            "exploded-view steps, configurations, and part/supplier properties",
+            "assembly revision compare (what changed between revisions)",
+        ],
+        "tools": [
+            "highlight or isolate parts; mate relationships, configurations, and explode steps are in the context",
+            "selected and available parts (and any revision diff) are provided in the context",
+        ],
+        "avoid": [
+            "Do NOT invent mates, parts, or configurations that are not in the assembly context.",
+            "Do NOT use facility-layout or plant-process framing here.",
+        ],
+    },
+    "report": {
+        "label": "Inspection Report",
+        "reasoning_focus": [
+            "inspection completeness and the gap summary (present / missing / partial / discrepant)",
+            "specific feature findings and their observations",
+            "what to re-check or document next",
+        ],
+        "tools": [
+            "the [INSPECTION] block holds the gap summary, findings, and critical issues",
+        ],
+        "avoid": [
+            "Do NOT invent findings, counts, or statuses that are not in the inspection context.",
+            "Do NOT use facility-layout or plant-process framing here.",
+        ],
+    },
+    "report_fai": {
+        "label": "Report / FAI",
+        "reasoning_focus": [
+            "FAI characteristics: balloon numbers, nominal and tolerance, measured value, and pass/fail status",
+            "completeness of the FAI table and which characteristics are missing a measurement",
+            "AS9102-style first-article expectations and discrepant characteristics",
+        ],
+        "tools": [
+            "FAI characteristics (nominal, tolerances, measured, status) are provided in the context",
+            "the FAI table / balloon actions are the preferred surface for changes",
+        ],
+        "avoid": [
+            "Do NOT invent characteristics, nominals, tolerances, or measurements that are not in the FAI context.",
+            "Do NOT report a characteristic as pass/fail without a measured value; mark it pending.",
+            "Do NOT use facility-layout or plant-process framing here.",
+        ],
+    },
+}
+
+
+def _mode_system_addendum(mode: Optional[str]) -> str:
+    """Durable per-mode reasoning contract appended to the system prompt.
+    Returns '' for modes without a registered contract (e.g. drawing today)."""
+    contract = MODE_CONTRACTS.get((mode or "").strip())
+    if not contract:
+        return ""
+    lines = [
+        "",
+        "",
+        "ACTIVE MODE CONTRACT",
+        f"The user is working in {contract['label']} mode (active_mode={mode}). Reason for THIS mode:",
+    ]
+    lines += [f"- Focus on: {x}" for x in contract["reasoning_focus"]]
+    lines += [f"- Data/source: {x}" for x in contract["tools"]]
+    lines += [f"- {x}" for x in contract["avoid"]]
+    lines.append(
+        "- The [MODE] / [FACILITY LAYOUT] / [PLANT PROCESS] block in the context message holds the live selected "
+        "state for this turn; treat it as authoritative. The mode can change between turns, so do not carry mode "
+        "assumptions over from earlier messages."
+    )
+    return "\n".join(lines)
+
+
+def _render_mode_contract_section(mode: Optional[str], submode: Optional[str], state: Optional[Dict]) -> str:
+    """Render the FACTUAL [MODE] context block plus per-mode selected state.
+    Returns '' when no mode is set. Reasoning guidance is NOT here -- it is
+    layered onto the system prompt via _mode_system_addendum()."""
+    mode = (mode or "").strip()
+    if not mode:
+        return ""
+    state = state if isinstance(state, dict) else {}
+    blocks = ["[MODE]\nActive mode: " + mode + (f" / {submode}" if submode else "")]
+
+    if mode == "facility_layout":
+        fl = ["[FACILITY LAYOUT]"]
+        sel = []
+        if state.get("selected_row_id"):
+            sel.append(f"capacity row {state['selected_row_id']}")
+        for key, noun in (("selected_rack_ids", "rack group"),
+                          ("selected_zone_ids", "operating zone"),
+                          ("selected_footprint_ids", "rack footprint")):
+            ids = state.get(key) or []
+            if ids:
+                sel.append(f"{len(ids)} {noun}(s): " + ", ".join(str(i) for i in ids[:8]))
+        if sel:
+            fl.append("Selected: " + "; ".join(sel))
+        route = state.get("route") or {}
+        if route:
+            stale = "" if route.get("matches_current_selection", True) else " [STALE: does not match the current From/To selectors]"
+            via = (" via " + " -> ".join(str(v) for v in route["via_aisles"])) if route.get("via_aisles") else ""
+            fl.append(
+                f"Active route{stale}: {route.get('start_label', '?')} -> {route.get('end_label', '?')} -- "
+                f"{route.get('distance_m', '?')} m, ETA {route.get('eta_text', '?')}{via}, {route.get('step_count', '?')} steps."
+            )
+        analysis = state.get("analysis") or {}
+        if analysis.get("headline"):
+            fl.append("Layout what-if: " + str(analysis["headline"]))
+        cap = state.get("capacity") or {}
+        if cap:
+            fl.append(f"Capacity estimate: {cap.get('estimated_total_boxes', '?')} boxes across {cap.get('row_count', '?')} rack row(s).")
+            for rw in (cap.get("rows") or [])[:8]:
+                fl.append(f"  - {rw.get('row_id', '?')}: {rw.get('boxes', 0)} boxes / {rw.get('racks', 0)} racks")
+        if len(fl) > 1:
+            blocks.append("\n".join(fl))
+
+    elif mode == "plant_process":
+        pp = ["[PLANT PROCESS]"]
+        zone = state.get("active_zone") or {}
+        if zone:
+            pp.append(f"Active process zone: {zone.get('label', zone.get('id', '?'))} ({zone.get('id', '?')})")
+        groups = state.get("selected_group_ids") or []
+        if groups:
+            pp.append(f"Selected equipment group(s) [{len(groups)}]: " + ", ".join(str(g) for g in groups[:10]))
+        flows = state.get("active_flow_ids") or []
+        if flows:
+            pp.append(f"Active flow path(s) [{len(flows)}]: " + ", ".join(str(f) for f in flows[:10]))
+        zones = state.get("available_zones") or []
+        if zones:
+            pp.append("Available zones: " + ", ".join(str(z.get("id", "?")) for z in zones[:12]))
+        if len(pp) > 1:
+            blocks.append("\n".join(pp))
+
+    return "\n\n".join(blocks)
+
+
 def _build_context_message(inspection_context: Optional[Dict]) -> str:
     """Build a sectioned context string from inspection results or profile data.
     Sections are only rendered when they have meaningful data."""
@@ -14617,6 +15122,18 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         if reasons:
             dm_lines.append("Reasons: " + "; ".join(reasons))
         parts.append("\n".join(dm_lines))
+
+    # -- MODE CONTRACT (mode-aware Sage) --
+    # Factual block: which mode the user is in + the live selected state. The
+    # durable reasoning contract is layered onto the system prompt separately
+    # via _mode_system_addendum().
+    mode_section = _render_mode_contract_section(
+        inspection_context.get("active_mode"),
+        inspection_context.get("mode_submode"),
+        inspection_context.get("mode_state"),
+    )
+    if mode_section:
+        parts.append(mode_section)
 
     # â”€â”€ INSPECTION â”€â”€
     gs = inspection_context.get("gap_summary")
@@ -15485,6 +16002,19 @@ async def agent_chat(request: AgentChatRequest):
         system_prompt += _sales_coaching_override(sales_application, _user_display)
     else:
         system_prompt += build_tool_appendix(request.agent_type)
+        # Mode-aware Sage: peek at the resolved mode in the raw attachments
+        # (before normalize runs, mirroring the display-name peek above) and
+        # layer the durable per-mode reasoning contract onto the base persona.
+        # Empty string for modes without a registered contract.
+        _mode_ctx = request.inspection_context or request.context or {}
+        try:
+            _mode_sess = (_mode_ctx.get("attachments") or {}).get("session") or {}
+            _mode_mc = _mode_sess.get("mode_contract") or {}
+            _active_mode = (_mode_sess.get("active_mode") or _mode_mc.get("mode") or "").strip()
+        except Exception:
+            _active_mode = ""
+        if _active_mode:
+            system_prompt += _mode_system_addendum(_active_mode)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)

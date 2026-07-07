@@ -88,6 +88,41 @@ PLANT_STATE = {
     "selected_group_ids": ["fan_deck", "basin"],
 }
 
+ASSEMBLY_TRAINING_STATE = {
+    "product_name": "Racing Bike Assembly",
+    "target_role": "technician",
+    "target_component": "Complete Racing Bike Assembly",
+    "goal": "Assemble the racing bike using the product structure map",
+    "viewport_mode": "assembly3d",
+    "active_viewer": {
+        "node_id": "L0-000",
+        "node_name": "Complete Racing Bike Assembly",
+        "asset_glb_url": "/generated/training/racing-bike/assembly_glb/racing_bike_assembly.glb",
+        "part_count": 47,
+    },
+    "selected_node": {
+        "node_id": "L0-000",
+        "name": "Complete Racing Bike Assembly",
+        "level": 0,
+        "purpose": "Root assembly completed by joining internal mechanical assembly with bodywork/exterior assembly.",
+        "part_count": 47,
+        "part_names": ["Front Wheel Rim", "Rear Wheel Rim", "Seat / Tail Body Shell"],
+    },
+    "procedure": {
+        "title": "Assembly procedure - Complete Racing Bike Assembly",
+        "node_id": "L0-000",
+        "step_index": 0,
+        "step_count": 5,
+        "current_step_title": "Identify major subassemblies",
+        "current_step_instruction": "Confirm the racing bike frame, wheels, brakes, and bodywork before starting.",
+    },
+    "available_top_nodes": [
+        {"node_id": "L0-000", "name": "Complete Racing Bike Assembly", "level": 0},
+        {"node_id": "L1-001", "name": "Internal Mechanical Assembly", "level": 1},
+        {"node_id": "L1-002", "name": "Bodywork / Exterior Assembly", "level": 1},
+    ],
+}
+
 
 def _flat(ctx):
     return server.normalize_agent_context(ctx)["flat"]
@@ -173,6 +208,33 @@ def test_plant_process_system_addendum_is_mode_specific():
     assert "process flow" in add
     # Acceptance: must avoid facility routing framing unless asked to compare.
     assert "facility-layout" in add and "compare" in add
+
+
+# ---------------------------------------------------------------------------
+# Assembly training: separate from the normal Assembly tab
+# ---------------------------------------------------------------------------
+
+def test_assembly_training_context_has_viewport_facts_without_drawing_prereqs():
+    flat = _flat(_session_ctx("assembly_training", ASSEMBLY_TRAINING_STATE))
+    flat.update({
+        "has_drawing_file": False,
+        "has_part_number": False,
+        "inspection_can_run": False,
+    })
+    msg = server._build_context_message(flat)
+    assert "[ASSEMBLY TRAINING]" in msg
+    assert "Racing Bike Assembly" in msg
+    assert "Complete Racing Bike Assembly" in msg
+    assert "racing_bike_assembly.glb" in msg
+    assert "NO DRAWING" not in msg
+    assert "NO PART" not in msg
+
+
+def test_assembly_training_addendum_blocks_product_guessing():
+    add = server._mode_system_addendum("assembly_training")
+    assert "Assembly Training mode" in add
+    assert "training viewport" in add
+    assert "engine" in add and "Do NOT identify" in add
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +327,36 @@ def test_3dmodel_addendum_specifics():
 def test_assembly_addendum_specifics():
     add = server._mode_system_addendum("assembly")
     assert "mates" in add.lower() and "parts" in add.lower()
+    assert "[MOTION] group labels/functions/part_numbers" in add
+    assert "set_part_highlight mode replace" in add
+    assert "play_motion at 30-40 RPM" in add
+    assert "pin_bore_fai_affected" not in add
+
+
+def test_motion_context_renders_group_function():
+    sec = server._render_mode_contract_section("assembly", None, {
+        "motion": {
+            "available": True,
+            "motions": [{
+                "motion_id": "m1",
+                "name": "Sample motion",
+                "driver": "driver-1",
+                "default_rpm": 90,
+                "rpm_range": [10, 600],
+                "moving_component_count": 2,
+                "groups": [{
+                    "id": "joint_a",
+                    "label": "Joint A",
+                    "part_numbers": ["100001", "100002"],
+                    "component_count": 2,
+                    "function": "Transfers rotation through the joint interface.",
+                }],
+            }],
+            "playback": {"playing": False},
+        }
+    })
+    assert "[MOTION]" in sec
+    assert "Function: Transfers rotation through the joint interface." in sec
 
 
 def test_report_fai_addendum_specifics():

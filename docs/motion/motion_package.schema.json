@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inspectorpro/motion_package/v1",
+  "title": "InspectorPro Motion Package (contract v1)",
+  "description": "Deterministic mechanism motion sampled from a SolidWorks motion study, replayable in the InspectorPro 3D viewport. Shape constraints only — semantic/physics rules (loop closure, crank revolution, fixed-stay-fixed, asset-pin verification, kinematic replay) are enforced by tools/motion_validate.py canaries V1-V11; see docs/motion/motion_contract_v1.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion", "motionId", "name", "source", "glbAsset", "frame",
+    "driver", "components", "sampling", "samples"
+  ],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "motionId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "assemblyFile", "motionStudyName", "studyType", "exportedAt"],
+      "properties": {
+        "system": { "const": "solidworks_motion" },
+        "assemblyFile": { "type": "string", "minLength": 1 },
+        "configuration": { "type": "string" },
+        "motionStudyName": { "type": "string", "minLength": 1 },
+        "studyType": { "enum": ["animation", "basic_motion", "motion_analysis"] },
+        "exportedAt": { "type": "string", "format": "date-time" },
+        "exporterVersion": { "type": "string" }
+      }
+    },
+
+    "glbAsset": {
+      "description": "Pin to the exact GLB this package was built and validated against (review fix 1). A package must never animate any other asset.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileName", "sha256", "byteLength"],
+      "properties": {
+        "fileName": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "byteLength": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "frame": {
+      "description": "All poses are in the GLB asset-root frame (review fix 2), never Three.js scene world. One authoritative frame; the SolidWorks conversion is baked at build time and recorded for audit only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["space", "convention", "units"],
+      "properties": {
+        "space": { "const": "glb_asset_root" },
+        "convention": { "const": "y_up_right_handed" },
+        "units": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["length", "angle"],
+          "properties": {
+            "length": { "const": "m" },
+            "angle": { "const": "deg" }
+          }
+        },
+        "sourceConvention": { "type": "string" },
+        "sourceToPackageMatrix": {
+          "type": "array", "items": { "type": "number" }, "minItems": 16, "maxItems": 16
+        }
+      }
+    },
+
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "componentId", "axis", "cycleDegrees", "defaultRpm", "rpmRange"],
+      "properties": {
+        "kind": { "const": "rotary" },
+        "componentId": { "type": "string", "minLength": 1 },
+        "axis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["origin", "direction"],
+          "properties": {
+            "origin": { "$ref": "#/$defs/vec3" },
+            "direction": { "$ref": "#/$defs/vec3" }
+          }
+        },
+        "cycleDegrees": { "const": 360 },
+        "defaultRpm": { "type": "number", "exclusiveMinimum": 0 },
+        "rpmRange": {
+          "description": "Display clamp for playback, not engineering data. rpmRange[0] < rpmRange[1] is checked by the validator.",
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 2, "maxItems": 2
+        }
+      }
+    },
+
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["moving", "fixed"],
+      "properties": {
+        "moving": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/componentRecord" },
+          "minItems": 1
+        },
+        "fixed": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/componentRecord" }
+        }
+      }
+    },
+
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parameter", "startDeg", "endDeg", "stepDeg", "count", "endpointDuplicatesStart"],
+      "properties": {
+        "parameter": { "const": "crank_angle_deg" },
+        "startDeg": { "const": 0 },
+        "endDeg": { "const": 360 },
+        "stepDeg": { "type": "number", "exclusiveMinimum": 0, "maximum": 15 },
+        "count": { "type": "integer", "minimum": 25 },
+        "endpointDuplicatesStart": { "const": true }
+      }
+    },
+
+    "samples": {
+      "description": "Keyed by component id (the SolidWorks root-relative instance path). Every key must be a declared component id; every array must have exactly sampling.count entries; quaternions must be unit-norm and hemisphere-continuous. Enforced by the validator.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/sampleTrack" }
+    },
+
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["angleDeg", "id", "label"],
+        "properties": {
+          "angleDeg": { "type": "number", "minimum": 0, "maximum": 360 },
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]*$" },
+          "label": { "type": "string", "minLength": 1 },
+          "componentIds": {
+            "type": "array", "items": { "type": "string" }, "uniqueItems": true
+          }
+        }
+      }
+    },
+
+    "semanticGroups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "componentIds", "function"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]*$" },
+          "label": { "type": "string", "minLength": 1 },
+          "componentIds": {
+            "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true
+          },
+          "function": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "derived": {
+      "description": "Computed by the builder from the samples — never authored by hand and never by an LLM.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strokeM": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "pistonTravelAxis": { "$ref": "#/$defs/vec3" }
+      }
+    }
+  },
+
+  "$defs": {
+    "vec3": {
+      "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3
+    },
+    "quat": {
+      "description": "Unit quaternion [x, y, z, w] (Three.js component order).",
+      "type": "array",
+      "items": { "type": "number", "minimum": -1.0000001, "maximum": 1.0000001 },
+      "minItems": 4, "maxItems": 4
+    },
+    "componentRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "displayName", "swInstancePath", "sourceFile", "glbNodes"],
+      "properties": {
+        "id": {
+          "description": "Primary key = the SolidWorks root-relative instance path (review fix 4), e.g. 'PistonAsm-1/connrod-1'. Used verbatim as the samples key and in all componentIds references.",
+          "type": "string", "minLength": 1
+        },
+        "displayName": { "type": "string", "minLength": 1 },
+        "swInstancePath": { "type": "string", "minLength": 1 },
+        "sourceFile": { "type": "string", "minLength": 1 },
+        "configuration": { "type": "string" },
+        "partNumber": {
+          "description": "Join key to assyPartMeshMap and FAI characteristics.",
+          "type": "string"
+        },
+        "glbNodes": {
+          "description": "One SolidWorks component may export as multiple GLB nodes (review fix 3). All listed nodes move rigidly with the component's sampled pose. No node may be claimed by two components (validator V10).",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "sampleTrack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["p", "q"],
+      "properties": {
+        "p": {
+          "description": "Positions in GLB asset-root space, meters.",
+          "type": "array", "items": { "$ref": "#/$defs/vec3" }, "minItems": 25
+        },
+        "q": {
+          "description": "Unit quaternions, hemisphere-continuous (build-time fix applied).",
+          "type": "array", "items": { "$ref": "#/$defs/quat" }, "minItems": 25
+        }
+      }
+    }
+  }
+}

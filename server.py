@@ -10,6 +10,7 @@ import os
 import re
 import io
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -4418,6 +4419,113 @@ def _available_feature_ids_from_context(ctx: Optional[Dict[str, Any]]) -> set[st
     return ids
 
 
+def _feature_highlight_targets_from_context(
+    ctx: Optional[Dict[str, Any]],
+    tokens: List[str],
+) -> List[str]:
+    """Resolve user/model feature phrases to CAD feature IDs.
+
+    Feature-colored GLBs are keyed by SolidWorks CAD IDs, but users and
+    agents should talk in semantic labels from the inspection profile.
+    This resolver accepts either form, plus color names, and returns only
+    IDs present in the current part context.
+    """
+    if not ctx:
+        return []
+    clean_tokens = [str(t or "").strip() for t in tokens if str(t or "").strip()]
+    if not clean_tokens:
+        return []
+
+    def slug(value: Any) -> str:
+        return re.sub(r'[^a-z0-9]', '', str(value or "").lower())
+
+    profile_rows: List[Dict[str, Any]] = []
+    raw_rows: List[Dict[str, Any]] = []
+    available_ids = _available_feature_ids_from_context(ctx)
+    for feat in ctx.get("profile_features", []):
+        if not isinstance(feat, dict):
+            continue
+        target_ids = feat.get("highlight_target_ids")
+        if not isinstance(target_ids, list) or not target_ids:
+            target_ids = feat.get("cad_feature_ids")
+        if not isinstance(target_ids, list):
+            continue
+        clean_ids = [
+            fid for fid in target_ids
+            if isinstance(fid, str) and fid and (
+                fid.startswith("semantic:") or not available_ids or fid in available_ids
+            )
+        ]
+        if not clean_ids:
+            continue
+        candidates = [
+            feat.get("name"),
+            feat.get("type"),
+            feat.get("spatial_description"),
+            feat.get("inspection_reason"),
+        ]
+        profile_rows.append({
+            "ids": clean_ids,
+            "slugs": [slug(c) for c in candidates if slug(c)],
+        })
+
+    for feat in ctx.get("available_cad_features", []):
+        if not isinstance(feat, dict):
+            continue
+        fid = feat.get("cad_feature_id")
+        if not isinstance(fid, str) or not fid:
+            continue
+        candidates = [
+            fid,
+            feat.get("display_label"),
+            feat.get("sw_name"),
+            feat.get("type"),
+            feat.get("color_name"),
+            feat.get("semantic_label"),
+            feat.get("semantic_profile_feature"),
+            feat.get("semantic_description"),
+        ]
+        aliases = feat.get("semantic_aliases")
+        if isinstance(aliases, list):
+            candidates.extend(aliases)
+        raw_rows.append({
+            "ids": [fid],
+            "slugs": [slug(c) for c in candidates if slug(c)],
+        })
+
+    resolved: List[str] = []
+
+    def match_rows(token: str, rows: List[Dict[str, Any]]) -> bool:
+        token_slug = slug(token)
+        if not token_slug:
+            return False
+        matched_any = False
+        for row in rows:
+            row_ids = row.get("ids") or []
+            if not row_ids:
+                continue
+            if token in row_ids:
+                for fid in row_ids:
+                    if fid not in resolved:
+                        resolved.append(fid)
+                matched_any = True
+                continue
+            for cand in row["slugs"]:
+                if token_slug == cand or token_slug in cand or cand in token_slug:
+                    for fid in row_ids:
+                        if fid not in resolved:
+                            resolved.append(fid)
+                    matched_any = True
+                    break
+        return matched_any
+
+    for token in clean_tokens:
+        if match_rows(token, profile_rows):
+            continue
+        match_rows(token, raw_rows)
+    return resolved
+
+
 def _semantic_region_highlight_targets(
     ctx: Optional[Dict[str, Any]],
     phrases: List[str],
@@ -5313,7 +5421,7 @@ def _semantic_region_labels_by_cad_feature(
 
 
 _TECHNICAL_DRILLDOWN_RE = re.compile(
-    r'\b(solidworks|feature\s*tree|feature\s*id|parameter|param|technical(?:ly)?|exact|raw)\b',
+    r'\b(solidworks|cad\s*internals?|cad\s*operation|operation|operations|feature\s*tree|feature\s*id|parameter|param|technical(?:ly)?|exact|raw)\b',
     re.IGNORECASE,
 )
 
@@ -5325,6 +5433,226 @@ def _is_technical_drilldown_message(message: Optional[str]) -> bool:
     sentence after the physical-language one -- physical always
     leads, technical follows when explicitly requested."""
     return bool(message and _TECHNICAL_DRILLDOWN_RE.search(message))
+
+
+_FEATURE_LIST_REQUEST_RE = re.compile(
+    r'\b(show|highlight|display)\b.*\b(all|every|each)\b.*\b(features?|geometry)\b'
+    r'|\b(list|what(?:\'s| is| are)?|how many|count|tell me about)\b.*\b(features|geometry)\b'
+    r'|\b(features|geometry)\b.*\b(on|of|for)\b.*\b(part|model)\b',
+    re.IGNORECASE,
+)
+_FEATURE_COLOR_WORD_RE = re.compile(
+    r'\b(red|green|blue|orange|yellow|purple|cyan|teal|magenta|pink|black|white|gray|grey|brown)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_user_facing_feature_list_request(message: Optional[str]) -> bool:
+    if not message or _is_technical_drilldown_message(message):
+        return False
+    if _FEATURE_COLOR_WORD_RE.search(message) and not re.search(r'\b(all|every|each)\b', message, re.IGNORECASE):
+        return False
+    return bool(_FEATURE_LIST_REQUEST_RE.search(message))
+
+
+def _plain_feature_phrase(text: Any, limit: int = 95) -> str:
+    clean = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if not clean:
+        return ""
+    first_sentence = re.split(r'(?<=[.!?])\s+', clean)[0]
+    first_sentence = re.split(r';\s+|\s+per extract\b', first_sentence)[0].strip()
+    if len(first_sentence) <= limit:
+        return first_sentence
+    clipped = first_sentence[:limit].rstrip(" ,;:-")
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0]
+    return clipped + "..."
+
+
+_FEATURE_VISUAL_ACTION_RE = re.compile(
+    r'\b(show|highlight(?:ed)?|display|focus|point\s*to|where\s+is|where\s+are|locate|light\s*up)\b',
+    re.IGNORECASE,
+)
+
+_FEATURE_QUERY_STOP_WORDS = {
+    "show", "highlight", "display", "focus", "point", "to", "where", "is", "are",
+    "highlighted", "locate", "light", "up", "me", "the", "a", "an", "please", "feature",
+    "features", "geometry", "part", "model", "this", "on", "of", "for", "all",
+}
+
+
+def _feature_targets_from_profile_feature(feature: Dict[str, Any]) -> List[str]:
+    targets = feature.get("highlight_target_ids")
+    if not isinstance(targets, list) or not targets:
+        targets = feature.get("cad_feature_ids")
+    out: List[str] = []
+    if isinstance(targets, list):
+        for target in targets:
+            if isinstance(target, str) and target.strip() and target not in out:
+                out.append(target)
+    return out
+
+
+def _profile_feature_tokens(value: Any) -> set[str]:
+    return {
+        t for t in re.findall(r'[a-z0-9]+', str(value or "").lower())
+        if t and t not in _FEATURE_QUERY_STOP_WORDS
+    }
+
+
+def _feature_token_variants(token: str) -> set[str]:
+    token = str(token or "").lower().strip()
+    if not token:
+        return set()
+    variants = {token}
+    if token.endswith("ies") and len(token) > 4:
+        variants.add(token[:-3] + "y")
+    if token.endswith("es") and len(token) > 3:
+        variants.add(token[:-2])
+    if token.endswith("s") and len(token) > 3:
+        variants.add(token[:-1])
+    return variants
+
+
+def _feature_query_tokens_match(query_tokens: set[str], hay_tokens: set[str]) -> bool:
+    if not query_tokens or not hay_tokens:
+        return False
+    for token in query_tokens:
+        token_variants = _feature_token_variants(token)
+        if not any(token_variants & _feature_token_variants(h) for h in hay_tokens):
+            return False
+    return True
+
+
+def _profile_features_matching_message(ctx: Dict[str, Any], message: str) -> List[Dict[str, Any]]:
+    features = ctx.get("profile_features")
+    if not isinstance(features, list):
+        return []
+    query_tokens = _profile_feature_tokens(message)
+    if not query_tokens:
+        return []
+    clean_features = [
+        feature for feature in features
+        if isinstance(feature, dict) and feature.get("name")
+    ]
+    name_matches: List[Dict[str, Any]] = []
+    for feature in clean_features:
+        name_tokens = _profile_feature_tokens(feature.get("name"))
+        if _feature_query_tokens_match(query_tokens, name_tokens):
+            name_matches.append(feature)
+    if name_matches:
+        return name_matches
+
+    matches: List[Dict[str, Any]] = []
+    for feature in clean_features:
+        if not isinstance(feature, dict) or not feature.get("name"):
+            continue
+        candidates = [
+            feature.get("type"),
+            feature.get("spatial_description"),
+            feature.get("inspection_reason"),
+        ]
+        hay_tokens = set()
+        for candidate in candidates:
+            hay_tokens.update(_profile_feature_tokens(candidate))
+        if not hay_tokens:
+            continue
+        if _feature_query_tokens_match(query_tokens, hay_tokens):
+            matches.append(feature)
+    if matches:
+        return matches
+
+    # Color/alias fallback: resolve through the active CAD feature map,
+    # then map those targets back to profile feature groups.
+    resolved = _feature_highlight_targets_from_context(ctx, [message])
+    if not resolved:
+        return []
+    resolved_set = set(resolved)
+    for feature in features:
+        if not isinstance(feature, dict) or not feature.get("name"):
+            continue
+        feature_targets = set(_feature_targets_from_profile_feature(feature))
+        cad_ids = feature.get("cad_feature_ids")
+        if isinstance(cad_ids, list):
+            feature_targets.update(fid for fid in cad_ids if isinstance(fid, str))
+        if feature_targets & resolved_set:
+            matches.append(feature)
+    return matches
+
+
+def _profile_feature_highlight_chat_result(
+    ctx: Dict[str, Any],
+    message: str,
+    agent_type: str,
+) -> Optional[Dict[str, Any]]:
+    if not message or not _FEATURE_VISUAL_ACTION_RE.search(message):
+        return None
+    matches = _profile_features_matching_message(ctx, message)
+    if not matches:
+        return None
+    highlight_ids: List[str] = []
+    names: List[str] = []
+    for feature in matches:
+        name = str(feature.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+        for target in _feature_targets_from_profile_feature(feature):
+            if target not in highlight_ids:
+                highlight_ids.append(target)
+    if not highlight_ids:
+        return None
+    raw_calls = [{"name": "highlight_features", "args": {"feature_ids": highlight_ids}}]
+    guarded, warnings = apply_tool_guardrails(raw_calls, agent_type, "profile_feature_highlight")
+    label = ", ".join(names) if len(names) <= 2 else ", ".join(names[:-1]) + f", and {names[-1]}"
+    return {
+        "response": f"Highlighted {label}.",
+        "highlight_features": highlight_ids,
+        "tool_calls": guarded,
+        "tool_source": "profile_feature_highlight",
+        "tool_call_count": len(guarded),
+        **({"tool_guardrail_warnings": warnings} if warnings else {}),
+    }
+
+
+def _feature_list_chat_result(ctx: Dict[str, Any], agent_type: str = "inspector") -> Optional[Dict[str, Any]]:
+    features = ctx.get("profile_features")
+    if not isinstance(features, list):
+        return None
+    clean_features = [f for f in features if isinstance(f, dict) and f.get("name")]
+    if not clean_features:
+        return None
+    part_name = ctx.get("part_name") or ctx.get("part_number") or "This part"
+    highlight_ids: List[str] = []
+    lines = [f"Highlighted all {len(clean_features)} inspectable features on {part_name}:"]
+    for f in clean_features:
+        name = str(f.get("name") or "").strip()
+        count = f.get("count", 1)
+        try:
+            count_int = int(count)
+        except Exception:
+            count_int = 1
+        targets = f.get("highlight_target_ids")
+        if not isinstance(targets, list) or not targets:
+            targets = f.get("cad_feature_ids")
+        if isinstance(targets, list):
+            for target in targets:
+                if isinstance(target, str) and target.strip() and target not in highlight_ids:
+                    highlight_ids.append(target)
+        qty = f" ({count_int}x)" if count_int > 1 else ""
+        line = f"- {name}{qty}"
+        lines.append(line)
+    raw_calls = []
+    if highlight_ids:
+        raw_calls = [{"name": "highlight_features", "args": {"feature_ids": highlight_ids}}]
+    guarded, warnings = apply_tool_guardrails(raw_calls, agent_type, "profile_feature_list")
+    return {
+        "response": "\n".join(lines),
+        "highlight_features": highlight_ids,
+        "tool_calls": guarded,
+        "tool_source": "profile_feature_list",
+        "tool_call_count": len(guarded),
+        **({"tool_guardrail_warnings": warnings} if warnings else {}),
+    }
 
 
 def _format_feature_change_summary(
@@ -5811,9 +6139,11 @@ def _resolve_semantic_regions_in_highlight_tool_calls(
             token = str(raw or "").strip()
             if not token:
                 continue
-            if token in available_ids:
-                if token not in repaired:
-                    repaired.append(token)
+            feature_ids = _feature_highlight_targets_from_context(ctx, [token])
+            if feature_ids:
+                for fid in feature_ids:
+                    if fid not in repaired:
+                        repaired.append(fid)
                 continue
             semantic_ids, semantic_regions = _semantic_region_highlight_targets(ctx, [token])
             if semantic_ids:
@@ -10983,6 +11313,12 @@ async def get_profile_details(part_number: str):
                     "type": feat.get("type", ""),
                     "count": feat.get("count", 1),
                     "spatial_description": feat.get("spatial_description", ""),
+                    "inspection_reason": feat.get("inspection_reason", ""),
+                    "cad_feature_ids": feat.get("cad_feature_ids", []),
+                    "highlight_target_ids": feat.get("highlight_target_ids", []),
+                    "highlight_regions": feat.get("highlight_regions", []),
+                    "solidworks_operations": feat.get("solidworks_operations", []),
+                    "evidence": feat.get("evidence", []),
                 })
 
         return {
@@ -12368,6 +12704,117 @@ async def get_assembly_views(assembly_number: str):
     return views
 
 
+# ---------------------------------------------------------------------------
+# Deterministic motion packages (engine motion demo)
+#
+# motion_registry.json maps an assembly number to its validated motion
+# artifacts. The GLB the viewer loads and the package the player replays are
+# pinned to each other by fileName/byteLength/sha256 (contract v1 -- see
+# docs/motion/motion_contract_v1.md). The pin is verified server-side; the
+# frontend refuses playback when /api/motion reports pin_ok=false.
+# ---------------------------------------------------------------------------
+_MOTION_REGISTRY_PATH = Path("generated/engine_motion/motion/motion_registry.json")
+# path -> ((mtime_ns, size), sha256 hex). Avoids rehashing a 16 MB GLB per request.
+_motion_glb_hash_cache: Dict[str, Tuple[Tuple[int, int], str]] = {}
+
+
+def _motion_registry() -> Dict[str, dict]:
+    try:
+        with open(_MOTION_REGISTRY_PATH, encoding="utf-8") as f:
+            reg = json.load(f)
+        return reg if isinstance(reg, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _motion_entry(assembly_number: str) -> Optional[dict]:
+    entry = _motion_registry().get(assembly_number)
+    return entry if isinstance(entry, dict) else None
+
+
+def _motion_file_sha256(path: Path) -> str:
+    st = path.stat()
+    sig = (int(st.st_mtime_ns), st.st_size)
+    cached = _motion_glb_hash_cache.get(str(path))
+    if cached and cached[0] == sig:
+        return cached[1]
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    digest = h.hexdigest()
+    _motion_glb_hash_cache[str(path)] = (sig, digest)
+    return digest
+
+
+def _motion_verify_pin(entry: dict) -> dict:
+    """Verify the registry GLB against the package's glbAsset pin.
+
+    Returns {ok, error, pin, glb_path, motion_id}. Never raises -- a broken
+    registry/package reads as a failed pin so playback is refused, not 500'd.
+    """
+    out: Dict[str, Any] = {"ok": False, "error": None, "pin": None, "glb_path": None, "motion_id": None}
+    try:
+        pkg_path = Path(str(entry.get("package") or ""))
+        glb_path = Path(str(entry.get("glb") or ""))
+        with open(pkg_path, encoding="utf-8") as f:
+            pkg = json.load(f)
+        pin = pkg.get("glbAsset") or {}
+        out["pin"] = pin
+        out["motion_id"] = pkg.get("motionId")
+        if not glb_path.exists():
+            out["error"] = f"pinned GLB missing: {glb_path}"
+            return out
+        if glb_path.name != pin.get("fileName"):
+            out["error"] = f"GLB fileName mismatch: {glb_path.name} != {pin.get('fileName')}"
+            return out
+        size = glb_path.stat().st_size
+        if size != pin.get("byteLength"):
+            out["error"] = f"GLB byteLength mismatch: {size} != {pin.get('byteLength')}"
+            return out
+        if _motion_file_sha256(glb_path) != pin.get("sha256"):
+            out["error"] = "GLB sha256 mismatch against package pin"
+            return out
+        out["ok"] = True
+        out["glb_path"] = glb_path
+        return out
+    except Exception as e:
+        out["error"] = f"motion pin verification failed: {e}"
+        return out
+
+
+@app.get("/api/motion/{assembly_number}")
+async def get_motion_info(assembly_number: str):
+    """Motion availability, GLB/package pin status, and the agent summary
+    for an assembly. The frontend uses package_url for full transforms; Sage
+    only ever sees the summary (no transform arrays)."""
+    safe_num = re.sub(r'[^\w\-]', '', assembly_number)
+    entry = _motion_entry(safe_num)
+    if not entry:
+        return {"available": False, "assembly_number": safe_num}
+    verify = _motion_verify_pin(entry)
+    summary = None
+    try:
+        with open(str(entry.get("summary") or ""), encoding="utf-8") as f:
+            summary = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+    def _url(rel: Any) -> Optional[str]:
+        rel = str(rel or "").replace("\\", "/")
+        return ("/" + rel) if rel else None
+    return {
+        "available": bool(verify["ok"]) and summary is not None,
+        "assembly_number": safe_num,
+        "motion_id": entry.get("motion_id") or verify.get("motion_id"),
+        "pin_ok": bool(verify["ok"]),
+        "pin_error": verify["error"],
+        "pin": verify["pin"],
+        "package_url": _url(entry.get("package")),
+        "summary_url": _url(entry.get("summary")),
+        "summary": summary,
+    }
+
+
 @app.get("/api/assembly-model/{assembly_number}")
 async def get_assembly_model(assembly_number: str, revision: Optional[str] = None):
     """Serve the colored GLB 3D model for an assembly, optionally for a specific revision."""
@@ -12376,6 +12823,24 @@ async def get_assembly_model(assembly_number: str, revision: Optional[str] = Non
         raise HTTPException(status_code=400, detail="Invalid assembly number")
 
     assemblies_dir = library_path("assemblies")
+
+    # Motion-pinned override: when this assembly has a validated motion
+    # package, the root viewer must load the exact GLB the package was built
+    # against (the sample-0 rest pose export), never the older library copy.
+    # Compare-mode revision loads keep the library GLB. A failed pin falls
+    # back to the library file and /api/motion reports pin_error, so the
+    # player refuses playback instead of animating a mismatched asset.
+    if not revision:
+        _entry = _motion_entry(safe_num)
+        if _entry:
+            _verify = _motion_verify_pin(_entry)
+            if _verify["ok"]:
+                return FileResponse(
+                    path=str(_verify["glb_path"]),
+                    media_type="model/gltf-binary",
+                    filename=str(_verify["pin"].get("fileName") or f"{safe_num}_colored.glb"),
+                )
+            logger.warning("[Motion] GLB pin failed for %s: %s -- serving library GLB", safe_num, _verify["error"])
 
     if revision:
         safe_rev = re.sub(r'[^\w]', '', revision)
@@ -13903,6 +14368,63 @@ To stop animation:
 ANIMATE_MOTION: stop
 Do NOT combine with EXPLODE_LEVEL or ISOLATE_PART â€” motion is mutually exclusive with explode/isolate.
 
+DETERMINISTIC MOTION PACKAGE (when a [MOTION] block is present in context):
+The assembly has a validated motion package â€” playback replays pre-computed SolidWorks
+motion-study transforms. Prefer the declarative motion actions over ANIMATE_MOTION.
+Emit them in a [UI_ACTIONS] block after your prose (strict JSON, same format as the
+Assembly Compare registry, workspace "assembly"):
+[UI_ACTIONS]
+{"workspace":"assembly","actions":[{"type":"play_motion","motion_id":"engine4cyl_crank_cycle","rpm":40,"loop":true}]}
+[/UI_ACTIONS]
+Available motion actions (use only these names):
+- play_motion    : { "type":"play_motion", "motion_id":"...", "rpm": 40, "loop": true }
+- pause_motion   : { "type":"pause_motion" }
+- set_motion_rpm : { "type":"set_motion_rpm", "rpm": 30 }
+- seek_motion    : { "type":"seek_motion", "crank_angle_deg": 180 }
+- stop_motion    : { "type":"stop_motion" }
+Display actions:
+- set_part_display: { "type":"set_part_display", "part_numbers":["100002"], "hidden": true }
+- set_part_display: { "type":"set_part_display", "part_numbers":["100002"], "opacity": 0.35 }
+- clear_part_display: { "type":"clear_part_display", "part_numbers":["100002"] } or { "type":"clear_part_display", "all": true }
+- For "show all parts", "bring back hidden parts", or "restore the assembly", combine clear_part_display all:true with clear_part_highlight all:true.
+Highlight actions:
+- set_part_highlight: { "type":"set_part_highlight", "part_numbers":["100006","100007"], "mode":"replace" }
+- set_part_highlight modes: "replace" (new highlighted set), "add" (add to current set), "remove" (remove from highlighted set)
+- clear_part_highlight: { "type":"clear_part_highlight", "all": true }
+- clear_part_highlight: { "type":"clear_part_highlight", "all": false } clears only agent-created highlights and leaves manual tree selections alone
+Viewport actions:
+- rotate_view: { "type":"rotate_view", "viewport":"assembly", "direction":"right" }
+- stop_rotate_view: { "type":"stop_rotate_view", "viewport":"assembly" }
+Rules:
+- RPM is a VISUALIZATION rate only â€” never present it as an engine operating speed.
+  Keep rpm inside the rpm_range from the [MOTION] block.
+- Viewport state is persistent. Do not stop motion, stop rotation, clear highlights, or restore hidden parts unless the user explicitly asks.
+- Highlight means selected-only display: the highlighted part(s) stay visible/highlighted and the rest of the assembly becomes hidden. For multiple parts, include every requested part number in one highlighted set.
+- If the user says "also/add/include/plus/as well", add to the existing highlighted set instead of replacing it.
+- If the user asks to hide, show, make transparent, or restore a component, use display
+  actions only. Hide means hide only the target part(s); the rest remains in the current state.
+  Do NOT emit HIGHLIGHT_PARTS for that pure visibility command.
+- If the user asks to show all parts/components or bring back hidden parts, emit both
+  { "type":"clear_part_display", "all": true } and { "type":"clear_part_highlight", "all": true }.
+- If the user asks to rotate/spin/orbit the view/model/assembly, use rotate_view only.
+  Do NOT use HIGHLIGHT_PARTS, EXPLODE_LEVEL, or motion actions for a pure camera orbit.
+  Rotate_view must not stop motion playback.
+- Display actions can run while motion is playing and can be combined with motion actions
+  and set_part_highlight. Example: to show piston motion while hiding the lower block,
+  include set_part_highlight for the piston if focus is requested, play_motion, and
+  { "type":"set_part_display", "part_numbers":["100002"], "hidden": true } in one
+  [UI_ACTIONS] block.
+- When the user asks to show a joint, mechanism, feature, or functional group in motion,
+  use the [MOTION] groups: match the request to group label/function/part numbers, choose
+  the smallest relevant group, then emit one [UI_ACTIONS] block with set_part_highlight
+  mode "replace" for that group's part_numbers and play_motion at 30-40 RPM. If a
+  feature highlight is also useful, add HIGHLIGHT_FEATURES separately, but do not let a
+  feature highlight replace the assembly part highlight + motion actions.
+- Do NOT invent loads, clearances, forces, velocities, accelerations, firing order, or
+  operating RPM â€” none of that is computed. Cite only numbers from the [MOTION] block.
+- If there is NO [MOTION] block, the motion package is not available â€” say so instead of
+  emitting motion actions (ANIMATE_MOTION may still work for legacy kinematic assemblies).
+
 EXCEPTION â€” DISASSEMBLY / ASSEMBLY LOGIC MODE:
 When asked "how do I take this apart?", "disassembly order", "how to remove X", or similar, the 3-sentence limit and no-bullets rules are SUSPENDED. Instead:
 - If SOLIDWORKS EXPLODE STEPS are provided in the context, you MUST follow that EXACT step order. Do NOT invent your own disassembly sequence.
@@ -14184,6 +14706,7 @@ AGENT_TOOL_SPECS = {
         {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers", "camera_view": "optional: front/top/right/back/bottom/left"}},
         {"name": "fai_fill", "description": "Fill FAI measured values", "args": {"values": "dict of char_number -> measured_value"}},
         {"name": "fai_tol", "description": "Set FAI tolerances", "args": {"values": "dict of char_number -> tolerance_value"}},
+        {"name": "ui_actions", "description": "Declarative UI action block -- used for deterministic assembly actions: motion playback (play_motion, pause_motion, set_motion_rpm, seek_motion, stop_motion), highlight control (set_part_highlight, clear_part_highlight), display control (set_part_display, clear_part_display), and viewport rotation (rotate_view, stop_rotate_view).", "args": {"workspace": "string", "actions": "list of action objects"}},
     ],
     "deviation-analyst": [
         {"name": "highlight_dimensions", "description": "Highlight dimensions on the drawing", "args": {"dim_keys": "list of dim_key strings"}},
@@ -14196,7 +14719,7 @@ AGENT_TOOL_SPECS = {
         {"name": "show_geometry_diff", "description": "Show geometry diff overlay on 3D compare viewer", "args": {}},
         {"name": "animate_motion", "description": "Start or stop motion animation", "args": {"action": "start or stop"}},
         {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
-        {"name": "ui_actions", "description": "Assembly Compare chat-first action registry â€” workspace + ordered list of declarative UI actions (open_workspace, set_compare_revisions, explode, focus, highlight, extract, select_bom_rows, open_supplier_spec, compare_supplier_specs, clear_compare_overlays).", "args": {"workspace": "string", "actions": "list of action objects"}},
+        {"name": "ui_actions", "description": "Chat-first action registry -- workspace + ordered list of declarative UI actions (open_workspace, set_compare_revisions, explode, focus, highlight, extract, select_bom_rows, open_supplier_spec, compare_supplier_specs, clear_compare_overlays, play_motion, pause_motion, set_motion_rpm, seek_motion, stop_motion, set_part_highlight, clear_part_highlight, set_part_display, clear_part_display, rotate_view, stop_rotate_view).", "args": {"workspace": "string", "actions": "list of action objects"}},
         {"name": "create_edit_session", "description": "Create an edit-session audit record from a cad-edit-handoff payload; does not execute CAD edits.", "args": {"handoffPayload": "cad-edit-handoff payload object", "notes": "optional note string"}},
     ],
     "parts-finder": [
@@ -14935,9 +15458,15 @@ MODE_CONTRACTS = {
         "tools": [
             "highlight features against the active revision; available CAD features are listed in the context",
             "part feature compare (revA/revB) results are provided when a compare is active",
+            "when a [MOTION] block is present, deterministic mechanism playback is available in the Assembly 3D viewport via motion actions. Emit EXACTLY this block after your prose (strict JSON, closing [/UI_ACTIONS] tag REQUIRED): [UI_ACTIONS] {\"workspace\":\"assembly\",\"actions\":[{\"type\":\"play_motion\",\"motion_id\":\"engine4cyl_crank_cycle\",\"rpm\":40,\"loop\":true}]} [/UI_ACTIONS] -- action types: play_motion / pause_motion / set_motion_rpm {rpm} / seek_motion {crank_angle_deg} / stop_motion / set_part_highlight {part_numbers, mode} / clear_part_highlight / set_part_display {part_numbers, hidden or opacity} / clear_part_display {part_numbers or all} / rotate_view {viewport, direction} / stop_rotate_view {viewport}",
+            "for a request like 'show this joint/feature in motion', match the user words to the [MOTION] group label/function/part_numbers, then combine set_part_highlight mode replace for that group's part_numbers with play_motion at 30-40 RPM",
         ],
         "avoid": [
             "Do NOT invent features that are not in the available CAD features for the active revision.",
+            "For pure assembly visibility requests such as hide/show/make transparent/restore a component, use set_part_display or clear_part_display only; do NOT emit HIGHLIGHT_PARTS unless the user also asked to highlight/focus.",
+            "For pure rotate/spin/orbit requests, use rotate_view or stop_rotate_view only; do NOT emit HIGHLIGHT_PARTS or stop motion playback.",
+            "Viewport state is persistent: do not stop motion, stop rotation, clear highlights, or restore hidden parts unless the user explicitly asks.",
+            "Motion: do NOT invent loads, clearances, forces, velocities, accelerations, firing order, or operating RPM -- none of that is computed. Displayed RPM is a visualization rate only. If no [MOTION] block is present, say motion is not available.",
             "Do NOT use facility-layout or plant-process framing here.",
         ],
     },
@@ -14947,13 +15476,43 @@ MODE_CONTRACTS = {
             "parts, mates, and neighboring components; assembly function and how parts fit together",
             "exploded-view steps, configurations, and part/supplier properties",
             "assembly revision compare (what changed between revisions)",
+            "deterministic mechanism motion playback (crank / rod / piston) when a [MOTION] block is present",
         ],
         "tools": [
             "highlight or isolate parts; mate relationships, configurations, and explode steps are in the context",
             "selected and available parts (and any revision diff) are provided in the context",
+            "the [MOTION] block lists motion packages, semantic motion groups, events, and live playback state; motion replays pre-computed SolidWorks transforms -- nothing is simulated at answer time",
+            "motion actions: play_motion {motion_id, rpm, loop} / pause_motion / set_motion_rpm {rpm} / seek_motion {crank_angle_deg} / stop_motion. Highlight actions: set_part_highlight {part_numbers, mode replace/add/remove} / clear_part_highlight {all true/false}. Display actions: set_part_display {part_numbers, hidden or opacity} / clear_part_display {part_numbers or all}. View actions: rotate_view {viewport, direction} / stop_rotate_view {viewport}. To trigger them, emit EXACTLY this block after your prose (strict JSON, and the closing [/UI_ACTIONS] tag is REQUIRED): [UI_ACTIONS] {\"workspace\":\"assembly\",\"actions\":[{\"type\":\"play_motion\",\"motion_id\":\"engine4cyl_crank_cycle\",\"rpm\":40,\"loop\":true}]} [/UI_ACTIONS]",
+            "highlight means selected-only display: the highlighted part(s) stay visible/highlighted and the rest of the assembly becomes hidden. For multiple parts, include all requested part numbers. Use mode add when the user says also/add/include/plus/as well",
+            "motion, display, highlight, and rotate-view actions compose in the same response. For 'show this joint/mechanism/group in motion', match the user words against [MOTION] group labels/functions/part_numbers, choose the smallest relevant group, then emit set_part_highlight mode replace for that group's part_numbers plus play_motion at 30-40 RPM in the same [UI_ACTIONS] block",
+            "for pure visibility requests such as hide/show/make transparent/restore a component, use set_part_display or clear_part_display only; hide means hide only the target part(s), not isolate/highlight the rest",
+            "for show-all/restore-all requests such as 'show all parts' or 'bring back hidden parts', emit clear_part_display all:true and clear_part_highlight all:true in the same [UI_ACTIONS] block",
+            "for pure rotate/spin/orbit requests, use rotate_view or stop_rotate_view only; do NOT emit HIGHLIGHT_PARTS, EXPLODE_LEVEL, or stop_motion",
+            "if the user asks for a feature or tolerance in motion, use feature highlights only as supporting context; the assembly viewport action must still come from the matching [MOTION] group part_numbers plus play_motion",
         ],
         "avoid": [
             "Do NOT invent mates, parts, or configurations that are not in the assembly context.",
+            "Motion: do NOT invent loads, clearances, forces, velocities, accelerations, firing order, or operating RPM -- none of that is computed. Displayed RPM is a visualization rate only, never an engine operating speed.",
+            "If no [MOTION] block is present, motion playback is not available for this assembly -- say so instead of pretending to animate.",
+            "Viewport state is persistent: do not stop motion, stop rotation, clear highlights, or restore hidden parts unless the user explicitly asks.",
+            "Do NOT use facility-layout or plant-process framing here.",
+        ],
+    },
+    "assembly_training": {
+        "label": "Assembly Training",
+        "reasoning_focus": [
+            "the training viewport, selected product-structure node, active subassembly, and current guided-build step",
+            "how the visible parts are assembled, joined, verified, and sequenced for a trainee",
+            "CAD-grounded part names and product-structure facts from the [ASSEMBLY TRAINING] block",
+        ],
+        "tools": [
+            "the [ASSEMBLY TRAINING] block identifies the product, active viewer asset, selected node, available nodes, and current procedure step",
+            "use the product/selected-node names from the training state rather than inferring the product type from appearance alone",
+        ],
+        "avoid": [
+            "Do NOT identify the assembly as an engine, valve train, crankshaft, or any other product unless those exact facts appear in the [ASSEMBLY TRAINING] block.",
+            "Do NOT use generic Assembly-tab mate/revision framing unless the training context provides those details.",
+            "If the visible product is unclear, say what the training state says is loaded instead of guessing.",
             "Do NOT use facility-layout or plant-process framing here.",
         ],
     },
@@ -15073,6 +15632,97 @@ def _render_mode_contract_section(mode: Optional[str], submode: Optional[str], s
             pp.append("Available zones: " + ", ".join(str(z.get("id", "?")) for z in zones[:12]))
         if len(pp) > 1:
             blocks.append("\n".join(pp))
+
+    elif mode == "assembly_training":
+        at = ["[ASSEMBLY TRAINING]"]
+        if state.get("product_name"):
+            at.append("Product: " + str(state["product_name"]))
+        if state.get("target_role"):
+            at.append("Target trainee role: " + str(state["target_role"]))
+        if state.get("target_component"):
+            at.append("Target component: " + str(state["target_component"]))
+        if state.get("goal"):
+            at.append("Training goal: " + str(state["goal"]))
+        viewer = state.get("active_viewer") or {}
+        if viewer:
+            at.append(
+                "Active viewport: "
+                + str(viewer.get("node_name") or viewer.get("node_id") or "?")
+                + f" ({viewer.get('node_id', '?')}); "
+                + f"parts={viewer.get('part_count', '?')}; "
+                + f"asset={viewer.get('asset_glb_url', '?')}"
+            )
+        selected = state.get("selected_node") or {}
+        if selected:
+            at.append(
+                "Selected product-structure node: "
+                + str(selected.get("name") or selected.get("node_id") or "?")
+                + f" ({selected.get('node_id', '?')}, level {selected.get('level', '?')}, parts={selected.get('part_count', '?')})"
+            )
+            if selected.get("purpose"):
+                at.append("Selected purpose: " + str(selected["purpose"])[:360])
+            names = selected.get("part_names") or []
+            if names:
+                at.append("Selected part names: " + ", ".join(str(n) for n in names[:12]))
+        proc = state.get("procedure") or {}
+        if proc:
+            at.append(
+                "Current procedure: "
+                + str(proc.get("title") or "?")
+                + f"; step {int(proc.get('step_index') or 0) + 1}/{proc.get('step_count', '?')}: "
+                + str(proc.get("current_step_title") or "?")
+            )
+            if proc.get("current_step_instruction"):
+                at.append("Current step instruction: " + str(proc["current_step_instruction"])[:360])
+        top = state.get("available_top_nodes") or []
+        if top:
+            at.append("Available product-structure nodes: " + ", ".join(
+                f"{n.get('name', '?')} ({n.get('node_id', '?')})" for n in top[:12]
+            ))
+        if len(at) > 1:
+            blocks.append("\n".join(at))
+
+    # -- [MOTION] -- deterministic motion package summary (assembly / 3dmodel).
+    # Facts come from the code-generated agent summary; the full transform
+    # arrays never reach the model. Rendered for any mode whose state carries
+    # a motion block so the contract stays frontend-factual / backend-prose.
+    motion = state.get("motion") or {}
+    if motion.get("available"):
+        mo = ["[MOTION]"]
+        for m in (motion.get("motions") or [])[:2]:
+            mo.append(f"Motion package: {m.get('motion_id', '?')} -- {m.get('name', '')}")
+            mo.append(
+                f"  Driver: {m.get('driver', '?')}; default {m.get('default_rpm', '?')} RPM, "
+                f"display range {m.get('rpm_range', '?')} (visualization rate only); "
+                f"moving components: {m.get('moving_component_count', '?')}"
+            )
+            strokes = m.get("stroke_m") or {}
+            if isinstance(strokes, dict) and strokes:
+                vals = [v for v in strokes.values() if isinstance(v, (int, float))]
+                if vals:
+                    mo.append(f"  Piston stroke: {min(vals):.4f}-{max(vals):.4f} m across {len(vals)} piston(s)")
+            elif isinstance(strokes, (int, float)):
+                mo.append(f"  Stroke: {strokes} m")
+            events = m.get("events") or []
+            if events:
+                mo.append("  Events: " + ", ".join(
+                    f"{e.get('id', '?')}@{e.get('angle_deg', '?')} deg" for e in events[:12]
+                ))
+            for g in (m.get("groups") or [])[:10]:
+                pns = ", ".join(str(p) for p in (g.get("part_numbers") or [])[:10])
+                mo.append(
+                    f"  Group {g.get('id', '?')} ({g.get('label', '?')}): "
+                    f"{g.get('component_count', '?')} component(s); part numbers: {pns or 'n/a'}"
+                )
+                if g.get("function"):
+                    mo.append(f"    Function: {g.get('function')}")
+        pb = motion.get("playback") or {}
+        mo.append(
+            "Playback: " + ("PLAYING" if pb.get("playing") else "stopped")
+            + (f" at {pb.get('rpm')} RPM" if pb.get("rpm") else "")
+            + (f", crank angle {pb.get('angle_deg')} deg" if pb.get("angle_deg") is not None else "")
+        )
+        blocks.append("\n".join(mo))
 
     return "\n\n".join(blocks)
 
@@ -15279,20 +15929,98 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     # CAD features available for highlighting on the 3D part model
     available_cad_features = inspection_context.get("available_cad_features", [])
     if available_cad_features:
-        cf_lines = ["AVAILABLE CAD FEATURES ON THIS PART (you can highlight any on the 3D model):"]
-        for feat in available_cad_features:
-            fid = feat.get("cad_feature_id", "")
-            label = feat.get("display_label", "")
-            ftype = feat.get("type", "")
-            color = feat.get("color_name", "")
-            face_count = feat.get("face_count", 0)
-            type_desc = {"holeWizard": "hole", "fillet": "fillet/round", "chamfer": "chamfer/bevel",
-                         "extrude": "extrusion", "extruthin": "thin extrusion (base body)",
-                         "revolve": "revolution", "cut": "cut"}.get(ftype, ftype)
-            cf_lines.append(f"- {fid} \u2014 {label} ({type_desc}, {face_count} faces) [{color}]")
-        cf_lines.append("To highlight features, include a line: HIGHLIGHT_FEATURES: feature_id1, feature_id2")
-        cf_lines.append("You can also use the feature type as shorthand: HIGHLIGHT_FEATURES: fillet1 (fuzzy matching is supported).")
-        cf_lines.append("Use color names in text (e.g. \"the green holes\"), not feature IDs.")
+        cad_by_id = {
+            feat.get("cad_feature_id", ""): feat
+            for feat in available_cad_features
+            if isinstance(feat, dict) and feat.get("cad_feature_id")
+        }
+        grouped_profile_features = [
+            pf for pf in inspection_context.get("profile_features", [])
+            if isinstance(pf, dict) and (
+                (isinstance(pf.get("highlight_target_ids"), list) and pf.get("highlight_target_ids"))
+                or (isinstance(pf.get("cad_feature_ids"), list) and pf.get("cad_feature_ids"))
+            )
+        ]
+        if grouped_profile_features:
+            cf_lines = ["USER-FACING FEATURES ON THIS PART (inspectable feature list; use these names with HIGHLIGHT_FEATURES):"]
+            color_cues: List[str] = []
+            operation_cues: List[str] = []
+            for pf in grouped_profile_features:
+                name = pf.get("name", "")
+                count = pf.get("count", 1)
+                ftype = pf.get("type", "")
+                desc = pf.get("spatial_description", "")
+                reason = pf.get("inspection_reason", "")
+                solidworks_ops = pf.get("solidworks_operations", [])
+                op_by_id = {}
+                if isinstance(solidworks_ops, list):
+                    for op in solidworks_ops:
+                        if isinstance(op, dict) and op.get("cad_feature_id"):
+                            op_by_id[str(op.get("cad_feature_id"))] = op
+                operation_bits = []
+                for fid in pf.get("cad_feature_ids", []):
+                    cad = cad_by_id.get(fid, {})
+                    op = op_by_id.get(str(fid), {})
+                    cad_label = (
+                        op.get("sw_name", "")
+                        or cad.get("display_label", "")
+                        or cad.get("sw_name", "")
+                        or fid
+                    )
+                    color = op.get("color_name", "") or cad.get("color_name", "")
+                    role = op.get("role", "")
+                    bit = f"{fid}"
+                    if color:
+                        bit += f" [{color}; SolidWorks operation: {cad_label}]"
+                    else:
+                        bit += f" [SolidWorks operation: {cad_label}]"
+                    if role:
+                        bit += f" - {role}"
+                    operation_bits.append(bit)
+                    if color and name:
+                        cue = f"{color} -> {name}"
+                        if cue not in color_cues:
+                            color_cues.append(cue)
+                highlight_ids = pf.get("highlight_target_ids")
+                if not isinstance(highlight_ids, list) or not highlight_ids:
+                    highlight_ids = pf.get("cad_feature_ids", [])
+                line = f"- {name} x{count} ({ftype})"
+                if desc:
+                    line += f" — {desc}"
+                if reason:
+                    line += f" Function/inspection reason: {reason}"
+                cf_lines.append(line)
+                if operation_bits:
+                    operation_cues.append(f"- {name}: " + ", ".join(operation_bits))
+            if color_cues:
+                cf_lines.append("COLOR CUES (use only when the user asks by color; do not volunteer colors in a normal feature list): " + "; ".join(color_cues))
+            if operation_cues and _is_technical_drilldown_message(inspection_context.get("_user_message")):
+                cf_lines.append("CAD OPERATION MAP (internal; use only if the user explicitly asks which SolidWorks operations build a feature):\n" + "\n".join(operation_cues))
+            cf_lines.append("For normal questions like 'show/list/count all features', answer with the user-facing feature names and plain function. Do not mention internal renderer terms, highlight target IDs, raw operation counts, implementation details, or SolidWorks operation names unless the user explicitly asks for CAD internals.")
+        else:
+            cf_lines = ["AVAILABLE CAD FEATURES ON THIS PART (you can highlight any on the 3D model):"]
+            for feat in available_cad_features:
+                fid = feat.get("cad_feature_id", "")
+                cad_label = feat.get("display_label", "") or feat.get("sw_name", "")
+                label = feat.get("semantic_label") or feat.get("semantic_profile_feature") or cad_label
+                semantic_profile = feat.get("semantic_profile_feature", "")
+                semantic_description = feat.get("semantic_description", "")
+                ftype = feat.get("type", "")
+                color = feat.get("color_name", "")
+                face_count = feat.get("face_count", 0)
+                type_desc = {"holeWizard": "hole", "fillet": "fillet/round", "chamfer": "chamfer/bevel",
+                             "extrude": "extrusion", "extruthin": "thin extrusion (base body)",
+                             "revolve": "revolution", "cut": "cut"}.get(ftype, ftype)
+                detail = f"- {fid} \u2014 {label}"
+                if semantic_profile and semantic_profile != label:
+                    detail += f" (profile feature: {semantic_profile})"
+                detail += f" [{color}; CAD: {cad_label}, {type_desc}, {face_count} faces]"
+                if semantic_description:
+                    detail += f" \u2014 {semantic_description}"
+                cf_lines.append(detail)
+        cf_lines.append("To highlight features, include a line: HIGHLIGHT_FEATURES: user-facing feature name")
+        cf_lines.append("Use plain user-facing feature names in your answer. Do not call user-facing geometry by raw SolidWorks operation names like Cut-Extrude1 unless the user asks for CAD internals.")
+        cf_lines.append("You can use color names in HIGHLIGHT_FEATURES when the user asks by color; fuzzy matching is supported.")
         cf_lines.append("The 3D model starts gray \u2014 your highlight reveals the feature's color.")
         parts.append("\n".join(cf_lines))
 
@@ -15738,24 +16466,93 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     in_progress = bool(inspection_context.get("inspection_in_progress"))
     can_run = bool(inspection_context.get("inspection_can_run"))
 
-    status_lines = []
-    if can_run:
-        status_lines.append("INSPECTION READY: Drawing and part number are set. You can emit RUN_INSPECTION if the user asks.")
-    else:
-        if not has_drawing:
-            status_lines.append("NO DRAWING: Tell user to upload a drawing file first.")
-        if not has_part:
-            status_lines.append("NO PART: Tell user to select a part number first.")
-        if in_progress:
-            status_lines.append("INSPECTION RUNNING: Tell user to wait for current inspection to finish.")
-    if status_lines:
-        parts.append("\n".join(status_lines))
+    # Facility/process training modes are CAD-context modes, not drawing
+    # inspection runs. Do not tell Sage to ask for a drawing/part there.
+    active_mode = (inspection_context.get("active_mode") or "").strip()
+    skip_inspection_prereqs = active_mode in {"facility_layout", "plant_process", "assembly_training"}
+    if not skip_inspection_prereqs:
+        status_lines = []
+        if can_run:
+            status_lines.append("INSPECTION READY: Drawing and part number are set. You can emit RUN_INSPECTION if the user asks.")
+        else:
+            if not has_drawing:
+                status_lines.append("NO DRAWING: Tell user to upload a drawing file first.")
+            if not has_part:
+                status_lines.append("NO PART: Tell user to select a part number first.")
+            if in_progress:
+                status_lines.append("INSPECTION RUNNING: Tell user to wait for current inspection to finish.")
+        if status_lines:
+            parts.append("\n".join(status_lines))
 
     return "\n\n".join(parts)
 
 
+_MOJIBAKE_REPLACEMENTS = (
+    ("\u00e2\u20ac\u201d", "-"),   # mojibake em dash
+    ("\u00e2\u20ac\u201c", "-"),   # mojibake en dash
+    ("\u00e2\"", "-"),             # truncated mojibake dash seen in chat
+    ("\u0101\u20ac\u201d", "-"),   # alternate mojibake em dash
+    ("\u0101\u20ac\u201c", "-"),   # alternate mojibake en dash
+    ("\u0101\u20ac\"", "-"),       # alternate truncated mojibake dash
+    ("\u0101\u20ac\u009d", "-"),   # alternate mojibake dash
+    ("\u00e2\u20ac\u2122", "'"),   # mojibake right single quote
+    ("\u00e2\u20ac\u02dc", "'"),   # mojibake left single quote
+    ("\u0101\u20ac\u2122", "'"),   # alternate mojibake right single quote
+    ("\u0101\u20ac\u02dc", "'"),   # alternate mojibake left single quote
+    ("\u00e2\u20ac\u0153", '"'),   # mojibake left double quote
+    ("\u00e2\u20ac\u009d", '"'),   # mojibake right double quote
+    ("\u0101\u20ac\u0153", '"'),   # alternate mojibake left double quote
+    ("\u0101\u20ac\u009d", '"'),   # alternate mojibake right double quote
+    ("\u00e2\u20ac\u00a6", "..."), # mojibake ellipsis
+    ("\u0101\u20ac\u00a6", "..."), # alternate mojibake ellipsis
+    ("\u00e2\u2020\u2019", "->"),  # mojibake right arrow
+    ("\u00e2\u2020\u0090", "<-"),  # mojibake left arrow
+    ("\u00e2\u2020\u201d", "<->"), # mojibake bidirectional arrow
+    ("\u0101\u2020\u2019", "->"),  # alternate mojibake right arrow
+    ("\u0101\u2020\u0090", "<-"),  # alternate mojibake left arrow
+    ("\u0101\u2020\u201d", "<->"), # alternate mojibake bidirectional arrow
+    ("\u00e2\u0152\u20ac", "diameter"),
+    ("\u0172", "diameter "),
+    ("\u00c2\u00a7", "Section"),
+    ("\u00c2\u00b0", " deg"),
+    ("\u00c3\u2014", "x"),
+    ("\u00c3\u0098", "diameter"),
+)
+
+_UNICODE_PUNCT_TRANSLATION = {
+    ord("\u2014"): "-",
+    ord("\u2013"): "-",
+    ord("\u2018"): "'",
+    ord("\u2019"): "'",
+    ord("\u201c"): '"',
+    ord("\u201d"): '"',
+    ord("\u2026"): "...",
+    ord("\u2192"): "->",
+    ord("\u2190"): "<-",
+    ord("\u2194"): "<->",
+    ord("\u00d7"): "x",
+}
+
+
+def _fix_text_encoding_artifacts(text: str) -> str:
+    """Remove mojibake and fragile punctuation from user-visible agent text."""
+    if not isinstance(text, str) or not text:
+        return text
+    out = text
+    for bad, good in _MOJIBAKE_REPLACEMENTS:
+        out = out.replace(bad, good)
+    out = out.translate(_UNICODE_PUNCT_TRANSLATION)
+    out = out.replace("\ufffd", "")
+    out = re.sub(r'[\u00e2\u0101]\u20ac["\u009d\u201c\u201d]?', "-", out)
+    # Last-resort cleanup for partial mojibake sequences such as a lone "â".
+    out = re.sub(r'\u00e2(?=\s|$|["\'])', "-", out)
+    out = re.sub(r'\u0101(?=\s|$|["\'])', "-", out)
+    return out
+
+
 def _clean_agent_response(text: str) -> str:
     """Strip markdown report formatting to keep agent responses conversational."""
+    text = _fix_text_encoding_artifacts(text or "")
     lines = text.split("\n")
     cleaned = []
     for line in lines:
@@ -15775,7 +16572,7 @@ def _clean_agent_response(text: str) -> str:
     # Collapse triple+ newlines into double
     result = "\n".join(cleaned)
     result = re.sub(r'\n{3,}', '\n\n', result)
-    return result.strip()
+    return _fix_text_encoding_artifacts(result.strip())
 
 
 def _is_walkthrough_message(message: str) -> bool:
@@ -16023,6 +16820,19 @@ async def agent_chat(request: AgentChatRequest):
         raw_ctx = request.inspection_context or request.context or {}
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
+        ctx["_user_message"] = request.message
+
+        if request.agent_type in {"inspector", "deviation-analyst"} and _is_user_facing_feature_list_request(request.message):
+            feature_list_result = _feature_list_chat_result(ctx, request.agent_type)
+            if feature_list_result:
+                return feature_list_result
+
+        if request.agent_type in {"inspector", "deviation-analyst"}:
+            profile_feature_result = _profile_feature_highlight_chat_result(
+                ctx, request.message, request.agent_type,
+            )
+            if profile_feature_result:
+                return profile_feature_result
 
         # Deterministic fast path for semantic-region CAD target questions
         # and edit-intent handoff questions. These are not open-ended LLM
@@ -16548,38 +17358,9 @@ async def agent_chat(request: AgentChatRequest):
         highlight_features = []
         hf_match = re.search(r'^HIGHLIGHT_FEATURES?:\s*(.+)$', response_text, re.MULTILINE)
         if hf_match:
-            available_feature_ids = set()
-            if ctx:
-                for feat in ctx.get("available_cad_features", []):
-                    available_feature_ids.add(feat.get("cad_feature_id", ""))
             raw_features = [f.strip() for f in hf_match.group(1).split(",") if f.strip()]
-            if available_feature_ids:
-                # Exact match first
-                highlight_features = [f for f in raw_features if f in available_feature_ids]
-                # Fuzzy fallback: match by substring or type keyword for any unmatched
-                if len(highlight_features) < len(raw_features):
-                    unmatched = [f for f in raw_features if f not in available_feature_ids]
-                    def _slug(s):
-                        """Normalize a string for fuzzy matching: lowercase, strip all non-alphanumeric."""
-                        return re.sub(r'[^a-z0-9]', '', s.lower())
-                    for um in unmatched:
-                        um_slug = _slug(um)
-                        for avail_id in available_feature_ids:
-                            if avail_id in highlight_features:
-                                continue
-                            avail_slug = _slug(avail_id)
-                            # Substring match in either direction
-                            if um_slug in avail_slug or avail_slug in um_slug:
-                                highlight_features.append(avail_id)
-                            # Type keyword match: "fillet" matches any ID starting with "fillet"
-                            elif avail_slug.startswith(um_slug):
-                                highlight_features.append(avail_id)
-                            # Plural stripping: "fillets" -> "fillet", "holes" -> "hole"
-                            elif um_slug.endswith('s') and avail_slug.startswith(um_slug[:-1]):
-                                highlight_features.append(avail_id)
-                    highlight_features = list(dict.fromkeys(highlight_features))  # dedupe preserving order
-            else:
-                highlight_features = raw_features
+            resolved = _feature_highlight_targets_from_context(ctx, raw_features)
+            highlight_features = resolved if resolved else raw_features
             response_text = re.sub(r'^HIGHLIGHT_FEATURES?:\s*(.+)$', '', response_text, flags=re.MULTILINE).strip()
 
         # Extract semantic-region highlight marker. Independent of the
@@ -16803,24 +17584,67 @@ async def agent_chat(request: AgentChatRequest):
         # the existing pipeline above. Failure to parse JSON drops the actions
         # silently â€” the prose response is still delivered honestly.
         ui_actions_payload = None
+
+        def _ui_actions_from_json(raw_block: str):
+            try:
+                parsed = json.loads(raw_block)
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"[UI_ACTIONS] block JSON parse failed: {e} â€” dropped")
+                return None
+            actions = parsed.get("actions") if isinstance(parsed, dict) else None
+            if not isinstance(actions, list):
+                logger.warning("[UI_ACTIONS] block parsed but 'actions' missing or not a list â€” dropped")
+                return None
+            return {
+                "workspace": (parsed.get("workspace") or "assembly_compare"),
+                "actions": [a for a in actions if isinstance(a, dict) and a.get("type")],
+            }
+
         ui_actions_pattern = re.compile(r'\[UI_ACTIONS\]\s*(\{.*?\})\s*\[/UI_ACTIONS\]', re.DOTALL)
         ui_match = ui_actions_pattern.search(response_text)
         if ui_match:
-            raw_block = ui_match.group(1)
-            try:
-                parsed = json.loads(raw_block)
-                actions = parsed.get("actions") if isinstance(parsed, dict) else None
-                if isinstance(actions, list):
-                    ui_actions_payload = {
-                        "workspace": (parsed.get("workspace") or "assembly_compare"),
-                        "actions": [a for a in actions if isinstance(a, dict) and a.get("type")],
-                    }
-                    logger.info(f"[UI_ACTIONS] parsed {len(ui_actions_payload['actions'])} action(s) for workspace={ui_actions_payload['workspace']}")
-                else:
-                    logger.warning("[UI_ACTIONS] block parsed but 'actions' missing or not a list â€” dropped")
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"[UI_ACTIONS] block JSON parse failed: {e} â€” dropped")
+            ui_actions_payload = _ui_actions_from_json(ui_match.group(1))
             response_text = ui_actions_pattern.sub('', response_text).strip()
+        elif '[UI_ACTIONS]' in response_text:
+            # Tolerant fallback: the model opened a block but omitted or lost
+            # the [/UI_ACTIONS] terminator (or truncated mid-block). Extract
+            # the first brace-balanced JSON object after the marker; whether
+            # or not that succeeds, strip the machine-directive debris from
+            # the prose so the user never sees a dangling fragment.
+            marker_idx = response_text.find('[UI_ACTIONS]')
+            tail = response_text[marker_idx:]
+            brace_start = tail.find('{')
+            if brace_start != -1:
+                depth = 0
+                in_str = False
+                esc = False
+                end_idx = -1
+                for i2, ch in enumerate(tail[brace_start:], start=brace_start):
+                    if esc:
+                        esc = False
+                        continue
+                    if ch == '\\':
+                        esc = True
+                        continue
+                    if ch == '"':
+                        in_str = not in_str
+                        continue
+                    if in_str:
+                        continue
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end_idx = i2
+                            break
+                if end_idx != -1:
+                    ui_actions_payload = _ui_actions_from_json(tail[brace_start:end_idx + 1])
+                    if ui_actions_payload:
+                        logger.info("[UI_ACTIONS] recovered block without [/UI_ACTIONS] terminator")
+            response_text = response_text[:marker_idx].strip()
+        if ui_actions_payload:
+            logger.info(f"[UI_ACTIONS] parsed {len(ui_actions_payload['actions'])} action(s) for workspace={ui_actions_payload['workspace']}")
 
         logger.info(f"[Sage parsed] highlight_parts={highlight_parts}, isolate_parts={isolate_parts}, "
                     f"narration_segments={len(narration_segments)}, camera_view={camera_view}, explode_level={explode_level}, "
@@ -16980,11 +17804,34 @@ async def agent_chat(request: AgentChatRequest):
             response_text = re.sub(r'ANIMATE_MOTION:\s*(start|stop)\s*', '', response_text, flags=re.I).strip()
 
         # Always update response with final cleaned text
-        result["response"] = response_text
+        result["response"] = _clean_agent_response(response_text)
 
         # Phase 7: All tool_calls go through canonical guardrails.
         if native_tool_calls:
-            guarded, warnings = apply_tool_guardrails(native_tool_calls, request.agent_type, "native")
+            # The model may split its actions across BOTH channels in one
+            # response (e.g. a HIGHLIGHT_PARTS text marker plus a native
+            # ui_actions tool call for motion). Merge marker-derived calls
+            # whose tool name is absent from the native block so neither
+            # channel silently drops the other; per-name dedupe preserves
+            # the original "no double-parse" guarantee.
+            _marker_all = build_tool_calls_from_result(result)
+            _native_ui = next((tc for tc in native_tool_calls
+                               if isinstance(tc, dict) and tc.get("name") == "ui_actions"), None)
+            _marker_ui = next((tc for tc in _marker_all
+                               if isinstance(tc, dict) and tc.get("name") == "ui_actions"), None)
+            if _native_ui and _marker_ui:
+                native_args = _native_ui.setdefault("args", {})
+                marker_args = _marker_ui.get("args") or {}
+                native_actions = native_args.get("actions") if isinstance(native_args.get("actions"), list) else []
+                marker_actions = marker_args.get("actions") if isinstance(marker_args.get("actions"), list) else []
+                native_args["workspace"] = native_args.get("workspace") or marker_args.get("workspace") or "assembly"
+                native_args["actions"] = native_actions + marker_actions
+            _native_names = {tc.get("name") for tc in native_tool_calls if isinstance(tc, dict)}
+            _marker_calls = [c for c in _marker_all
+                             if c.get("name") not in _native_names]
+            if _marker_calls:
+                logger.info(f"[ToolParse] merged marker-derived calls into native block: {[c['name'] for c in _marker_calls]}")
+            guarded, warnings = apply_tool_guardrails(native_tool_calls + _marker_calls, request.agent_type, "native")
             result["tool_calls"] = guarded
             result["tool_source"] = "native"
             # Clear conflicting marker-derived action fields
@@ -16992,7 +17839,7 @@ async def agent_chat(request: AgentChatRequest):
                         "highlight_parts", "camera_view", "isolate_parts",
                         "compare_parts", "compare_features", "show_geometry_diff",
                         "run_inspection", "animate_motion", "explode_level",
-                        "fai_fills", "fai_tol"):
+                        "fai_fills", "fai_tol", "ui_actions"):
                 result.pop(key, None)
             if request.agent_type == "parts-finder":
                 apply_tool_calls_to_legacy_result(result, guarded)
@@ -17106,6 +17953,7 @@ async def agent_chat_stream(request: AgentChatRequest):
             raw_ctx = request.inspection_context or request.context or {}
             normalized = normalize_agent_context(raw_ctx)
             ctx = normalized["flat"]
+            ctx["_user_message"] = request.message
             context_text = _build_context_message(ctx)
 
             if request.cross_agent_context:

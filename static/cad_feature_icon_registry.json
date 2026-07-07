@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "fallbackIcon": "ip-cad-icon-feature-group",
+  "semantic": [
+    {
+      "icon": "ip-cad-icon-ring-grooves",
+      "aliases": ["ring groove", "ring grooves", "ring_groove", "groove stack", "seal groove"]
+    },
+    {
+      "icon": "ip-cad-icon-counterbore",
+      "aliases": ["counterbore", "counter bore", "spotface", "boss face", "seat counterbore"]
+    },
+    {
+      "icon": "ip-cad-icon-pin-bore",
+      "aliases": ["through bore", "through_bore", "pin bore", "pin bores", "hole", "bore", "shaft bore", "bearing bore"]
+    },
+    {
+      "icon": "ip-cad-icon-dome",
+      "aliases": ["dome", "crown", "surface", "spherical", "cap surface"]
+    },
+    {
+      "icon": "ip-cad-icon-cut",
+      "aliases": ["relief", "cutout", "cut out", "pocket", "slot", "skirt", "clearance"]
+    },
+    {
+      "icon": "ip-cad-icon-boss",
+      "aliases": ["boss", "pad", "rib", "mounting boss", "raised feature"]
+    },
+    {
+      "icon": "ip-cad-icon-plane",
+      "aliases": ["datum", "reference", "reference plane", "plane"]
+    },
+    {
+      "icon": "ip-cad-icon-concentric",
+      "aliases": ["concentric", "mate", "relation", "coaxial"]
+    }
+  ],
+  "operations": [
+    {
+      "icon": "ip-cad-icon-counterbore",
+      "meta": "hole",
+      "aliases": ["hole wizard", "counterbore", "counter bore", "countersink", "tapped hole", "simple hole", "hole series"]
+    },
+    {
+      "icon": "ip-cad-icon-cut",
+      "meta": "cut",
+      "aliases": ["cut extrude", "cut-extrude", "extruded cut", "ice cut extrude", "revolved cut", "swept cut", "lofted cut", "boundary cut"]
+    },
+    {
+      "icon": "ip-cad-icon-boss",
+      "meta": "boss",
+      "aliases": ["boss extrude", "boss-extrude", "extruded boss base", "extruded boss", "base extrude", "ice boss extrude", "swept boss", "lofted boss", "boundary boss", "rib"]
+    },
+    {
+      "icon": "ip-cad-icon-revolve",
+      "meta": "revolve",
+      "aliases": ["revolve", "revolved boss base", "revolved boss", "revolved surface", "revolution"]
+    },
+    {
+      "icon": "ip-cad-icon-dome",
+      "meta": "surface",
+      "aliases": ["dome", "surface fill", "filled surface", "knit surface", "offset surface", "delete face", "move face"]
+    },
+    {
+      "icon": "ip-cad-icon-mirror",
+      "meta": "mirror",
+      "aliases": ["mirror", "mirrorpattern", "mirror pattern"]
+    },
+    {
+      "icon": "ip-cad-icon-feature-group",
+      "meta": "pattern",
+      "aliases": ["linear pattern", "circular pattern", "curve driven pattern", "sketch driven pattern", "fill pattern", "pattern"]
+    },
+    {
+      "icon": "ip-cad-icon-feature-group",
+      "meta": "edge",
+      "aliases": ["fillet", "chamfer", "round", "variable radius fillet"]
+    },
+    {
+      "icon": "ip-cad-icon-cut",
+      "meta": "shell",
+      "aliases": ["shell", "draft", "split line", "wrap", "indent", "flex"]
+    },
+    {
+      "icon": "ip-cad-icon-plane",
+      "meta": "ref",
+      "aliases": ["reference plane", "plane", "axis", "reference axis", "point", "coordinate system"]
+    },
+    {
+      "icon": "ip-cad-icon-sketch",
+      "meta": "sketch",
+      "aliases": ["sketch", "3d sketch", "profile", "layout sketch"]
+    },
+    {
+      "icon": "ip-cad-icon-origin",
+      "meta": "origin",
+      "aliases": ["origin"]
+    },
+    {
+      "icon": "ip-cad-icon-concentric",
+      "meta": "mate",
+      "aliases": ["concentric", "coincident", "parallel", "perpendicular", "tangent", "distance mate", "angle mate", "mate"]
+    }
+  ]
+}

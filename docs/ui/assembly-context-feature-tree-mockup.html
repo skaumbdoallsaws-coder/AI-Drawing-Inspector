@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InspectorPro Assembly Context Feature Tree Mockup</title>
+  <style>
+    :root {
+      --bg: #111720;
+      --panel: #1b222d;
+      --panel-2: #202a36;
+      --panel-3: #263241;
+      --border: #334253;
+      --text: #e6edf5;
+      --muted: #8e9cab;
+      --accent: #4fc3f7;
+      --accent-2: #00e676;
+      --warn: #f6c14f;
+      --blue-top: #afd7e3;
+      --blue-left: #679fb6;
+      --blue-right: #3a748c;
+      --amber-top: #ffe98b;
+      --amber-left: #dea533;
+      --amber-right: #9b6414;
+      --cut: #2e4256;
+      --ink: #0b1520;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 68% 38%, #344251 0, #222b36 38%, #141a22 100%);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    .app {
+      width: 1420px;
+      height: 850px;
+      margin: 28px auto;
+      border: 1px solid #263445;
+      background: #0f141b;
+      box-shadow: 0 20px 50px rgba(0,0,0,.42);
+      display: grid;
+      grid-template-rows: 42px 86px 1fr;
+      overflow: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 14px;
+      border-bottom: 1px solid #273241;
+      background: #0d1218;
+      font-size: 12px;
+    }
+    .brand { font-weight: 700; color: #f6fbff; }
+    .brand span { color: var(--accent); }
+    .top-menu { display: flex; gap: 18px; color: #bac6d3; }
+    .top-spacer { flex: 1; }
+    .search {
+      width: 210px;
+      height: 24px;
+      border: 1px solid #293747;
+      border-radius: 3px;
+      color: #8f9ead;
+      padding: 4px 8px;
+      background: #111821;
+    }
+    .run {
+      height: 30px;
+      border: 0;
+      border-radius: 3px;
+      padding: 0 16px;
+      color: white;
+      background: #0b78d0;
+      font-weight: 600;
+    }
+
+    .ribbon {
+      display: grid;
+      grid-template-columns: 268px 1fr;
+      background: #151c25;
+      border-bottom: 1px solid #2e3b4b;
+    }
+    .ribbon-tabs {
+      grid-column: 2;
+      height: 32px;
+      display: flex;
+      align-items: end;
+      gap: 4px;
+      padding-left: 12px;
+      border-bottom: 1px solid #283545;
+    }
+    .tab {
+      height: 28px;
+      padding: 7px 14px 0;
+      color: #c7d2dd;
+      font-size: 12px;
+      border: 1px solid transparent;
+      border-bottom: 0;
+    }
+    .tab.active {
+      color: #fff;
+      background: #202a36;
+      border-color: #38506a;
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+    .ribbon-tools {
+      grid-column: 2;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      padding: 8px 16px 10px;
+    }
+    .tool-group {
+      width: 120px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      color: #cdd7e1;
+      font-size: 11px;
+      border-left: 1px solid rgba(255,255,255,.05);
+      border-right: 1px solid rgba(0,0,0,.22);
+    }
+    .tool-icon { font-size: 19px; line-height: 1; }
+    .tool-label { margin-top: 4px; color: #a8b5c3; text-transform: uppercase; font-size: 9px; letter-spacing: .08em; }
+
+    .main {
+      display: grid;
+      grid-template-columns: 268px 1fr;
+      min-height: 0;
+    }
+    .left {
+      background: linear-gradient(180deg, #202834 0, #171e28 100%);
+      border-right: 1px solid #2d3a4a;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .viewport {
+      position: relative;
+      background: radial-gradient(circle at 66% 40%, #3c4a59 0, #2b3542 42%, #202832 100%);
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .section {
+      border-bottom: 1px solid #2b3848;
+      padding: 14px;
+    }
+    .section-title {
+      color: #8fa0b1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 9px;
+    }
+    .upload {
+      height: 92px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #41566d;
+      border-radius: 5px;
+      color: #cfe9ff;
+      background: #1d2632;
+      font-size: 13px;
+    }
+    .part-card {
+      border: 1px solid #334456;
+      background: #202936;
+      border-radius: 4px;
+      padding: 9px 10px;
+      font-size: 12px;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      padding: 5px 0;
+      color: #cbd7e2;
+    }
+    .assembly-link {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      color: #dff7ea;
+      border: 1px solid rgba(0,230,118,.55);
+      background: rgba(0,230,118,.08);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .scope {
+      padding: 12px 12px 8px;
+      border-bottom: 1px solid #2b3848;
+    }
+    .scope-title {
+      color: #8fa0b1;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .scope-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+      background: #141b24;
+      border: 1px solid #334253;
+      border-radius: 5px;
+      padding: 4px;
+    }
+    .scope-btn {
+      height: 28px;
+      border: 0;
+      border-radius: 3px;
+      background: transparent;
+      color: #9caaba;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .scope-btn.active {
+      color: white;
+      background: #26394b;
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+
+    .tree {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      padding: 8px 0 12px;
+      font-size: 12px;
+    }
+    .tree-header {
+      padding: 5px 14px 7px;
+      color: #dbe7f2;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .tree-header span:last-child { color: var(--muted); font-weight: 500; }
+    .row {
+      min-height: 28px;
+      display: grid;
+      grid-template-columns: 18px 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px 4px 10px;
+      border-left: 2px solid transparent;
+    }
+    .row:hover { background: rgba(255,255,255,.035); }
+    .row.active {
+      border-left-color: var(--accent);
+      background: rgba(79,195,247,.10);
+      padding-left: 8px;
+    }
+    .row.child { grid-template-columns: 36px 20px minmax(0, 1fr) auto; color: #c4d1de; }
+    .row.grandchild { grid-template-columns: 54px 20px minmax(0, 1fr) auto; color: #aebdca; }
+    .chev {
+      width: 0; height: 0;
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      border-left: 6px solid #93a3b3;
+      justify-self: center;
+      transform: rotate(90deg);
+    }
+    .chev.closed { transform: rotate(0); }
+    .line { height: 100%; border-left: 1px solid rgba(154,168,183,.23); justify-self: end; width: 18px; }
+    .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .meta { color: #7d8b99; font-size: 10px; white-space: nowrap; }
+
+    .ico {
+      width: 18px; height: 18px;
+      display: inline-block;
+    }
+    .stroke { stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .blue-top { fill: var(--blue-top); }
+    .blue-left { fill: var(--blue-left); }
+    .blue-right { fill: var(--blue-right); }
+    .amber-top { fill: var(--amber-top); }
+    .amber-left { fill: var(--amber-left); }
+    .amber-right { fill: var(--amber-right); }
+    .cut { fill: var(--cut); }
+    .cyan { fill: #7ce8f2; }
+    .green { fill: #67c87b; }
+    .magenta { fill: #c357c6; }
+    .ghost { opacity: .32; }
+
+    .callout {
+      position: absolute;
+      right: 68px;
+      top: 54px;
+      width: 300px;
+      background: rgba(13,18,25,.88);
+      border: 1px solid #405165;
+      border-radius: 6px;
+      padding: 12px 13px;
+      box-shadow: 0 14px 28px rgba(0,0,0,.25);
+    }
+    .callout h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+    .callout p {
+      margin: 0;
+      color: #b9c7d6;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .viewer-title {
+      position: absolute;
+      left: 24px;
+      top: 20px;
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      color: #dbe7f2;
+      font-size: 12px;
+    }
+    .pill {
+      color: #bfeeff;
+      background: rgba(79,195,247,.10);
+      border: 1px solid rgba(79,195,247,.36);
+      border-radius: 4px;
+      padding: 4px 8px;
+    }
+    .engine {
+      position: absolute;
+      left: 44%;
+      top: 51%;
+      width: 520px;
+      height: 310px;
+      transform: translate(-50%, -50%);
+      opacity: .97;
+    }
+    .gdnt {
+      position: absolute;
+      left: 40px;
+      bottom: 30px;
+      width: 430px;
+      background: rgba(18,24,33,.85);
+      border: 1px solid #405165;
+      border-radius: 6px;
+      padding: 13px 14px;
+    }
+    .gdnt-title {
+      font-size: 12px;
+      color: #dbe7f2;
+      font-weight: 700;
+      margin-bottom: 9px;
+    }
+    .gdnt-grid {
+      display: grid;
+      grid-template-columns: 85px 1fr;
+      row-gap: 7px;
+      column-gap: 10px;
+      font-size: 11px;
+      color: #b8c6d4;
+      line-height: 1.35;
+    }
+    .tag {
+      color: #161b22;
+      background: var(--warn);
+      border-radius: 3px;
+      padding: 2px 5px;
+      font-weight: 700;
+      justify-self: start;
+    }
+  </style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute;left:-9999px" aria-hidden="true">
+  <symbol id="icon-assembly" viewBox="0 0 24 24">
+    <path d="M5 8.5 12 4.5l7 4-7 4Z" class="blue-top stroke"/>
+    <path d="M5 8.5v7l7 4v-7Z" class="blue-left stroke"/>
+    <path d="M19 8.5v7l-7 4v-7Z" class="blue-right stroke"/>
+  </symbol>
+  <symbol id="icon-pin" viewBox="0 0 24 24">
+    <path d="M5 8 12 4.2 19 8l-7 3.8Z" class="blue-top stroke"/>
+    <path d="M5 8v8.5l7 3.8v-8.5Z" class="blue-left stroke"/>
+    <path d="M19 8v8.5l-7 3.8v-8.5Z" class="blue-right stroke"/>
+    <ellipse cx="12" cy="11.7" rx="3.1" ry="1.7" class="cut stroke"/>
+  </symbol>
+  <symbol id="icon-dome" viewBox="0 0 24 24">
+    <ellipse cx="12" cy="16.5" rx="7.5" ry="2.7" class="blue-right stroke"/>
+    <path d="M5 16c.8-5.1 3.3-8.2 7-8.2s6.2 3.1 7 8.2c-1.1 1.5-12.9 1.5-14 0Z" class="blue-top stroke"/>
+  </symbol>
+  <symbol id="icon-part" viewBox="0 0 24 24">
+    <path d="M4 14 12 9.8 20 14l-8 4.2Z" class="amber-top stroke"/>
+    <path d="M4 14v3.7l8 4.1v-3.6Z" class="amber-left stroke"/>
+    <path d="M20 14v3.7l-8 4.1v-3.6Z" class="amber-right stroke"/>
+  </symbol>
+</svg>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand">Inspector<span>Pro</span></div>
+    <div class="top-menu"><span>File</span><span>Edit</span><span>View</span><span>Help</span></div>
+    <div class="top-spacer"></div>
+    <div class="search">Search Commands</div>
+    <button class="run">Run Inspection</button>
+  </div>
+
+  <div class="ribbon">
+    <div></div>
+    <div class="ribbon-tabs">
+      <div class="tab">Drawing</div>
+      <div class="tab active">3D Model</div>
+      <div class="tab">Assembly</div>
+      <div class="tab">Training</div>
+      <div class="tab">Design for Manufacturing</div>
+      <div class="tab">Report</div>
+      <div class="tab">Usage</div>
+      <div class="tab">Sessions</div>
+    </div>
+    <div></div>
+    <div class="ribbon-tools">
+      <div class="tool-group"><div><div class="tool-icon">▣</div><div class="tool-label">Properties</div></div></div>
+      <div class="tool-group"><div><div class="tool-icon">◆</div><div class="tool-label">Features</div></div></div>
+      <div class="tool-group"><div><div class="tool-icon">⟐</div><div class="tool-label">Relations</div></div></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <aside class="left">
+      <div class="section">
+        <div class="section-title">Drawing Upload</div>
+        <div class="upload">Drag & drop or click to upload<br>PNG, JPEG, PDF</div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Part Information</div>
+        <div class="part-card">100006 — Piston</div>
+        <div class="info-row"><span>Part #</span><strong>100006</strong></div>
+        <div class="info-row"><span>Name</span><strong>Piston</strong></div>
+        <div class="info-row"><span>Features</span><strong>5</strong></div>
+        <div class="assembly-link">Assembly: Four Cylinder Engine Assembly<br>43 components · 57 mates</div>
+      </div>
+
+      <div class="scope">
+        <div class="scope-title">Features</div>
+        <div class="scope-switch">
+          <button class="scope-btn">Part Features</button>
+          <button class="scope-btn active">Assembly Context</button>
+        </div>
+      </div>
+
+      <div class="tree">
+        <div class="tree-header"><span>100001 Engine Assembly</span><span>context</span></div>
+        <div class="row">
+          <span class="chev"></span>
+          <svg class="ico"><use href="#icon-assembly"></use></svg>
+          <span class="name">Crank-slider group</span>
+          <span class="meta">4 cyl</span>
+        </div>
+        <div class="row child active">
+          <span class="line"></span>
+          <svg class="ico"><use href="#icon-part"></use></svg>
+          <span class="name">100006 Piston</span>
+          <span class="meta">selected</span>
+        </div>
+        <div class="row grandchild">
+          <span class="line"></span>
+          <svg class="ico"><use href="#icon-pin"></use></svg>
+          <span class="name">Pin bores through bosses</span>
+          <span class="meta">GD&T</span>
+        </div>
+        <div class="row grandchild active">
+          <span class="line"></span>
+          <svg class="ico"><use href="#icon-dome"></use></svg>
+          <span class="name">Crown dome</span>
+          <span class="meta">shown</span>
+        </div>
+        <div class="row child">
+          <span class="line"></span>
+          <svg class="ico"><use href="#icon-part"></use></svg>
+          <span class="name">100007 Piston Pin</span>
+          <span class="meta">mate</span>
+        </div>
+        <div class="row child">
+          <span class="line"></span>
+          <svg class="ico"><use href="#icon-part"></use></svg>
+          <span class="name">100004 Connecting Rod</span>
+          <span class="meta">load path</span>
+        </div>
+        <div class="row child">
+          <span class="line"></span>
+          <svg class="ico"><use href="#icon-part"></use></svg>
+          <span class="name">100009 Piston Rings</span>
+          <span class="meta">3x</span>
+        </div>
+        <div class="row">
+          <span class="chev closed"></span>
+          <svg class="ico"><use href="#icon-assembly"></use></svg>
+          <span class="name">Crankshaft and journals</span>
+          <span class="meta">collapsed</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="viewport">
+      <div class="viewer-title"><span class="pill">Assembly Context</span><span>Feature: Crown dome on 100006 Piston</span></div>
+      <svg class="engine" viewBox="0 0 620 360">
+        <rect x="70" y="205" width="480" height="88" rx="14" fill="#91aebe" opacity=".14"/>
+        <rect x="96" y="172" width="420" height="64" rx="6" fill="#91aebe" opacity=".10"/>
+        <g opacity=".23" fill="#8aa3b5">
+          <ellipse cx="170" cy="88" rx="54" ry="17"/>
+          <rect x="116" y="88" width="108" height="98" rx="18"/>
+          <ellipse cx="300" cy="72" rx="56" ry="18"/>
+          <rect x="244" y="72" width="112" height="106" rx="18"/>
+          <ellipse cx="430" cy="92" rx="54" ry="17"/>
+          <rect x="376" y="92" width="108" height="96" rx="18"/>
+        </g>
+        <g fill="#88a3b5" opacity=".18">
+          <rect x="145" y="60" width="116" height="113" rx="20"/>
+          <rect x="275" y="42" width="120" height="123" rx="21"/>
+          <rect x="406" y="66" width="116" height="112" rx="20"/>
+        </g>
+        <path d="M106 232c44-22 76 14 120-12s70-18 104 12 73 18 115-11 72-8 100 16" fill="none" stroke="#a88728" stroke-width="42" stroke-linecap="round" opacity=".75"/>
+        <g fill="#91a32a" opacity=".45">
+          <circle cx="150" cy="230" r="37"/>
+          <circle cx="283" cy="224" r="42"/>
+          <circle cx="418" cy="228" r="39"/>
+        </g>
+        <g stroke="#6fcf7d" stroke-width="19" stroke-linecap="round" opacity=".62">
+          <path d="M170 175 150 230"/>
+          <path d="M300 160 284 224"/>
+          <path d="M430 178 418 228"/>
+        </g>
+        <g>
+          <rect x="244" y="42" width="112" height="123" rx="21" fill="#7ce8f2" opacity=".38"/>
+          <ellipse cx="300" cy="42" rx="56" ry="18" fill="#7ce8f2"/>
+          <ellipse cx="300" cy="42" rx="66" ry="24" fill="none" stroke="#e6ffff" stroke-width="4" opacity=".95"/>
+          <rect x="275" y="42" width="120" height="123" rx="21" fill="none" stroke="#e6ffff" stroke-width="2" opacity=".46"/>
+        </g>
+        <g fill="#c357c6" opacity=".75">
+          <circle cx="284" cy="224" r="19"/>
+          <rect x="260" y="210" width="47" height="32" rx="10"/>
+        </g>
+        <g fill="#f2a23c" opacity=".82">
+          <circle cx="300" cy="154" r="18"/>
+        </g>
+      </svg>
+
+      <div class="callout">
+        <h3>Assembly evidence highlighted</h3>
+        <p>The selected piston feature is shown in the full engine context. Related pin, rod, and crank-slider parts can be highlighted together to explain function, motion, and drawing risk.</p>
+      </div>
+
+      <div class="gdnt">
+        <div class="gdnt-title">GD&T reasoning card</div>
+        <div class="gdnt-grid">
+          <span class="tag">Feature</span><span>Crown dome controls combustion face / top envelope.</span>
+          <span class="tag">Context</span><span>Surrounded by ring grooves, skirt axis, pin bore, and crank-slider motion path.</span>
+          <span class="tag">Likely check</span><span>Profile or height control relative to piston axis / datum scheme, depending on engineering intent.</span>
+          <span class="tag">Proof</span><span>Highlight feature on part, then show its role in the parent assembly.</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InspectorPro CAD Feature Icon Review</title>
+  <style>
+    :root {
+      --bg: #10161f;
+      --panel: #171e29;
+      --panel-2: #1e2733;
+      --row: #202936;
+      --row-hover: #263241;
+      --border: #2f3a48;
+      --text: #e8eef7;
+      --muted: #9aa8b7;
+      --ink: #0b1520;
+      --blue-top: #afd7e3;
+      --blue-left: #679fb6;
+      --blue-right: #3a748c;
+      --amber-top: #ffe98b;
+      --amber-left: #dea533;
+      --amber-right: #9b6414;
+      --cut: #2e4256;
+      --green: #90df9d;
+      --green-dark: #3b9b66;
+      --magenta: #ef70ef;
+      --cyan: #86d9f2;
+      --red: #ff4e4e;
+      --axis-x: #f25050;
+      --axis-y: #55d66f;
+      --axis-z: #4f87ff;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 30% 0%, #202a36 0, #10161f 38%, #0c1118 100%);
+      color: var(--text);
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 28px auto 40px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      max-width: 760px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012)), var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 14px 36px rgba(0,0,0,0.32);
+      overflow: hidden;
+    }
+
+    .card h2 {
+      margin: 0;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: rgba(0,0,0,0.16);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tree {
+      padding: 10px 0;
+      font-size: 12px;
+    }
+
+    .tree-row {
+      min-height: 28px;
+      display: grid;
+      grid-template-columns: 18px 20px 1fr auto;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px 4px 10px;
+      color: var(--text);
+    }
+
+    .tree-row.child {
+      grid-template-columns: 36px 20px 1fr auto;
+      color: #c9d4df;
+    }
+
+    .tree-row:hover { background: var(--row-hover); }
+    .tree-row.selected {
+      background: rgba(79, 195, 247, 0.12);
+      border-left: 2px solid #4fc3f7;
+      padding-left: 8px;
+    }
+
+    .tree-row.suppressed .icon,
+    .tree-row.suppressed .name {
+      opacity: 0.38;
+      filter: grayscale(0.9);
+    }
+
+    .tree-row.suppressed .name {
+      font-style: italic;
+    }
+
+    .icon-wrap {
+      position: relative;
+      display: inline-flex;
+      width: var(--s, 18px);
+      height: var(--s, 18px);
+      align-items: center;
+      justify-content: center;
+    }
+
+    .state-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      border: 1px solid rgba(0,0,0,0.55);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.10);
+      vertical-align: middle;
+    }
+
+    .icon-wrap .state-badge {
+      position: absolute;
+      right: -2px;
+      bottom: -2px;
+      box-shadow: 0 0 0 1px var(--panel), 0 0 0 2px rgba(255,255,255,0.08);
+    }
+
+    .state-badge.warn { background: #ffb300; }
+    .state-badge.error { background: #ff5252; }
+
+    .chev {
+      width: 0;
+      height: 0;
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      border-left: 6px solid var(--muted);
+      transform: rotate(90deg);
+      justify-self: center;
+    }
+
+    .indent-line {
+      width: 18px;
+      height: 100%;
+      border-left: 1px solid rgba(154,168,183,0.25);
+      justify-self: end;
+    }
+
+    .name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .meta {
+      color: #778694;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .grid {
+      padding: 14px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+    }
+
+    .icon-tile {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 10px;
+      min-height: 96px;
+    }
+
+    .icon-tile .sizes {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-height: 34px;
+      margin-bottom: 10px;
+    }
+
+    .icon-tile .label {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .icon-tile .hint {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .notes {
+      padding: 13px 14px 16px;
+      color: #c9d4df;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .notes b { color: var(--text); }
+
+    .large-strip {
+      padding: 14px 14px 6px;
+      display: grid;
+      grid-template-columns: repeat(13, minmax(44px, 1fr));
+      gap: 8px;
+      border-bottom: 1px solid rgba(47,58,72,0.65);
+    }
+
+    .large-swatch {
+      min-height: 62px;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.13);
+      border: 1px solid rgba(255,255,255,0.055);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+    }
+
+    .icon {
+      width: var(--s, 20px);
+      height: var(--s, 20px);
+      flex: 0 0 auto;
+      display: inline-block;
+      vertical-align: middle;
+      overflow: visible;
+    }
+
+    .s16 { --s: 16px; }
+    .s20 { --s: 20px; }
+    .s24 { --s: 24px; }
+    .s40 { --s: 40px; }
+
+    .tree .icon { --s: 18px; }
+    .large-swatch .icon { filter: drop-shadow(0 1px 1px rgba(0,0,0,0.50)); }
+
+    svg .stroke { stroke: var(--ink); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+    svg .thin { stroke-width: 1.25; }
+    svg .dash { stroke-dasharray: 2.25 1.5; }
+    svg .blue-top { fill: var(--blue-top); }
+    svg .blue-left { fill: var(--blue-left); }
+    svg .blue-right { fill: var(--blue-right); }
+    svg .amber-top { fill: var(--amber-top); }
+    svg .amber-left { fill: var(--amber-left); }
+    svg .amber-right { fill: var(--amber-right); }
+    svg .cut { fill: var(--cut); }
+    svg .green { fill: var(--green); }
+    svg .green-line { stroke: var(--green); }
+    svg .green-dark { fill: var(--green-dark); }
+    svg .magenta-line { stroke: var(--magenta); }
+    svg .magenta-fill { fill: var(--magenta); }
+    svg .cyan-line { stroke: var(--cyan); }
+    svg .muted-line { stroke: #8fa0af; }
+    svg .ghost { opacity: 0.42; }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+      .large-strip { grid-template-columns: repeat(7, minmax(44px, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute;left:-9999px;overflow:hidden" aria-hidden="true" focusable="false">
+  <symbol id="ip-icon-feature-group" viewBox="1.5 1.5 21 21">
+    <path d="M2.8 7.2h6.6l1.9 2.1h9.9v10.4H2.8Z" fill="#40586f" class="stroke"/>
+    <path d="M2.8 7.2h6.6l1.9 2.1h9.9v2.4H2.8Z" fill="#587088" class="stroke"/>
+    <path d="M12.7 14.2 16.2 12.2l3.5 2-3.5 2Z" class="amber-top stroke"/>
+    <path d="M12.7 14.2 16.2 16.2v3.4l-3.5-2Z" class="amber-left stroke"/>
+    <path d="M19.7 14.2 16.2 16.2v3.4l3.5-2Z" class="amber-right stroke"/>
+  </symbol>
+
+  <symbol id="ip-icon-boss" viewBox="1.5 1.5 21 21">
+    <path d="M4 14 12 9.8 20 14l-8 4.2Z" class="blue-top stroke"/>
+    <path d="M4 14v3.8l8 4.2v-3.8Z" class="blue-left stroke"/>
+    <path d="M20 14v3.8L12 22v-3.8Z" class="blue-right stroke"/>
+    <path d="M9.6 9.5 12 8.2l2.4 1.3-2.4 1.3Z" class="amber-top stroke"/>
+    <path d="M9.6 9.5v4.5l2.4 1.3v-4.5Z" class="amber-left stroke"/>
+    <path d="M14.4 9.5v4.5L12 15.3v-4.5Z" class="amber-right stroke"/>
+    <path d="M18.7 8.6v4.8M16.9 10.2l1.8-1.8 1.8 1.8" fill="none" stroke="var(--amber-top)" class="thin"/>
+  </symbol>
+
+  <symbol id="ip-icon-cut" viewBox="1.5 1.5 21 21">
+    <path d="M4 10.8 12 6.6l8 4.2-8 4.2Z" class="blue-top stroke"/>
+    <path d="M4 10.8v6.8l8 4.2V15Z" class="blue-left stroke"/>
+    <path d="M20 10.8v6.8l-8 4.2V15Z" class="blue-right stroke"/>
+    <path d="M9.1 10.4 12 8.9l2.9 1.5-2.9 1.5Z" class="cut stroke"/>
+    <path d="M12 11.9v3.5" fill="none" stroke="var(--amber-top)" class="thin"/>
+    <path d="M10.3 13.7 12 15.4l1.7-1.7" fill="none" stroke="var(--amber-top)" class="thin"/>
+  </symbol>
+
+  <symbol id="ip-icon-revolve" viewBox="1.5 1.5 21 21">
+    <path d="M11.2 4.2c-3.3.9-5.5 4-5.5 7.8s2.2 6.9 5.5 7.8Z" class="blue-left stroke"/>
+    <path d="M12.8 4.2c3.3.9 5.5 4 5.5 7.8s-2.2 6.9-5.5 7.8" fill="none" class="muted-line thin"/>
+    <path d="M12 2.5v19" fill="none" class="muted-line dash thin"/>
+    <path d="M16.2 5.9c1.5 1.2 2.4 2.9 2.4 4.8" fill="none" stroke="var(--amber-top)" class="thin"/>
+    <path d="M18.7 6.2h-2.3l.6 2.1" fill="none" stroke="var(--amber-top)" class="thin"/>
+  </symbol>
+
+  <symbol id="ip-icon-dome" viewBox="1.5 1.5 21 21">
+    <ellipse cx="12" cy="16.4" rx="7.6" ry="2.8" class="blue-right stroke"/>
+    <path d="M5 15.9c.8-5.1 3.3-8.2 7-8.2s6.2 3.1 7 8.2c-1.1 1.6-12.9 1.6-14 0Z" class="blue-top stroke"/>
+    <path d="M12 8.1c-1.4 2-1.8 4.7-1.6 8.8" fill="none" class="stroke thin"/>
+  </symbol>
+
+  <symbol id="ip-icon-ring-grooves" viewBox="1.5 1.5 21 21">
+    <path d="M5.5 5.5c3.1-1.9 9.9-1.9 13 0v13c-3.1 1.9-9.9 1.9-13 0Z" class="blue-left stroke"/>
+    <ellipse cx="12" cy="5.5" rx="6.5" ry="2.3" class="blue-top stroke"/>
+    <path d="M5.5 10.4h3.9l1.1-1.5h3l1.1 1.5h3.9M5.5 15.2h3.9l1.1-1.5h3l1.1 1.5h3.9" fill="none" stroke="var(--cut)" stroke-width="2.25" stroke-linecap="round"/>
+  </symbol>
+
+  <symbol id="ip-icon-pin-bore" viewBox="1.5 1.5 21 21">
+    <path d="M5 7.8 12 4l7 3.8-7 3.8Z" class="blue-top stroke"/>
+    <path d="M5 7.8v8.3l7 3.9v-8.4Z" class="blue-left stroke"/>
+    <path d="M19 7.8v8.3L12 20v-8.4Z" class="blue-right stroke"/>
+    <ellipse cx="12" cy="11.5" rx="3.1" ry="1.7" class="cut stroke"/>
+    <ellipse cx="15.3" cy="8.5" rx="2.2" ry="1.2" fill="none" class="muted-line dash thin"/>
+  </symbol>
+
+  <symbol id="ip-icon-counterbore" viewBox="1.5 1.5 21 21">
+    <path d="M6.2 5.3h11.6v4.8h-3.4v8.6H9.6v-8.6H6.2Z" class="blue-left stroke"/>
+    <path d="M8.4 7.2h7.2v2.3h-7.2Z" class="cut stroke"/>
+    <path d="M10.5 10.2h3v6.1h-3Z" fill="#0b2432" class="stroke"/>
+    <path d="M8.4 10.1h7.2" stroke="var(--amber-top)" class="thin"/>
+  </symbol>
+
+  <symbol id="ip-icon-mirror" viewBox="1.5 1.5 21 21">
+    <path d="M12 2.8v18.4" fill="none" class="green-line dash thin"/>
+    <path d="M3.5 17.4h6.3V6.2h2.1v13.4H3.5Z" class="blue-left stroke"/>
+    <path d="M20.5 17.4h-6.3V6.2h-2.1v13.4h8.4Z" fill="none" stroke="var(--blue-top)" stroke-width="1.55" stroke-linejoin="round" stroke-dasharray="3 1.6"/>
+    <path d="M9.5 4.9 12 2.8l2.5 2.1" fill="none" class="green-line thin"/>
+  </symbol>
+
+  <symbol id="ip-icon-plane" viewBox="1.5 1.5 21 21">
+    <path d="M5.3 8.7 17.4 4.8l1.3 10.5L6.6 19.2Z" fill="rgba(127,211,143,0.42)" class="stroke"/>
+    <path d="M5.3 8.7 6.6 19.2M17.4 4.8l1.3 10.5" fill="none" class="green-line thin"/>
+    <circle cx="5.3" cy="8.7" r="1.1" class="green-dark"/>
+  </symbol>
+
+  <symbol id="ip-icon-sketch" viewBox="1.5 1.5 21 21">
+    <path d="M6.2 6.7h7.8c2.2 0 3.8 1.6 3.8 3.8v6.8H6.2Z" fill="none" class="magenta-line" stroke-width="1.4"/>
+    <path d="M14 6.7c2 0 3.8 1.8 3.8 3.8" fill="none" class="cyan-line thin"/>
+    <circle cx="6.2" cy="6.7" r="1" class="magenta-fill"/>
+    <circle cx="14" cy="6.7" r="1" class="magenta-fill"/>
+    <circle cx="17.8" cy="17.3" r="1" class="magenta-fill"/>
+    <circle cx="6.2" cy="17.3" r="1" class="magenta-fill"/>
+  </symbol>
+
+  <symbol id="ip-icon-origin" viewBox="1.5 1.5 21 21">
+    <path d="M10.7 14.4 5.3 19.8" stroke="var(--axis-z)" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M10.7 14.4h8.6" stroke="var(--axis-x)" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M10.7 14.4V4.9" stroke="var(--axis-y)" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M20.2 14.4 16.9 12.6v3.6Z" fill="var(--axis-x)"/>
+    <path d="M10.7 3.8 8.9 7.1h3.6Z" fill="var(--axis-y)"/>
+    <path d="M4.4 20.7 8.1 19.7l-2.7-2.7Z" fill="var(--axis-z)"/>
+    <path d="M8.8 13.2 10.7 12.1l1.9 1.1-1.9 1.1Z" fill="#a9b6c2" class="stroke"/>
+    <path d="M8.8 13.2 10.7 14.3v2l-1.9-1.1Z" fill="#748392" class="stroke"/>
+    <path d="M12.6 13.2 10.7 14.3v2l1.9-1.1Z" fill="#566575" class="stroke"/>
+  </symbol>
+
+  <symbol id="ip-icon-concentric" viewBox="1.5 1.5 21 21">
+    <circle cx="12" cy="12" r="6.2" fill="none" stroke="var(--blue-top)" stroke-width="2.1"/>
+    <circle cx="12" cy="12" r="2.8" class="amber-top stroke"/>
+    <path d="M12 3.4v2.5M12 18.1v2.5M3.4 12h2.5M18.1 12h2.5" fill="none" class="muted-line thin"/>
+  </symbol>
+</svg>
+
+<main>
+  <h1>CAD Feature Tree Icon Review</h1>
+  <p class="subtitle">
+    Original SVG concepts for InspectorPro. The goal is a SolidWorks-familiar mental model without using SolidWorks-owned artwork:
+    restrained flat-isometric solids, strong silhouette strokes, no per-icon chrome, and clear semantics at 16-24 px.
+  </p>
+
+  <div class="layout">
+    <section class="card">
+      <h2>Mock Feature Tree</h2>
+      <div class="tree">
+        <div class="tree-row selected">
+          <span class="chev"></span>
+          <svg class="icon s16"><use href="#ip-icon-feature-group"></use></svg>
+          <span class="name">Ring grooves</span>
+          <span class="meta">3 ops</span>
+        </div>
+        <div class="tree-row child">
+          <span class="indent-line"></span>
+          <svg class="icon s16"><use href="#ip-icon-cut"></use></svg>
+          <span class="name">Cut-Extrude1</span>
+          <span class="meta">groove</span>
+        </div>
+        <div class="tree-row child">
+          <span class="indent-line"></span>
+          <svg class="icon s16"><use href="#ip-icon-cut"></use></svg>
+          <span class="name">Cut-Extrude2</span>
+          <span class="meta">groove</span>
+        </div>
+        <div class="tree-row child">
+          <span class="indent-line"></span>
+          <svg class="icon s16"><use href="#ip-icon-cut"></use></svg>
+          <span class="name">Cut-Extrude3</span>
+          <span class="meta">groove</span>
+        </div>
+
+        <div class="tree-row">
+          <span class="chev"></span>
+          <svg class="icon s16"><use href="#ip-icon-pin-bore"></use></svg>
+          <span class="name">Pin bores through bosses</span>
+          <span class="meta">2x</span>
+        </div>
+        <div class="tree-row child">
+          <span class="indent-line"></span>
+          <svg class="icon s16"><use href="#ip-icon-counterbore"></use></svg>
+          <span class="name">Boss counterbores</span>
+          <span class="meta">2x</span>
+        </div>
+        <div class="tree-row child">
+          <span class="indent-line"></span>
+          <svg class="icon s16"><use href="#ip-icon-mirror"></use></svg>
+          <span class="name">Mirror1</span>
+          <span class="meta">sym</span>
+        </div>
+
+        <div class="tree-row">
+          <span class="chev"></span>
+          <svg class="icon s16"><use href="#ip-icon-dome"></use></svg>
+          <span class="name">Crown dome</span>
+          <span class="meta">surf</span>
+        </div>
+        <div class="tree-row child">
+          <span class="indent-line"></span>
+          <svg class="icon s16"><use href="#ip-icon-revolve"></use></svg>
+          <span class="name">Revolve1</span>
+          <span class="meta">base</span>
+        </div>
+
+        <div class="tree-row">
+          <span class="chev"></span>
+          <svg class="icon s16"><use href="#ip-icon-concentric"></use></svg>
+          <span class="name">Concentric assembly relation</span>
+          <span class="meta">mate</span>
+        </div>
+        <div class="tree-row suppressed">
+          <span class="chev"></span>
+          <svg class="icon s16"><use href="#ip-icon-sketch"></use></svg>
+          <span class="name">Suppressed sketch profile</span>
+          <span class="meta"></span>
+        </div>
+        <div class="tree-row">
+          <span class="chev"></span>
+          <span class="icon-wrap">
+            <svg class="icon s16"><use href="#ip-icon-plane"></use></svg>
+            <span class="state-badge warn" title="Warning"></span>
+          </span>
+          <span class="name">Reference plane warning</span>
+          <span class="meta"></span>
+        </div>
+        <div class="tree-row">
+          <span class="chev"></span>
+          <span class="icon-wrap">
+            <svg class="icon s16"><use href="#ip-icon-pin-bore"></use></svg>
+            <span class="state-badge error" title="Error"></span>
+          </span>
+          <span class="name">Missing pin-bore mapping</span>
+          <span class="meta"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Scale Check: 16 / 20 / 24 px</h2>
+      <div class="large-strip" aria-label="Large preview strip">
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-feature-group"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-boss"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-cut"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-revolve"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-dome"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-ring-grooves"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-pin-bore"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-counterbore"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-mirror"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-plane"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-sketch"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-origin"></use></svg></div>
+        <div class="large-swatch"><svg class="icon s40"><use href="#ip-icon-concentric"></use></svg></div>
+      </div>
+      <div class="grid">
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-feature-group"></use></svg><svg class="icon s20"><use href="#ip-icon-feature-group"></use></svg><svg class="icon s24"><use href="#ip-icon-feature-group"></use></svg></div><div class="label">Semantic group</div><div class="hint">Folder plus small feature cube badge.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-boss"></use></svg><svg class="icon s20"><use href="#ip-icon-boss"></use></svg><svg class="icon s24"><use href="#ip-icon-boss"></use></svg></div><div class="label">Extruded boss</div><div class="hint">Amber material added above blue base.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-cut"></use></svg><svg class="icon s20"><use href="#ip-icon-cut"></use></svg><svg class="icon s24"><use href="#ip-icon-cut"></use></svg></div><div class="label">Cut-extrude</div><div class="hint">Dark pocket floor indicates removed material.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-revolve"></use></svg><svg class="icon s20"><use href="#ip-icon-revolve"></use></svg><svg class="icon s24"><use href="#ip-icon-revolve"></use></svg></div><div class="label">Revolve</div><div class="hint">Body, construction axis, restrained arrow.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-dome"></use></svg><svg class="icon s20"><use href="#ip-icon-dome"></use></svg><svg class="icon s24"><use href="#ip-icon-dome"></use></svg></div><div class="label">Dome / surface</div><div class="hint">Matte surface form, no glossy highlight.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-ring-grooves"></use></svg><svg class="icon s20"><use href="#ip-icon-ring-grooves"></use></svg><svg class="icon s24"><use href="#ip-icon-ring-grooves"></use></svg></div><div class="label">Ring grooves</div><div class="hint">Two deep edge notches avoid the database-icon read.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-pin-bore"></use></svg><svg class="icon s20"><use href="#ip-icon-pin-bore"></use></svg><svg class="icon s24"><use href="#ip-icon-pin-bore"></use></svg></div><div class="label">Pin bore / hole</div><div class="hint">Front bore plus hidden-line exit.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-counterbore"></use></svg><svg class="icon s20"><use href="#ip-icon-counterbore"></use></svg><svg class="icon s24"><use href="#ip-icon-counterbore"></use></svg></div><div class="label">Counterbore</div><div class="hint">Simple half-section, stepped bore grammar.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-mirror"></use></svg><svg class="icon s20"><use href="#ip-icon-mirror"></use></svg><svg class="icon s24"><use href="#ip-icon-mirror"></use></svg></div><div class="label">Mirror</div><div class="hint">Solid source, green plane, blue dashed copy.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-plane"></use></svg><svg class="icon s20"><use href="#ip-icon-plane"></use></svg><svg class="icon s24"><use href="#ip-icon-plane"></use></svg></div><div class="label">Reference plane</div><div class="hint">Green translucent plane with one anchor dot.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-sketch"></use></svg><svg class="icon s20"><use href="#ip-icon-sketch"></use></svg><svg class="icon s24"><use href="#ip-icon-sketch"></use></svg></div><div class="label">Sketch / profile</div><div class="hint">Flat profile, vertex dots, no tilted sheet.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-origin"></use></svg><svg class="icon s20"><use href="#ip-icon-origin"></use></svg><svg class="icon s24"><use href="#ip-icon-origin"></use></svg></div><div class="label">Origin triad</div><div class="hint">RGB axes with small cube center.</div></div>
+        <div class="icon-tile"><div class="sizes"><svg class="icon s16"><use href="#ip-icon-concentric"></use></svg><svg class="icon s20"><use href="#ip-icon-concentric"></use></svg><svg class="icon s24"><use href="#ip-icon-concentric"></use></svg></div><div class="label">Concentric mate</div><div class="hint">Straight-on rings and external ticks.</div></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:18px">
+    <h2>Design Rules Tested Here</h2>
+    <div class="notes">
+      <b>Rendering:</b> flat SVG faces, three-tone solids, one dark edge stroke, no per-icon plates, no runtime glow, no proprietary artwork.
+      <br>
+      <b>Color grammar:</b> blue means base geometry, amber means added/focus material, dark blue means cut or void,
+      green means reference geometry, magenta means sketch/curve, RGB is reserved for axes.
+      <br>
+      <b>Implementation:</b> ship as inline SVG symbols or a project sprite; row state is CSS-only:
+      selected row background, suppressed opacity/grayscale, and separate warning/error badges rather than baked-in icon states.
+    </div>
+  </section>
+</main>
+</body>
+</html>

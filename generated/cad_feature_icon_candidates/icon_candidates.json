@@ -1,0 +1,173 @@
+{
+  "registry_path": "static\\cad_feature_icon_registry.json",
+  "summary": {
+    "profiles_scanned": 26,
+    "json_files_skipped": 81,
+    "features_scanned": 115,
+    "operations_scanned": 21,
+    "semantic_features_covered": 106,
+    "operations_covered": 21,
+    "candidate_count": 4,
+    "semantic_candidate_count": 4,
+    "operation_candidate_count": 0
+  },
+  "coverage_by_icon": {
+    "ip-cad-icon-boss": 2,
+    "ip-cad-icon-concentric": 6,
+    "ip-cad-icon-counterbore": 15,
+    "ip-cad-icon-cut": 29,
+    "ip-cad-icon-dome": 15,
+    "ip-cad-icon-pin-bore": 54,
+    "ip-cad-icon-revolve": 3,
+    "ip-cad-icon-ring-grooves": 3
+  },
+  "candidates": [
+    {
+      "candidate_id": "semantic_edge_fillets_and_breaks",
+      "kind": "semantic",
+      "label": "Edge fillets and breaks",
+      "normalized_text": "fillet edge fillets and breaks small rounded edge treatment on two edges of the revolved body visible in the model feature tree and highlighted by the feature color map edge treatment affects fit handling stress concentration and burr control at transitions it should be checked if the drawing or manufacturing plan requires a specific radius",
+      "suggested_icon": "ip-cad-icon-feature-group",
+      "suggested_meta": null,
+      "suggested_aliases": [
+        "Edge fillets and breaks"
+      ],
+      "review_status": "needs_review",
+      "needs_new_svg": true,
+      "recommended_registry_entry": {
+        "icon": "ip-cad-icon-feature-group",
+        "aliases": [
+          "Edge fillets and breaks"
+        ]
+      },
+      "sources": [
+        {
+          "part_number": "1030002",
+          "part_name": "Threaded adapter flange",
+          "profile_path": "400S_Sorted_Library\\1030002_inspection_profile.json",
+          "feature_name": "Edge fillets and breaks",
+          "feature_type": "fillet"
+        },
+        {
+          "part_number": "1030002",
+          "part_name": "Threaded adapter flange",
+          "profile_path": "400S_Sorted_Library\\parts\\1030002\\revA\\1030002_inspection_profile.json",
+          "feature_name": "Edge fillets and breaks",
+          "feature_type": "fillet"
+        }
+      ]
+    },
+    {
+      "candidate_id": "semantic_external_m45_threaded_adapter_end",
+      "kind": "semantic",
+      "label": "External M45 threaded adapter end",
+      "normalized_text": "external thread external m45 threaded adapter end male thread on the cylindrical adapter end opposite the flange it is visible as thread graphics in the side isometric model views and called out in section view a a the external thread is the functional connection interface pitch class length and major minor geometry determine whether the part can assemble to the mating threaded component",
+      "suggested_icon": "ip-cad-icon-boss",
+      "suggested_meta": null,
+      "suggested_aliases": [
+        "External M45 threaded adapter end"
+      ],
+      "review_status": "needs_review",
+      "needs_new_svg": false,
+      "recommended_registry_entry": {
+        "icon": "ip-cad-icon-boss",
+        "aliases": [
+          "External M45 threaded adapter end"
+        ]
+      },
+      "sources": [
+        {
+          "part_number": "1030002",
+          "part_name": "Threaded adapter flange",
+          "profile_path": "400S_Sorted_Library\\1030002_inspection_profile.json",
+          "feature_name": "External M45 threaded adapter end",
+          "feature_type": "external_thread"
+        },
+        {
+          "part_number": "1030002",
+          "part_name": "Threaded adapter flange",
+          "profile_path": "400S_Sorted_Library\\parts\\1030002\\revA\\1030002_inspection_profile.json",
+          "feature_name": "External M45 threaded adapter end",
+          "feature_type": "external_thread"
+        }
+      ]
+    },
+    {
+      "candidate_id": "semantic_main_mounting_flange_disk",
+      "kind": "semantic",
+      "label": "Main mounting flange disk",
+      "normalized_text": "revolved body main mounting flange disk largest circular disk at the base of the part it is the flat flange seen as the outer circle in the face view and as the thin left side plate in the side and section views this feature defines the part envelope mounting face and base thickness used to seat against a mating component",
+      "suggested_icon": "ip-cad-icon-boss",
+      "suggested_meta": null,
+      "suggested_aliases": [
+        "Main mounting flange disk"
+      ],
+      "review_status": "needs_review",
+      "needs_new_svg": false,
+      "recommended_registry_entry": {
+        "icon": "ip-cad-icon-boss",
+        "aliases": [
+          "Main mounting flange disk"
+        ]
+      },
+      "sources": [
+        {
+          "part_number": "1030002",
+          "part_name": "Threaded adapter flange",
+          "profile_path": "400S_Sorted_Library\\1030002_inspection_profile.json",
+          "feature_name": "Main mounting flange disk",
+          "feature_type": "revolved_body"
+        },
+        {
+          "part_number": "1030002",
+          "part_name": "Threaded adapter flange",
+          "profile_path": "400S_Sorted_Library\\parts\\1030002\\revA\\1030002_inspection_profile.json",
+          "feature_name": "Main mounting flange disk",
+          "feature_type": "revolved_body"
+        }
+      ]
+    },
+    {
+      "candidate_id": "semantic_outer_diameter",
+      "kind": "semantic",
+      "label": "Outer diameter",
+      "normalized_text": "body feature outer diameter 90 mm x 4 3 mm outer cylindrical face the outer circle in the plan projection flush with the piston s 90 lands when installed purple bands in the colored assembly views od in the free vs installed state governs sealing contact and whether the ring sits proud of the lands here it visibly matches the piston od so an oversize ring would be the first thing caught at assembly",
+      "suggested_icon": "ip-cad-icon-ring-grooves",
+      "suggested_meta": null,
+      "suggested_aliases": [
+        "Outer diameter"
+      ],
+      "review_status": "needs_review",
+      "needs_new_svg": false,
+      "recommended_registry_entry": {
+        "icon": "ip-cad-icon-ring-grooves",
+        "aliases": [
+          "Outer diameter"
+        ]
+      },
+      "sources": [
+        {
+          "part_number": "100009",
+          "part_name": "Piston Ring",
+          "profile_path": "400S_Sorted_Library\\100009_inspection_profile.json",
+          "feature_name": "Outer diameter",
+          "feature_type": "body_feature"
+        },
+        {
+          "part_number": "100009",
+          "part_name": "Piston Ring",
+          "profile_path": "400S_Sorted_Library\\parts\\100009\\revA\\100009_inspection_profile.json",
+          "feature_name": "Outer diameter",
+          "feature_type": "body_feature"
+        },
+        {
+          "part_number": "100009",
+          "part_name": "Piston Ring",
+          "profile_path": "generated\\engine_motion\\claude_profile_packet\\draft_profiles\\100009_inspection_profile.json",
+          "feature_name": "Outer diameter",
+          "feature_type": "body_feature"
+        }
+      ]
+    }
+  ]
+}

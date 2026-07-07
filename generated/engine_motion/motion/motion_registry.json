@@ -1,0 +1,9 @@
+{
+  "100001": {
+    "motion_id": "engine4cyl_crank_cycle",
+    "package": "generated/engine_motion/motion/engine4cyl_crank_cycle.json",
+    "summary": "generated/engine_motion/motion/engine4cyl_crank_cycle_summary.json",
+    "diagnostics": "generated/engine_motion/motion/engine4cyl_crank_cycle_diagnostics.json",
+    "glb": "generated/engine_motion/glb_assets_sample0/Engine_Motion_Study_sample0_colored.glb"
+  }
+}

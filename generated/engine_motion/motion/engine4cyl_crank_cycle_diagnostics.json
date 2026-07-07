@@ -1,0 +1,273 @@
+{
+  "rawExport": "generated/engine_motion/motion_exports/engine_motion_crank_cycle_trimmed_45_raw.json",
+  "rawExportSha256": "8bc7e9d577110142993fa724943c5ac7467452a3908481612ec9a440d2cb974c",
+  "assemblyMetadata": "generated/engine_motion/glb_assets_sample0/Engine_Motion_Study_sample0_assembly.json",
+  "glbAssetPath": "generated/engine_motion/glb_assets_sample0/Engine_Motion_Study_sample0_colored.glb",
+  "glbNodeCount": 38,
+  "sourceStartTimeSeconds": 0.1783333333,
+  "sourceEndTimeSeconds": 4.1016666667,
+  "sourceDurationSeconds": 3.9233333334,
+  "skippedUnbound": [
+    {
+      "id": "Piston Assembly-1",
+      "displayName": "Piston and Ring Assembly",
+      "partNumber": "100010",
+      "sourceFile": "Piston Assembly.SLDASM",
+      "type": "Assembly",
+      "reason": "No exact GLB node; allowed only because this is a non-rendered assembly wrapper."
+    },
+    {
+      "id": "Piston Assembly-2",
+      "displayName": "Piston and Ring Assembly",
+      "partNumber": "100010",
+      "sourceFile": "Piston Assembly.SLDASM",
+      "type": "Assembly",
+      "reason": "No exact GLB node; allowed only because this is a non-rendered assembly wrapper."
+    },
+    {
+      "id": "Piston Assembly-4",
+      "displayName": "Piston and Ring Assembly",
+      "partNumber": "100010",
+      "sourceFile": "Piston Assembly.SLDASM",
+      "type": "Assembly",
+      "reason": "No exact GLB node; allowed only because this is a non-rendered assembly wrapper."
+    },
+    {
+      "id": "Piston Assembly-5",
+      "displayName": "Piston and Ring Assembly",
+      "partNumber": "100010",
+      "sourceFile": "Piston Assembly.SLDASM",
+      "type": "Assembly",
+      "reason": "No exact GLB node; allowed only because this is a non-rendered assembly wrapper."
+    }
+  ],
+  "validation": {
+    "ok": true,
+    "sampleCount": 45,
+    "movingCount": 37,
+    "fixedCount": 1,
+    "quatNormMaxError": 8.6e-11,
+    "scaleMaxError": 0.0,
+    "loopClosureMaxTransformDelta": 0.0015261669,
+    "loopClosureWorstComponent": "crankshaft-1",
+    "loopClosureMaxAngleDeg": 0.08822675,
+    "loopClosureAngleWorstComponent": "crankshaft-1",
+    "loopClosureWarning": true,
+    "loopClosureFailure": false,
+    "loopClosureTop": [
+      {
+        "componentId": "crankshaft-1",
+        "maxTransformDelta": 0.0015261669
+      },
+      {
+        "componentId": "connecting rod-5",
+        "maxTransformDelta": 0.0003197684
+      },
+      {
+        "componentId": "connecting rod-1",
+        "maxTransformDelta": 0.0003197684
+      },
+      {
+        "componentId": "connecting rod cap-5",
+        "maxTransformDelta": 0.0003197684
+      },
+      {
+        "componentId": "connecting rod cap-1",
+        "maxTransformDelta": 0.0003197684
+      },
+      {
+        "componentId": "Socket Head Cap Screw-9",
+        "maxTransformDelta": 0.0003197684
+      },
+      {
+        "componentId": "Socket Head Cap Screw-2",
+        "maxTransformDelta": 0.0003197684
+      },
+      {
+        "componentId": "Socket Head Cap Screw-10",
+        "maxTransformDelta": 0.0003197684
+      }
+    ],
+    "loopClosureAngleTop": [
+      {
+        "componentId": "crankshaft-1",
+        "angleDeg": 0.08822675
+      },
+      {
+        "componentId": "Socket Head Cap Screw-9",
+        "angleDeg": 0.01839574
+      },
+      {
+        "componentId": "Socket Head Cap Screw-1",
+        "angleDeg": 0.01835459
+      },
+      {
+        "componentId": "Socket Head Cap Screw-10",
+        "angleDeg": 0.01834583
+      },
+      {
+        "componentId": "Socket Head Cap Screw-2",
+        "angleDeg": 0.01829818
+      },
+      {
+        "componentId": "connecting rod-5",
+        "angleDeg": 0.01828603
+      },
+      {
+        "componentId": "connecting rod-1",
+        "angleDeg": 0.01828603
+      },
+      {
+        "componentId": "connecting rod cap-5",
+        "angleDeg": 0.01828603
+      }
+    ],
+    "fixedMaxTransformDelta": 0.0,
+    "fixedWorstComponent": "Lower block-1",
+    "restPoseMaxTransformDelta": 0.0,
+    "restPoseWorstComponent": "piston pin-5",
+    "restPoseComparedCount": 38,
+    "restPoseExpectedCount": 38,
+    "restPoseMissingComponents": [],
+    "restPoseOk": true,
+    "restPoseTop": [
+      {
+        "componentId": "piston pin-5",
+        "maxTransformDelta": 0.0
+      },
+      {
+        "componentId": "piston pin-4",
+        "maxTransformDelta": 0.0
+      },
+      {
+        "componentId": "piston pin-2",
+        "maxTransformDelta": 0.0
+      },
+      {
+        "componentId": "piston pin-1",
+        "maxTransformDelta": 0.0
+      },
+      {
+        "componentId": "crankshaft-1",
+        "maxTransformDelta": 0.0
+      },
+      {
+        "componentId": "connecting rod-5",
+        "maxTransformDelta": 0.0
+      },
+      {
+        "componentId": "connecting rod-4",
+        "maxTransformDelta": 0.0
+      },
+      {
+        "componentId": "connecting rod-2",
+        "maxTransformDelta": 0.0
+      }
+    ],
+    "jointClosurePairs": [
+      {
+        "a": "Piston Assembly-1/piston-1",
+        "b": "piston pin-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "Piston Assembly-2/piston-1",
+        "b": "piston pin-2",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "Piston Assembly-4/piston-1",
+        "b": "piston pin-4",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "Piston Assembly-5/piston-1",
+        "b": "piston pin-5",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod cap-1",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod cap-2",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod cap-4",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod cap-5",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod-1",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod-2",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod-4",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "connecting rod-5",
+        "b": "crankshaft-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "piston pin-1",
+        "b": "connecting rod-1",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "piston pin-2",
+        "b": "connecting rod-2",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "piston pin-4",
+        "b": "connecting rod-4",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      },
+      {
+        "a": "piston pin-5",
+        "b": "connecting rod-5",
+        "maxMm": 0.0,
+        "rmsMm": 0.0
+      }
+    ],
+    "jointClosurePairCount": 16,
+    "jointClosureMaxMm": 0.0,
+    "jointClosureLimitMm": 1.0,
+    "jointClosureOk": true,
+    "packageEndpointDuplicatedFromStart": true,
+    "measuredEndpointKeptInDiagnosticsOnly": true
+  },
+  "componentCount": 38
+}

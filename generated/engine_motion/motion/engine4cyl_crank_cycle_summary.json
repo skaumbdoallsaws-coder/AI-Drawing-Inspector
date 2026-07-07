@@ -1,0 +1,258 @@
+{
+  "available_motions": [
+    {
+      "motion_id": "engine4cyl_crank_cycle",
+      "name": "Four-cylinder crank-slider cycle",
+      "driver": "crankshaft-1, rotary, 360 degree cycle",
+      "default_rpm": 90,
+      "rpm_range": [
+        10,
+        600
+      ],
+      "moving_component_count": 37,
+      "groups": [
+        {
+          "id": "crankshaft_drive",
+          "label": "Crankshaft drive",
+          "component_ids": [
+            "crankshaft-1"
+          ],
+          "part_numbers": [
+            "100003"
+          ],
+          "function": "Rotary driver that converts reciprocating piston loads into crankshaft rotation."
+        },
+        {
+          "id": "crank_slider_instance1",
+          "label": "Cylinder 1 crank-slider (SW instance 1)",
+          "component_ids": [
+            "connecting rod-1",
+            "connecting rod cap-1",
+            "piston pin-1",
+            "Piston Assembly-1/piston-1",
+            "Piston Assembly-1/piston ring-1",
+            "Piston Assembly-1/piston ring-2",
+            "Piston Assembly-1/piston ring-4",
+            "Socket Head Cap Screw-1",
+            "Socket Head Cap Screw-2"
+          ],
+          "part_numbers": [
+            "100004",
+            "100005",
+            "100006",
+            "100007",
+            "100008",
+            "100009"
+          ],
+          "function": "Converts crankshaft rotation into piston reciprocation through the connecting rod and piston pin."
+        },
+        {
+          "id": "crank_slider_instance2",
+          "label": "Cylinder 2 crank-slider (SW instance 2)",
+          "component_ids": [
+            "connecting rod-2",
+            "connecting rod cap-2",
+            "piston pin-2",
+            "Piston Assembly-2/piston-1",
+            "Piston Assembly-2/piston ring-1",
+            "Piston Assembly-2/piston ring-2",
+            "Piston Assembly-2/piston ring-4",
+            "Socket Head Cap Screw-3",
+            "Socket Head Cap Screw-4"
+          ],
+          "part_numbers": [
+            "100004",
+            "100005",
+            "100006",
+            "100007",
+            "100008",
+            "100009"
+          ],
+          "function": "Converts crankshaft rotation into piston reciprocation through the connecting rod and piston pin."
+        },
+        {
+          "id": "crank_slider_instance4",
+          "label": "Cylinder 3 crank-slider (SW instance 4)",
+          "component_ids": [
+            "connecting rod-4",
+            "connecting rod cap-4",
+            "piston pin-4",
+            "Piston Assembly-4/piston-1",
+            "Piston Assembly-4/piston ring-1",
+            "Piston Assembly-4/piston ring-2",
+            "Piston Assembly-4/piston ring-4",
+            "Socket Head Cap Screw-7",
+            "Socket Head Cap Screw-8"
+          ],
+          "part_numbers": [
+            "100004",
+            "100005",
+            "100006",
+            "100007",
+            "100008",
+            "100009"
+          ],
+          "function": "Converts crankshaft rotation into piston reciprocation through the connecting rod and piston pin."
+        },
+        {
+          "id": "crank_slider_instance5",
+          "label": "Cylinder 4 crank-slider (SW instance 5)",
+          "component_ids": [
+            "connecting rod-5",
+            "connecting rod cap-5",
+            "piston pin-5",
+            "Piston Assembly-5/piston-1",
+            "Piston Assembly-5/piston ring-1",
+            "Piston Assembly-5/piston ring-2",
+            "Piston Assembly-5/piston ring-4",
+            "Socket Head Cap Screw-10",
+            "Socket Head Cap Screw-9"
+          ],
+          "part_numbers": [
+            "100004",
+            "100005",
+            "100006",
+            "100007",
+            "100008",
+            "100009"
+          ],
+          "function": "Converts crankshaft rotation into piston reciprocation through the connecting rod and piston pin."
+        },
+        {
+          "id": "reciprocating_group",
+          "label": "Reciprocating components",
+          "component_ids": [
+            "Piston Assembly-1/piston ring-1",
+            "Piston Assembly-1/piston ring-2",
+            "Piston Assembly-1/piston ring-4",
+            "Piston Assembly-1/piston-1",
+            "Piston Assembly-2/piston ring-1",
+            "Piston Assembly-2/piston ring-2",
+            "Piston Assembly-2/piston ring-4",
+            "Piston Assembly-2/piston-1",
+            "Piston Assembly-4/piston ring-1",
+            "Piston Assembly-4/piston ring-2",
+            "Piston Assembly-4/piston ring-4",
+            "Piston Assembly-4/piston-1",
+            "Piston Assembly-5/piston ring-1",
+            "Piston Assembly-5/piston ring-2",
+            "Piston Assembly-5/piston ring-4",
+            "Piston Assembly-5/piston-1",
+            "Socket Head Cap Screw-1",
+            "Socket Head Cap Screw-10",
+            "Socket Head Cap Screw-2",
+            "Socket Head Cap Screw-3",
+            "Socket Head Cap Screw-4",
+            "Socket Head Cap Screw-7",
+            "Socket Head Cap Screw-8",
+            "Socket Head Cap Screw-9",
+            "connecting rod cap-1",
+            "connecting rod cap-2",
+            "connecting rod cap-4",
+            "connecting rod cap-5",
+            "connecting rod-1",
+            "connecting rod-2",
+            "connecting rod-4",
+            "connecting rod-5",
+            "piston pin-1",
+            "piston pin-2",
+            "piston pin-4",
+            "piston pin-5"
+          ],
+          "part_numbers": [
+            "100004",
+            "100005",
+            "100006",
+            "100007",
+            "100008",
+            "100009"
+          ],
+          "function": "Pistons, piston pins, rings, rods, and caps that translate or articulate during the crank cycle."
+        },
+        {
+          "id": "pin_bore_fai_affected",
+          "label": "Pin bore affected motion group",
+          "component_ids": [
+            "Piston Assembly-1/piston-1",
+            "Piston Assembly-2/piston-1",
+            "Piston Assembly-4/piston-1",
+            "Piston Assembly-5/piston-1",
+            "connecting rod cap-1",
+            "connecting rod cap-2",
+            "connecting rod cap-4",
+            "connecting rod cap-5",
+            "connecting rod-1",
+            "connecting rod-2",
+            "connecting rod-4",
+            "connecting rod-5",
+            "piston pin-1",
+            "piston pin-2",
+            "piston pin-4",
+            "piston pin-5"
+          ],
+          "part_numbers": [
+            "100004",
+            "100005",
+            "100006",
+            "100007"
+          ],
+          "function": "Components whose fit or articulation is affected by piston pin bore alignment and diameter."
+        }
+      ],
+      "events": [
+        {
+          "id": "cyl1_tdc",
+          "angle_deg": 196.363636,
+          "label": "CYL1 TDC"
+        },
+        {
+          "id": "cyl1_bdc",
+          "angle_deg": 351.818182,
+          "label": "CYL1 BDC"
+        },
+        {
+          "id": "cyl2_tdc",
+          "angle_deg": 278.181818,
+          "label": "CYL2 TDC"
+        },
+        {
+          "id": "cyl2_bdc",
+          "angle_deg": 106.363636,
+          "label": "CYL2 BDC"
+        },
+        {
+          "id": "cyl3_tdc",
+          "angle_deg": 106.363636,
+          "label": "CYL3 TDC"
+        },
+        {
+          "id": "cyl3_bdc",
+          "angle_deg": 278.181818,
+          "label": "CYL3 BDC"
+        },
+        {
+          "id": "cyl4_tdc",
+          "angle_deg": 351.818182,
+          "label": "CYL4 TDC"
+        },
+        {
+          "id": "cyl4_bdc",
+          "angle_deg": 196.363636,
+          "label": "CYL4 BDC"
+        }
+      ],
+      "stroke_m": {
+        "Piston Assembly-1/piston-1": 0.087990433,
+        "Piston Assembly-2/piston-1": 0.0879339168,
+        "Piston Assembly-4/piston-1": 0.087942977,
+        "Piston Assembly-5/piston-1": 0.0879937324
+      }
+    }
+  ],
+  "playback": {
+    "active_motion_id": null,
+    "playing": false,
+    "rpm": null,
+    "angle_deg": null
+  }
+}

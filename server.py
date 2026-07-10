@@ -17104,6 +17104,103 @@ def _sales_coaching_override(application: str, user_name: str = "") -> str:
 # Data-driven by design: groups, part numbers, and rpm ranges all come from
 # the live context digest -- nothing is hard-coded to a specific assembly.
 
+
+def _normalize_viewport_action_text(text: Any) -> str:
+    """Match the browser's assembly-display text normalization."""
+    value = str(text or "").lower()
+    value = re.sub(r"[^a-z0-9.%]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _is_viewport_state_question(text: Any) -> bool:
+    """Match the browser's command-aware state-question guard."""
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return False
+    command_start = re.compile(
+        r"^(please\s+)?(hide|unhide|show|restore|bring back|make|set|rotate|spin|orbit|"
+        r"highlight|focus|select|clear|reset|remove|unhighlight|stop|pause|resume|play|"
+        r"animate|move)\b"
+    )
+    polite_command = re.compile(
+        r"^(can|could|would|will)\s+you\s+(please\s+)?(the\s+)?(hide|unhide|show|"
+        r"restore|bring back|make|set|rotate|spin|orbit|highlight|focus|select|clear|"
+        r"reset|remove|unhighlight|stop|pause|resume|play|animate|move)\b"
+    )
+    if command_start.search(raw) or polite_command.search(raw):
+        return False
+    if re.search(
+        r"^(can|could|would|will)\s+you\s+(see|tell|check|confirm|explain|say|"
+        r"determine|find out|verify)\b",
+        raw,
+    ):
+        return True
+    if re.search(r"^(why|what|how|which|when|where|is|are|was|were|do|does|did|has|have|had)\b", raw):
+        return True
+    return raw.endswith("?")
+
+
+def _message_explicitly_requests_viewport_change(text: Any) -> bool:
+    """Permanent server-side authorization gate for viewport writes.
+
+    This mirrors the browser gate. It does not classify engineering intent;
+    it only confirms that the raw message contains an explicit visual action.
+    Both implementations are locked to the shared authorization fixture.
+    """
+    query = _normalize_viewport_action_text(text)
+    if not query:
+        return False
+    if re.search(r"\b(play|animate|replay|resume|restart)\b", query):
+        return True
+    if re.search(r"\b(make|let|set)\b.*\b(move|moving|spin|turn|rotate|transparent|opaque)\b", query):
+        return True
+    if re.search(r"\b(turn|rotate|spin|orbit)\b", query):
+        return True
+    if re.search(
+        r"\b(stop|pause|freeze|halt)\b.*\b(motion|animation|playback|moving|rotating|"
+        r"rotation|spinning)\b",
+        query,
+    ):
+        return True
+    if re.search(r"\b(slow|speed)\b.*\b(down|up)\b", query):
+        return True
+    if re.search(r"\b(faster|slower)\b", query) or re.search(r"\b\d{1,4}\s*rpm\b", query):
+        return True
+    if re.search(
+        r"\b(hide|unhide|conceal|restore|bring|reveal|transparent|transparency|opaque|"
+        r"solid|ghost)\b",
+        query,
+    ):
+        return True
+    if re.search(r"\b(highlight|unhighlight|isolate|zoom|fit|pan|focus|select)\b", query):
+        return True
+    if re.search(
+        r"\b(show|display|visualize|see|demonstrate|watch|view)\b.*\b(affected|part|"
+        r"parts|component|components|viewport|model|motion|mechanism|machine|feature|"
+        r"features|joint|group|bore|pin|piston|rod|crank|crankshaft|block|dome|groove|"
+        r"surface|moving|moves|working|running|operating)\b",
+        query,
+    ):
+        return True
+    if re.search(r"\b(open|switch|go to|take me)\b.*\btab\b", query):
+        return True
+    if re.search(r"\b(clear|reset)\b.*\b(highlight|highlights|selection|selected|view|display|overrides?)\b", query):
+        return True
+    return False
+
+
+def _viewport_write_authorized(text: Any, destructive: bool = False) -> bool:
+    """Authorize a viewport write after semantic classification.
+
+    State questions veto destructive effects even when they contain an action
+    verb (for example, "did you clear highlights?").
+    """
+    if not _message_explicitly_requests_viewport_change(text):
+        return False
+    if destructive and _is_viewport_state_question(text):
+        return False
+    return True
+
 VIEWPORT_INTENT_MODEL = os.getenv("INSPECTORPRO_INTENT_MODEL", "claude-haiku-4-5")
 VIEWPORT_INTENT_MAX_TOKENS = 500
 VIEWPORT_INTENT_AGENT_TYPES = {"deviation-analyst", "inspector"}

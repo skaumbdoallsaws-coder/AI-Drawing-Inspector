@@ -47768,6 +47768,12 @@
             return false;
         }
 
+        function _viewportWriteAuthorized(messageText, destructive = false) {
+            if (!_messageExplicitlyRequestsViewportChange(messageText)) return false;
+            if (destructive && _isViewportStateQuestion(messageText)) return false;
+            return true;
+        }
+
         function _shouldSuppressImplicitFaiViewportActions(messageText) {
             // Explanation-only turns must not touch the viewport (no tab
             // switch, no highlight, no motion) regardless of which nouns
@@ -48609,7 +48615,6 @@
                 // message allows viewport execution. "what is the affected
                 // motion?" / "what is the impact on the assembly?" never
                 // execute, no matter how confident the classification.
-                if (!_messageExplicitlyRequestsViewportChange(messageText)) return notApplied;
                 // Belt and braces for DESTRUCTIVE kinds only: a state question
                 // ("did you clear highlights?") must never hide/stop/clear even
                 // if the classifier misfires. Additive kinds trust the
@@ -48617,9 +48622,7 @@
                 // ("can you the show the affected motion?" ends with "?" but
                 // is a command, not a state question).
                 const destructiveKinds = ['hide', 'restore', 'clear_highlight', 'stop_motion', 'pause_motion'];
-                if (destructiveKinds.includes(kind) && _isViewportStateQuestion(messageText)) {
-                    return notApplied;
-                }
+                if (!_viewportWriteAuthorized(messageText, destructiveKinds.includes(kind))) return notApplied;
 
                 const resolved = _classifiedIntentResolveTargets(vi);
                 // "show the affected motion" must highlight AND play as one

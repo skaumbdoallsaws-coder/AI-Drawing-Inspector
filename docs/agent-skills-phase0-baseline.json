@@ -1,0 +1,563 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-07-10T06:17:25.739473+00:00",
+  "git_head": "d519299f2141643329e46d7a20ab2c2ca75d33aa",
+  "phase": "agent-skills-phase0",
+  "telemetry": {
+    "database": "runtime_metrics\\inspectorpro_metrics.sqlite",
+    "available": true,
+    "provider_events": 474,
+    "workflows": {
+      "viewport_intent": {
+        "events": 136,
+        "first_timestamp_utc": "2026-07-08T19:41:05.136290+00:00",
+        "last_timestamp_utc": "2026-07-09T20:40:35.430480+00:00",
+        "statuses": {
+          "success": 136
+        },
+        "models": [
+          "claude-haiku-4-5"
+        ],
+        "latency_ms": {
+          "min": 1330.6,
+          "p50": 2014.7,
+          "p75": 2218.0,
+          "p90": 2640.1,
+          "p95": 3150.2,
+          "p99": 5826.9,
+          "mean": 2131.2,
+          "max": 6929.8
+        },
+        "input_tokens": {
+          "p50": 1569,
+          "p95": 1593,
+          "mean": 1467.8,
+          "total": 199627
+        },
+        "output_tokens": {
+          "p50": 175,
+          "p95": 210,
+          "mean": 160.7,
+          "total": 21858
+        },
+        "total_tokens": {
+          "p50": 1680,
+          "p95": 1783,
+          "mean": 1628.6,
+          "total": 221485
+        },
+        "latency_thresholds": {
+          "1500": {
+            "within": 11,
+            "over": 125,
+            "over_rate": 0.9191
+          },
+          "2000": {
+            "within": 64,
+            "over": 72,
+            "over_rate": 0.5294
+          },
+          "2500": {
+            "within": 115,
+            "over": 21,
+            "over_rate": 0.1544
+          },
+          "3000": {
+            "within": 128,
+            "over": 8,
+            "over_rate": 0.0588
+          },
+          "3500": {
+            "within": 133,
+            "over": 3,
+            "over_rate": 0.0221
+          },
+          "4000": {
+            "within": 133,
+            "over": 3,
+            "over_rate": 0.0221
+          },
+          "5000": {
+            "within": 133,
+            "over": 3,
+            "over_rate": 0.0221
+          }
+        },
+        "by_agent_type": {
+          "deviation-analyst": {
+            "events": 136,
+            "first_timestamp_utc": "2026-07-08T19:41:05.136290+00:00",
+            "last_timestamp_utc": "2026-07-09T20:40:35.430480+00:00",
+            "statuses": {
+              "success": 136
+            },
+            "models": [
+              "claude-haiku-4-5"
+            ],
+            "latency_ms": {
+              "min": 1330.6,
+              "p50": 2014.7,
+              "p75": 2218.0,
+              "p90": 2640.1,
+              "p95": 3150.2,
+              "p99": 5826.9,
+              "mean": 2131.2,
+              "max": 6929.8
+            },
+            "input_tokens": {
+              "p50": 1569,
+              "p95": 1593,
+              "mean": 1467.8,
+              "total": 199627
+            },
+            "output_tokens": {
+              "p50": 175,
+              "p95": 210,
+              "mean": 160.7,
+              "total": 21858
+            },
+            "total_tokens": {
+              "p50": 1680,
+              "p95": 1783,
+              "mean": 1628.6,
+              "total": 221485
+            },
+            "latency_thresholds": {
+              "1500": {
+                "within": 11,
+                "over": 125,
+                "over_rate": 0.9191
+              },
+              "2000": {
+                "within": 64,
+                "over": 72,
+                "over_rate": 0.5294
+              },
+              "2500": {
+                "within": 115,
+                "over": 21,
+                "over_rate": 0.1544
+              },
+              "3000": {
+                "within": 128,
+                "over": 8,
+                "over_rate": 0.0588
+              },
+              "3500": {
+                "within": 133,
+                "over": 3,
+                "over_rate": 0.0221
+              },
+              "4000": {
+                "within": 133,
+                "over": 3,
+                "over_rate": 0.0221
+              },
+              "5000": {
+                "within": 133,
+                "over": 3,
+                "over_rate": 0.0221
+              }
+            }
+          }
+        }
+      },
+      "agent_chat": {
+        "events": 325,
+        "first_timestamp_utc": "2026-06-30T05:06:53.830690+00:00",
+        "last_timestamp_utc": "2026-07-09T20:40:37.572414+00:00",
+        "statuses": {
+          "error": 8,
+          "success": 317
+        },
+        "models": [
+          "claude-sonnet-4-5-20250929"
+        ],
+        "latency_ms": {
+          "min": 315.7,
+          "p50": 6902.0,
+          "p75": 8335.7,
+          "p90": 9797.3,
+          "p95": 11340.6,
+          "p99": 14057.2,
+          "mean": 7095.2,
+          "max": 33866.4
+        },
+        "input_tokens": {
+          "p50": 18600,
+          "p95": 21512,
+          "mean": 15369.7,
+          "total": 4995137
+        },
+        "output_tokens": {
+          "p50": 132,
+          "p95": 233,
+          "mean": 133.8,
+          "total": 43472
+        },
+        "total_tokens": {
+          "p50": 18773,
+          "p95": 21622,
+          "mean": 15503.4,
+          "total": 5038609
+        },
+        "latency_thresholds": {
+          "1500": {
+            "within": 5,
+            "over": 320,
+            "over_rate": 0.9846
+          },
+          "2000": {
+            "within": 6,
+            "over": 319,
+            "over_rate": 0.9815
+          },
+          "2500": {
+            "within": 6,
+            "over": 319,
+            "over_rate": 0.9815
+          },
+          "3000": {
+            "within": 8,
+            "over": 317,
+            "over_rate": 0.9754
+          },
+          "3500": {
+            "within": 13,
+            "over": 312,
+            "over_rate": 0.96
+          },
+          "4000": {
+            "within": 25,
+            "over": 300,
+            "over_rate": 0.9231
+          },
+          "5000": {
+            "within": 57,
+            "over": 268,
+            "over_rate": 0.8246
+          }
+        },
+        "by_agent_type": {
+          "deviation-analyst": {
+            "events": 241,
+            "first_timestamp_utc": "2026-06-30T05:51:51.036591+00:00",
+            "last_timestamp_utc": "2026-07-09T20:40:37.572414+00:00",
+            "statuses": {
+              "success": 238,
+              "error": 3
+            },
+            "models": [
+              "claude-sonnet-4-5-20250929"
+            ],
+            "latency_ms": {
+              "min": 1300.6,
+              "p50": 7128.7,
+              "p75": 8544.8,
+              "p90": 9946.3,
+              "p95": 11362.9,
+              "p99": 14837.5,
+              "mean": 7396.4,
+              "max": 33866.4
+            },
+            "input_tokens": {
+              "p50": 19214,
+              "p95": 21570,
+              "mean": 18455.2,
+              "total": 4447712
+            },
+            "output_tokens": {
+              "p50": 125,
+              "p95": 237,
+              "mean": 132.8,
+              "total": 32008
+            },
+            "total_tokens": {
+              "p50": 19376,
+              "p95": 21723,
+              "mean": 18588.0,
+              "total": 4479720
+            },
+            "latency_thresholds": {
+              "1500": {
+                "within": 2,
+                "over": 239,
+                "over_rate": 0.9917
+              },
+              "2000": {
+                "within": 2,
+                "over": 239,
+                "over_rate": 0.9917
+              },
+              "2500": {
+                "within": 2,
+                "over": 239,
+                "over_rate": 0.9917
+              },
+              "3000": {
+                "within": 4,
+                "over": 237,
+                "over_rate": 0.9834
+              },
+              "3500": {
+                "within": 7,
+                "over": 234,
+                "over_rate": 0.971
+              },
+              "4000": {
+                "within": 16,
+                "over": 225,
+                "over_rate": 0.9336
+              },
+              "5000": {
+                "within": 36,
+                "over": 205,
+                "over_rate": 0.8506
+              }
+            }
+          },
+          "inspector": {
+            "events": 84,
+            "first_timestamp_utc": "2026-06-30T05:06:53.830690+00:00",
+            "last_timestamp_utc": "2026-07-08T20:04:41.694057+00:00",
+            "statuses": {
+              "error": 5,
+              "success": 79
+            },
+            "models": [
+              "claude-sonnet-4-5-20250929"
+            ],
+            "latency_ms": {
+              "min": 315.7,
+              "p50": 6099.3,
+              "p75": 7480.3,
+              "p90": 8163.4,
+              "p95": 10456.7,
+              "p99": 13218.5,
+              "mean": 6230.9,
+              "max": 13218.5
+            },
+            "input_tokens": {
+              "p50": 6644,
+              "p95": 9323,
+              "mean": 6517.0,
+              "total": 547425
+            },
+            "output_tokens": {
+              "p50": 145,
+              "p95": 215,
+              "mean": 136.5,
+              "total": 11464
+            },
+            "total_tokens": {
+              "p50": 6819,
+              "p95": 9399,
+              "mean": 6653.4,
+              "total": 558889
+            },
+            "latency_thresholds": {
+              "1500": {
+                "within": 3,
+                "over": 81,
+                "over_rate": 0.9643
+              },
+              "2000": {
+                "within": 4,
+                "over": 80,
+                "over_rate": 0.9524
+              },
+              "2500": {
+                "within": 4,
+                "over": 80,
+                "over_rate": 0.9524
+              },
+              "3000": {
+                "within": 4,
+                "over": 80,
+                "over_rate": 0.9524
+              },
+              "3500": {
+                "within": 6,
+                "over": 78,
+                "over_rate": 0.9286
+              },
+              "4000": {
+                "within": 9,
+                "over": 75,
+                "over_rate": 0.8929
+              },
+              "5000": {
+                "within": 21,
+                "over": 63,
+                "over_rate": 0.75
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "timeout_assessment": {
+    "previous_candidate_timeout_ms": 2000,
+    "observed_calls_over_2000_ms": 72,
+    "observed_over_2000_rate": 0.5294,
+    "measured_p95_ms": 3150.2,
+    "phase2_shadow_timeout_ms": 4750,
+    "serial_production_status": "not_approved",
+    "decision": "A 2000 ms serial timeout is not viable for the current classifier. Use the measured shadow budget while optimizing; approve a serial router only after latency and total-turn token targets are met."
+  },
+  "prompt_and_capability_inventory": {
+    "agents": {
+      "inspector": {
+        "base_prompt_chars": 8188,
+        "base_prompt_words": 1339,
+        "tool_appendix_chars": 1939,
+        "combined_static_chars": 10127,
+        "combined_static_token_estimate_chars_div_4": 2532,
+        "tools": [
+          "run_inspection",
+          "highlight_dimensions",
+          "highlight_views",
+          "highlight_features",
+          "highlight_parts",
+          "fai_fill",
+          "fai_tol",
+          "ui_actions"
+        ],
+        "tool_count": 8
+      },
+      "deviation-analyst": {
+        "base_prompt_chars": 27965,
+        "base_prompt_words": 4050,
+        "tool_appendix_chars": 2573,
+        "combined_static_chars": 30538,
+        "combined_static_token_estimate_chars_div_4": 7635,
+        "tools": [
+          "highlight_dimensions",
+          "highlight_views",
+          "highlight_features",
+          "highlight_parts",
+          "isolate_parts",
+          "compare_parts",
+          "compare_features",
+          "show_geometry_diff",
+          "animate_motion",
+          "set_explode_level",
+          "ui_actions",
+          "create_edit_session"
+        ],
+        "tool_count": 12
+      },
+      "parts-finder": {
+        "base_prompt_chars": 1944,
+        "base_prompt_words": 290,
+        "tool_appendix_chars": 914,
+        "combined_static_chars": 2858,
+        "combined_static_token_estimate_chars_div_4": 715,
+        "tools": [
+          "highlight_parts"
+        ],
+        "tool_count": 1
+      }
+    },
+    "mode_contracts": {
+      "facility_layout": {
+        "label": "Facility Layout",
+        "addendum_chars": 1189
+      },
+      "plant_process": {
+        "label": "Plant / Process Explanation",
+        "addendum_chars": 1022
+      },
+      "drawing": {
+        "label": "Drawing / Inspection",
+        "addendum_chars": 1012
+      },
+      "3dmodel": {
+        "label": "3D Model",
+        "addendum_chars": 2057
+      },
+      "assembly": {
+        "label": "Assembly",
+        "addendum_chars": 5005
+      },
+      "assembly_training": {
+        "label": "Assembly Training",
+        "addendum_chars": 1394
+      },
+      "report": {
+        "label": "Inspection Report",
+        "addendum_chars": 803
+      },
+      "report_fai": {
+        "label": "Report / FAI",
+        "addendum_chars": 3432
+      }
+    },
+    "mode_contract_count": 8,
+    "frontend_ui_actions": [
+      "open_workspace",
+      "set_compare_revisions",
+      "play_motion",
+      "pause_motion",
+      "set_motion_rpm",
+      "seek_motion",
+      "stop_motion",
+      "rotate_view",
+      "stop_rotate_view",
+      "set_part_highlight",
+      "clear_part_highlight",
+      "set_part_display",
+      "clear_part_display",
+      "explode",
+      "focus",
+      "highlight",
+      "extract",
+      "select_bom_rows",
+      "open_supplier_spec",
+      "compare_supplier_specs",
+      "clear_compare_overlays"
+    ],
+    "frontend_ui_action_count": 21,
+    "context_sections": [
+      "[PART]",
+      "[MODE]",
+      "[DRAWING MODE]",
+      "[INSPECTION]",
+      "[FACILITY LAYOUT]",
+      "[PLANT PROCESS]",
+      "[ASSEMBLY TRAINING]",
+      "[MOTION]",
+      "[MOTION - reference only]",
+      "DIMENSIONS THE USER HAS SELECTED",
+      "AVAILABLE DIMENSIONS ON THIS DRAWING",
+      "AVAILABLE DRAWING VIEWS",
+      "PARTS THE USER HAS SELECTED",
+      "USER-FACING FEATURES ON THIS PART",
+      "AVAILABLE CAD FEATURES ON THIS PART",
+      "AVAILABLE SEMANTIC REGIONS ON THIS PART",
+      "AVAILABLE PARTS IN THIS ASSEMBLY",
+      "PART PHYSICAL PROPERTIES",
+      "NEARBY PARTS",
+      "MATE RELATIONSHIPS",
+      "SOLIDWORKS EXPLODE STEPS",
+      "PAUSED WALKTHROUGH",
+      "PART FEATURE CHANGES",
+      "REVISION CHANGES",
+      "GEOMETRY DIFF",
+      "FAI TABLE",
+      "FAI CHAT COMMANDS",
+      "INSPECTION READINESS"
+    ],
+    "context_section_count": 28
+  },
+  "frozen_regression_bars": [
+    "tests/test_viewport_intent_mapping.js",
+    "tests/test_viewport_authorization_parity.py",
+    "tests/test_fai_response_grounding.py",
+    "tests/test_viewport_intent_classifier.py",
+    "tests/test_mode_contract.py",
+    "tests/test_agent_response_encoding.py",
+    "tests/smoke_fai_motion_contract.py"
+  ]
+}

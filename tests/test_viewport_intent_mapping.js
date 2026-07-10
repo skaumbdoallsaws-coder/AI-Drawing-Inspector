@@ -16,6 +16,8 @@ const src = lines.slice(start, end).join('\n');
 
 const summary = JSON.parse(fs.readFileSync(
     path.join(ROOT, 'generated', 'engine_motion', 'motion', 'engine4cyl_crank_cycle_summary.json'), 'utf8'));
+const authorizationFixture = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'tests', 'fixtures', 'viewport_authorization_cases.json'), 'utf8'));
 
 let state = { activeTab: 'assembly', motionPkgInfo: { summary }, partExplorerAgentParts: new Set() };
 const assemblyContext = { part_color_legend: [
@@ -57,6 +59,24 @@ function vi(overrides) {
 }
 const target = (kind, extra) => Object.assign(
     { kind, label: '', part_numbers: [], feature_ids: [], motion_group_id: null }, extra);
+
+// Phase 0 shared authorization vectors. The Python/server test consumes the
+// same JSON fixture, so either implementation drifting fails the same cases.
+for (const item of authorizationFixture.cases || []) {
+    const expected = item.expected || {};
+    const actual = {
+        explicit_action: _messageExplicitlyRequestsViewportChange(item.message),
+        state_question: _isViewportStateQuestion(item.message),
+        allow_additive: _viewportWriteAuthorized(item.message, false),
+        allow_destructive: _viewportWriteAuthorized(item.message, true),
+    };
+    check(`AUTH ${item.id}`,
+        actual.explicit_action === expected.explicit_action
+        && actual.state_question === expected.state_question
+        && actual.allow_additive === expected.allow_additive
+        && actual.allow_destructive === expected.allow_destructive,
+        JSON.stringify({ expected, actual }));
+}
 
 // 1. "show the pin joint" -> highlight only, no play_motion
 {

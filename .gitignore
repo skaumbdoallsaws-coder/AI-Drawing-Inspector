@@ -30,6 +30,8 @@ venv/
 !sw_inspector_requirements.json
 !static/cad_feature_icon_registry.json
 !generated/cad_feature_icon_candidates/*.json
+!tests/fixtures/viewport_authorization_cases.json
+!docs/agent-skills-phase0-baseline.json
 
 # OS files
 .DS_Store

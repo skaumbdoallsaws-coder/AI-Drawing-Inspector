@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "description": "Shared labeled vectors for server/browser viewport-write authorization parity.",
+  "cases": [
+    {
+      "id": "show-pin-joint",
+      "message": "show the pin joint",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "show-pin-joint-motion-slowly",
+      "message": "show the pin joint in motion slowly",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "awkward-show-affected-motion",
+      "message": "can you the show the affected motion?",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "hide-lower-block",
+      "message": "hide the lower block",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "bring-everything-back",
+      "message": "bring everything back",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "bring-crankshaft",
+      "message": "bring the crankshaft",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "rotate-view",
+      "message": "rotate the view",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "turn-crankshaft",
+      "message": "turn the crankshaft",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "show-whole-assembly-motion",
+      "message": "show me how this assembly moves",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "what-is-hidden",
+      "message": "what is hidden?",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "did-you-clear-highlights",
+      "message": "did you clear highlights?",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": true, "allow_additive": true, "allow_destructive": false}
+    },
+    {
+      "id": "is-lower-block-hidden",
+      "message": "is the lower block hidden?",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "fai-impact-question",
+      "message": "what is the impact on the assembly of the failed dimension in the fai table?",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "show-failure-meaning",
+      "message": "show me what this failure means in the assembly",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": false, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "show-affected-motion",
+      "message": "show the affected motion",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "highlight-affected-parts",
+      "message": "highlight the affected parts in the assembly",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "what-is-affected-motion",
+      "message": "what is the affected motion?",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "explain-assembly-impact",
+      "message": "explain the assembly impact of #5",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": false, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "what-motion-will-be-affected",
+      "message": "what motion will be affected?",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "show-joint-working",
+      "message": "show the joint working",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "show-unknown-part",
+      "message": "hide the flux capacitor",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "ambiguous-show-thing",
+      "message": "show the thing",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": false, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "explicit-rpm",
+      "message": "show the pin joint in motion at 2 rpm",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "play-affected-motion",
+      "message": "play the affected motion",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "explain-affected-motion",
+      "message": "explain the affected motion",
+      "source": "viewport-mapping-suite",
+      "expected": {"explicit_action": false, "state_question": false, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "pause-motion",
+      "message": "pause the motion",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "is-it-moving",
+      "message": "is it moving?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "polite-show-crankshaft",
+      "message": "could you please show the crankshaft?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "make-block-transparent",
+      "message": "make the lower block transparent",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "clear-highlights",
+      "message": "clear the highlights",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "why-did-you-hide-block",
+      "message": "why did you hide the lower block?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": true, "allow_additive": true, "allow_destructive": false}
+    },
+    {
+      "id": "did-rotation-stop",
+      "message": "did the rotation stop?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "stop-rotation",
+      "message": "stop the rotation",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "open-assembly-tab",
+      "message": "open the assembly tab",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "can-you-see-pin",
+      "message": "can you see the pin?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": true, "allow_additive": true, "allow_destructive": false}
+    },
+    {
+      "id": "demonstrate-mechanism",
+      "message": "demonstrate the mechanism",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "watch-assembly-moving",
+      "message": "watch the assembly moving",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "could-you-make-it-move",
+      "message": "could you make it move?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
+      "id": "how-does-mechanism-move",
+      "message": "how does the mechanism move?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "where-is-pin-joint",
+      "message": "where is the pin joint?",
+      "source": "phase0-edge",
+      "expected": {"explicit_action": false, "state_question": true, "allow_additive": false, "allow_destructive": false}
+    }
+  ]
+}

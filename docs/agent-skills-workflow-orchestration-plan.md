@@ -182,7 +182,7 @@ The current viewport classifier runs concurrently with the main LLM. The general
 
 ### Router latency policy
 
-Phase 0 must measure the current classifier's p50 and p95 from existing Anthropic-call telemetry before setting the production budget. The initial implementation target is a hard timeout near 2 seconds, adjusted only from measured data; timeout immediately selects the legacy prompt path.
+Phase 0 measured 136 successful `viewport_intent` calls: p50 `2,014.7 ms`, p95 `3,150.2 ms`, and p99 `5,826.9 ms`. A `2,000 ms` serial timeout would have rejected 72/136 calls (`52.9%`), so that target is not viable for the current classifier. Phase 2 shadow evaluation uses a measured `4,750 ms` budget (1.5 x p95, rounded up); serial production routing remains unapproved until the route is optimized and remeasured. Timeout always selects the legacy prompt path.
 
 Latency mitigations for v1:
 
@@ -970,7 +970,7 @@ Exit gate: manifests validate, versioning works, and no user-facing behavior cha
 - Run it for Sage turns without using its output.
 - Compare routes against labeled evaluation cases and current behavior.
 - Tune skill descriptions and examples, not keyword lists.
-- Set the initial hard timeout near 2 seconds after reviewing measured p95; timeout uses the legacy path.
+- Use the measured `4,750 ms` timeout for Phase 2 shadow evaluation only; optimize and remeasure before approving any serial production timeout. Timeout uses the legacy path.
 - Cache only an exact normalized-message + workflow-state + context-fingerprint match.
 
 Exit gate: agreed route-quality threshold is met on paraphrases, typos, and synthetic fixtures.
@@ -1058,6 +1058,6 @@ V1 is complete when:
 1. Keep the first workflow narrow and name it `supplier-fai-disposition`. Generalize to nonconformance disposition only after another validated workflow requires it.
 2. Allow the main agent to request exactly one additional skill, validated and loaded in a second pass.
 3. Limit a normal turn to one primary plus three supporting skills.
-4. Measure classifier p50/p95 first, then start with a hard timeout near 2 seconds and legacy fallback.
+4. Phase 0 measured classifier p50 `2,014.7 ms` and p95 `3,150.2 ms`; a two-second timeout is rejected. Use `4,750 ms` for shadow evaluation, retain legacy fallback, and do not approve serial production routing until optimization and remeasurement.
 5. Keep viewport actions frontend-executed in v1. Generate browser receipts and deterministic same-turn status text; return receipts to the server on the next context attachment.
 6. Activate skill/workflow changes through code review initially. Builder-managed activation remains Phase 7.

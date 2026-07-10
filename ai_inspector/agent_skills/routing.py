@@ -109,11 +109,19 @@ Required schema:
 
 Routing rules:
 - Interpret the user's meaning, including typos, awkward grammar, and recent referents.
+- Resolve a named component against LIVE_CONTEXT_UNTRUSTED assembly_parts descriptions
+  and target IDs. When one description clearly matches, use that part ID and do not
+  ask for clarification. For example, a direct "hide the lower housing" command is
+  a hide_parts viewport request when one listed part is named Lower Housing.
 - Select only IDs marked eligible in CANDIDATE_CATALOG. Never invent an ID.
 - Use no more than one primary skill and three supporting skills.
 - If no registered workflow fits, set primary_workflow to null and skill_candidates to [].
 - If no registered workflow fits, use context_requirements: [] and needs_clarification: false;
   routing to null lets the main agent answer normally.
+- A direct viewport command still needs typed intents and requested_effects even when
+  primary_workflow is null. For example, "play the assembly motion at 20 RPM" has
+  play_motion and set_motion_rpm effects, viewport_write true, no skills, and no
+  clarification when a motion is available in live context.
 - If the user's objective clearly matches a registered workflow, select that
   workflow even when its status is unavailable. Then select no unavailable
   skill and request the missing evidence through clarification.
@@ -123,6 +131,31 @@ Routing rules:
   field-name prefixes such as requires_context: or optional_context:.
 - When a workflow is selected and an eligible skill supplies evidence needed by
   the request, select that skill. Exactly one selected skill must have role primary.
+- For a basic FAI status or measurement question, use assess-fai-characteristic.
+- For a question about what a failed feature means or what it affects, use
+  assess-fai-characteristic with reason-about-part-features and
+  trace-assembly-impact when those skills are eligible. This is evidence
+  selection only and never implies a viewport write.
+- For an explicit FAI measured-value edit, select assess-fai-characteristic when
+  eligible; the deterministic asset-write path remains responsible for execution.
+- For a disposition request, use recommend-fai-disposition as primary; its declared
+  assessment dependency is added by deterministic validation. Do not add feature,
+  assembly, motion, or viewport skills unless the user also asks for that work.
+- For assembly-impact tracing, use trace-assembly-impact as primary and add
+  reason-about-assembly-context only when its assembly evidence is eligible and needed.
+  Do not add reason-about-motion unless the user asks about motion.
+- For an affected-motion explanation, use reason-about-motion as primary and add
+  control-cad-viewport only for an explicit visual command. The motion skill's
+  declared dependencies add trace and assessment automatically; do not list them
+  redundantly unless they have a separate requested role.
+- For an explicit viewport command inside the FAI workflow, add control-cad-viewport
+  as support. Never select it for a read-only question or explanation.
+- For a requested semantic feature explanation, use reason-about-part-features.
+- Skills in this catalog belong only to supplier-fai-disposition. When
+  primary_workflow is null, skill_candidates MUST be empty even if a viewport
+  command resembles one of their descriptions.
+- Never select more than three explicit skills; deterministic dependency expansion
+  may add one more. Prefer the smallest sufficient composition.
 - requested_side_effects reports what the user requested. It never authorizes execution.
 - Questions, explanations, and analyses are read-only even when they mention motion, highlighting, failure impact, or affected parts.
 - A direct command to show, play, hide, restore, rotate, fill, edit, or navigate may request the corresponding write category.
@@ -132,6 +165,8 @@ Routing rules:
   clear_highlight, fill_fai, set_fai_tolerance, navigate_tab.
 - Use hide_parts for a hide command, show_parts for reveal/restore of named parts,
   highlight_parts for a part highlight, and fill_fai for measured-value entry.
+- "Restore all", "bring everything back", and equivalent commands request
+  show_parts and clear_highlight viewport effects.
 - A command to fill all FAI rows with stated exclusions is an edit request for
   fill_fai. Classify the request without asking the router to determine values;
   the main agent and deterministic tool contract handle the fill details.
@@ -352,25 +387,20 @@ def validate_route_response(data: Any, catalog: CandidateCatalog) -> dict[str, A
         return None
     if not all(type(value) is bool for value in side_effect_data.values()):
         return None
-    requested_side_effects = dict(side_effect_data)
+    model_side_effects = dict(side_effect_data)
 
     needs_clarification = data.get("needs_clarification")
     if type(needs_clarification) is not bool:
         return None
     clarification = data.get("clarification_question")
     if clarification is not None:
-        if not isinstance(clarification, str) or not clarification.strip() or len(clarification) > 240:
+        if not isinstance(clarification, str) or not clarification.strip():
             return None
-        clarification = clarification.strip()
+        clarification = clarification.strip()[:240]
     if needs_clarification and clarification is None:
         return None
     if not needs_clarification and clarification is not None:
         return None
-    if needs_clarification and any(requested_side_effects.values()):
-        return None
-    if speech_act in READ_ONLY_SPEECH_ACTS and any(requested_side_effects.values()):
-        return None
-
     raw_intents = data.get("intents")
     if not isinstance(raw_intents, list) or len(raw_intents) > 4:
         return None
@@ -429,19 +459,45 @@ def validate_route_response(data: Any, catalog: CandidateCatalog) -> dict[str, A
             }
         )
 
-    if bool(effect_union & VIEWPORT_EFFECTS) != requested_side_effects["viewport_write"]:
-        return None
-    if bool(effect_union & ASSET_EFFECTS) != requested_side_effects["asset_write"]:
-        return None
+    # The effect list is the typed source of truth for what the model is
+    # requesting. Canonicalize the redundant category flags here instead of
+    # rejecting an otherwise valid route when the classifier contradicts
+    # itself. These are still requests only; the independent raw-message
+    # authorization gates decide whether any write may execute.
+    requested_side_effects = {
+        "viewport_write": bool(effect_union & VIEWPORT_EFFECTS),
+        "asset_write": bool(effect_union & ASSET_EFFECTS),
+        "system_write": model_side_effects["system_write"],
+    }
     if requested_side_effects["system_write"]:
+        return None
+    if needs_clarification and any(requested_side_effects.values()):
+        return None
+    if speech_act in READ_ONLY_SPEECH_ACTS and any(requested_side_effects.values()):
         return None
 
     raw_skills = data.get("skill_candidates")
     if not isinstance(raw_skills, list) or len(raw_skills) > 4:
         return None
+    if workflow_id is None and raw_skills:
+        # A model may recognize a registered skill's semantic similarity on a
+        # turn that correctly has no registered workflow. Validate the rows so
+        # invented IDs still fail closed, then deterministically discard them;
+        # no workflow means no skill body can enter a production prompt.
+        for raw_skill in raw_skills:
+            if not isinstance(raw_skill, dict) or not _strict_keys(
+                raw_skill, {"id", "role", "confidence"}
+            ):
+                return None
+            if catalog.skill(str(raw_skill.get("id") or "").strip()) is None:
+                return None
+            if str(raw_skill.get("role") or "").strip().lower() not in ROUTE_SKILL_ROLES:
+                return None
+            if _confidence(raw_skill.get("confidence")) is None:
+                return None
+        raw_skills = []
     skill_candidates = []
     skill_ids: list[str] = []
-    primary_count = 0
     for raw_skill in raw_skills:
         if not isinstance(raw_skill, dict) or not _strict_keys(raw_skill, {"id", "role", "confidence"}):
             return None
@@ -454,8 +510,6 @@ def validate_route_response(data: Any, catalog: CandidateCatalog) -> dict[str, A
         role = str(raw_skill.get("role") or "").strip().lower()
         if role not in ROUTE_SKILL_ROLES:
             return None
-        if role == "primary":
-            primary_count += 1
         skill_confidence = _confidence(raw_skill.get("confidence"))
         if skill_confidence is None:
             return None
@@ -463,10 +517,22 @@ def validate_route_response(data: Any, catalog: CandidateCatalog) -> dict[str, A
         skill_candidates.append({"id": skill_id, "role": role, "confidence": skill_confidence})
     if len(skill_ids) != len(set(skill_ids)):
         return None
-    if skill_candidates and primary_count != 1:
-        return None
-    if workflow_id is None and skill_candidates:
-        return None
+    if skill_candidates:
+        # Role labels select prompt layout, not permissions. Models sometimes
+        # mark two compatible skills primary or mark all of them support. Keep
+        # the highest-confidence proposed primary (or highest-confidence skill)
+        # and deterministically demote the rest so an otherwise valid route is
+        # not lost to redundant role metadata.
+        proposed_primary = [
+            index for index, item in enumerate(skill_candidates) if item["role"] == "primary"
+        ]
+        candidate_indices = proposed_primary or list(range(len(skill_candidates)))
+        primary_index = max(
+            candidate_indices,
+            key=lambda index: (skill_candidates[index]["confidence"], -index),
+        )
+        for index, item in enumerate(skill_candidates):
+            item["role"] = "primary" if index == primary_index else "support"
 
     # Dependencies are registry declarations, not model choices. Add eligible
     # dependencies deterministically, then reject conflicts and over-budget
@@ -509,6 +575,8 @@ def validate_route_response(data: Any, catalog: CandidateCatalog) -> dict[str, A
         cleaned_requirements.append(requirement)
     if len(cleaned_requirements) != len(set(cleaned_requirements)):
         return None
+    if workflow_id is None:
+        cleaned_requirements = []
 
     return {
         "route_version": ROUTE_VERSION,

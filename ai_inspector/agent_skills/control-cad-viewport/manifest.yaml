@@ -1,0 +1,32 @@
+schema_version: 1
+id: control-cad-viewport
+version: 1.0.0
+description: Translate an explicit user display command into validated CAD viewport highlighting, visibility, transparency, rotation, or motion actions while preserving unrelated state.
+agents:
+  - sage
+workflows:
+  - supplier-fai-disposition
+modes:
+  - report_fai
+  - report
+  - drawing
+  - assembly
+requires_context:
+  - viewport.state
+optional_context:
+  - assembly.parts
+  - part.feature_map
+  - motion.groups
+allowed_tools:
+  - ui_actions
+  - highlight_features
+side_effects:
+  - viewport_write
+depends_on: []
+conflicts_with: []
+composable_with:
+  - reason-about-part-features
+  - reason-about-assembly-context
+  - trace-assembly-impact
+  - reason-about-motion
+evidence_policy: explicit_viewport_intent

@@ -44,8 +44,10 @@ def classify_shadow_route(
     authorize: Callable[[str, Mapping[str, bool]], Mapping[str, bool]] | None = None,
     complete: Callable[[str, str], str] | None = None,
     failure: dict[str, Any] | None = None,
+    runtime_mode: str = "shadow",
+    telemetry_workflow: str = "skill_route_shadow",
 ) -> dict[str, Any] | None:
-    """Return a validated route for telemetry only; never execute it.
+    """Return a validated route; side effects remain independently gated.
 
     When ``failure`` is a dict and the result is None, it receives a
     ``reason`` key (and ``error_type`` when known) so callers such as the
@@ -53,6 +55,8 @@ def classify_shadow_route(
     runtime failures without changing the soft-fail return contract.
     """
     started = time.perf_counter()
+    if runtime_mode not in {"shadow", "production"}:
+        raise ValueError("runtime_mode must be shadow or production")
     message = str(message or "").strip()
     if not message:
         _note_failure(failure, "empty_message")
@@ -66,13 +70,15 @@ def classify_shadow_route(
     cached = cache.get(key)
     if cached is not None:
         requested = cached["requested_side_effects"]
-        cached["_shadow"] = _shadow_metadata(
+        metadata_key = "_shadow" if runtime_mode == "shadow" else "_runtime"
+        cached[metadata_key] = _route_metadata(
             cached,
             catalog,
             cache_hit=True,
             authorized=(dict(authorize(message, requested)) if authorize else _deny_all()),
+            runtime_mode=runtime_mode,
         )
-        _record_route_stage(cached, "cache_hit", started, agent_type)
+        _record_route_stage(cached, "cache_hit", started, agent_type, telemetry_workflow)
         return cached
 
     user_text = build_route_user_text(
@@ -90,7 +96,7 @@ def classify_shadow_route(
 
             key_value = api_key or os.getenv("ANTHROPIC_API_KEY")
             if not key_value:
-                _record_empty_stage("api_key_missing", started, agent_type)
+                _record_empty_stage("api_key_missing", started, agent_type, workflow=telemetry_workflow)
                 _note_failure(failure, "api_key_missing")
                 return None
             client = anthropic.Anthropic(
@@ -115,10 +121,12 @@ def classify_shadow_route(
                         status=status,
                         errorType=error_type,
                         route="/api/agent/chat",
-                        workflow="skill_route_shadow",
+                        workflow=telemetry_workflow,
                         agentType=agent_type,
                     )
-                    _record_empty_stage("model_error", started, agent_type, error_type)
+                    _record_empty_stage(
+                        "model_error", started, agent_type, error_type, workflow=telemetry_workflow
+                    )
                     _note_failure(failure, "model_error", error_type)
                     return None
             record_anthropic_call(
@@ -126,7 +134,7 @@ def classify_shadow_route(
                 response=response,
                 latency_ms=elapsed_ms(),
                 route="/api/agent/chat",
-                workflow="skill_route_shadow",
+                workflow=telemetry_workflow,
                 agentType=agent_type,
             )
             raw = "".join(block.text for block in response.content if hasattr(block, "text"))
@@ -134,22 +142,28 @@ def classify_shadow_route(
         parsed = extract_json_object(raw)
         route = validate_route_response(parsed, catalog)
         if route is None:
-            _record_empty_stage("invalid_route", started, agent_type)
+            _record_empty_stage("invalid_route", started, agent_type, workflow=telemetry_workflow)
             _note_failure(failure, "schema_invalid")
+            if failure is not None:
+                failure["route_shape"] = _safe_route_shape(parsed)
             return None
         cache.put(key, route)
         requested = route["requested_side_effects"]
-        route["_shadow"] = _shadow_metadata(
+        metadata_key = "_shadow" if runtime_mode == "shadow" else "_runtime"
+        route[metadata_key] = _route_metadata(
             route,
             catalog,
             cache_hit=False,
             authorized=(dict(authorize(message, requested)) if authorize else _deny_all()),
+            runtime_mode=runtime_mode,
         )
-        _record_route_stage(route, "valid", started, agent_type)
+        _record_route_stage(route, "valid", started, agent_type, telemetry_workflow)
         return route
     except Exception as exc:  # noqa: BLE001 -- shadow routing is soft-fail by contract
         logger.warning("Skill shadow route failed: %s", exc)
-        _record_empty_stage("runtime_error", started, agent_type, type(exc).__name__)
+        _record_empty_stage(
+            "runtime_error", started, agent_type, type(exc).__name__, workflow=telemetry_workflow
+        )
         _note_failure(failure, "runtime_error", type(exc).__name__)
         return None
 
@@ -162,20 +176,69 @@ def _note_failure(failure: dict[str, Any] | None, reason: str, error_type: str |
         failure["error_type"] = error_type
 
 
+def _safe_route_shape(value: Any) -> dict[str, Any]:
+    """Summarize invalid route structure without retaining model prose."""
+    if not isinstance(value, dict):
+        return {"type": type(value).__name__}
+    intents = value.get("intents") if isinstance(value.get("intents"), list) else []
+    skills = value.get("skill_candidates") if isinstance(value.get("skill_candidates"), list) else []
+    return {
+        "keys": sorted(str(key) for key in value),
+        "speech_act": value.get("speech_act"),
+        "primary_workflow": value.get("primary_workflow"),
+        "workflow_confidence": value.get("workflow_confidence"),
+        "workflow_confidence_type": type(value.get("workflow_confidence")).__name__,
+        "continue_existing_workflow": value.get("continue_existing_workflow"),
+        "continue_existing_workflow_type": type(value.get("continue_existing_workflow")).__name__,
+        "intent_kinds": [item.get("kind") for item in intents if isinstance(item, dict)],
+        "requested_effects": [
+            effect
+            for item in intents if isinstance(item, dict)
+            for effect in (item.get("requested_effects") or [])
+        ],
+        "target_kinds": [
+            target.get("kind")
+            for item in intents if isinstance(item, dict)
+            for target in (item.get("targets") or []) if isinstance(target, dict)
+        ],
+        "target_ids": [
+            str(target.get("id"))
+            for item in intents if isinstance(item, dict)
+            for target in (item.get("targets") or [])
+            if isinstance(target, dict) and target.get("id") is not None
+        ],
+        "skill_ids": [item.get("id") for item in skills if isinstance(item, dict)],
+        "skill_roles": [item.get("role") for item in skills if isinstance(item, dict)],
+        "context_requirements": value.get("context_requirements"),
+        "requested_side_effects": value.get("requested_side_effects"),
+        "needs_clarification": value.get("needs_clarification"),
+        "clarification_question_type": type(value.get("clarification_question")).__name__,
+        "clarification_question_length": len(value.get("clarification_question") or ""),
+    }
+
+
 def _deny_all() -> dict[str, bool]:
     return {"viewport_write": False, "asset_write": False, "system_write": False}
 
 
-def _shadow_metadata(
+def classify_production_route(*args, **kwargs) -> dict[str, Any] | None:
+    """Classify one production turn while preserving deterministic authorization."""
+    kwargs["runtime_mode"] = "production"
+    kwargs["telemetry_workflow"] = "skill_route_production"
+    return classify_shadow_route(*args, **kwargs)
+
+
+def _route_metadata(
     route: Mapping[str, Any],
     catalog: CandidateCatalog,
     *,
     cache_hit: bool,
     authorized: Mapping[str, bool],
+    runtime_mode: str,
 ) -> dict[str, Any]:
     return {
-        "mode": "shadow",
-        "used_for_prompt": False,
+        "mode": runtime_mode,
+        "used_for_prompt": runtime_mode == "production",
         "used_for_execution": False,
         "cache_hit": bool(cache_hit),
         "context_fingerprint": catalog.context_fingerprint,
@@ -201,9 +264,15 @@ def _route_label(route: Mapping[str, Any]) -> str:
     return f"{workflow}|{speech}|{skills}|{effect}"[:240]
 
 
-def _record_route_stage(route: Mapping[str, Any], stage: str, started: float, agent_type: str) -> None:
+def _record_route_stage(
+    route: Mapping[str, Any],
+    stage: str,
+    started: float,
+    agent_type: str,
+    workflow: str,
+) -> None:
     record_workflow_stage(
-        workflow="skill_route_shadow",
+        workflow=workflow,
         stage=stage,
         latency_ms=(time.perf_counter() - started) * 1000.0,
         route=_route_label(route),
@@ -216,9 +285,11 @@ def _record_empty_stage(
     started: float,
     agent_type: str,
     error_type: str | None = None,
+    *,
+    workflow: str = "skill_route_shadow",
 ) -> None:
     record_workflow_stage(
-        workflow="skill_route_shadow",
+        workflow=workflow,
         stage=stage,
         latency_ms=(time.perf_counter() - started) * 1000.0,
         status="error" if error_type else "success",

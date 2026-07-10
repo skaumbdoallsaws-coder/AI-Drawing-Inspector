@@ -32,49 +32,49 @@
       "id": "fai-failure-meaning",
       "context": "fai_motion",
       "message": "What does the failed bore dimension mean?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain", "analyze"], "skills": ["assess-fai-characteristic"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain", "analyze"], "skills": ["assess-fai-characteristic", "reason-about-part-features", "trace-assembly-impact"], "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-disposition",
       "context": "fai_motion",
       "message": "Should this inspected part be accepted, reworked, or rejected?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "analyze"], "skills": ["assess-fai-characteristic"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "analyze"], "skills": ["assess-fai-characteristic", "recommend-fai-disposition"], "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-assembly-impact",
       "context": "fai_motion",
       "message": "What is the impact on the assembly of the failed dimension?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain", "analyze"], "skills": ["assess-fai-characteristic"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain", "analyze"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-assembly-context"], "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-affected-motion-question",
       "context": "fai_motion",
       "message": "What is the affected motion?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion"], "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-motion-will-be-affected",
       "context": "fai_motion",
       "message": "What motion will be affected by this failure?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion"], "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-show-affected-motion",
       "context": "fai_motion",
       "message": "Show the affected motion.",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic"], "viewport_write": true, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion", "control-cad-viewport"], "viewport_write": true, "asset_write": false}
     },
     {
       "id": "fai-show-affected-motion-awkward",
       "context": "fai_motion",
       "message": "can you the show the affected motion?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic"], "viewport_write": true, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion", "control-cad-viewport"], "viewport_write": true, "asset_write": false}
     },
     {
       "id": "fai-highlight-affected-parts",
       "context": "fai_motion",
       "message": "Highlight the parts affected by the failed characteristic.",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic"], "viewport_write": true, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "control-cad-viewport"], "viewport_write": true, "asset_write": false}
     },
     {
       "id": "fai-fill-exclusions",
@@ -128,7 +128,7 @@
       "id": "fai-explicit-no-view-change",
       "context": "fai_motion",
       "message": "Explain how this failure affects the assembly, but do not change the view.",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["explain", "analyze"], "skills": ["assess-fai-characteristic"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["explain", "analyze"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-assembly-context"], "viewport_write": false, "asset_write": false}
     },
     {
       "id": "assembly-explicit-rpm",
@@ -163,7 +163,7 @@
         {"role": "assistant", "text": "The failed characteristic affects the pin-joint motion group."}
       ],
       "workflow_state": {"workflow_id": "supplier-fai-disposition", "version": "1.0.0", "stage": "motion_explanation"},
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic"], "viewport_write": true, "asset_write": false, "continue_existing_workflow": true}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion", "control-cad-viewport"], "viewport_write": true, "asset_write": false, "continue_existing_workflow": true}
     }
   ]
 }

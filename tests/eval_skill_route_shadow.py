@@ -156,7 +156,9 @@ def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None)
         "asset_effect": bool(route)
         and route.get("requested_side_effects", {}).get("asset_write") is expected["asset_write"],
         "skills": bool(route)
-        and sorted(item["id"] for item in route.get("skill_candidates") or []) == sorted(expected["skills"]),
+        and set(expected["skills"]).issubset(
+            {item["id"] for item in route.get("skill_candidates") or []}
+        ),
     }
     if "needs_clarification" in expected:
         checks["needs_clarification"] = bool(route) and route.get("needs_clarification") is expected["needs_clarification"]

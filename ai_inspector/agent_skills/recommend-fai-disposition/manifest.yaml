@@ -1,0 +1,27 @@
+schema_version: 1
+id: recommend-fai-disposition
+version: 1.0.0
+description: Recommend a grounded supplier FAI disposition by separating measured status, available rework or acceptance evidence, and required engineering escalation.
+agents:
+  - sage
+workflows:
+  - supplier-fai-disposition
+modes:
+  - report_fai
+  - report
+  - drawing
+  - assembly
+requires_context:
+  - fai.characteristics
+optional_context:
+  - drawing.dimensions
+  - part.feature_map
+  - assembly.parts
+allowed_tools: []
+side_effects: []
+depends_on:
+  - assess-fai-characteristic
+conflicts_with: []
+composable_with:
+  - trace-assembly-impact
+evidence_policy: grounded_disposition

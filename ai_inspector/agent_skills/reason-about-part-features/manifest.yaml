@@ -1,0 +1,27 @@
+schema_version: 1
+id: reason-about-part-features
+version: 1.0.0
+description: Resolve drawing or FAI characteristics to semantic part features, expected drawing locations, and validated feature-highlight targets.
+agents:
+  - sage
+workflows:
+  - supplier-fai-disposition
+modes:
+  - report_fai
+  - report
+  - drawing
+  - assembly
+requires_context:
+  - part.feature_map
+optional_context:
+  - fai.characteristics
+  - drawing.dimensions
+allowed_tools: []
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with:
+  - assess-fai-characteristic
+  - trace-assembly-impact
+  - control-cad-viewport
+evidence_policy: semantic_feature_map

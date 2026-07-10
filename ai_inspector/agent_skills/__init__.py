@@ -25,7 +25,13 @@ from .routing import (
     route_cache_key,
     validate_route_response,
 )
-from .shadow import classify_shadow_route
+from .executors import (
+    EXECUTOR_RECIPES,
+    ExecutorPlan,
+    merge_executor_tool_calls,
+    plan_registered_executor,
+)
+from .shadow import classify_production_route, classify_shadow_route
 
 __all__ = [
     "ManifestValidationError",
@@ -49,5 +55,10 @@ __all__ = [
     "normalize_route_message",
     "route_cache_key",
     "validate_route_response",
+    "EXECUTOR_RECIPES",
+    "ExecutorPlan",
+    "merge_executor_tool_calls",
+    "plan_registered_executor",
+    "classify_production_route",
     "classify_shadow_route",
 ]

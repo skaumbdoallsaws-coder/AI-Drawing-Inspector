@@ -1,0 +1,32 @@
+schema_version: 1
+id: trace-assembly-impact
+version: 1.0.0
+description: Trace a failed FAI characteristic through its semantic feature, mating interface, affected assembly instance, and supported motion group.
+agents:
+  - sage
+workflows:
+  - supplier-fai-disposition
+modes:
+  - report_fai
+  - report
+  - drawing
+  - assembly
+requires_context:
+  - fai.characteristics
+  - assembly.parts
+optional_context:
+  - part.feature_map
+  - assembly.mates
+  - motion.groups
+  - viewport.state
+allowed_tools: []
+side_effects: []
+depends_on:
+  - assess-fai-characteristic
+conflicts_with: []
+composable_with:
+  - reason-about-part-features
+  - reason-about-assembly-context
+  - reason-about-motion
+  - control-cad-viewport
+evidence_policy: cross_asset_trace

@@ -90,7 +90,11 @@ def test_production_catalog_loads_and_schema_documents_match():
         workflow_ids=set(workflows.ids),
         known_agents={"sage", "iris", "scout"},
         known_modes={"report_fai", "report", "drawing", "assembly"},
-        known_tools_by_agent={"sage": set(), "iris": set(), "scout": set()},
+        known_tools_by_agent={
+            "sage": {"ui_actions", "highlight_features"},
+            "iris": set(),
+            "scout": set(),
+        },
     )
     workflow = workflows.get("supplier-fai-disposition")
     skill = skills.get("assess-fai-characteristic")
@@ -98,6 +102,19 @@ def test_production_catalog_loads_and_schema_documents_match():
     assert skill.manifest.version == "1.0.0"
     assert skill.body_sha256 == "7281a9966de5255d675becca0a43c3248857b0f80313909af3a490a84847c6a3"
     assert "100006" not in skill.body
+    assert skills.ids == {
+        "assess-fai-characteristic",
+        "recommend-fai-disposition",
+        "reason-about-part-features",
+        "reason-about-assembly-context",
+        "trace-assembly-impact",
+        "reason-about-motion",
+        "control-cad-viewport",
+    }
+    for skill_id in skills.ids:
+        package = skills.get(skill_id)
+        assert all(byte < 128 for byte in (package.path / "SKILL.md").read_bytes())
+        assert "100006" not in package.body
 
     skill_schema = json.loads(
         (SKILL_ROOT / "schemas" / "skill-manifest.schema.json").read_text(encoding="ascii")
@@ -291,6 +308,8 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
         os.environ["INSPECTORPRO_SKILLS_SHADOW"] = "0"
         server._reset_agent_skill_runtime_cache_for_tests()
         status = asyncio.run(server.agent_skill_runtime_status())
+        assert status["phase"] == 3
+        assert status["production_chat_integration"] is False
         assert status["runtime_loaded"] is False
         assert status["skills"] == []
         request = server.AgentSkillTestComposeRequest(include_skill_bodies=True)
@@ -303,10 +322,13 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
         os.environ["INSPECTORPRO_SKILLS_ENABLED"] = "1"
         server._reset_agent_skill_runtime_cache_for_tests()
         status = asyncio.run(server.agent_skill_runtime_status())
+        assert status["phase"] == 3
+        assert status["production_chat_integration"] is True
         assert status["runtime_loaded"] is True
+        assert len(status["skills"]) == 7
         assert status["skills"][0]["id"] == "assess-fai-characteristic"
         result = asyncio.run(server.agent_skill_test_compose(request))
-        assert result["production_chat_integration"] is False
+        assert result["production_chat_integration"] is True
         assert result["workflow"] == {"id": "supplier-fai-disposition", "version": "1.0.0"}
         assert result["selection"][0]["id"] == "assess-fai-characteristic"
         assert result["selection"][0]["side_effects"] == []

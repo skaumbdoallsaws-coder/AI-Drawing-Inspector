@@ -1,0 +1,28 @@
+schema_version: 1
+id: reason-about-assembly-context
+version: 1.0.0
+description: Explain a part in its parent assembly using exact instances, neighboring components, mate relationships, functions, and current assembly state.
+agents:
+  - sage
+workflows:
+  - supplier-fai-disposition
+modes:
+  - report_fai
+  - report
+  - drawing
+  - assembly
+requires_context:
+  - assembly.parts
+optional_context:
+  - assembly.mates
+  - viewport.state
+  - fai.characteristics
+allowed_tools: []
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with:
+  - trace-assembly-impact
+  - reason-about-motion
+  - control-cad-viewport
+evidence_policy: assembly_relationships

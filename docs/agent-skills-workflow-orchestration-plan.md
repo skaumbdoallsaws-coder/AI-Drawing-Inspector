@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation plan, revision 5. Phase 0 through Phase 2 are complete as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, feature flags, gated internal test endpoints, and a validated semantic router running only in optional shadow mode. Production prompt selection, tool selection, responses, and viewport execution remain unchanged pending Phase 3.
+Implementation plan, revision 6. Phase 0 through Phase 3 are implemented as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, seven v1 skill packages, selected-skill prompt assembly, registered FAI executor recipes, feature flags, gated internal test endpoints, and a validated semantic router. Phase 3 is off by default and has been live-tested only under controlled activation; normal production activation remains pending router-latency optimization.
 
 ## Purpose
 
@@ -984,7 +984,7 @@ Exit gate: manifests validate, versioning works, and no user-facing behavior cha
 Implementation checkpoint (2026-07-10):
 
 - Added deterministic eligible/unavailable candidate generation from registered workflow/skill metadata plus live asset, mode, context-provider, and target availability. Full skill bodies never enter the router prompt.
-- Added a strict route schema and validator for speech act, workflow, skills, targets, context requirements, requested effects, and clarification state. Unknown IDs, unavailable skills, read-only writes, effect/category mismatches, and invented context IDs fail closed.
+- Added a strict route schema and validator for speech act, workflow, skills, targets, context requirements, requested effects, and clarification state. Unknown IDs, unavailable skills, read-only writes, and invented context IDs fail closed. Redundant side-effect category flags are canonicalized from typed effects before permanent raw-message authorization and browser vetoes run.
 - Added a privacy-safe exact-match cache keyed by a SHA-256 of normalized message, recent/workflow state, and the full context/catalog fingerprint. No raw message is stored in cache keys or telemetry.
 - Added a Sage-only, queue-bounded, single-worker shadow submission after context normalization. It is never awaited and its result has no call site into production prompts, responses, tools, or frontend actions.
 - Kept the measured 4,750 ms provider timeout. A fresh-cache 25-case synthetic evaluation produced 92% valid routes; one call timed out and one response failed schema validation and therefore fell back. Across validated routes, workflow, speech-act, viewport-effect, asset-effect, and skill accuracy were all 100%.
@@ -1001,6 +1001,16 @@ Exit gate: agreed route-quality threshold is met on paraphrases, typos, and synt
 - Add registered, data-driven executor recipes for the v1 action combinations; do not build the general dependency-graph planner yet.
 - Keep the permanent browser authorization and suppression vetoes active after classifier mapping.
 - Keep legacy fallback enabled.
+
+Implementation checkpoint (2026-07-10):
+
+- Added all seven v1 packages: FAI assessment, disposition, semantic part-feature reasoning, assembly-context reasoning, assembly-impact tracing, motion reasoning, and CAD viewport control. Manifests are versioned, ASCII-only, mode/workflow scoped, and validated against Sage's actual tool catalog.
+- Added serial production routing behind `INSPECTORPRO_SKILLS_ENABLED`. Accepted routes replace the monolithic Sage prompt with a compact core, the selected workflow, only the selected skill bodies, and only tools allowed by those skills. Missing, invalid, low-confidence, write-category, or out-of-slice routes use the unchanged legacy path.
+- Added registered, data-driven executor recipes for resolved motion-group playback, motion-group highlighting, part highlighting, and feature highlighting. Executors consume validated live IDs only and preserve unrelated display, motion, and rotation state.
+- Kept independent server authorization and browser-side vetoes permanent. Classifier side-effect labels are requests only; explanation questions remain read-only even when they mention motion or affected parts.
+- Hardened route validation for classifier inconsistencies by deriving side-effect categories from typed effects, clamping clarification text, and normalizing redundant primary-role labels. Unknown IDs, unavailable skills, unsafe writes, and invalid targets still fail closed.
+- The controlled Phase 3 live workflow passed 32/32 checks. It verified read-only FAI impact and motion questions, explicit affected-motion playback at 30 RPM, additive crankshaft visibility without stopping motion, and full viewport restoration. The frozen offline bars passed 140/140 Python checks and 115/115 browser authorization/mapping checks.
+- Production activation remains off by default. The current serial router uses the measured 4,750 ms fallback budget for controlled testing only; latency optimization and remeasurement remain required before always-on rollout.
 
 Exit gate: all required acceptance cases pass offline and live.
 

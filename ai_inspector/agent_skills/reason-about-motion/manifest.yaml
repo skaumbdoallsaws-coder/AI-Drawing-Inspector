@@ -1,0 +1,29 @@
+schema_version: 1
+id: reason-about-motion
+version: 1.0.0
+description: Explain validated motion-package behavior, semantic motion groups, events, and visualization rates without inventing dynamics or operating conditions.
+agents:
+  - sage
+workflows:
+  - supplier-fai-disposition
+modes:
+  - report_fai
+  - report
+  - drawing
+  - assembly
+requires_context:
+  - motion.groups
+optional_context:
+  - fai.characteristics
+  - assembly.parts
+  - viewport.state
+allowed_tools: []
+side_effects: []
+depends_on:
+  - trace-assembly-impact
+conflicts_with: []
+composable_with:
+  - trace-assembly-impact
+  - reason-about-assembly-context
+  - control-cad-viewport
+evidence_policy: motion_package_facts

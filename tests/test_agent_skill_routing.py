@@ -40,7 +40,11 @@ def _registries():
         workflow_ids=set(workflows.ids),
         known_agents={"sage", "iris", "scout"},
         known_modes={"report_fai", "report", "drawing", "assembly"},
-        known_tools_by_agent={"sage": set(), "iris": set(), "scout": set()},
+        known_tools_by_agent={
+            "sage": {"ui_actions", "highlight_features"},
+            "iris": set(),
+            "scout": set(),
+        },
     )
     return workflows, skills
 
@@ -187,8 +191,19 @@ def test_route_validator_rejects_unknown_ids_unavailable_skills_and_extra_keys()
     unavailable = _catalog(with_fai=False)
     assert validate_route_response(_route(), unavailable) is None
 
+    no_workflow = _route(workflow=None)
+    normalized = validate_route_response(no_workflow, catalog)
+    assert normalized is not None
+    assert normalized["primary_workflow"] is None
+    assert normalized["skill_candidates"] == []
+    assert normalized["context_requirements"] == []
 
-def test_route_validator_rejects_read_only_writes_and_effect_mismatches():
+    no_workflow_unknown = _route(workflow=None)
+    no_workflow_unknown["skill_candidates"][0]["id"] = "invented-skill"
+    assert validate_route_response(no_workflow_unknown, catalog) is None
+
+
+def test_route_validator_rejects_read_only_writes_and_canonicalizes_effect_categories():
     catalog = _catalog()
     read_only_write = _route(effects=("play_motion",))
     assert validate_route_response(read_only_write, catalog) is None
@@ -202,10 +217,25 @@ def test_route_validator_rejects_read_only_writes_and_effect_mismatches():
     )
     assert validate_route_response(command, catalog) is not None
     command["requested_side_effects"]["viewport_write"] = False
-    assert validate_route_response(command, catalog) is None
+    cleaned_command = validate_route_response(command, catalog)
+    assert cleaned_command is not None
+    assert cleaned_command["requested_side_effects"]["viewport_write"] is True
+
+    no_effect = _route()
+    no_effect["requested_side_effects"]["viewport_write"] = True
+    cleaned_no_effect = validate_route_response(no_effect, catalog)
+    assert cleaned_no_effect is not None
+    assert cleaned_no_effect["requested_side_effects"]["viewport_write"] is False
 
     asset_edit = _route(speech_act="edit", effects=("fill_fai",))
     assert validate_route_response(asset_edit, catalog) is not None
+
+    long_clarification = _route(clarification=True)
+    long_clarification["skill_candidates"] = []
+    long_clarification["clarification_question"] = "Which characteristic? " * 30
+    cleaned = validate_route_response(long_clarification, catalog)
+    assert cleaned is not None
+    assert len(cleaned["clarification_question"]) == 240
 
 
 def test_route_validator_rejects_unknown_target_and_invalid_skill_roles():
@@ -224,15 +254,11 @@ def test_route_validator_rejects_unknown_target_and_invalid_skill_roles():
     assert no_feature_targets.known_target_ids["feature"] == frozenset()
     assert validate_route_response(invented_feature, no_feature_targets) is None
 
-    duplicate_primary = _route()
-    duplicate_primary["skill_candidates"].append(
-        {"id": "assess-fai-characteristic", "role": "primary", "confidence": 0.8}
-    )
-    assert validate_route_response(duplicate_primary, catalog) is None
-
     no_primary = _route()
     no_primary["skill_candidates"][0]["role"] = "support"
-    assert validate_route_response(no_primary, catalog) is None
+    cleaned_no_primary = validate_route_response(no_primary, catalog)
+    assert cleaned_no_primary is not None
+    assert cleaned_no_primary["skill_candidates"][0]["role"] == "primary"
 
 
 def test_route_validator_adds_dependencies_and_rejects_conflicts():
@@ -281,6 +307,40 @@ def test_route_validator_adds_dependencies_and_rejects_conflicts():
         context_fingerprint="conflict",
     )
     assert validate_route_response(_route(), conflict_catalog) is None
+
+
+def test_route_validator_normalizes_multiple_primary_skill_roles_by_confidence():
+    base = _catalog()
+    assessment = dict(base.skill("assess-fai-characteristic"))
+    helper = dict(assessment)
+    helper.update(
+        {
+            "id": "evidence-helper",
+            "description": "Synthetic supporting skill.",
+            "depends_on": [],
+            "conflicts_with": [],
+            "composable_with": [],
+        }
+    )
+    catalog = CandidateCatalog(
+        agent=base.agent,
+        mode=base.mode,
+        available_assets=base.available_assets,
+        available_context=base.available_context,
+        workflows=base.workflows,
+        skills=(assessment, helper),
+        known_context_ids=base.known_context_ids,
+        known_target_ids=base.known_target_ids,
+        context_fingerprint="multiple-primary",
+    )
+    route = _route()
+    route["skill_candidates"] = [
+        {"id": "assess-fai-characteristic", "role": "primary", "confidence": 0.8},
+        {"id": "evidence-helper", "role": "primary", "confidence": 0.9},
+    ]
+    cleaned = validate_route_response(route, catalog)
+    assert cleaned is not None
+    assert [item["role"] for item in cleaned["skill_candidates"]] == ["support", "primary"]
 
 
 def test_exact_cache_changes_with_message_state_context_and_expires():
@@ -423,7 +483,9 @@ def test_shadow_classifier_reports_failure_reasons():
     assert route is None and failure == {"reason": "empty_message"}
 
     route, failure = run_with_failure("show the affected motion", lambda *_args: "not json at all")
-    assert route is None and failure == {"reason": "schema_invalid"}
+    assert route is None and failure["reason"] == "schema_invalid"
+    assert failure["route_shape"] == {"type": "NoneType"}
+    assert "raw_response" not in failure
 
     def boom(*_args):
         raise RuntimeError("provider exploded")
@@ -471,6 +533,9 @@ def test_server_context_builds_data_driven_targets_and_shadow_is_off_by_default(
             {"char_number": "5", "description": "Synthetic bore", "status": "FAIL", "measured": 32.0}
         ],
         "profile_features": [{"id": "synthetic-bore", "semantic_name": "Pin bore"}],
+        "mate_relationships": [
+            {"type": "concentric", "description": "Synthetic shared axis"}
+        ],
         "viewport_context": {
             "part_legend": [{"part_number": "SYNTH-PART", "description": "Synthetic piston"}],
             "motion": {
@@ -489,11 +554,24 @@ def test_server_context_builds_data_driven_targets_and_shadow_is_off_by_default(
                     }
                 ],
             },
+            "state": {
+                "active_tab": "report",
+                "motion_playing": False,
+                "highlighted": [],
+                "hidden": [],
+            },
         },
     }
     assets, contexts, facts = server._skill_route_context(ctx)
     assert {"fai_table", "drawing", "part_model", "parent_assembly", "motion_package"} <= assets
-    assert {"fai.characteristics", "part.feature_map"} <= contexts
+    assert {
+        "fai.characteristics",
+        "part.feature_map",
+        "assembly.parts",
+        "assembly.mates",
+        "motion.groups",
+        "viewport.state",
+    } <= contexts
     assert facts["target_index"]["fai_characteristic"] == ["5"]
     assert facts["target_index"]["motion_group"] == ["synthetic-affected"]
 

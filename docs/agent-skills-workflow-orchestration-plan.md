@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation plan, revision 4. Phase 0 and Phase 1 are complete as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, feature flags, and gated internal test endpoints. Production chat prompt selection and semantic skill routing remain unchanged pending Phase 2 and Phase 3.
+Implementation plan, revision 5. Phase 0 through Phase 2 are complete as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, feature flags, gated internal test endpoints, and a validated semantic router running only in optional shadow mode. Production prompt selection, tool selection, responses, and viewport execution remain unchanged pending Phase 3.
 
 ## Purpose
 
@@ -980,6 +980,16 @@ Exit gate: manifests validate, versioning works, and no user-facing behavior cha
 - Tune skill descriptions and examples, not keyword lists.
 - Use the measured `4,750 ms` timeout for Phase 2 shadow evaluation only; optimize and remeasure before approving any serial production timeout. Timeout uses the legacy path.
 - Cache only an exact normalized-message + workflow-state + context-fingerprint match.
+
+Implementation checkpoint (2026-07-10):
+
+- Added deterministic eligible/unavailable candidate generation from registered workflow/skill metadata plus live asset, mode, context-provider, and target availability. Full skill bodies never enter the router prompt.
+- Added a strict route schema and validator for speech act, workflow, skills, targets, context requirements, requested effects, and clarification state. Unknown IDs, unavailable skills, read-only writes, effect/category mismatches, and invented context IDs fail closed.
+- Added a privacy-safe exact-match cache keyed by a SHA-256 of normalized message, recent/workflow state, and the full context/catalog fingerprint. No raw message is stored in cache keys or telemetry.
+- Added a Sage-only, queue-bounded, single-worker shadow submission after context normalization. It is never awaited and its result has no call site into production prompts, responses, tools, or frontend actions.
+- Kept the measured 4,750 ms provider timeout. A fresh-cache 25-case synthetic evaluation produced 92% valid routes; one call timed out and one response failed schema validation and therefore fell back. Across validated routes, workflow, speech-act, viewport-effect, asset-effect, and skill accuracy were all 100%.
+- Successful shadow calls in the final acceptance run measured p50 2,473 ms and p95 3,307 ms, with input-token p50/p95 1,919/1,928 and output-token p50/p95 283/329.
+- The complete shadow-enabled FAI-to-motion Playwright regression passed 32/32, confirming no user-facing behavior change.
 
 Exit gate: agreed route-quality threshold is met on paraphrases, typos, and synthetic fixtures.
 

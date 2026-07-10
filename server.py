@@ -79,12 +79,15 @@ from ai_inspector.telemetry import (
     time_block,
 )
 from ai_inspector.agent_skills import (
+    ExactRouteCache,
     PromptSection,
     RegistryValidationError,
     SkillRegistry,
     SkillRuntimeError,
     SkillRuntimeSettings,
     WorkflowRegistry,
+    build_candidate_catalog,
+    classify_shadow_route,
     compose_prompt_sections,
 )
 
@@ -17127,6 +17130,14 @@ class AgentSkillTestComposeRequest(BaseModel):
     include_skill_bodies: bool = False
 
 
+class AgentSkillTestRouteRequest(BaseModel):
+    message: str
+    history: Optional[List[Dict[str, Any]]] = None
+    inspection_context: Optional[Dict[str, Any]] = None
+    agent: str = "sage"
+    bypass_cache: bool = False
+
+
 def _agent_skill_runtime_settings() -> SkillRuntimeSettings:
     return SkillRuntimeSettings.from_env()
 
@@ -17179,9 +17190,14 @@ async def agent_skill_runtime_status():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     result: Dict[str, Any] = {
-        "phase": 1,
+        "phase": 2,
         "flags": settings.to_dict(),
         "production_chat_integration": False,
+        "shadow_router": {
+            "sage_only": True,
+            "timeout_ms": 4750,
+            "cache": _SKILL_ROUTE_SHADOW_CACHE.stats(),
+        },
         "runtime_loaded": False,
         "skills": [],
         "workflows": [],
@@ -17287,6 +17303,353 @@ async def agent_skill_test_compose(request: AgentSkillTestComposeRequest):
         "prompt_accounting": prompt_build.accounting,
         "skill_prompt_accounting": skill_build.accounting,
         "skill_prompt": skill_build.prompt if request.include_skill_bodies else None,
+    }
+
+
+_SKILL_ROUTE_SHADOW_TIMEOUT_SECONDS = 4.75
+_SKILL_ROUTE_SHADOW_MAX_TOKENS = 700
+_SKILL_ROUTE_SHADOW_CACHE = ExactRouteCache(max_entries=256, ttl_seconds=600.0)
+_SKILL_ROUTE_SHADOW_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="skill-route-shadow")
+_SKILL_ROUTE_SHADOW_SLOTS = threading.BoundedSemaphore(3)
+
+
+def _skill_route_text(value: Any, limit: int = 120) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+def _skill_route_characteristic_id(row: Dict[str, Any]) -> Optional[str]:
+    for key in ("char_number", "characteristic_number", "number", "id", "balloon"):
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[str, Any]]:
+    """Build the compact, data-only routing context and target index."""
+    ctx = ctx if isinstance(ctx, dict) else {}
+    assets: set[str] = set()
+    contexts: set[str] = set()
+    active_mode = str(ctx.get("active_mode") or ctx.get("active_tab") or "unknown").strip()
+    facts: Dict[str, Any] = {
+        "active_mode": active_mode,
+        "target_index": {
+            "fai_characteristic": [],
+            "part": [],
+            "feature": [],
+            "motion_group": [],
+            "assembly": [],
+            "viewport": ["current"],
+        },
+    }
+
+    part_number = str(ctx.get("part_number") or "").strip()
+    if part_number:
+        assets.add("part_model")
+        facts["part"] = {
+            "part_number": part_number,
+            "part_name": _skill_route_text(ctx.get("part_name"), 80),
+        }
+        facts["target_index"]["part"].append(part_number)
+
+    if ctx.get("has_drawing_file") or ctx.get("available_views"):
+        assets.add("drawing")
+    if ctx.get("available_dimensions"):
+        contexts.add("drawing.dimensions")
+
+    fai_rows = ctx.get("fai_characteristics")
+    if isinstance(fai_rows, list) and fai_rows:
+        assets.add("fai_table")
+        contexts.add("fai.characteristics")
+        compact_rows = []
+        for row in fai_rows[:60]:
+            if not isinstance(row, dict):
+                continue
+            characteristic_id = _skill_route_characteristic_id(row)
+            if characteristic_id:
+                facts["target_index"]["fai_characteristic"].append(characteristic_id)
+            measured = row.get("measured")
+            if measured is None:
+                measured = row.get("measured_value")
+            compact_rows.append(
+                {
+                    "id": characteristic_id,
+                    "description": _skill_route_text(
+                        row.get("description") or row.get("name") or row.get("feature"),
+                        100,
+                    ),
+                    "status": _skill_route_text(row.get("status"), 20).lower(),
+                    "has_measured_value": measured not in (None, ""),
+                }
+            )
+        facts["fai"] = {"count": len(fai_rows), "rows": compact_rows}
+
+    profile_features = ctx.get("profile_features")
+    if isinstance(profile_features, list) and profile_features:
+        contexts.add("part.feature_map")
+        compact_features = []
+        for feature in profile_features[:40]:
+            if not isinstance(feature, dict):
+                continue
+            feature_id = feature.get("id") or feature.get("feature_id") or feature.get("semantic_id")
+            feature_id = str(feature_id).strip() if feature_id is not None else ""
+            if feature_id:
+                facts["target_index"]["feature"].append(feature_id)
+            compact_features.append(
+                {
+                    "id": feature_id or None,
+                    "label": _skill_route_text(
+                        feature.get("semantic_name") or feature.get("name") or feature.get("label"),
+                        80,
+                    ),
+                }
+            )
+        facts["features"] = compact_features
+
+    viewport = ctx.get("viewport_context") if isinstance(ctx.get("viewport_context"), dict) else {}
+    legend = viewport.get("part_legend")
+    if not isinstance(legend, list) or not legend:
+        legend = ctx.get("part_color_legend") if isinstance(ctx.get("part_color_legend"), list) else []
+    compact_parts = []
+    for item in legend[:60]:
+        if not isinstance(item, dict):
+            continue
+        pn = item.get("part_number")
+        if pn is None:
+            continue
+        pn = str(pn).strip()
+        if not pn:
+            continue
+        facts["target_index"]["part"].append(pn)
+        compact_parts.append({"part_number": pn, "description": _skill_route_text(item.get("description"), 70)})
+    if compact_parts or ctx.get("mate_relationships"):
+        assets.add("parent_assembly")
+        facts["assembly_parts"] = compact_parts
+        if part_number:
+            facts["target_index"]["assembly"].append(part_number)
+
+    motion = viewport.get("motion") if isinstance(viewport.get("motion"), dict) else {}
+    motions = motion.get("motions") if isinstance(motion.get("motions"), list) else []
+    compact_motions = []
+    if motion.get("available") and motions:
+        assets.add("motion_package")
+        for motion_item in motions[:4]:
+            if not isinstance(motion_item, dict):
+                continue
+            groups = []
+            for group in (motion_item.get("groups") or [])[:20]:
+                if not isinstance(group, dict) or not group.get("id"):
+                    continue
+                group_id = str(group["id"])
+                facts["target_index"]["motion_group"].append(group_id)
+                groups.append(
+                    {
+                        "id": group_id,
+                        "label": _skill_route_text(group.get("label"), 80),
+                        "function": _skill_route_text(group.get("function"), 140),
+                        "part_numbers": [str(value) for value in (group.get("part_numbers") or [])[:16]],
+                    }
+                )
+            compact_motions.append(
+                {
+                    "motion_id": str(motion_item.get("motion_id") or ""),
+                    "groups": groups,
+                }
+            )
+        facts["motions"] = compact_motions
+
+    viewport_state = viewport.get("state") if isinstance(viewport.get("state"), dict) else {}
+    if viewport_state:
+        facts["viewport_state"] = {
+            "active_tab": _skill_route_text(viewport_state.get("active_tab"), 30),
+            "motion_playing": bool(viewport_state.get("motion_playing")),
+            "highlighted_count": len(viewport_state.get("highlighted") or []),
+            "hidden_count": len(viewport_state.get("hidden") or []),
+        }
+
+    for kind, values in facts["target_index"].items():
+        facts["target_index"][kind] = list(dict.fromkeys(str(value) for value in values if str(value)))
+    return assets, contexts, facts
+
+
+def _skill_route_recent_turns(history: Optional[List[Dict[str, Any]]]) -> List[Dict[str, str]]:
+    turns = []
+    for item in (history or [])[-4:]:
+        if not isinstance(item, dict):
+            continue
+        turns.append(
+            {
+                "role": _skill_route_text(item.get("role"), 20) or "unknown",
+                "text": _skill_route_text(item.get("content") or item.get("text"), 400),
+            }
+        )
+    return turns
+
+
+def _skill_route_workflow_state(ctx: Optional[Dict]) -> Dict[str, Any]:
+    ctx = ctx if isinstance(ctx, dict) else {}
+    state = ctx.get("skill_workflow_state")
+    if not isinstance(state, dict):
+        return {}
+    return {
+        "workflow_id": _skill_route_text(state.get("workflow_id"), 80),
+        "version": _skill_route_text(state.get("version"), 30),
+        "stage": _skill_route_text(state.get("stage"), 80),
+        "objective": _skill_route_text(state.get("objective"), 160),
+        "entities": state.get("entities") if isinstance(state.get("entities"), dict) else {},
+        "pending_clarification": _skill_route_text(state.get("pending_clarification"), 200),
+    }
+
+
+def _build_skill_route_catalog(ctx: Optional[Dict], public_agent: str):
+    workflows, skills = _get_agent_skill_runtime()
+    assets, contexts, facts = _skill_route_context(ctx)
+    mode = str((ctx or {}).get("active_mode") or (ctx or {}).get("active_tab") or "unknown").strip()
+    catalog = build_candidate_catalog(
+        workflows,
+        skills,
+        agent=public_agent,
+        mode=mode,
+        available_assets=assets,
+        available_context=contexts,
+        context_facts=facts,
+    )
+    return catalog, facts
+
+
+def _authorize_skill_shadow_effects(message: str, requested: Mapping[str, bool]) -> Dict[str, bool]:
+    return {
+        "viewport_write": bool(requested.get("viewport_write"))
+        and _viewport_write_authorized(message, destructive=True),
+        "asset_write": False,
+        "system_write": False,
+    }
+
+
+def _run_skill_route_shadow(
+    message: str,
+    ctx: Dict[str, Any],
+    history: Optional[List[Dict[str, Any]]],
+    api_key: str,
+    model: str,
+    agent_type: str,
+) -> Optional[Dict[str, Any]]:
+    catalog, facts = _build_skill_route_catalog(ctx, "sage")
+    return classify_shadow_route(
+        message,
+        catalog=catalog,
+        context_facts=facts,
+        recent_turns=_skill_route_recent_turns(history),
+        workflow_state=_skill_route_workflow_state(ctx),
+        cache=_SKILL_ROUTE_SHADOW_CACHE,
+        model=model,
+        timeout_seconds=_SKILL_ROUTE_SHADOW_TIMEOUT_SECONDS,
+        max_tokens=_SKILL_ROUTE_SHADOW_MAX_TOKENS,
+        api_key=api_key,
+        agent_type=agent_type,
+        authorize=_authorize_skill_shadow_effects,
+    )
+
+
+def _skill_route_shadow_done(future) -> None:
+    try:
+        route = future.result()
+        if route:
+            logger.info(
+                "[SkillRouteShadow] workflow=%s speech=%s skills=%s requested=%s authorized=%s cache=%s",
+                route.get("primary_workflow"),
+                route.get("speech_act"),
+                [item.get("id") for item in route.get("skill_candidates") or []],
+                route.get("requested_side_effects"),
+                (route.get("_shadow") or {}).get("authorized_side_effects"),
+                (route.get("_shadow") or {}).get("cache_hit"),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[SkillRouteShadow] callback failed: %s", exc)
+    finally:
+        _SKILL_ROUTE_SHADOW_SLOTS.release()
+
+
+def _submit_skill_route_shadow(
+    request: AgentChatRequest,
+    ctx: Dict[str, Any],
+    api_key: str,
+) -> bool:
+    if request.agent_type != "deviation-analyst":
+        return False
+    try:
+        settings = _agent_skill_runtime_settings()
+    except SkillRuntimeError as exc:
+        logger.warning("[SkillRouteShadow] invalid settings: %s", exc)
+        return False
+    if not settings.shadow:
+        return False
+    if not _SKILL_ROUTE_SHADOW_SLOTS.acquire(blocking=False):
+        record_workflow_stage(
+            workflow="skill_route_shadow",
+            stage="queue_full",
+            latency_ms=0.0,
+            status="error",
+            errorType="QUEUE_FULL",
+            route="none",
+            agentType=request.agent_type,
+        )
+        return False
+    try:
+        future = _SKILL_ROUTE_SHADOW_EXECUTOR.submit(
+            _run_skill_route_shadow,
+            request.message,
+            ctx,
+            request.history,
+            api_key,
+            settings.router_model,
+            request.agent_type,
+        )
+        future.add_done_callback(_skill_route_shadow_done)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _SKILL_ROUTE_SHADOW_SLOTS.release()
+        logger.warning("[SkillRouteShadow] submit failed: %s", exc)
+        return False
+
+
+@app.post("/api/internal/agent-skills/test-route")
+async def agent_skill_test_route(request: AgentSkillTestRouteRequest):
+    """Run one semantic route synchronously without applying its output."""
+    settings = _agent_skill_runtime_settings()
+    if not (settings.enabled or settings.shadow):
+        raise HTTPException(status_code=404, detail="Agent skill test-route endpoint is disabled")
+    if request.agent.strip().lower() != "sage":
+        raise HTTPException(status_code=422, detail="Phase 2 shadow routing is Sage-only")
+    normalized = normalize_agent_context(request.inspection_context or {})
+    ctx = normalized["flat"]
+    catalog, facts = _build_skill_route_catalog(ctx, "sage")
+    route_cache = (
+        ExactRouteCache(max_entries=1, ttl_seconds=1.0)
+        if request.bypass_cache
+        else _SKILL_ROUTE_SHADOW_CACHE
+    )
+    route = await asyncio.to_thread(
+        classify_shadow_route,
+        request.message,
+        catalog=catalog,
+        context_facts=facts,
+        recent_turns=_skill_route_recent_turns(request.history),
+        workflow_state=_skill_route_workflow_state(ctx),
+        cache=route_cache,
+        model=settings.router_model,
+        timeout_seconds=_SKILL_ROUTE_SHADOW_TIMEOUT_SECONDS,
+        max_tokens=_SKILL_ROUTE_SHADOW_MAX_TOKENS,
+        agent_type="deviation-analyst",
+        authorize=_authorize_skill_shadow_effects,
+    )
+    return {
+        "phase": 2,
+        "shadow_only": True,
+        "used_for_prompt": False,
+        "used_for_execution": False,
+        "route": route,
+        "cache": _SKILL_ROUTE_SHADOW_CACHE.stats(),
     }
 
 
@@ -17787,6 +18150,11 @@ async def agent_chat(request: AgentChatRequest):
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
         ctx["_user_message"] = request.message
+
+        # Phase 2: submit a Sage-only semantic route in parallel shadow mode.
+        # The future is never awaited and its result is never used for prompt
+        # selection, response generation, tool calls, or browser actions.
+        _submit_skill_route_shadow(request, ctx, api_key)
 
         if request.agent_type in {"inspector", "deviation-analyst"} and _is_user_facing_feature_list_request(request.message):
             feature_list_result = _feature_list_chat_result(ctx, request.agent_type)

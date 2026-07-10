@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inspectorp.ro/schemas/skill-route-v1.json",
+  "title": "InspectorPro Semantic Skill Route v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "route_version",
+    "speech_act",
+    "primary_workflow",
+    "continue_existing_workflow",
+    "workflow_confidence",
+    "intents",
+    "skill_candidates",
+    "context_requirements",
+    "requested_side_effects",
+    "needs_clarification",
+    "clarification_question"
+  ],
+  "properties": {
+    "route_version": {"const": 1},
+    "speech_act": {
+      "enum": ["question", "explain", "analyze", "command", "edit", "compare", "navigate", "clarify"]
+    },
+    "primary_workflow": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}
+      ]
+    },
+    "continue_existing_workflow": {"type": "boolean"},
+    "workflow_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "intents": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/intent"}
+    },
+    "skill_candidates": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/skillCandidate"}
+    },
+    "context_requirements": {
+      "type": "array",
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"}
+    },
+    "requested_side_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewport_write", "asset_write", "system_write"],
+      "properties": {
+        "viewport_write": {"type": "boolean"},
+        "asset_write": {"type": "boolean"},
+        "system_write": {"type": "boolean"}
+      }
+    },
+    "needs_clarification": {"type": "boolean"},
+    "clarification_question": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "minLength": 1, "maxLength": 240}
+      ]
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "label"],
+      "properties": {
+        "kind": {
+          "enum": ["fai_characteristic", "part", "feature", "motion_group", "assembly", "viewport", "unknown"]
+        },
+        "id": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "label": {"type": "string", "maxLength": 160}
+      }
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targets", "requested_effects", "confidence"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "assess_fai_characteristic",
+            "explain_assembly_impact",
+            "explain_motion",
+            "visualize_affected_context",
+            "recommend_disposition",
+            "other"
+          ]
+        },
+        "targets": {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/target"}},
+        "requested_effects": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "highlight_parts",
+              "highlight_features",
+              "play_motion",
+              "pause_motion",
+              "stop_motion",
+              "set_motion_rpm",
+              "hide_parts",
+              "show_parts",
+              "set_transparency",
+              "rotate_view",
+              "clear_highlight",
+              "fill_fai",
+              "set_fai_tolerance",
+              "navigate_tab"
+            ]
+          }
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "skillCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "confidence"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "role": {"enum": ["primary", "support"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

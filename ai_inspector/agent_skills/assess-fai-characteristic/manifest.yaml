@@ -1,7 +1,7 @@
 schema_version: 1
 id: assess-fai-characteristic
 version: 1.0.0
-description: Evaluate FAI characteristics from computed limits and measured evidence without inventing disposition facts.
+description: Identify and evaluate FAI characteristics as grounded evidence for status, disposition, assembly-impact, and requested visualization workflows.
 agents:
   - sage
 workflows:

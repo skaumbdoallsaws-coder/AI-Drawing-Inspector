@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -195,7 +196,7 @@ def run() -> int:
         record("t1_no_tab_switch", s1["activeTab"] == "report", s1)
         record("t1_no_motion", s1["motionPlaying"] is False, s1)
         record("t1_no_new_highlights", s1["highlighted"] == baseline["highlighted"], s1)
-        record("t1_no_mojibake", "Â" not in a1 and "â€" not in a1, a1[:200])
+        record("t1_no_mojibake", "\u00c2" not in a1 and "\u00e2\u20ac" not in a1, a1[:200])
         banned_hits = [b for b in BANNED_T1 if b in low1]
         record("t1_no_ungrounded_claims", not banned_hits, {"hits": banned_hits, "answer": a1[:400]})
         record("t1_quantified", any(ch.isdigit() for ch in a1), a1[:200])
@@ -204,18 +205,33 @@ def run() -> int:
         a2 = ask("what is the affected motion?")
         s2 = snap()
         low2 = a2.lower()
-        group_labels = page.evaluate("""
+        motion_evidence = page.evaluate("""
             (() => {
-                const out = [];
+                const labels = [];
+                const affectedTerms = new Set();
+                const stop = new Set(['assembly', 'instance', 'components', 'component',
+                    'affected', 'motion', 'group', 'whose', 'through', 'during',
+                    'with', 'that', 'the', 'and', 'from', 'into']);
                 const info = window.__compareDbg.state.motionPkgInfo;
                 const motions = info && info.summary && info.summary.available_motions || [];
                 motions.forEach(m => (m.groups || []).forEach(g => {
-                    if (g.label) out.push(String(g.label).toLowerCase());
-                    if (g.id) out.push(String(g.id).toLowerCase().replace(/_/g, ' '));
+                    if (g.label) labels.push(String(g.label).toLowerCase());
+                    if (g.id) labels.push(String(g.id).toLowerCase().replace(/_/g, ' '));
+                    const marker = `${g.id || ''} ${g.label || ''}`.toLowerCase();
+                    if (/affected|fai/.test(marker)) {
+                        const evidence = [g.function || '', ...(g.component_ids || [])].join(' ');
+                        String(evidence).toLowerCase().split(/[^a-z0-9]+/).forEach(term => {
+                            if (term.length >= 3 && !stop.has(term) && !/^[0-9]+$/.test(term)) {
+                                affectedTerms.add(term);
+                            }
+                        });
+                    }
                 }));
-                return out;
+                return { labels, affected_terms: [...affectedTerms] };
             })();
         """)
+        group_labels = motion_evidence["labels"]
+        affected_terms = motion_evidence["affected_terms"]
         record("t2_answer_received", bool(a2.strip()), a2[:200])
         record("t2_no_tab_switch", s2["activeTab"] == "report", s2)
         record("t2_no_motion", s2["motionPlaying"] is False, s2)
@@ -224,7 +240,15 @@ def run() -> int:
         # package's canonical ID and its human label as equivalent evidence.
         norm2 = low2.replace("-", " ").replace("_", " ")
         norm_labels = [lbl.replace("-", " ") for lbl in group_labels]
-        names_group = any(lbl in norm2 for lbl in norm_labels) or "motion group" in norm2 or "crank slider" in norm2
+        matched_terms_2 = [term for term in affected_terms if re.search(rf"\b{re.escape(term)}\b", norm2)]
+        names_group = (
+            any(lbl in norm2 for lbl in norm_labels)
+            or "motion group" in norm2
+            or (
+                len(set(matched_terms_2)) >= 2
+                and any(word in norm2 for word in ("motion", "joint", "mechanism", "articulation"))
+            )
+        )
         record("t2_names_motion_group", names_group, {"labels": group_labels, "answer": a2[:400]})
 
         # T2b: equivalent affected-motion wording -> still prose only.
@@ -238,8 +262,22 @@ def run() -> int:
         claim_hits = [w for w in ["highlighted", "showing", "playing", "animating", "replaying", "selected", "isolated"] if w in low2b]
         record("t2b_no_false_action_claim", not claim_hits, {"hits": claim_hits, "answer": a2b[:400]})
         norm2b = low2b.replace("-", " ").replace("_", " ")
-        names_group_2b = any(lbl in norm2b for lbl in norm_labels) or "motion group" in norm2b or "affected motion" in norm2b or "crank slider" in norm2b
-        record("t2b_names_motion_group", names_group_2b, {"labels": group_labels, "answer": a2b[:400]})
+        matched_terms = [term for term in affected_terms if re.search(rf"\b{re.escape(term)}\b", norm2b)]
+        names_supported_mechanism = (
+            len(set(matched_terms)) >= 2
+            and any(word in norm2b for word in ("motion", "joint", "mechanism", "articulation"))
+        )
+        names_group_2b = (
+            any(lbl in norm2b for lbl in norm_labels)
+            or "motion group" in norm2b
+            or "affected motion" in norm2b
+            or names_supported_mechanism
+        )
+        record(
+            "t2b_names_motion_group",
+            names_group_2b,
+            {"labels": group_labels, "matched_terms": matched_terms, "answer": a2b[:400]},
+        )
 
         # T3: explicit request -> assembly + highlight + playback @30, honest.
         a3 = ask("show the affected motion")

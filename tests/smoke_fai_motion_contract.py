@@ -220,7 +220,9 @@ def run() -> int:
         record("t2_no_tab_switch", s2["activeTab"] == "report", s2)
         record("t2_no_motion", s2["motionPlaying"] is False, s2)
         record("t2_no_new_highlights", s2["highlighted"] == baseline["highlighted"], s2)
-        norm2 = low2.replace("-", " ")
+        # Group IDs use underscores while labels use spaces. Treat the
+        # package's canonical ID and its human label as equivalent evidence.
+        norm2 = low2.replace("-", " ").replace("_", " ")
         norm_labels = [lbl.replace("-", " ") for lbl in group_labels]
         names_group = any(lbl in norm2 for lbl in norm_labels) or "motion group" in norm2 or "crank slider" in norm2
         record("t2_names_motion_group", names_group, {"labels": group_labels, "answer": a2[:400]})
@@ -235,7 +237,7 @@ def run() -> int:
         record("t2b_no_new_highlights", s2b["highlighted"] == baseline["highlighted"], s2b)
         claim_hits = [w for w in ["highlighted", "showing", "playing", "animating", "replaying", "selected", "isolated"] if w in low2b]
         record("t2b_no_false_action_claim", not claim_hits, {"hits": claim_hits, "answer": a2b[:400]})
-        norm2b = low2b.replace("-", " ")
+        norm2b = low2b.replace("-", " ").replace("_", " ")
         names_group_2b = any(lbl in norm2b for lbl in norm_labels) or "motion group" in norm2b or "affected motion" in norm2b or "crank slider" in norm2b
         record("t2b_names_motion_group", names_group_2b, {"labels": group_labels, "answer": a2b[:400]})
 

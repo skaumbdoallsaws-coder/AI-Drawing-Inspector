@@ -2,7 +2,7 @@
 
 ## Status
 
-Review draft, revision 3. This revision incorporates both architecture review passes and is ready for Phase 0 approval. It defines the architecture and rollout plan only. It does not change the current agent runtime.
+Implementation plan, revision 4. Phase 0 and Phase 1 are complete as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, feature flags, and gated internal test endpoints. Production chat prompt selection and semantic skill routing remain unchanged pending Phase 2 and Phase 3.
 
 ## Purpose
 
@@ -961,6 +961,14 @@ Exit gate: current behavior is reproducible and measured.
   - `INSPECTORPRO_SKILLS_ENABLED`
   - `INSPECTORPRO_SKILLS_SHADOW`
   - `INSPECTORPRO_SKILL_ROUTER_MODEL`
+
+Implementation checkpoint (2026-07-10):
+
+- Added strict ASCII-only YAML/Markdown package loading with duplicate-key rejection, exact schema keys, numeric SemVer resolution, known-agent/mode/tool checks, cross-reference validation, dependency-cycle detection, conflict checks, and one-primary-plus-three-supporting selection limits.
+- Added `supplier-fai-disposition@1.0.0` and the inactive `assess-fai-characteristic@1.0.0` package as the first validated catalog entries.
+- Added deterministic prompt-section character, byte, line, approximate-token, and SHA-256 accounting. The internal Sage/report-FAI composition measured 35,525 characters total; the isolated first skill contributes approximately 388 tokens.
+- Added gated `/api/internal/agent-skills/status` and `/api/internal/agent-skills/test-compose` endpoints. Both report `production_chat_integration: false`; the production `/api/agent/chat` path has no skill-runtime call site.
+- All three feature flags default off. Manifests can be inspected in enabled/shadow mode without changing user-facing behavior.
 
 Exit gate: manifests validate, versioning works, and no user-facing behavior changes.
 

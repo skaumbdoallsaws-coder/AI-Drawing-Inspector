@@ -1,0 +1,24 @@
+schema_version: 1
+id: assess-fai-characteristic
+version: 1.0.0
+description: Evaluate FAI characteristics from computed limits and measured evidence without inventing disposition facts.
+agents:
+  - sage
+workflows:
+  - supplier-fai-disposition
+modes:
+  - report_fai
+  - report
+  - drawing
+  - assembly
+requires_context:
+  - fai.characteristics
+optional_context:
+  - drawing.dimensions
+  - part.feature_map
+allowed_tools: []
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: computed_fields_only

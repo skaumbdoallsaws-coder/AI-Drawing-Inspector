@@ -78,6 +78,15 @@ from ai_inspector.telemetry import (
     record_workflow_stage,
     time_block,
 )
+from ai_inspector.agent_skills import (
+    PromptSection,
+    RegistryValidationError,
+    SkillRegistry,
+    SkillRuntimeError,
+    SkillRuntimeSettings,
+    WorkflowRegistry,
+    compose_prompt_sections,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17093,6 +17102,192 @@ def _sales_coaching_override(application: str, user_name: str = "") -> str:
         "HIGHLIGHT_PARTS: part_number1, part_number2\n"
         "CAMERA_FOCUS: part_number1, part_number2\n"
     )
+
+
+# ---------- Agent skill runtime (Phase 1, internal only) ----------
+
+_AGENT_SKILL_ROOT = REPO_ROOT / "ai_inspector" / "agent_skills"
+_AGENT_WORKFLOW_ROOT = REPO_ROOT / "ai_inspector" / "agent_workflows"
+_SKILL_PUBLIC_TO_INTERNAL_AGENT = {
+    "iris": "inspector",
+    "sage": "deviation-analyst",
+    "scout": "parts-finder",
+}
+_AGENT_SKILL_RUNTIME_LOCK = threading.Lock()
+_AGENT_SKILL_RUNTIME_CACHE: Optional[Tuple[WorkflowRegistry, SkillRegistry]] = None
+
+
+class AgentSkillTestComposeRequest(BaseModel):
+    agent: str = "sage"
+    workflow_id: str = "supplier-fai-disposition"
+    workflow_version: Optional[str] = None
+    mode: str = "report_fai"
+    primary_skill_id: str = "assess-fai-characteristic"
+    supporting_skill_ids: Optional[List[str]] = None
+    include_skill_bodies: bool = False
+
+
+def _agent_skill_runtime_settings() -> SkillRuntimeSettings:
+    return SkillRuntimeSettings.from_env()
+
+
+def _build_agent_skill_runtime() -> Tuple[WorkflowRegistry, SkillRegistry]:
+    public_agents = set(_SKILL_PUBLIC_TO_INTERNAL_AGENT)
+    workflows = WorkflowRegistry.from_roots(
+        [_AGENT_WORKFLOW_ROOT],
+        known_agents=public_agents,
+    )
+    known_tools = {
+        public_agent: {
+            spec["name"]
+            for spec in AGENT_TOOL_SPECS.get(internal_agent, [])
+            if isinstance(spec, dict) and isinstance(spec.get("name"), str)
+        }
+        for public_agent, internal_agent in _SKILL_PUBLIC_TO_INTERNAL_AGENT.items()
+    }
+    skills = SkillRegistry.from_roots(
+        [_AGENT_SKILL_ROOT],
+        workflow_ids=set(workflows.ids),
+        known_agents=public_agents,
+        known_modes=set(MODE_CONTRACTS),
+        known_tools_by_agent=known_tools,
+    )
+    return workflows, skills
+
+
+def _get_agent_skill_runtime() -> Tuple[WorkflowRegistry, SkillRegistry]:
+    global _AGENT_SKILL_RUNTIME_CACHE
+    if _AGENT_SKILL_RUNTIME_CACHE is None:
+        with _AGENT_SKILL_RUNTIME_LOCK:
+            if _AGENT_SKILL_RUNTIME_CACHE is None:
+                _AGENT_SKILL_RUNTIME_CACHE = _build_agent_skill_runtime()
+    return _AGENT_SKILL_RUNTIME_CACHE
+
+
+def _reset_agent_skill_runtime_cache_for_tests() -> None:
+    global _AGENT_SKILL_RUNTIME_CACHE
+    with _AGENT_SKILL_RUNTIME_LOCK:
+        _AGENT_SKILL_RUNTIME_CACHE = None
+
+
+@app.get("/api/internal/agent-skills/status")
+async def agent_skill_runtime_status():
+    """Report Phase 1 feature flags and validated package metadata."""
+    try:
+        settings = _agent_skill_runtime_settings()
+    except SkillRuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    result: Dict[str, Any] = {
+        "phase": 1,
+        "flags": settings.to_dict(),
+        "production_chat_integration": False,
+        "runtime_loaded": False,
+        "skills": [],
+        "workflows": [],
+    }
+    if not (settings.enabled or settings.shadow):
+        return result
+    try:
+        workflows, skills = _get_agent_skill_runtime()
+    except SkillRuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    result.update(
+        {
+            "runtime_loaded": True,
+            "skills": skills.metadata_catalog(),
+            "workflows": workflows.metadata_catalog(),
+        }
+    )
+    return result
+
+
+@app.post("/api/internal/agent-skills/test-compose")
+async def agent_skill_test_compose(request: AgentSkillTestComposeRequest):
+    """Load and account selected skills without touching production chat."""
+    try:
+        settings = _agent_skill_runtime_settings()
+    except SkillRuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not settings.enabled:
+        raise HTTPException(status_code=404, detail="Agent skill test-compose endpoint is disabled")
+
+    public_agent = (request.agent or "").strip().lower()
+    internal_agent = _SKILL_PUBLIC_TO_INTERNAL_AGENT.get(public_agent)
+    if internal_agent is None:
+        raise HTTPException(status_code=422, detail=f"Unknown agent: {request.agent}")
+    try:
+        workflows, skills = _get_agent_skill_runtime()
+        workflow = workflows.get(request.workflow_id, request.workflow_version)
+        if public_agent not in workflow.manifest.agents:
+            raise RegistryValidationError(
+                [f"workflow {workflow.manifest.id} is not allowed for agent {public_agent}"]
+            )
+        selected = skills.resolve_selection(
+            primary_id=request.primary_skill_id,
+            supporting_ids=request.supporting_skill_ids or [],
+            agent=public_agent,
+            workflow_id=workflow.manifest.id,
+            mode=request.mode,
+        )
+
+        sections = [
+            PromptSection(
+                id=f"core.{public_agent}",
+                content=AGENT_PROMPTS[internal_agent],
+                source=f"server.AGENT_PROMPTS[{internal_agent}]",
+                kind="core",
+            ),
+            PromptSection(
+                id=f"tools.{public_agent}",
+                content=build_tool_appendix(internal_agent),
+                source=f"server.AGENT_TOOL_SPECS[{internal_agent}]",
+                kind="tools",
+            ),
+        ]
+        mode_addendum = _mode_system_addendum(request.mode)
+        if mode_addendum:
+            sections.append(
+                PromptSection(
+                    id="mode.contract",
+                    content=mode_addendum,
+                    source=f"server.MODE_CONTRACTS[{request.mode}]",
+                    kind="mode",
+                )
+            )
+        skill_sections = skills.prompt_sections(selected)
+        sections.extend(skill_sections)
+        prompt_build = compose_prompt_sections(sections)
+        skill_build = compose_prompt_sections(skill_sections)
+    except SkillRuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    selection = []
+    for package in selected:
+        manifest = package.manifest
+        selection.append(
+            {
+                "id": manifest.id,
+                "version": manifest.version,
+                "role": "primary" if manifest.id == request.primary_skill_id else "support",
+                "body_sha256": package.body_sha256,
+                "allowed_tools": list(manifest.allowed_tools),
+                "side_effects": list(manifest.side_effects),
+            }
+        )
+    return {
+        "phase": 1,
+        "flags": settings.to_dict(),
+        "production_chat_integration": False,
+        "workflow": {
+            "id": workflow.manifest.id,
+            "version": workflow.manifest.version,
+        },
+        "selection": selection,
+        "prompt_accounting": prompt_build.accounting,
+        "skill_prompt_accounting": skill_build.accounting,
+        "skill_prompt": skill_build.prompt if request.include_skill_bodies else None,
+    }
 
 
 # ---------- Viewport intent classifier (hybrid intent layer) ----------

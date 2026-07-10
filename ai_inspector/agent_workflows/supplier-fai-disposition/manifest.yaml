@@ -1,0 +1,27 @@
+schema_version: 1
+id: supplier-fai-disposition
+version: 1.0.0
+description: Evaluate a supplier first-article result, trace supported product impact, and provide grounded disposition guidance.
+agents:
+  - sage
+entry_signals:
+  - supplier inspection or first-article question
+  - measured value, failed characteristic, or disposition request
+required_assets:
+  - fai_table
+optional_assets:
+  - drawing
+  - part_model
+  - parent_assembly
+  - motion_package
+stages:
+  - identify_characteristic
+  - evaluate_result
+  - explain_part_function
+  - trace_assembly_impact
+  - visualize_affected_context
+  - recommend_disposition
+completion:
+  - failed characteristic and evidence are identified
+  - disposition wording is grounded
+  - requested visualization has an execution receipt when applicable

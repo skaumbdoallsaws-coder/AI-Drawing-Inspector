@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any, Callable, Mapping, Sequence
 
@@ -26,6 +27,10 @@ from .routing import (
 
 
 logger = logging.getLogger("inspectorpro.skill-shadow")
+_SECRET_RE = re.compile(
+    r"(?i)(?:sk-(?:ant-)?[a-z0-9_-]{8,}|"
+    r"(?:authorization|api[-_ ]?key)\s*[:=]?\s*(?:bearer\s+)?[a-z0-9_-]{8,})"
+)
 
 
 def classify_shadow_route(
@@ -114,6 +119,12 @@ def classify_shadow_route(
                     )
                 except Exception as exc:  # noqa: BLE001
                     status, error_type = classify_exception_status(exc)
+                    error_message = _sanitize_provider_error(exc, secrets=(key_value,))
+                    logger.warning(
+                        "Skill route model call failed (%s): %s",
+                        error_type,
+                        error_message,
+                    )
                     record_anthropic_call(
                         model=model,
                         response=None,
@@ -127,7 +138,12 @@ def classify_shadow_route(
                     _record_empty_stage(
                         "model_error", started, agent_type, error_type, workflow=telemetry_workflow
                     )
-                    _note_failure(failure, "model_error", error_type)
+                    _note_failure(
+                        failure,
+                        "model_error",
+                        error_type,
+                        error_message=error_message,
+                    )
                     return None
             record_anthropic_call(
                 model=model,
@@ -168,12 +184,40 @@ def classify_shadow_route(
         return None
 
 
-def _note_failure(failure: dict[str, Any] | None, reason: str, error_type: str | None = None) -> None:
+def _note_failure(
+    failure: dict[str, Any] | None,
+    reason: str,
+    error_type: str | None = None,
+    *,
+    error_message: str | None = None,
+) -> None:
     if failure is None:
         return
     failure["reason"] = reason
     if error_type:
         failure["error_type"] = error_type
+    if error_message:
+        failure["error_message"] = error_message
+
+
+def _sanitize_provider_error(
+    exc: BaseException,
+    *,
+    secrets: Sequence[str] = (),
+    max_length: int = 240,
+) -> str:
+    """Keep an actionable provider reason without retaining request content."""
+    body = getattr(exc, "body", None)
+    error = body.get("error") if isinstance(body, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+    text = str(message or exc or type(exc).__name__)
+    for secret in secrets:
+        if secret:
+            text = text.replace(str(secret), "[redacted]")
+    text = _SECRET_RE.sub("[redacted]", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.encode("ascii", errors="replace").decode("ascii")
+    return text[:max(1, int(max_length))] or type(exc).__name__
 
 
 def _safe_route_shape(value: Any) -> dict[str, Any]:

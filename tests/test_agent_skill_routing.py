@@ -27,6 +27,7 @@ from ai_inspector.agent_skills import (  # noqa: E402
     route_cache_key,
     validate_route_response,
 )
+from ai_inspector.agent_skills.shadow import _sanitize_provider_error  # noqa: E402
 
 
 SKILL_ROOT = REPO_ROOT / "ai_inspector" / "agent_skills"
@@ -521,6 +522,24 @@ def test_shadow_classifier_reports_failure_reasons():
     assert route is None
 
 
+def test_provider_error_reason_is_short_ascii_and_redacts_credentials():
+    class ProviderError(RuntimeError):
+        body = {
+            "error": {
+                "message": "Credit balance too low for sk-ant-secret123 and API key abcdefghijk."
+            }
+        }
+
+    cleaned = _sanitize_provider_error(
+        ProviderError("unused raw exception"),
+        secrets=("sk-ant-secret123",),
+        max_length=80,
+    )
+    assert cleaned == "Credit balance too low for [redacted] and [redacted]."
+    assert all(ord(char) < 128 for char in cleaned)
+    assert len(cleaned) <= 80
+
+
 def test_server_context_builds_data_driven_targets_and_shadow_is_off_by_default():
     import server
 
@@ -652,6 +671,7 @@ def test_labeled_route_fixture_is_ascii_unique_and_has_fixed_effect_expectations
     assert all(byte < 128 for byte in raw)
     fixture = json.loads(raw.decode("ascii"))
     assert fixture["schema_version"] == 1
+    assert fixture["thresholds"]["skill_precision_accuracy"] == 1.0
     cases = fixture["cases"]
     ids = [case["id"] for case in cases]
     assert len(cases) >= 20

@@ -52,9 +52,9 @@ The recipes consume only validated IDs from live context. They do not contain en
 ## Verification
 
 - Skill runtime: 8/8
-- Semantic routing: 16/16
+- Semantic routing: 17/17
 - Phase 3 prompt and executor tests: 4/4
-- Combined frozen Python regression: 140/140
+- Combined frozen Python regression: 141/141
 - Browser authorization and mapping: 115/115
 - Controlled live FAI-to-motion Playwright workflow: 32/32
 
@@ -65,7 +65,9 @@ The live workflow verified:
 - `bring the crankshaft` added the crankshaft without stopping motion or clearing prior highlights
 - `bring everything back` cleared highlights and restored hidden parts while preserving motion
 
-The full semantic evaluation run before the final hardening measured 96% route availability and passed all accuracy thresholds except viewport-effect accuracy at 95.8%. The four affected cases were corrected and passed a targeted 4/4 rerun at 100% across all metrics. A final full provider rerun was unavailable because subsequent classifier requests returned HTTP 400; no paid-call result is represented as a code-quality pass.
+The final clean semantic evaluation passed all 25 synthetic cases. Route availability, workflow accuracy, speech-act accuracy, viewport-effect accuracy, asset-effect accuracy, skill recall, skill precision, clarification accuracy, and continuity accuracy were all 100%. Skill recall allows relevant supporting skills beyond the minimum expected set; the separate precision check requires every proposed skill to be eligible for the selected workflow, unique, and within the one-primary-plus-three-supporting cap.
+
+The earlier HTTP 400 burst was transient and account-side. Later minimal and full-route calls succeeded with the same request shape. Provider failures now log and return a short sanitized reason alongside the exception type; API keys and authorization tokens are redacted and the reason is length-limited.
 
 ## Operational State
 

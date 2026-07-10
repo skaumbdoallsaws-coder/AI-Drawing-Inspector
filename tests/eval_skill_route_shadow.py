@@ -98,6 +98,24 @@ def _authorize(message, requested):
     return server._authorize_skill_shadow_effects(message, requested)
 
 
+def _skill_selection_is_precise(route: dict | None, catalog) -> bool:
+    if not route:
+        return False
+    selected = route.get("skill_candidates") or []
+    workflow_id = route.get("primary_workflow")
+    if len(selected) > 4 or len({item.get("id") for item in selected}) != len(selected):
+        return False
+    if workflow_id is None:
+        return not selected
+    if selected and sum(item.get("role") == "primary" for item in selected) != 1:
+        return False
+    for item in selected:
+        row = catalog.skill(str(item.get("id") or ""))
+        if row is None or row.get("status") != "eligible" or workflow_id not in row.get("workflows", []):
+            return False
+    return True
+
+
 def _route_via_http(endpoint: str, case: dict, context: dict) -> tuple[dict | None, dict | None]:
     context = dict(context)
     if case.get("workflow_state"):
@@ -124,13 +142,13 @@ def _route_via_http(endpoint: str, case: dict, context: dict) -> tuple[dict | No
 
 def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None) -> dict:
     context = _synthetic_context(case["context"])
+    catalog, facts = server._build_skill_route_catalog(context, "sage")
     failure_info: dict = {}
     if endpoint:
         route, http_failure = _route_via_http(endpoint, case, context)
         if isinstance(http_failure, dict):
             failure_info.update(http_failure)
     else:
-        catalog, facts = server._build_skill_route_catalog(context, "sage")
         route = classify_shadow_route(
             case["message"],
             catalog=catalog,
@@ -159,6 +177,7 @@ def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None)
         and set(expected["skills"]).issubset(
             {item["id"] for item in route.get("skill_candidates") or []}
         ),
+        "skill_precision": _skill_selection_is_precise(route, catalog),
     }
     if "needs_clarification" in expected:
         checks["needs_clarification"] = bool(route) and route.get("needs_clarification") is expected["needs_clarification"]
@@ -243,6 +262,7 @@ def run() -> int:
         "viewport_effect_accuracy": _rate(results, "viewport_effect"),
         "asset_effect_accuracy": _rate(results, "asset_effect"),
         "skill_accuracy": _rate(results, "skills"),
+        "skill_precision_accuracy": _rate(results, "skill_precision"),
         "clarification_accuracy": _rate(results, "needs_clarification"),
         "continuation_accuracy": _rate(results, "continue_existing_workflow"),
     }

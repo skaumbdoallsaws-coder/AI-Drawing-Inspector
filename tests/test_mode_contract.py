@@ -322,6 +322,12 @@ def test_drawing_addendum_specifics():
 def test_3dmodel_addendum_specifics():
     add = server._mode_system_addendum("3dmodel")
     assert "CAD features" in add and "revision" in add.lower()
+    # Motion playback is fenced to the Assembly tab: the 3dmodel contract
+    # must not teach motion actions, and generic summaries are part-only.
+    assert "play_motion" not in add
+    assert "Assembly-tab capability" in add
+    assert "must describe only the loaded part" in add
+    assert "Do NOT mention the parent assembly" in add
 
 
 def test_assembly_addendum_specifics():
@@ -331,6 +337,10 @@ def test_assembly_addendum_specifics():
     assert "set_part_highlight mode replace" in add
     assert "play_motion at 30-40 RPM" in add
     assert "pin_bore_fai_affected" not in add
+    # Slow playback floor + narration-matches-action + visibility narration.
+    assert "never below 30" in add
+    assert "'isolating/extracting'" in add
+    assert "pure visibility command" in add
 
 
 def test_motion_context_renders_group_function():
@@ -359,10 +369,113 @@ def test_motion_context_renders_group_function():
     assert "Function: Transfers rotation through the joint interface." in sec
 
 
+def test_motion_context_is_assembly_mode_only():
+    # The same motion state that renders [MOTION] in assembly mode must NOT
+    # render it in 3dmodel mode: generic part summaries were leaking
+    # assembly motion/neighbor-part framing through this block.
+    motion_state = {
+        "motion": {
+            "available": True,
+            "motions": [{
+                "motion_id": "m1",
+                "name": "Sample motion",
+                "driver": "driver-1",
+                "default_rpm": 90,
+                "rpm_range": [10, 600],
+                "moving_component_count": 2,
+                "groups": [],
+            }],
+            "playback": {"playing": False},
+        }
+    }
+    sec_assembly = server._render_mode_contract_section("assembly", None, motion_state)
+    assert "[MOTION]" in sec_assembly
+    sec_3dmodel = server._render_mode_contract_section("3dmodel", None, motion_state)
+    assert "[MOTION]" not in sec_3dmodel
+
+
+def test_report_fai_gets_reference_only_motion_block():
+    # "What is the affected motion?" asked from the Report tab must be
+    # answerable in PROSE: report_fai renders a reference-only group map from
+    # the tab-agnostic viewport digest -- with an explicit no-actions rule.
+    viewport_motion = {
+        "available": True,
+        "motions": [{
+            "motion_id": "m1",
+            "default_rpm": 90,
+            "rpm_range": [10, 600],
+            "groups": [{
+                "id": "joint_a_affected",
+                "label": "Joint A affected group",
+                "part_numbers": ["100001", "100002"],
+                "function": "Components affected by the joint A bore diameter.",
+            }],
+        }],
+    }
+    sec = server._render_mode_contract_section(
+        "report_fai", None, {}, viewport_motion=viewport_motion)
+    assert "[MOTION - reference only]" in sec
+    assert "joint_a_affected" in sec
+    assert "Components affected by the joint A bore diameter." in sec
+    assert "Do NOT start motion" in sec
+
+    # Without the digest there is nothing to render.
+    sec_none = server._render_mode_contract_section("report_fai", None, {})
+    assert "[MOTION" not in sec_none
+
+    # 3dmodel stays motion-free even when the digest is available.
+    sec_3d = server._render_mode_contract_section(
+        "3dmodel", None, {}, viewport_motion=viewport_motion)
+    assert "[MOTION" not in sec_3d
+
+
+def test_report_fai_addendum_grounding_additions():
+    add = server._mode_system_addendum("report_fai")
+    assert "out_of_tolerance_by for the exact exceedance" in add
+    assert "ONE inspected part" in add
+    assert "process-control actions" in add
+    assert "[MOTION - reference only]" in add
+
+
 def test_report_fai_addendum_specifics():
     add = server._mode_system_addendum("report_fai")
     assert "FAI" in add
     assert "measured" in add.lower() and "pending" in add.lower()
+    # Grounded disposition language + ASCII-safe units.
+    assert "escalated for disposition" in add
+    assert "catastrophic" in add.lower()
+    assert "+/-0.05 mm" in add
+    assert "above-upper condition" in add
+    assert "undersize" in add
+    assert "fit_effect_hint" in add
+
+
+def test_fai_context_renders_computed_deviation_direction():
+    ctx = {
+        "fai_characteristics": [{
+            "char_number": 5,
+            "description": "Wrist-pin hole diameter through the piston.",
+            "nominal": 30.0,
+            "tol_plus": 0.05,
+            "tol_minus": 0.05,
+            "measured": "30.100",
+            "status": "FAIL",
+            "lower_limit": 29.95,
+            "upper_limit": 30.05,
+            "deviation_from_nominal": 0.1,
+            "deviation_direction": "above_upper",
+            "out_of_tolerance_by": 0.05,
+            "fit_feature_kind": "internal_diameter",
+            "fit_effect_hint": "internal diameter above upper limit: likely increased clearance/looser fit with mating shaft or pin",
+        }]
+    }
+    msg = server._build_context_message(ctx)
+    assert "limits=[29.95, 30.05]" in msg
+    assert "delta_from_nominal=0.1" in msg
+    assert "direction=above_upper" in msg
+    assert "out_of_tolerance_by=0.05" in msg
+    assert "fit_feature_kind=internal_diameter" in msg
+    assert "likely increased clearance/looser fit" in msg
 
 
 def test_increment3_modes_render_echo_without_duplicating_facts():
@@ -378,6 +491,10 @@ def test_frontend_resolves_report_fai():
     html = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8", errors="replace")
     assert "report_fai" in html
     assert "faiCharacteristics" in html
+    assert "deviation_from_nominal" in html
+    assert "out_of_tolerance_by" in html
+    assert "deviation_direction" in html
+    assert "fit_effect_hint" in html
 
 
 if __name__ == "__main__":

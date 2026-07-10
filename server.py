@@ -19,6 +19,7 @@ import shutil
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import importlib.util
 from collections import OrderedDict
@@ -223,9 +224,9 @@ async def _fallback_openai_transcribe(audio_bytes, filename=None):
     global _whisper_fallback_count
     _whisper_fallback_count += 1
     if _whisper_fallback_count == 1:
-        logger.warning("Local STT failed â€” falling back to OpenAI Whisper API")
+        logger.warning("Local STT failed -- falling back to OpenAI Whisper API")
     elif _whisper_fallback_count == 5:
-        logger.error("Local STT has failed 5 times â€” check faster-whisper installation")
+        logger.error("Local STT has failed 5 times -- check faster-whisper installation")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -295,9 +296,9 @@ def _resolve_part_asset(safe_pn: str, *relative_parts: str) -> Optional[Path]:
     return None
 
 
-# â”€â”€ Library Intake Wizard â€” stub-profile awareness (Step 1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -- Library Intake Wizard -- stub-profile awareness (Step 1) -----------
 #
-# Per docs/library-intake-wizard-plan.md Â§5.7, a profile written by the
+# Per docs/library-intake-wizard-plan.md sect. 5.7, a profile written by the
 # wizard's intake flow is marked with `source: "library_intake_stub"`.
 # Downstream consumers (get_profile_details, run_inspection, the
 # /api/profiles picker via SpatialInspector.list_profiles) must detect
@@ -305,7 +306,7 @@ def _resolve_part_asset(safe_pn: str, *relative_parts: str) -> Optional[Path]:
 # incomplete-profile part presented as inspection-ready.
 #
 # This file owns the canonical detection rule + path-resolution helpers
-# so the gates in /api/profile-details (Â§9.5) and /api/inspect (Â§9.6)
+# so the gates in /api/profile-details (sect. 9.5) and /api/inspect (sect. 9.6)
 # stay consistent. Both gates use the same predicate so the UI and
 # backend never disagree about which parts are stubs.
 
@@ -317,7 +318,7 @@ INTAKE_STUB_INSPECT_MESSAGE = (
 
 
 def _is_intake_stub_profile(profile_data: Any) -> bool:
-    """Single source of truth for the intake-stub detection rule (Â§5.7).
+    """Single source of truth for the intake-stub detection rule (sect. 5.7).
 
     Returns True iff the parsed profile JSON has top-level
     `source == "library_intake_stub"`. Defensive: non-dict input returns
@@ -741,7 +742,7 @@ app.add_middleware(
 # event per /api/* request (route, method, http status, latency). Skips
 # static assets and the root index so we don't bury the dashboard in
 # noise. The helper is soft-fail; an exception inside it never affects
-# the response â€” that contract is enforced inside record_endpoint_event.
+# the response -- that contract is enforced inside record_endpoint_event.
 @app.middleware("http")
 async def _telemetry_endpoint_timing(request, call_next):
     path = request.url.path
@@ -775,9 +776,9 @@ async def _telemetry_endpoint_timing(request, call_next):
                 latency_ms=elapsed_ms,
                 errorType=(type(raised).__name__ if raised is not None and not isinstance(raised, HTTPException) else None),
             )
-        except Exception:  # noqa: BLE001 â€” last-ditch belt-and-suspenders
+        except Exception:  # noqa: BLE001 -- last-ditch belt-and-suspenders
             # record_endpoint_event itself is soft-fail; this outer
-            # except is the FastAPI-middleware contract â€” we MUST NOT
+            # except is the FastAPI-middleware contract -- we MUST NOT
             # raise out of the finally clause.
             pass
 
@@ -1182,10 +1183,68 @@ async def get_drawing_map(part_number: str, revision: Optional[str] = Query(None
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# â”€â”€ Phase 10D: SOLIDWORKS extraction bridge endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _resolve_part_drawing_pdf_path(safe_pn: str, revision: Optional[str] = None) -> Optional[Path]:
+    """Return the saved drawing PDF for a part, preferring a requested revision."""
+    if not safe_pn:
+        return None
+
+    filenames = [
+        f"{safe_pn}_drawing.pdf",
+        f"{safe_pn}_drawing.PDF",
+        f"{safe_pn}.pdf",
+        f"{safe_pn}.PDF",
+    ]
+
+    safe_rev = re.sub(r"[^\w]", "", revision or "")
+    if safe_rev:
+        if safe_rev.lower().startswith("rev"):
+            safe_rev = safe_rev[3:]
+        rev_labels = []
+        for label in (safe_rev, safe_rev.upper(), safe_rev.lower()):
+            if label and label not in rev_labels:
+                rev_labels.append(label)
+        for rev_label in rev_labels:
+            for filename in filenames:
+                path = _resolve_part_asset(safe_pn, f"rev{rev_label}", filename)
+                if path is not None:
+                    return path
+
+    root = library_path()
+    for filename in filenames:
+        candidate = root / filename
+        if candidate.exists():
+            return candidate
+    for subdir in ("drawings", "drawing_pdfs"):
+        for filename in filenames:
+            candidate = root / subdir / filename
+            if candidate.exists():
+                return candidate
+    return None
+
+
+@app.get("/api/drawing-pdf/{part_number}")
+async def get_drawing_pdf(part_number: str, revision: Optional[str] = Query(None)):
+    """Serve the saved drawing PDF for a selected library part."""
+    safe_pn = sanitize_part_number(part_number)
+    if not safe_pn:
+        raise HTTPException(status_code=400, detail="Invalid part number")
+
+    pdf_path = _resolve_part_drawing_pdf_path(safe_pn, revision)
+    if pdf_path is None:
+        rev_msg = f" revision '{revision}'" if revision else ""
+        raise HTTPException(status_code=404, detail=f"No drawing PDF found for part number '{safe_pn}'{rev_msg}")
+
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=f"{safe_pn}_drawing.pdf",
+    )
+
+
+# -- Phase 10D: SOLIDWORKS extraction bridge endpoints --------------
 #
-# /api/bridge/status            â€” discoverability probe; always 200
-# /api/request-extraction       â€” drives the bridge end-to-end and
+# /api/bridge/status            -- discoverability probe; always 200
+# /api/request-extraction       -- drives the bridge end-to-end and
 #                                 imports the package into 400S_Sorted_Library
 #
 # See ai_inspector/bridge/ for the client + protocol details.
@@ -1201,7 +1260,7 @@ _request_extraction_lock = asyncio.Lock()
 
 # Configurable path to the inspectorpkg CLI used for validate-package +
 # compat-export. Override via INSPECTORPKG_CLI env var. The default is
-# the Release build alongside the Week-9+ SOLIDWORKS extractor repo â€”
+# the Release build alongside the Week-9+ SOLIDWORKS extractor repo --
 # fragile to dev-machine layout, which is why it is overridable.
 _DEFAULT_INSPECTORPKG_CLI = str(
     REPO_ROOT / "tools" / "inspectorpkg" / "inspectorpkg.exe"
@@ -1255,7 +1314,7 @@ async def bridge_status():
     """Discoverability probe for the InspectorPro app's UI.
 
     Always returns 200 so callers can render a clean disabled state
-    when the bridge is missing â€” they should NOT need try/except for
+    when the bridge is missing -- they should NOT need try/except for
     the common "SOLIDWORKS isn't running" case.
 
     Week 11 fields:
@@ -1322,17 +1381,17 @@ async def request_extraction(body: RequestExtractionBody):
     drawing package into 400S_Sorted_Library.
 
     Phases (each emits a log line under "request_extraction.*"):
-      start            â†’ request received
-      precheck         â†’ bridge alive, active doc is a drawing
-      job.created      â†’ POST /jobs/extract returned awaiting-approval
-      bridge.done      â†’ user approved + extraction completed
-      bridge.denied    â†’ user denied or approval timed out
-      bridge.failed    â†’ extraction threw on the SW side
+      start            -> request received
+      precheck         -> bridge alive, active doc is a drawing
+      job.created      -> POST /jobs/extract returned awaiting-approval
+      bridge.done      -> user approved + extraction completed
+      bridge.denied    -> user denied or approval timed out
+      bridge.failed    -> extraction threw on the SW side
       package.downloaded
       package.validated
       compat.exported
-      imported         â†’ atomic-replace into 400S_Sorted_Library + load verified
-      failed.<phase>   â†’ any non-recoverable failure
+      imported         -> atomic-replace into 400S_Sorted_Library + load verified
+      failed.<phase>   -> any non-recoverable failure
     """
     safe_pn = sanitize_part_number(body.partNumber)
     if not safe_pn:
@@ -1354,12 +1413,12 @@ async def request_part_extraction(body: RequestExtractionBody):
     """Drive the bridge to extract a Part package and install it as a
     sidecar under 400S_Sorted_Library/_bridge_imports/part/{pn}/.
 
-    Sidecar-only â€” never touches manual library files (the curated
+    Sidecar-only -- never touches manual library files (the curated
     {pn}.json / {pn}_inspection_profile.json / view PNGs / etc. under
     400S_Sorted_Library/parts/{pn}/...). See
-    docs/bridge-part-assembly-app-integration-plan.md Â§4.2.
+    docs/bridge-part-assembly-app-integration-plan.md sect. 4.2.
 
-    Same single-flight gate as the drawing endpoint â€” the SW user
+    Same single-flight gate as the drawing endpoint -- the SW user
     only ever sees one approval modal at a time.
     """
     safe_pn = sanitize_part_number(body.partNumber)
@@ -1383,7 +1442,7 @@ async def request_assembly_extraction(body: RequestExtractionBody):
     as a sidecar under 400S_Sorted_Library/_bridge_imports/assembly/{pn}/.
 
     Same sidecar-only / single-flight contract as the part endpoint
-    above. See docs/bridge-part-assembly-app-integration-plan.md Â§4.3.
+    above. See docs/bridge-part-assembly-app-integration-plan.md sect. 4.3.
     """
     safe_pn = sanitize_part_number(body.partNumber)
     if not safe_pn:
@@ -1400,21 +1459,21 @@ async def request_assembly_extraction(body: RequestExtractionBody):
         return await _drive_assembly_extraction(safe_pn, expected_doc_path)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---------------------------------------------------------------------
 # Shared bridge pipeline (Phase B refactor)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ---------------------------------------------------------------------
 #
 # The full bridge extraction pipeline has two distinct halves:
 #
 #   Half 1 (kind-agnostic, shared):
-#     precheck â†’ POST /jobs/extract â†’ poll â†’ download .zip â†’ validate
-#       via inspectorpkg validate-package â†’ unzip into staging
+#     precheck -> POST /jobs/extract -> poll -> download .zip -> validate
+#       via inspectorpkg validate-package -> unzip into staging
 #
 #   Half 2 (kind-specific, per-orchestrator):
-#     drawing  â†’ compat-export + atomic-replace into library root with
+#     drawing  -> compat-export + atomic-replace into library root with
 #                .bak rollback + load_drawing_map verify
-#     part     â†’ sidecar install into _bridge_imports/part/{pn}/{pkgId}/
-#     assembly â†’ sidecar install into _bridge_imports/assembly/{pn}/{pkgId}/
+#     part     -> sidecar install into _bridge_imports/part/{pn}/{pkgId}/
+#     assembly -> sidecar install into _bridge_imports/assembly/{pn}/{pkgId}/
 #
 # `_bridge_extract_and_unpack` is half 1; the three `_drive_*_extraction`
 # orchestrators below own half 2. Drawing's half 2 logic was written
@@ -1429,7 +1488,7 @@ class _BridgeFetchOk:
 
     The caller is responsible for the per-kind import tail AND for
     cleaning up `zip_path` and `pkg_folder` after a successful import
-    (the helper does NOT clean them up on success â€” different
+    (the helper does NOT clean them up on success -- different
     orchestrators have slightly different cleanup ordering). The
     helper DOES clean both up on its own failure paths so a partial
     download / unzip cannot leak into a future re-extraction.
@@ -1444,7 +1503,7 @@ class _BridgeFetchOk:
 class _BridgeNotDone(Exception):
     """Bridge reached a terminal state OTHER than DONE (denied, failed,
     or anything unexpected). Caller catches and renders its own
-    kind-specific failure response shape â€” denied/failed do NOT raise
+    kind-specific failure response shape -- denied/failed do NOT raise
     HTTPException because the consumer-visible 200 OK + success=false
     is part of the established contract.
 
@@ -1484,7 +1543,7 @@ async def _bridge_extract_and_unpack(
     log_prefix: str,
 ) -> _BridgeFetchOk:
     """Run the kind-agnostic phases of bridge extraction:
-        precheck â†’ POST /jobs/extract â†’ poll â†’ download â†’ validate â†’ unzip
+        precheck -> POST /jobs/extract -> poll -> download -> validate -> unzip
 
     Behavioural contract:
       - HTTPException on transport / timeout / precondition / validate /
@@ -1495,7 +1554,7 @@ async def _bridge_extract_and_unpack(
       - _BridgeFetchOk on bridge terminal state DONE.
 
     `log_prefix` lets each per-kind orchestrator namespace its log
-    lines:  "request_extraction" (drawing â€” preserves byte-equivalent
+    lines:  "request_extraction" (drawing -- preserves byte-equivalent
     grep recipes), "request_part_extraction", "request_assembly_extraction".
 
     Drawing flow stays byte-equivalent on the wire: when kind=KIND_DRAWING
@@ -1508,7 +1567,7 @@ async def _bridge_extract_and_unpack(
     client = BridgeClient()
 
     # Phase 3 telemetry: workflow="bridge_extract" stage timers. The
-    # approval_wait vs extract_wait split is the most-important piece â€”
+    # approval_wait vs extract_wait split is the most-important piece --
     # waiting for the user to click Approve in SOLIDWORKS should never
     # be blamed on software latency.
     import time as _t_bridge
@@ -1524,7 +1583,7 @@ async def _bridge_extract_and_unpack(
             route=_wf_route, partNumber=part_number, documentKind=kind,
         )
 
-    # â”€â”€ Precheck: bridge available + authenticated + active doc matches kind â”€â”€
+    # -- Precheck: bridge available + authenticated + active doc matches kind --
     status = await client.status()
     if status is None:
         log.warning("%s.failed.bridge_unavailable pn=%s", log_prefix, part_number)
@@ -1567,7 +1626,7 @@ async def _bridge_extract_and_unpack(
     _precheck_done = _t_bridge.perf_counter()
     _emit_stage("precheck", latency_ms=(_precheck_done - _stage_start) * 1000.0)
 
-    # â”€â”€ Create job (triggers SW approval window) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Create job (triggers SW approval window) -------------------
     _create_start = _t_bridge.perf_counter()
     try:
         # Drawing flow stays byte-equivalent on the wire: omit `kind`
@@ -1607,7 +1666,7 @@ async def _bridge_extract_and_unpack(
     _create_done = _t_bridge.perf_counter()
     _emit_stage("job_create", latency_ms=(_create_done - _create_start) * 1000.0)
 
-    # â”€â”€ Poll until terminal (10-min hard cap) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Poll until terminal (10-min hard cap) ----------------------
     # Track approval-wait split: the moment the bridge job leaves the
     # "awaiting-approval" state is when the SOLIDWORKS user clicked
     # Approve (or Deny). Everything before that is operator wait time;
@@ -1660,7 +1719,7 @@ async def _bridge_extract_and_unpack(
         raise HTTPException(status_code=500, detail=f"unexpected terminal state {snap.state!r}")
 
     # Emit approval_wait + extract_wait stage events. If the user denied
-    # immediately, _approval_done_marker may still be None â€” treat the
+    # immediately, _approval_done_marker may still be None -- treat the
     # whole polling duration as approval_wait and extract_wait as 0.
     _poll_end = _t_bridge.perf_counter()
     _approval_done = _approval_done_marker[0] if _approval_done_marker[0] is not None else _poll_end
@@ -1669,7 +1728,7 @@ async def _bridge_extract_and_unpack(
     _emit_stage("extract_wait",
                 latency_ms=(_poll_end - _approval_done) * 1000.0)
 
-    # bridge.done log line â€” drawing keeps the original sheets/views
+    # bridge.done log line -- drawing keeps the original sheets/views
     # tail for byte-equivalent grep recipes; part/assembly use a
     # kind-aware line that reports the relevant counts.
     if kind == KIND_DRAWING:
@@ -1685,7 +1744,7 @@ async def _bridge_extract_and_unpack(
                  log_prefix, part_number, job_id, snap.package_id,
                  snap.component_count, snap.mate_count, snap.active_configuration)
 
-    # â”€â”€ Stage path + download zip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Stage path + download zip ----------------------------------
     library_root = LIBRARY_DIR
     staging_dir = library_root / "_staging"
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -1720,7 +1779,7 @@ async def _bridge_extract_and_unpack(
     _download_done = _t_bridge.perf_counter()
     _emit_stage("download", latency_ms=(_download_done - _download_start) * 1000.0)
 
-    # â”€â”€ Validate via inspectorpkg CLI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Validate via inspectorpkg CLI ------------------------------
     _validate_start = _t_bridge.perf_counter()
     cli = _inspectorpkg_cli_path()
     if cli is None:
@@ -1753,7 +1812,7 @@ async def _bridge_extract_and_unpack(
         except Exception: pass
         raise HTTPException(status_code=500, detail=f"inspectorpkg CLI invoke failed: {ex}")
 
-    # â”€â”€ Unzip into staging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Unzip into staging -----------------------------------------
     # Zip's top-level entry is the {packageId}.inspectorpkg folder.
     import zipfile
     _unzip_start = _t_bridge.perf_counter()
@@ -1805,7 +1864,7 @@ def _install_sidecar(
     Returns (target_dir, latest_pointer_path) on success.
     Raises HTTPException(500) on copy / rename / pointer write failure;
     in failure cases, the .partial dir is removed and _latest.txt is
-    NOT updated â€” per the user directive, failure paths must never
+    NOT updated -- per the user directive, failure paths must never
     create a successful sidecar pointer.
     """
     log = logger
@@ -1824,7 +1883,7 @@ def _install_sidecar(
 
     if target.exists():
         # Idempotent re-extract of identical content. We trust the bridge
-        # packageId (sha256 of content) â€” same id means same bytes. Skip
+        # packageId (sha256 of content) -- same id means same bytes. Skip
         # the copy and just refresh the _latest.txt pointer.
         log.info("%s.sidecar.idempotent pn=%s packageId=%s target=%s",
                  log_prefix, part_number, package_id, target)
@@ -1903,7 +1962,7 @@ def _bridge_workflow_total_timer(*, kind: str, route: str):
             try:
                 result = await fn(part_number, expected_doc_path)
                 # _BridgeNotDone is converted to a dict response inside
-                # the orchestrator â€” detect denial via the response shape
+                # the orchestrator -- detect denial via the response shape
                 # so the total event labels it accurately.
                 if isinstance(result, dict) and result.get("success") is False:
                     js = result.get("jobState")
@@ -1962,7 +2021,7 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
     staging_dir   = ok.staging_dir
     cli           = _inspectorpkg_cli_path()  # already proven non-None inside the helper
 
-    # Run compat-export â†’ drops {pn}_drawing_map.json + {pn}_drawing.pdf in staging
+    # Run compat-export -> drops {pn}_drawing_map.json + {pn}_drawing.pdf in staging
     try:
         rc = _run_subprocess([
             cli, "compat-export",
@@ -1985,7 +2044,7 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
     log.info("request_extraction.compat.exported pn=%s map=%s pdf=%s",
              part_number, new_map, new_pdf if new_pdf.exists() else "(none)")
 
-    # â”€â”€ Atomic replace into library root + verify load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Atomic replace into library root + verify load -------------
     dest_map = library_root / f"{part_number}_drawing_map.json"
     dest_pdf = library_root / f"{part_number}_drawing.pdf"
 
@@ -2011,7 +2070,7 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
                 backup_pdf.unlink()
             os.replace(dest_pdf, backup_pdf)
         except Exception:
-            pass  # PDF backup failure is non-fatal â€” map is the source of truth
+            pass  # PDF backup failure is non-fatal -- map is the source of truth
 
     # Stage the new files via tmp + rename for atomicity
     def _atomic_install(src: Path, dest: Path) -> None:
@@ -2047,7 +2106,7 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
 
     if loaded is None:
         # Roll back map (and pdf if backed up)
-        log.error("request_extraction.failed.load_verify pn=%s â€” rolling back", part_number)
+        log.error("request_extraction.failed.load_verify pn=%s -- rolling back", part_number)
         if backup_map.exists():
             try: os.replace(backup_map, dest_map)
             except Exception as rollback_ex:
@@ -2063,7 +2122,7 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
             detail="newly imported drawing map failed to load; restored previous version.",
         )
 
-    # Success â€” clean up backups + staging artifacts
+    # Success -- clean up backups + staging artifacts
     for p in (backup_map, backup_pdf):
         try:
             if p.exists(): p.unlink()
@@ -2103,7 +2162,7 @@ async def _drive_extraction(part_number: str, expected_doc_path: Optional[str]) 
 async def _drive_part_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
     """Part-specific orchestrator. After the shared pipeline produces
     an unzipped pkg_folder, install it as a sidecar and return the
-    response shape spec'd in plan Â§3.1 (success / kind / packageId /
+    response shape spec'd in plan sect. 3.1 (success / kind / packageId /
     importPath / latestPointerPath / featureCount / activeConfiguration).
 
     Never touches manual library data. Failure paths leave _latest.txt
@@ -2165,7 +2224,7 @@ async def _drive_part_extraction(part_number: str, expected_doc_path: Optional[s
 async def _drive_assembly_extraction(part_number: str, expected_doc_path: Optional[str]) -> dict:
     """Assembly-specific orchestrator. Mirrors _drive_part_extraction
     with assembly-specific response fields (componentCount, mateCount,
-    activeConfiguration). See plan Â§3.1."""
+    activeConfiguration). See plan sect. 3.1."""
     log = logger
     try:
         ok = await _bridge_extract_and_unpack(
@@ -2231,17 +2290,17 @@ def _run_subprocess(argv: list) -> int:
     return proc.returncode
 
 
-# â”€â”€ Library Intake Wizard â€” preview + promote (Step 2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -- Library Intake Wizard -- preview + promote (Step 2) -----------------
 #
-# Per docs/library-intake-wizard-plan.md Â§4 (user flow steps 10-11),
-# Â§5 (canonical storage shape), Â§6 (safety rules), Â§7 (validation),
-# Â§9.2 (endpoints), Â§9.4 (single-flight gate), and Â§10.7 (consumer
-# behaviour against stubs â€” Step 1 of this wizard already ships that
+# Per docs/library-intake-wizard-plan.md sect. 4 (user flow steps 10-11),
+# sect. 5 (canonical storage shape), sect. 6 (safety rules), sect. 7 (validation),
+# sect. 9.2 (endpoints), sect. 9.4 (single-flight gate), and sect. 10.7 (consumer
+# behaviour against stubs -- Step 1 of this wizard already ships that
 # half).
 #
 # MVP scope: part + drawing only. Assembly intake is explicitly out
-# of scope (Â§3.2, Â§10.3) and the endpoints below only ever read/write
-# under parts/ â€” assembly_profiles globals are not touched.
+# of scope (sect. 3.2, sect. 10.3) and the endpoints below only ever read/write
+# under parts/ -- assembly_profiles globals are not touched.
 #
 # Data sources at promote time:
 #   - drawing map  -- library_dir / "{pn}_drawing_map.json"
@@ -2253,17 +2312,17 @@ def _run_subprocess(argv: list) -> int:
 #   - part data    -- library_dir / "_bridge_imports/part/{pn}/{packageId}/part/part.json"
 #                     (sidecar from /api/request-part-extraction; the
 #                     wizard reads but never modifies _bridge_imports/
-#                     per Â§6.6)
+#                     per sect. 6.6)
 #
 # Targets:
 #   - parts/{pn}/rev{X}/{pn}_drawing_map.json            (per-rev archive)
 #   - parts/{pn}/rev{X}/{pn}.json                        (per-rev part metadata)
 #   - parts/{pn}/rev{X}/{pn}_drawing.pdf                 (per-rev, optional)
 #   - parts/{pn}/rev{X}/intake_manifest.json             (per-rev, synthesized)
-#   - parts/{pn}/rev{X}/{pn}_inspection_profile.json     (per-rev stub copy, Â§5.7
+#   - parts/{pn}/rev{X}/{pn}_inspection_profile.json     (per-rev stub copy, sect. 5.7
 #                                                         row 1+2; skipped if a
 #                                                         real profile exists at
-#                                                         root per Â§5.7 row 3)
+#                                                         root per sect. 5.7 row 3)
 #   - library_dir / "{pn}_drawing_map.json"              (root "current pointer")
 #   - library_dir / "{pn}_drawing.pdf"                   (root, optional)
 #   - library_dir / "{pn}_inspection_profile.json"       (root stub, same skip rule)
@@ -2275,13 +2334,13 @@ INTAKE_BRIDGE_BASELINE         = {"addinCommit": "c043fbe", "appCommit": "c2de55
 INTAKE_VALID_MODES             = {"new-revision-of-existing-part", "brand-new-part"}
 INTAKE_REV_RE                  = re.compile(r"^rev[A-Za-z0-9]+$")
 
-# Â§9.4 single-flight gate. Separate lock from bridge so an in-flight
+# sect. 9.4 single-flight gate. Separate lock from bridge so an in-flight
 # extraction does not block a preview / promote.
 _library_intake_lock = asyncio.Lock()
 
 
 def _intake_sanitize_revision(rev: str) -> str:
-    """Project convention: revA, revB, ... â€” `rev` prefix + alphanumeric.
+    """Project convention: revA, revB, ... -- `rev` prefix + alphanumeric.
     Returns the input verbatim if it matches; empty string otherwise.
     Empty return signals 'invalid revision' to callers (handled as a
     400 by the endpoint).
@@ -2598,7 +2657,7 @@ def _intake_existing_revision_package_id(library_dir: Path, pn: str, revision: s
 
 
 def _intake_real_profile_present(library_dir: Path, pn: str) -> bool:
-    """Â§5.7 row 3 protection: true iff library root has a
+    """sect. 5.7 row 3 protection: true iff library root has a
     {pn}_inspection_profile.json that is NOT an intake stub. When true,
     the wizard MUST NOT write a stub at root or in the per-rev archive
     (a real profile is authoritative; the wizard never shadows it)."""
@@ -2632,7 +2691,7 @@ def _synthesize_intake_manifest(
     files: List[Dict[str, Any]],
     promoted_by: str,
 ) -> dict:
-    """Â§5.4 intake_manifest.json shape. `files` is a list of
+    """sect. 5.4 intake_manifest.json shape. `files` is a list of
     { "path": "<relative>", "bytes": <int> } entries for everything
     the wizard wrote into this revision directory."""
     return {
@@ -2666,7 +2725,7 @@ def _synthesize_intake_stub(
     part_name: str = "",
     part_description: str = "",
 ) -> dict:
-    """Â§5.7 schema for the intake stub profile JSON."""
+    """sect. 5.7 schema for the intake stub profile JSON."""
     return {
         "$schemaVersion":  INTAKE_STUB_SCHEMA_VERSION,
         "source":          INTAKE_STUB_SOURCE,
@@ -2703,15 +2762,15 @@ def _intake_relpath(library_dir: Path, path: Path) -> str:
 
 
 def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
-    """Returns the Â§9.2 preview response shape: planValid, actions,
+    """Returns the sect. 9.2 preview response shape: planValid, actions,
     warnings, errors. Pure computation -- no file writes."""
     library_dir = library_path()
     errors: List[Dict[str, str]] = []
     warnings: List[Dict[str, str]] = []
     actions: List[Dict[str, Any]] = []
 
-    # â”€â”€ Pre-flight validation (Â§6.5 fail-closed: any failure here
-    # blocks promotion). â”€â”€
+    # -- Pre-flight validation (sect. 6.5 fail-closed: any failure here
+    # blocks promotion). --
     safe_pn = sanitize_part_number(body.partNumber)
     if not safe_pn:
         errors.append({"code": "invalid_part_number", "message": "partNumber is empty or contains invalid characters."})
@@ -2733,7 +2792,7 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
     rev_dir = library_dir / "parts" / safe_pn / safe_rev
     target_rel = _intake_relpath(library_dir, rev_dir)
 
-    # â”€â”€ Source artifact checks (Â§7.5 / Â§7.3 / Â§7.4) â”€â”€
+    # -- Source artifact checks (sect. 7.5 / sect. 7.3 / sect. 7.4) --
     drawing_map_src = library_dir / f"{safe_pn}_drawing_map.json"
     drawing_pdf_src = library_dir / f"{safe_pn}_drawing.pdf"
     part_json_src   = _intake_part_sidecar_partjson_path(library_dir, safe_pn, body.partPackageId)
@@ -2765,8 +2824,8 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
                 "intakeMode": body.intakeMode, "targetRevisionPath": target_rel,
                 "actions": [], "warnings": warnings, "errors": errors}
 
-    # â”€â”€ Overwrite gate (Â§6.1 case 1). The user-confirmed retype string
-    # MUST equal the revision name exactly. â”€â”€
+    # -- Overwrite gate (sect. 6.1 case 1). The user-confirmed retype string
+    # MUST equal the revision name exactly. --
     rev_dir_exists = rev_dir.exists()
     overwrite_confirmed = (body.overwriteConfirmed or "").strip() == safe_rev
     if rev_dir_exists and not overwrite_confirmed:
@@ -2781,7 +2840,7 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
                 "intakeMode": body.intakeMode, "targetRevisionPath": target_rel,
                 "actions": [], "warnings": warnings, "errors": errors}
 
-    # â”€â”€ Package-ID-change-for-existing-revision gate. When the
+    # -- Package-ID-change-for-existing-revision gate. When the
     # operator is re-promoting an existing revision but with a
     # different partPackageId than the one the rev's intake_manifest
     # already records, the per-rev's existing wizard-managed visual
@@ -2814,9 +2873,9 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
                     "intakeMode": body.intakeMode, "targetRevisionPath": target_rel,
                     "actions": [], "warnings": warnings, "errors": errors}
 
-    # â”€â”€ Real-profile-at-root protection (Â§5.7 row 3). When a real
+    # -- Real-profile-at-root protection (sect. 5.7 row 3). When a real
     # profile exists at root, the wizard does NOT write a stub anywhere
-    # (root or per-rev archive). â”€â”€
+    # (root or per-rev archive). --
     skip_stub = _intake_real_profile_present(library_dir, safe_pn)
     if skip_stub:
         warnings.append({
@@ -2828,9 +2887,9 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
             ),
         })
 
-    # â”€â”€ Build the action list. Order matters only for human readability
+    # -- Build the action list. Order matters only for human readability
     # in the preview table; promote executes them in the order most
-    # likely to leave a consistent intermediate state on a failure. â”€â”€
+    # likely to leave a consistent intermediate state on a failure. --
     overwrite_kind = "OVERWRITE" if rev_dir_exists else "CREATE"
 
     # Drawing-side bytes only computed when not model-only. The model-
@@ -2868,7 +2927,7 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
     # the wizard copy-if-not-exists into the per-rev archive so the
     # operator does not have to move them by hand. Curated assets
     # already in the per-rev folder survive: the writer never clobbers
-    # an existing target (Â§6.4 spirit, applied to visual assets).
+    # an existing target (sect. 6.4 spirit, applied to visual assets).
     # Mirror the same flags _execute_intake_plan honors so the preview's
     # action table reflects what would actually happen on promote. Without
     # this, the operator sees SKIP for the visuals they JUST refreshed via
@@ -2954,26 +3013,26 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
             "kind":   overwrite_kind,
             "path":   _intake_relpath(library_dir, rev_dir / f"{safe_pn}_inspection_profile.json"),
             "bytes":  stub_bytes,
-            "source": "synthesized stub (Â§5.7)",
+            "source": "synthesized stub (sect. 5.7)",
         })
         root_stub_path = library_dir / f"{safe_pn}_inspection_profile.json"
         actions.append({
             "kind":   "UPDATE" if root_stub_path.exists() else "CREATE",
             "path":   _intake_relpath(library_dir, root_stub_path),
             "bytes":  stub_bytes,
-            "source": "synthesized stub (Â§5.7)",
+            "source": "synthesized stub (sect. 5.7)",
         })
     else:
         actions.append({
             "kind":   "SKIP",
             "path":   _intake_relpath(library_dir, library_dir / f"{safe_pn}_inspection_profile.json"),
             "bytes":  0,
-            "source": "real profile protected (Â§5.7 row 3)",
+            "source": "real profile protected (sect. 5.7 row 3)",
         })
 
     # Root drawing map (and pdf). Always UPDATE on subsequent runs; the
     # .bak rollback mirrors the existing drawing-extraction install
-    # pattern (Â§10.1). Skipped entirely in model-only mode: the wizard
+    # pattern (sect. 10.1). Skipped entirely in model-only mode: the wizard
     # has no drawing bytes to push to the root pointer, and the prior
     # root pointer (if any) must remain valid for its previously-
     # promoted revision.
@@ -3010,10 +3069,10 @@ def _compute_intake_plan(body: "IntakeRequestBody") -> dict:
 
 
 def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
-    """Performs the Â§5 install. Mirrors the partial-then-rename safety
-    design from Â§6.2 for NEW targets; per-file tmp+replace for confirmed
+    """Performs the sect. 5 install. Mirrors the partial-then-rename safety
+    design from sect. 6.2 for NEW targets; per-file tmp+replace for confirmed
     OVERWRITE targets so curated files (.STL, .glb, view PNGs) survive
-    per Â§6.4.
+    per sect. 6.4.
 
     Returns a dict matching the preview response shape with each action
     additively annotated `committed: true|false` and a final
@@ -3041,7 +3100,7 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
     drawing_pdf_src = library_dir / f"{safe_pn}_drawing.pdf"
     part_json_src   = _intake_part_sidecar_partjson_path(library_dir, safe_pn, body.partPackageId)
 
-    # Pre-read sources INTO MEMORY before any write -- Â§6.5 fail-closed.
+    # Pre-read sources INTO MEMORY before any write -- sect. 6.5 fail-closed.
     # If any source is unreadable, we abort before touching disk.
     # In model-only mode the drawing files are skipped entirely; the
     # part sidecar is still required (the wizard never produces a
@@ -3193,10 +3252,10 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
             "detail":    detail,
         })
 
-    # â”€â”€ Per-revision directory writes. â”€â”€
-    # NEW path: build under .partial then atomic rename. Mirrors Â§6.2.
+    # -- Per-revision directory writes. --
+    # NEW path: build under .partial then atomic rename. Mirrors sect. 6.2.
     # OVERWRITE path: write each file via tmp+replace into existing dir,
-    # leaves untouched files (.STL, .glb, etc.) alone per Â§6.4.
+    # leaves untouched files (.STL, .glb, etc.) alone per sect. 6.4.
     parts_root = library_dir / "parts" / safe_pn
     parts_root.mkdir(parents=True, exist_ok=True)
 
@@ -3227,7 +3286,7 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
             (partial / "intake_manifest.json").write_bytes(manifest_bytes)
             if not skip_stub:
                 (partial / f"{safe_pn}_inspection_profile.json").write_bytes(stub_bytes)
-            # Atomic flip (Â§6.2 step 4)
+            # Atomic flip (sect. 6.2 step 4)
             os.rename(partial, rev_dir)
         except Exception as ex:
             for rp in rollback_paths:
@@ -3245,7 +3304,7 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
             _record("CREATE", rev_dir / f"{safe_pn}_inspection_profile.json", True)
     else:
         # Confirmed OVERWRITE -- per-file tmp + os.replace. Preserves
-        # any curated files in the same dir per Â§6.4.
+        # any curated files in the same dir per sect. 6.4.
         overwrite_pairs: List = []
         if not model_only:
             overwrite_pairs.append((f"{safe_pn}_drawing_map.json", drawing_map_bytes))
@@ -3269,11 +3328,11 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
                 return {**plan, "success": False, "executed": executed,
                         "errors": [{"code": "per_rev_overwrite_failed", "message": str(ex)}]}
 
-    # â”€â”€ Visual-asset copy (task 3 of the extractor-parity pass). â”€â”€
+    # -- Visual-asset copy (task 3 of the extractor-parity pass). --
     # Copy-if-not-exists from the bridge sidecar into the per-rev
     # archive. Runs for BOTH new + overwrite paths and for BOTH
     # standard + model-only intakes. Curated assets already in the
-    # target are skipped, not clobbered (Â§6.4 spirit applied to
+    # target are skipped, not clobbered (sect. 6.4 spirit applied to
     # visual assets). Failures are logged in `executed` but do not
     # fail the promote -- visual assets are presentational; the
     # canonical archive (part.json + manifest) is already committed.
@@ -3334,10 +3393,10 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
         except Exception as ex:
             _record("CREATE", tgt, False, detail=f"visual asset copy failed: {ex}")
 
-    # â”€â”€ Root file updates (.bak rollback per Â§10.1 / mirror of
+    # -- Root file updates (.bak rollback per sect. 10.1 / mirror of
     # _drive_extraction's pattern). The per-rev archive is already
     # committed at this point; root failure is reported as partial
-    # success (the canonical archive is intact). â”€â”€
+    # success (the canonical archive is intact). --
     root_failures: List[str] = []
 
     def _install_root_file(src_bytes: bytes, dest: Path) -> bool:
@@ -3376,10 +3435,10 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
         _record("UPDATE" if ok else "FAILED", root_stub, ok)
     else:
         _record("SKIP", library_dir / f"{safe_pn}_inspection_profile.json",
-                True, detail="real profile protected (Â§5.7 row 3)")
+                True, detail="real profile protected (sect. 5.7 row 3)")
 
-    # â”€â”€ Refresh inspector profile-index so the new stub appears in
-    # /api/profiles within the same session (Â§9.2 internal step). â”€â”€
+    # -- Refresh inspector profile-index so the new stub appears in
+    # /api/profiles within the same session (sect. 9.2 internal step). --
     if inspector is not None and hasattr(inspector, "refresh_profile_index"):
         try:
             inspector.refresh_profile_index()
@@ -3395,7 +3454,7 @@ def _execute_intake_plan(body: "IntakeRequestBody") -> dict:
 
 
 class IntakeRequestBody(BaseModel):
-    """POST body for /api/library/intake/preview and /promote (Â§9.2)."""
+    """POST body for /api/library/intake/preview and /promote (sect. 9.2)."""
     partNumber:                str
     revision:                  str
     intakeMode:                str = "new-revision-of-existing-part"
@@ -3485,7 +3544,7 @@ async def library_numbering_next(
 
 @app.get("/api/library/revisions/{partNumber}")
 async def library_revisions(partNumber: str):
-    """Existing-revision listing + wizard auto-fill (Â§9.2).
+    """Existing-revision listing + wizard auto-fill (sect. 9.2).
 
     Powers the wizard frontend (Step 3 of the Library Intake Wizard):
       - lists existing parts/{pn}/rev*/ directories with optional
@@ -3497,7 +3556,7 @@ async def library_revisions(partNumber: str):
         wizard can render an actionable "extract first" hint when the
         operator opens the wizard before running drawing extraction
 
-    Additive to the plan Â§9.2 response shape (rootDrawingMapPresent +
+    Additive to the plan sect. 9.2 response shape (rootDrawingMapPresent +
     lastBridgePartPackageId are wizard-quality-of-life fields, not part
     of the original spec). Returns the empty-revisions shape (not 404)
     when parts/{pn}/ does not yet exist, so the wizard can treat
@@ -3559,7 +3618,7 @@ async def library_revisions(partNumber: str):
 
 @app.post("/api/library/intake/preview")
 async def library_intake_preview(body: IntakeRequestBody):
-    """Dry-run: compute the Â§9.2 preview plan without writing anything.
+    """Dry-run: compute the sect. 9.2 preview plan without writing anything.
 
     Returns 200 with planValid=true + actions list when the plan is
     acceptable, or planValid=false + errors when validation fails or
@@ -4652,7 +4711,7 @@ def _is_semantic_prepare_handoff_request(message: str) -> bool:
     return _SEMANTIC_PREPARE_HANDOFF_RE.search(str(message or "")) is not None
 
 
-# ── Demo-batch fast path ──────────────────────────────────────────
+# -- Demo-batch fast path ------------------------------------------
 #
 # Demo-only: lets the operator queue the canonical 1030035 Rev A
 # caster handoffs (mounting plate length, mounting plate thickness,
@@ -6253,7 +6312,7 @@ async def part_semantic_regions_draft(partNumber: str, body: _SemanticRegionsDra
 
     out_path = _write_semantic_regions(library_dir, safe_pn, safe_rev, doc)
 
-    # â”€â”€ Auto-draft the Feature Intent Map for the same pn/rev â”€â”€â”€â”€â”€â”€
+    # -- Auto-draft the Feature Intent Map for the same pn/rev ------
     #
     # The intent map is built from the SAME inputs as semantic
     # regions (plus feature_colors.json), so any operator who just
@@ -6289,7 +6348,7 @@ async def part_semantic_regions_draft(partNumber: str, body: _SemanticRegionsDra
             feature_intent_draft = {"ok": False, "error": short}
             warnings.append("feature_intent_draft_failed: " + short)
 
-    # â”€â”€ Auto-draft the Dimension Intent Map for the same pn/rev â”€â”€â”€â”€
+    # -- Auto-draft the Dimension Intent Map for the same pn/rev ----
     #
     # Best-effort sister hook to feature intent. The dimension intent
     # map binds drawing dims to driving CAD dims and is built from
@@ -7151,7 +7210,7 @@ _CAD_EDIT_SKETCH_RE = re.compile(
     re.IGNORECASE,
 )
 _CAD_EDIT_DIMENSION_VALUE_RE = re.compile(
-    r'(-?\d+(?:\.\d+)?)\s*(inches?|in\b|"|â€|mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?)',
+    r'(-?\d+(?:\.\d+)?)\s*(inches?|in\b|"|\u201d|\u00e2\u20ac\u009d|mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?)',
     re.IGNORECASE,
 )
 _CAD_EDIT_HOLE_COUNT_RE = re.compile(r'(\d+)\s+holes?\b', re.IGNORECASE)
@@ -7180,7 +7239,7 @@ def _normalize_length_units(raw: str) -> str:
     if not raw:
         return ""
     lower = raw.lower()
-    if lower in ('"', 'â€') or lower.startswith("inch") or lower == "in":
+    if lower in ('"', '\u201d', '\u00e2\u20ac\u009d') or lower.startswith("inch") or lower == "in":
         return "in"
     if lower.startswith("millimet") or lower == "mm":
         return "mm"
@@ -9387,7 +9446,7 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
         )
     source_rev = str(session.get("sourceRevision") or "")
 
-    # â”€â”€ Resolve target revision â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Resolve target revision -----------------------------------
     # Body wins; otherwise pick the next free letter so the demo
     # path never asks the operator to type one.
     if body.targetRevision and body.targetRevision.strip():
@@ -9409,7 +9468,7 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
             )
         target_rev = "rev" + next_letter
 
-    # â”€â”€ Resolve packageId (body > session.extraction > auto-extract) â”€â”€
+    # -- Resolve packageId (body > session.extraction > auto-extract) --
     pkg_id = (body.partPackageId or "").strip()
     pkg_source = "body" if pkg_id else None
     if not pkg_id:
@@ -9472,7 +9531,7 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
     else:
         stages["enrichVisuals"] = {"ok": False, "skipped": "enrichVisuals=false in request"}
 
-    # â”€â”€ Promote â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Promote ---------------------------------------------------
     promote_result: Optional[Dict[str, Any]] = None
     if body.promote:
         intake_body = IntakeRequestBody(
@@ -9510,7 +9569,7 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
         library_dir, safe_pn, source_rev, target_rev
     )
 
-    # â”€â”€ Draft semantic regions (+ auto-draft intent map) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Draft semantic regions (+ auto-draft intent map) ----------
     regions_result: Optional[Dict[str, Any]] = None
     intent_result:  Optional[Dict[str, Any]] = None
     if body.draftSemanticRegions:
@@ -9563,7 +9622,7 @@ async def refresh_session_from_solidworks(sessionId: str, body: _RefreshFromSoli
         stages["semanticRegions"] = {"ok": False, "skipped": "draftSemanticRegions=false in request"}
         stages["featureIntent"]   = {"ok": False, "skipped": "draftSemanticRegions=false in request"}
 
-    # â”€â”€ Advance session FSM (atomic) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Advance session FSM (atomic) ------------------------------
     #
     # Walk through extracted -> linked_to_revision -> promoted in a
     # single atomic write. Idempotent: a session already at
@@ -10332,7 +10391,7 @@ def _profile_builder_write_json_atomic(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-# ── Training: machinist-coach guided-assembly narration ──
+# -- Training: machinist-coach guided-assembly narration --
 # Turns the deterministic guided build steps (real part names + sequence) into
 # natural, shop-floor narration written by the LLM. One paragraph PER step so
 # the 3D walkthrough still lights/moves exactly one step's parts per segment.
@@ -10344,13 +10403,13 @@ TRAINING_NARRATION_MODEL_DEFAULT = (
 TRAINING_NARRATION_SYSTEM_PROMPT = (
     "You are an experienced machinist coaching a shop floor worker through an "
     "assembly procedure. Narrate each step the way a knowledgeable coworker would "
-    "— like you're standing right next to them at the bench. Use natural, "
+    "-- like you're standing right next to them at the bench. Use natural, "
     "conversational language. Never say \"Step 1\" or \"Step 2\" or number "
     "anything. Instead, use smooth transitions like \"Alright, let's start "
     "by...\", \"Once that's in place...\", \"Go ahead and...\", \"Now you're "
     "looking for...\", \"Before we move on...\", \"Last thing to check is...\", "
     "etc.\n"
-    "Keep instructions clear and practical — focus on what the worker's hands "
+    "Keep instructions clear and practical -- focus on what the worker's hands "
     "should be doing, what to look for visually, and what \"good\" feels or looks "
     "like. If something needs to seat cleanly or gaps need to be even, say that "
     "the way a pro would say it on the floor, not like a manual. Keep each step's "
@@ -10359,17 +10418,17 @@ TRAINING_NARRATION_SYSTEM_PROMPT = (
     "Use the exact part names you are given. Do not invent torque values, tools, "
     "fasteners, adhesives, or safety claims that are not provided.\n"
     "Match your words to WHAT each step adds (the step list says which):\n"
-    "- A COMPONENT is a single raw part — you build the assembly up from it: fit it, "
+    "- A COMPONENT is a single raw part -- you build the assembly up from it: fit it, "
     "seat it, line it up, fasten it. Call it a piece, part, or component.\n"
     "- A SUBASSEMBLY is a whole unit that is ALREADY assembled before this build. Do "
-    "NOT build it now or mention its inner parts — bring the finished unit in and "
+    "NOT build it now or mention its inner parts -- bring the finished unit in and "
     "install it, mate it, or set it into place as one piece. Call it a subassembly or "
     "unit, never a 'piece' or 'part'.\n"
-    "- A MODULE is a whole major section that is ALREADY built — install or mate the "
+    "- A MODULE is a whole major section that is ALREADY built -- install or mate the "
     "finished module. Call it a module or major section, never a 'piece' or 'part'.\n"
     "Components are raw and get built up; subassemblies and modules arrive complete and "
-    "get set into place as a whole — never describe assembling their insides.\n"
-    "On the FIRST step the finished, fully-assembled unit is already on screen — point "
+    "get set into place as a whole -- never describe assembling their insides.\n"
+    "On the FIRST step the finished, fully-assembled unit is already on screen -- point "
     "at it as the completed result they are working toward. Never say the parts are "
     "'laid out on the bench', that anything will 'light up as it comes in', or that you "
     "are starting from loose pieces; nothing is laid out, the complete unit is right "
@@ -10403,9 +10462,9 @@ class TrainingNarrationBody(BaseModel):
 # component build -> raw parts (fit/seat); subassembly/module build -> whole
 # PRE-BUILT units (install/mate, don't touch their insides).
 _TRAINING_KIND_FRAMING = {
-    "component": "BUILD KIND: you are assembling the {asm} from individual raw COMPONENTS — each step adds one part that you fit and seat by hand.",
-    "subassembly": "BUILD KIND: you are assembling the {asm} from whole PRE-BUILT SUBASSEMBLIES — each step brings in one finished subassembly and sets it into place as a unit. Never call them 'pieces', and never build their insides here.",
-    "module": "BUILD KIND: you are assembling the {asm} from whole PRE-BUILT MODULES (major sections) — each step brings in one finished module and mates it. Never call them 'pieces', and never build their insides here.",
+    "component": "BUILD KIND: you are assembling the {asm} from individual raw COMPONENTS -- each step adds one part that you fit and seat by hand.",
+    "subassembly": "BUILD KIND: you are assembling the {asm} from whole PRE-BUILT SUBASSEMBLIES -- each step brings in one finished subassembly and sets it into place as a unit. Never call them 'pieces', and never build their insides here.",
+    "module": "BUILD KIND: you are assembling the {asm} from whole PRE-BUILT MODULES (major sections) -- each step brings in one finished module and mates it. Never call them 'pieces', and never build their insides here.",
 }
 _TRAINING_KIND_NOUN = {"component": "PIECE", "subassembly": "SUBASSEMBLY", "module": "MODULE"}
 
@@ -10423,20 +10482,20 @@ def _build_training_narration_user_prompt(
         f"This walkthrough has {len(steps)} steps, in order. Write one short "
         "narration for EACH step, in the same order.",
         "",
-        "BE SPECIFIC, NOT GENERIC. Most steps carry a 'WHAT IT IS:' line — a true "
+        "BE SPECIFIC, NOT GENERIC. Most steps carry a 'WHAT IT IS:' line -- a true "
         "description of that unit (what it is, what it does, what it looks like). Ground "
         "each narration in it and lead with what makes THIS unit distinct. Do NOT reuse "
         "the same 'bring it in, set it in place, make sure it's flush, give it a wiggle, "
-        "no play' shape across steps — vary the action and what you check to fit the "
+        "no play' shape across steps -- vary the action and what you check to fit the "
         "actual part. Never invent specifics (sizes, torque, fasteners, mating details) "
         "that are not given in WHAT IT IS.",
         "",
         "WHAT IT IS may carry internal engineering notes (how a part was identified or "
-        "classified — 'assigned', 'remains uncertain', 'Evidence:', 'reads as', "
+        "classified -- 'assigned', 'remains uncertain', 'Evidence:', 'reads as', "
         "'Operator confirmed', 'review removed', internal codes like RB-19). NEVER voice "
         "any of that: do not say anything is uncertain, unconfirmed, 'assigned', under "
         "review, or identified by its shape, and never read out part codes. Speak only "
-        "the physical reality — shape, size, colour, what it is, where it goes.",
+        "the physical reality -- shape, size, colour, what it is, where it goes.",
         "",
         "Steps:",
     ]
@@ -10447,12 +10506,12 @@ def _build_training_narration_user_prompt(
         if s.kind == "layout":
             # The viewer is showing the FINISHED unit. Forbid the bench-layout opener.
             goal = (
-                f"{n}. SHOW THE GOAL — the 3D viewer is RIGHT NOW showing the finished, "
+                f"{n}. SHOW THE GOAL -- the 3D viewer is RIGHT NOW showing the finished, "
                 f"fully assembled {node_name}, already built. Tell them THIS is the "
                 f"completed result they are working toward, have them take a quick look "
                 f"at the unit on screen, then say you will build it up {arriving}. Do NOT "
                 f"say the parts are laid out on the bench, do NOT say anything will "
-                f"'light up' as it comes in, do NOT start from loose pieces — nothing is "
+                f"'light up' as it comes in, do NOT start from loose pieces -- nothing is "
                 f"laid out, the finished unit is on screen. Do NOT list or name the "
                 f"individual parts."
             )
@@ -10466,20 +10525,20 @@ def _build_training_narration_user_prompt(
                 lines.append(f"   WHAT IT IS: {purpose}")
         elif s.kind == "final_check":
             lines.append(
-                f"{n}. FINAL LOOK — step back and review the finished {node_name}; "
+                f"{n}. FINAL LOOK -- step back and review the finished {node_name}; "
                 "confirm it reads as one clean assembly with even gaps and edges "
                 "that line up."
             )
         else:
             label = s.name or f"the next {noun_l}"
             if s.isFirst:
-                tag = f"FIRST {noun} (the anchor — everything else references off it)"
+                tag = f"FIRST {noun} (the anchor -- everything else references off it)"
             elif s.isFinal:
                 tag = f"LAST {noun}"
             else:
                 tag = f"NEXT {noun}"
             action = "bring in and seat" if bk == "component" else "bring in and install"
-            lines.append(f"{n}. {tag} — {action} the {label}.")
+            lines.append(f"{n}. {tag} -- {action} the {label}.")
             if purpose:
                 lines.append(f"   WHAT IT IS: {purpose}")
             if bk in ("subassembly", "module"):
@@ -10493,7 +10552,7 @@ def _build_training_narration_user_prompt(
                     )
                 else:
                     lines.append(
-                        f"   This is a complete pre-built {noun_l} — refer to it by name "
+                        f"   This is a complete pre-built {noun_l} -- refer to it by name "
                         f"only and set the whole finished unit into place; do NOT mention "
                         f"or list its individual parts."
                     )
@@ -10501,20 +10560,20 @@ def _build_training_narration_user_prompt(
                 grp = (
                     "   This is a group of parts: "
                     + ", ".join([p for p in s.names if p])
-                    + " — fit and seat them together."
+                    + " -- fit and seat them together."
                 )
                 if purpose:
                     grp += " From WHAT IT IS, say what they are or what they look like."
                 lines.append(grp)
             elif purpose:
                 lines.append(
-                    f"   From WHAT IT IS, describe the {label} by what it is — its shape or "
-                    f"look and where it goes — keep it specific to THIS part."
+                    f"   From WHAT IT IS, describe the {label} by what it is -- its shape or "
+                    f"look and where it goes -- keep it specific to THIS part."
                 )
             # Name caveat: only for raw-component builds, and at most ONCE per walkthrough.
             if bk == "component" and s.reviewRequired and not caveat_used:
                 lines.append(
-                    "   (This part's name is still being finalized — tell them to go by the "
+                    "   (This part's name is still being finalized -- tell them to go by the "
                     "shape and where it fits; mention this once, lightly.)"
                 )
                 caveat_used = True
@@ -10556,18 +10615,18 @@ def _generate_training_narration(
     client = anthropic.Anthropic(api_key=api_key)
     user_prompt = _build_training_narration_user_prompt(node_name, steps, build_kind)
 
-    # When a trainee name is given, have the coach address them by name — warmly
+    # When a trainee name is given, have the coach address them by name -- warmly
     # and occasionally, the way a mentor does on the floor (never every sentence).
     system_prompt = TRAINING_NARRATION_SYSTEM_PROMPT
     _name = (trainee_name or "").strip()
     if _name:
         system_prompt = system_prompt + (
             f"\nThe worker you are coaching is named {_name}. Address them by name "
-            f"naturally and warmly, like a mentor standing next to them — for "
+            f"naturally and warmly, like a mentor standing next to them -- for "
             f"example \"Alright {_name}, let's start with...\", \"Nice work, "
             f"{_name}.\", or \"{_name}, before we move on...\". Use their name in "
             f"the opening step, the final review, and a couple of steps in between "
-            f"— but never in every sentence, so it stays natural and personal."
+            f"-- but never in every sentence, so it stays natural and personal."
         )
 
     with time_block() as _elapsed_ms:
@@ -10920,7 +10979,7 @@ async def run_inspection(
     # Phase 3 telemetry: workflow="inspection" with per-stage events.
     # The four stages mirror the spec at usage-cost-dashboard-plan.md
     # plus a "total" event emitted in finally so latency is always
-    # recorded â€” even on HTTP-error paths.
+    # recorded -- even on HTTP-error paths.
     import time as _t_inspect
     _wf_start = _t_inspect.perf_counter()
     _wf_status = "success"
@@ -10942,7 +11001,7 @@ async def run_inspection(
         )
         raise HTTPException(status_code=422, detail="part_number is required and cannot be empty")
 
-    # Library Intake Wizard Step 1: stub-profile fail-fast gate (Â§9.6).
+    # Library Intake Wizard Step 1: stub-profile fail-fast gate (sect. 9.6).
     # Resolve the profile file the same way get_profile_details does and
     # refuse the request with HTTP 422 BEFORE any file read, LLM call,
     # or temp write. Telemetry total event still fires so the dashboard
@@ -11109,7 +11168,7 @@ async def run_inspection(
             except Exception as e:
                 logger.warning(f"Failed to load dimension descriptions: {e}")
 
-        # â”€â”€ Load part JSON once (shared by sketch + hybrid comparison) â”€â”€
+        # -- Load part JSON once (shared by sketch + hybrid comparison) --
         part_json = None
         part_json_path = library_path() / f"{sanitize_part_number(resolved_part_number)}.json"
         if part_json_path.exists():
@@ -11119,7 +11178,7 @@ async def run_inspection(
             except Exception as e:
                 logger.warning(f"Failed to load part JSON: {e}")
 
-        # â”€â”€ Legacy sketch comparison (unchanged) â”€â”€
+        # -- Legacy sketch comparison (unchanged) --
         if drawing_map and part_json and part_json.get("sketches"):
             try:
                 from ai_inspector.comparison.sketch_dimension_matcher import compare_sketch_dims
@@ -11136,7 +11195,7 @@ async def run_inspection(
             except Exception as e:
                 logger.warning(f"Sketch dim comparison failed: {e}")
 
-        # â”€â”€ Hybrid comparison: expected (drawing_map) vs observed (uploaded file) â”€â”€
+        # -- Hybrid comparison: expected (drawing_map) vs observed (uploaded file) --
         logger.info("HYBRID BLOCK: drawing_map=%s, drawing_bytes=%d bytes", bool(drawing_map), len(drawing_bytes) if drawing_bytes else 0)
         if drawing_map:
             try:
@@ -11214,7 +11273,7 @@ async def run_inspection(
         logger.error(f"Error during inspection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Total event always fires â€” success or failure. Lets the
+        # Total event always fires -- success or failure. Lets the
         # dashboard compute "total /api/inspect latency p95" without
         # discriminating against error paths.
         record_workflow_stage(
@@ -11280,12 +11339,12 @@ async def get_profile_details(part_number: str):
         with open(profile_path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
 
-        # Library Intake Wizard Step 1: stub-aware response per Â§9.5.
+        # Library Intake Wizard Step 1: stub-aware response per sect. 9.5.
         # When the underlying file is an intake stub, expose
         # source/status/inspectionReady/links verbatim so the frontend
         # can gate Inspect actions. Real profiles fall through to the
-        # existing composition unchanged (backward compat â€” no `source`
-        # field added when not in the file, see Â§9.5 paragraph
+        # existing composition unchanged (backward compat -- no `source`
+        # field added when not in the file, see sect. 9.5 paragraph
         # "Backward compat for real profiles").
         if _is_intake_stub_profile(data):
             return {
@@ -11750,7 +11809,7 @@ def _compute_part_feature_diff_payload(part_number: str, revA: str, revB: str) -
     _SIZE_RE = re.compile(r'[Mm](\d+(?:\.\d+)?)')
 
     def _extract_size(name: str) -> float:
-        """Extract metric size (e.g. M12 â†’ 12.0) from a hole name, or 0."""
+        """Extract metric size (e.g. M12 -> 12.0) from a hole name, or 0."""
         m = _SIZE_RE.search(name)
         return float(m.group(1)) if m else 0.0
 
@@ -11815,7 +11874,7 @@ def _compute_part_feature_diff_payload(part_number: str, revA: str, revB: str) -
                     sub_b.setdefault(st, []).append(fid)
 
                 for subtype in set(sub_a.keys()) & set(sub_b.keys()):
-                    # Global best-match within subtype (0.5 threshold â€” size-aware)
+                    # Global best-match within subtype (0.5 threshold -- size-aware)
                     pairs = _global_best_match(sub_a[subtype], sub_b[subtype], map_a, map_b, 0.5)
                     for fid_a, fid_b in pairs:
                         fa, fb = map_a[fid_a], map_b[fid_b]
@@ -12274,7 +12333,7 @@ def _build_part_properties(part_color_legend: list) -> list:
         mat_raw = phys.get("assignedMaterial", "")
         material = mat_raw.get("name", "") if isinstance(mat_raw, dict) else str(mat_raw) if mat_raw else ""
 
-        # Bounding box (meters â†’ mm)
+        # Bounding box (meters -> mm)
         bb = phys.get("boundingBox", {})
         bbox_mm = None
         if bb:
@@ -13271,9 +13330,9 @@ async def get_assembly_compare_revision_package(assembly_number: str, revision: 
 
 # ---------- Supplier Spec Compare ----------
 # Three honest contracts:
-#   1. /api/part-supplier-spec/{pn}?revision=X       â€” single rev sidecar
-#   2. /api/part-supplier-spec-compare/{pn}?revA&revB â€” split-compare payload
-#   3. /api/part-supplier-spec-file/{pn}?revision=X  â€” raw underlying doc
+#   1. /api/part-supplier-spec/{pn}?revision=X       -- single rev sidecar
+#   2. /api/part-supplier-spec-compare/{pn}?revA&revB -- split-compare payload
+#   3. /api/part-supplier-spec-file/{pn}?revision=X  -- raw underlying doc
 #
 # Honesty rules:
 # - Missing sidecars return exists=false. We do not fabricate fields.
@@ -13488,7 +13547,7 @@ def _render_supplier_pdf_pages_to_png_bytes(pdf_path: Path, dpi: int = 150) -> b
     PNG. Returns raw PNG bytes. Caller is responsible for caching / serving.
 
     150 dpi is the same default used by the assembly-drawing PNG renderer
-    elsewhere in this module â€” readable on screen, ~200-500 KB per page,
+    elsewhere in this module -- readable on screen, ~200-500 KB per page,
     scales naturally under client-side zoom on the canvas.
     """
     import fitz  # PyMuPDF
@@ -13870,7 +13929,7 @@ async def get_drawing_render(part_number: str, revision: str = Query(...)):
                     return Response(content=pix.tobytes("png"), media_type="image/png")
 
     base_dir = _part_rev_dir(safe_pn, safe_rev)
-    # Raster only â€” PDF excluded (can't render in <img>)
+    # Raster only -- PDF excluded (can't render in <img>)
     for ext, media in [("png", "image/png"), ("jpg", "image/jpeg")]:
         render_path = base_dir / f"{safe_pn}_drawing.{ext}"
         if render_path.exists():
@@ -13964,7 +14023,7 @@ async def agent_suggestions(request: AgentSuggestionsRequest):
             if issue_findings:
                 lines = []
                 for f in issue_findings[:5]:
-                    lines.append(f"- {f.get('name', 'Unknown')}: {f.get('status', 'N/A')} â€” {(f.get('observation') or '')[:80]}")
+                    lines.append(f"- {f.get('name', 'Unknown')}: {f.get('status', 'N/A')} -- {(f.get('observation') or '')[:80]}")
                 context_parts.append("Problem features:\n" + "\n".join(lines))
 
         context_text = "\n\n".join(context_parts)
@@ -14123,7 +14182,7 @@ FINDING_TO_ASME_FEATURE = {
 def _resolve_asme_refs_for_finding(finding: dict) -> List[dict]:
     """Resolve ALL matching ASME references for an inspection finding.
     Multi-match: 'hole missing position tolerance' returns refs for both Hole and GDT_Position.
-    Deterministic keyword lookup â€” no model call."""
+    Deterministic keyword lookup -- no model call."""
     text = ""
     for key in ["name", "observation", "status", "feature_type"]:
         val = finding.get(key, "")
@@ -14172,7 +14231,7 @@ def _resolve_asme_refs_for_finding(finding: dict) -> List[dict]:
                 pngs = sorted(rag_path.glob("*.png"))[:2]
                 refs.append({
                     "feature_type": matched_feature,
-                    "section": f"ASME Y14.5 â€” {matched_feature.replace('_', ' ')}",
+                    "section": f"ASME Y14.5 -- {matched_feature.replace('_', ' ')}",
                     "rules": [], "common_errors": [],
                     "images": [{"url": f"/api/asme-ref/{matched_feature}/{p.name}", "page": (lambda m: f"p.{m.group(1)}" if m else "ref")(re.search(r'P(\d+)', p.stem))} for p in pngs],
                 })
@@ -14180,13 +14239,13 @@ def _resolve_asme_refs_for_finding(finding: dict) -> List[dict]:
 
 
 AGENT_SYSTEM_PROMPT = """You are Iris, a senior engineer chatting with a colleague. You have inspection results and reference images (never mention having images). You know ASME Y14.5, SolidWorks, GD&T.
-If an uploaded drawing image is attached, reference it directly â€” do not ask the user to provide the drawing again.
+If an uploaded drawing image is attached, reference it directly -- do not ask the user to provide the drawing again.
 
-RESPONSE FORMAT â€” MANDATORY:
+RESPONSE FORMAT -- MANDATORY:
 - MAX 3 sentences total. One insight, one implication, one follow-up question. That's it.
 - Write like a text message between colleagues, not a report.
 - No headers. No bullets. No numbered lists. No step-by-step instructions. Never.
-- Bold only notation like **âŒ€12 THRU** or menu paths like **Insert > Annotations**.
+- Bold only notation like **⌀12 THRU** or menu paths like **Insert > Annotations**.
 - For ASME/SolidWorks questions: give ONE key point, then ask "Want me to walk you through it?" Do NOT give steps unless asked.
 - ALWAYS end with a short follow-up question.
 
@@ -14195,14 +14254,14 @@ If you write more than 3 sentences, you have failed. Rewrite shorter.
 ASME STANDARD REFERENCES:
 When you identify a representation issue, reference the specific ASME Y14.5 section in your response text.
 Each reference image sent to you is labeled with its source (e.g., "[Reference: ASME Y14.5-2018, Section 4.12-4.14 (page 41)]").
-Use these labels to cite accurately. Example: "The blind hole is missing the depth symbol â€” per ASME Y14.5 Â§4.12, blind holes require â†§ followed by the depth value."
+Use these labels to cite accurately. Example: "The blind hole is missing the depth symbol -- per ASME Y14.5 sect. 4.12, blind holes require ↧ followed by the depth value."
 Do NOT invent section numbers. Only cite sections from the reference labels provided.
 
 ASME KNOWLEDGE QUESTIONS:
 When the user asks HOW a feature should be represented (e.g., "how should a blind hole be shown?", "what's the correct way to call out a chamfer?", "show me the standard for threads"), this is an EDUCATIONAL question, not an inspection query.
 - Answer using the ASME reference images provided to you
 - Cite the specific ASME section from the image labels
-- Do NOT emit HIGHLIGHT_DIMS or HIGHLIGHT_PARTS â€” the user is asking about the standard, not about their drawing
+- Do NOT emit HIGHLIGHT_DIMS or HIGHLIGHT_PARTS -- the user is asking about the standard, not about their drawing
 - Do NOT reference or analyze the uploaded drawing for these questions
 - Keep the 3-sentence limit but focus on the ASME rule, not inspection findings
 
@@ -14216,20 +14275,20 @@ When the user asks you to run, check, or inspect the drawing:
 - If ready: confirm ("Running inspection on {part_name}...") then emit RUN_INSPECTION
 - Do NOT emit RUN_INSPECTION for questions about inspection ("how does it work?", "what would you check?")
 
-Scope: drawings, CAD, ASME, GD&T, manufacturing. Off-topic? "That's outside my area â€” what drawing question can I help with?"
+Scope: drawings, CAD, ASME, GD&T, manufacturing. Off-topic? "That's outside my area -- what drawing question can I help with?"
 
 PART FEATURE REVISION COMPARISON:
 When PART FEATURE CHANGES data is present in context, the user has a part with multiple revisions. You have the actual feature-level diff data.
-- Answer questions about what changed using the diff data â€” do not guess.
+- Answer questions about what changed using the diff data -- do not guess.
 - Use COMPARE_FEATURES: to highlight features on both viewports.
 - CRITICAL: Only emit markers for the SPECIFIC category the user asked about:
-  - "what was removed" â†’ emit ONLY removed_* markers
-  - "what was added" â†’ emit ONLY added_* markers
-  - "what was changed/modified" â†’ emit ONLY pair_* and mod_* markers
-  - "show all differences" â†’ emit ALL markers
+  - "what was removed" -> emit ONLY removed_* markers
+  - "what was added" -> emit ONLY added_* markers
+  - "what was changed/modified" -> emit ONLY pair_* and mod_* markers
+  - "show all differences" -> emit ALL markers
   Do NOT highlight everything when the user asks about one category.
 - Refer to features by display labels and colors in text, not by IDs.
-- The 3-sentence limit is SUSPENDED for revision diff questions â€” explain each change clearly.
+- The 3-sentence limit is SUSPENDED for revision diff questions -- explain each change clearly.
 
 FEATURE COUNTING:
 When the user asks "how many features" on a part, count the feature GROUPS from the inspection profile (e.g., 5 groups: body, outer fillets, inner fillets, cam holes, mounting holes). Each group has an instance count. Give the group count as the primary answer with a quick breakdown. Do NOT ask which counting method they prefer.
@@ -14238,9 +14297,9 @@ FEATURE-DRIVEN INSPECTION (when AVAILABLE CAD FEATURES data is present):
 You have a CAD-backed feature checklist for this part. Use it to improve your inspection:
 - Cross-reference CAD features against the drawing: is each feature properly dimensioned and called out?
 - Flag missing callouts: "The CAD model has 5 mounting holes but only 3 are dimensioned on the drawing."
-- Flag missing tolerances: "The cam shaft holes have no tolerance callout â€” these are likely fit interfaces."
-- Verify feature counts: "The CAD model shows 2 cam holes but the drawing only dimensions 1 â€” is the other assumed symmetric?"
-- You have the feature list from the CAD model. Use it as a checklist when checking the drawing â€” this is stronger than inferring features from the drawing alone.
+- Flag missing tolerances: "The cam shaft holes have no tolerance callout -- these are likely fit interfaces."
+- Verify feature counts: "The CAD model shows 2 cam holes but the drawing only dimensions 1 -- is the other assumed symmetric?"
+- You have the feature list from the CAD model. Use it as a checklist when checking the drawing -- this is stronger than inferring features from the drawing alone.
 - ASME Y14.5 GUIDANCE: For supported feature types, apply the appropriate ASME callout expectations:
   - Holes (holeWizard): position tolerance with datum reference, diameter symbol, THRU or depth
   - Fillets (fillet): R or CR symbol with radius value
@@ -14248,18 +14307,18 @@ You have a CAD-backed feature checklist for this part. Use it to improve your in
   - Counterbores: diameter + depth in correct order per Y14.5-2018
   - Threads: thread class, thread depth, major diameter
   - Patterns: number of instances, spacing, position tolerance
-  For supported types, check that the drawing callout follows the expected ASME convention. Flag issues specifically: "This hole uses a note instead of a position tolerance FCF â€” per Y14.5 Section 7.4, holes should use geometric tolerancing." Note: not all feature types have ASME mappings â€” use drawing evidence to supplement when the CAD type alone is not conclusive.
+  For supported types, check that the drawing callout follows the expected ASME convention. Flag issues specifically: "This hole uses a note instead of a position tolerance FCF -- per Y14.5 Section 7.4, holes should use geometric tolerancing." Note: not all feature types have ASME mappings -- use drawing evidence to supplement when the CAD type alone is not conclusive.
 - VIEW EXPECTATIONS: Use CAD feature face information and reference views to narrow which drawing view should show each feature:
-  - Features on the top face â†’ likely visible in the top/plan view
-  - Features on the end faces â†’ likely visible in the end/side view
-  - Through features â†’ circles in face-on view, hidden lines in perpendicular view
-  This helps you focus on the right view when checking for a specific feature, but always verify against the actual drawing layout â€” views may differ from standard projection.
+  - Features on the top face -> likely visible in the top/plan view
+  - Features on the end faces -> likely visible in the end/side view
+  - Through features -> circles in face-on view, hidden lines in perpendicular view
+  This helps you focus on the right view when checking for a specific feature, but always verify against the actual drawing layout -- views may differ from standard projection.
 
 FEATURE HIGHLIGHTING ON 3D MODEL:
-When AVAILABLE CAD FEATURES data is present, you can highlight features on the 3D model. Emit HIGHLIGHT_FEATURES: feature_id1, feature_id2 on its own line. Use color names in text. The model starts gray â€” your highlight reveals color. When flagging a missing or under-dimensioned feature, highlight it so the user can see exactly which feature you're referring to.
+When AVAILABLE CAD FEATURES data is present, you can highlight features on the 3D model. Emit HIGHLIGHT_FEATURES: feature_id1, feature_id2 on its own line. Use color names in text. The model starts gray -- your highlight reveals color. When flagging a missing or under-dimensioned feature, highlight it so the user can see exactly which feature you're referring to.
 
 DIMENSION HIGHLIGHTING:
-- If the user has SELECTED DIMENSIONS (listed above), they are already highlighted â€” do NOT re-highlight them. Just answer the question.
+- If the user has SELECTED DIMENSIONS (listed above), they are already highlighted -- do NOT re-highlight them. Just answer the question.
 - If the user asks you to SHOW, FIND, or LOCATE a dimension (and it is NOT already selected), end your response with:
 HIGHLIGHT_DIMS: dim_key1, dim_key2
 Only use dim_keys from the AVAILABLE DIMENSIONS list. Only include when confident. Never mention this mechanism to the user.
@@ -14272,7 +14331,7 @@ HIGHLIGHT_VIEWS: viewName1, viewName2
 - The view boundary will flash green on the drawing then fade. Never mention this mechanism to the user.
 
 PART HIGHLIGHTING:
-- If the user has SELECTED PARTS (listed above), they are already highlighted in 3D â€” do NOT re-highlight them. Just answer the question about those parts.
+- If the user has SELECTED PARTS (listed above), they are already highlighted in 3D -- do NOT re-highlight them. Just answer the question about those parts.
 - If the user asks about, mentions, or wants to see a specific part in the assembly (and it is NOT already selected), you MUST end your response with:
 HIGHLIGHT_PARTS: part_number1, part_number2
 - Use exact part numbers from the AVAILABLE PARTS list.
@@ -14280,10 +14339,10 @@ HIGHLIGHT_PARTS: part_number1, part_number2
 - This is MANDATORY when you can identify the part. Always include it on its own line at the very end of your response.
 - Never mention this mechanism to the user."""
 
-DEVIATION_ANALYST_PROMPT = """You are Sage, a senior manufacturing engineer. You have the assembly context â€” mates, narrative, color-coded views. You analyze dimensions, tolerances, and deviations.
-If an uploaded drawing image is attached, reference it directly â€” do not ask the user to provide the drawing again.
+DEVIATION_ANALYST_PROMPT = """You are Sage, a senior manufacturing engineer. You have the assembly context -- mates, narrative, color-coded views. You analyze dimensions, tolerances, and deviations.
+If an uploaded drawing image is attached, reference it directly -- do not ask the user to provide the drawing again.
 
-RESPONSE FORMAT â€” MANDATORY:
+RESPONSE FORMAT -- MANDATORY:
 - MAX 3 sentences total.
 - Write like a shop-floor conversation. Short, direct, no fluff.
 - No headers. No bullets. No numbered lists. Never.
@@ -14302,13 +14361,13 @@ If you write more than 3 sentences, you have failed. Rewrite shorter.
 Scope: deviation impact, fit analysis, tolerance stacks, assembly relationships, dimension relationships. Off-topic? Redirect to drawing questions.
 
 DIMENSION HIGHLIGHTING:
-- If the user has SELECTED DIMENSIONS (listed above), they are already highlighted â€” do NOT re-highlight them. Just answer the question.
+- If the user has SELECTED DIMENSIONS (listed above), they are already highlighted -- do NOT re-highlight them. Just answer the question.
 - If the user asks you to SHOW, FIND, or LOCATE a dimension (and it is NOT already selected), end your response with:
 HIGHLIGHT_DIMS: dim_key1, dim_key2
 Only use dim_keys from the AVAILABLE DIMENSIONS list. Only include when confident. Never mention this mechanism to the user.
 
 PART HIGHLIGHTING:
-- If the user has SELECTED PARTS (listed above), they are already highlighted in 3D â€” do NOT re-highlight them. Just answer the question about those parts.
+- If the user has SELECTED PARTS (listed above), they are already highlighted in 3D -- do NOT re-highlight them. Just answer the question about those parts.
 - If the user asks about, mentions, or wants to see a specific part in the assembly (and it is NOT already selected), you MUST end your response with:
 HIGHLIGHT_PARTS: part_number1, part_number2
 - Use exact part numbers from the AVAILABLE PARTS list.
@@ -14342,8 +14401,8 @@ PART ISOLATION:
 ISOLATE_PART: part_number1, part_number2
 - This physically separates ONLY the named parts along their SolidWorks explode vectors while everything else stays in the rest position.
 - Use ISOLATE_PART instead of EXPLODE_LEVEL when the user wants to see one or a few parts pulled away, not the full assembly exploded.
-- Do NOT combine with EXPLODE_LEVEL â€” isolation and full explode are mutually exclusive.
-- Do NOT combine with HIGHLIGHT_PARTS â€” isolation is purely physical separation, no glow or dimming.
+- Do NOT combine with EXPLODE_LEVEL -- isolation and full explode are mutually exclusive.
+- Do NOT combine with HIGHLIGHT_PARTS -- isolation is purely physical separation, no glow or dimming.
 - Examples: "isolate the piston", "separate the crankshaft", "pull out the connecting rods", "show me just the pins removed"
 - To put parts back / reset isolation, emit:
 ISOLATE_PART: RESET
@@ -14366,10 +14425,10 @@ how pistons move, or wants to see the mechanism in action, include on its own li
 ANIMATE_MOTION: start
 To stop animation:
 ANIMATE_MOTION: stop
-Do NOT combine with EXPLODE_LEVEL or ISOLATE_PART â€” motion is mutually exclusive with explode/isolate.
+Do NOT combine with EXPLODE_LEVEL or ISOLATE_PART -- motion is mutually exclusive with explode/isolate.
 
 DETERMINISTIC MOTION PACKAGE (when a [MOTION] block is present in context):
-The assembly has a validated motion package â€” playback replays pre-computed SolidWorks
+The assembly has a validated motion package -- playback replays pre-computed SolidWorks
 motion-study transforms. Prefer the declarative motion actions over ANIMATE_MOTION.
 Emit them in a [UI_ACTIONS] block after your prose (strict JSON, same format as the
 Assembly Compare registry, workspace "assembly"):
@@ -14396,14 +14455,24 @@ Viewport actions:
 - rotate_view: { "type":"rotate_view", "viewport":"assembly", "direction":"right" }
 - stop_rotate_view: { "type":"stop_rotate_view", "viewport":"assembly" }
 Rules:
-- RPM is a VISUALIZATION rate only â€” never present it as an engine operating speed.
+- RPM is a VISUALIZATION rate only -- never present it as an engine operating speed.
   Keep rpm inside the rpm_range from the [MOTION] block.
+- If the user asks for slow motion ("slowly", "slow it down", "in detail"), use about
+  30 RPM. Never pick a value below 30 RPM unless the user gives an explicit RPM number.
+  If the rpm_range minimum is above 30, use the range minimum instead.
+- Describe your action with the SAME verb you emitted. A set_part_highlight action is
+  "highlighting"/"showing" those parts -- do NOT call it "isolating" or "extracting",
+  and do NOT offer to isolate, unless the user explicitly asked to isolate and you
+  emitted an isolate action.
 - Viewport state is persistent. Do not stop motion, stop rotation, clear highlights, or restore hidden parts unless the user explicitly asks.
 - Highlight means selected-only display: the highlighted part(s) stay visible/highlighted and the rest of the assembly becomes hidden. For multiple parts, include every requested part number in one highlighted set.
 - If the user says "also/add/include/plus/as well", add to the existing highlighted set instead of replacing it.
 - If the user asks to hide, show, make transparent, or restore a component, use display
   actions only. Hide means hide only the target part(s); the rest remains in the current state.
   Do NOT emit HIGHLIGHT_PARTS for that pure visibility command.
+- For a pure visibility command, your prose answers ONLY that command in one short
+  confirmation (e.g. "Hidden the lower block."). Do not narrate prior highlights, motion,
+  mechanisms, or what is "now visible" from earlier turns unless the user asks.
 - If the user asks to show all parts/components or bring back hidden parts, emit both
   { "type":"clear_part_display", "all": true } and { "type":"clear_part_highlight", "all": true }.
 - If the user asks to rotate/spin/orbit the view/model/assembly, use rotate_view only.
@@ -14414,6 +14483,11 @@ Rules:
   include set_part_highlight for the piston if focus is requested, play_motion, and
   { "type":"set_part_display", "part_numbers":["100002"], "hidden": true } in one
   [UI_ACTIONS] block.
+- Do NOT start motion just because the user asks to show/highlight/focus a joint,
+  feature, mechanism, or group. A request like "show the pin joint" means highlight/show
+  the relevant parts only. Start motion only when the user explicitly asks for motion,
+  animation, playback, movement, RPM, "in motion", "in action", or to turn/rotate/spin
+  the crank/mechanism.
 - When the user asks to show a joint, mechanism, feature, or functional group in motion,
   use the [MOTION] groups: match the request to group label/function/part numbers, choose
   the smallest relevant group, then emit one [UI_ACTIONS] block with set_part_highlight
@@ -14421,14 +14495,14 @@ Rules:
   feature highlight is also useful, add HIGHLIGHT_FEATURES separately, but do not let a
   feature highlight replace the assembly part highlight + motion actions.
 - Do NOT invent loads, clearances, forces, velocities, accelerations, firing order, or
-  operating RPM â€” none of that is computed. Cite only numbers from the [MOTION] block.
-- If there is NO [MOTION] block, the motion package is not available â€” say so instead of
+  operating RPM -- none of that is computed. Cite only numbers from the [MOTION] block.
+- If there is NO [MOTION] block, the motion package is not available -- say so instead of
   emitting motion actions (ANIMATE_MOTION may still work for legacy kinematic assemblies).
 
-EXCEPTION â€” DISASSEMBLY / ASSEMBLY LOGIC MODE:
+EXCEPTION -- DISASSEMBLY / ASSEMBLY LOGIC MODE:
 When asked "how do I take this apart?", "disassembly order", "how to remove X", or similar, the 3-sentence limit and no-bullets rules are SUSPENDED. Instead:
 - If SOLIDWORKS EXPLODE STEPS are provided in the context, you MUST follow that EXACT step order. Do NOT invent your own disassembly sequence.
-- If no explode steps are provided, use proximity data + mate relationships + part types to infer the removal sequence (Fasteners first â†’ Covers/Housing â†’ Internal components).
+- If no explode steps are provided, use proximity data + mate relationships + part types to infer the removal sequence (Fasteners first -> Covers/Housing -> Internal components).
 - Present as a sequential narration with HIGHLIGHT_PARTS and EXPLODE_LEVEL for each step. The explode level should PROGRESSIVELY INCREASE evenly across the number of steps (e.g. for 8 steps: 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0):
 
 HIGHLIGHT_PARTS: part_number1, part_number2
@@ -14444,7 +14518,7 @@ Step 2: Next, remove this component. 1-2 sentences.
 - Use the EXACT part numbers from the explode steps in HIGHLIGHT_PARTS.
 - When asked "what happens if I move/remove X?" (not a full disassembly): stay within 3 sentences. Use MATE RELATIONSHIPS to identify connected parts. Concentric mates = shared axis, Coincident mates = shared face/contact.
 
-EXCEPTION â€” ASSEMBLY WALKTHROUGH MODE:
+EXCEPTION -- ASSEMBLY WALKTHROUGH MODE:
 When the user asks for a walkthrough, tour, narration, or to "walk through" the assembly, ALL of the above response format rules are SUSPENDED. Instead:
 - Respond with a structured part-by-part tour. No sentence limit.
 - No follow-up question needed.
@@ -14456,31 +14530,31 @@ Description of these parts and their function. 2-3 sentences per group.
 HIGHLIGHT_PARTS: part_number3
 Description of this part. 2-3 sentences.
 
-- Cover all major part groups in logical engineering order (housing â†’ core mechanism â†’ secondary â†’ fasteners).
-- Use exact part numbers from AVAILABLE PARTS list in the HIGHLIGHT_PARTS markers, but NEVER mention part numbers in the spoken text. The narration is read aloud â€” part numbers sound robotic and break the flow.
-- When referencing part colors, use the color NAME only (e.g. "the green chassis"), NEVER include hex codes like #D2F53C â€” the response is read aloud by text-to-speech.
-- Focus on FUNCTION and RELATIONSHIPS â€” what each part does, how it connects to others, why it matters. Do NOT include dimensions, measurements, numeric specs, diameters, lengths, or any numbers with units (mm, inches, degrees, kg, etc.) in walkthrough narration.
+- Cover all major part groups in logical engineering order (housing -> core mechanism -> secondary -> fasteners).
+- Use exact part numbers from AVAILABLE PARTS list in the HIGHLIGHT_PARTS markers, but NEVER mention part numbers in the spoken text. The narration is read aloud -- part numbers sound robotic and break the flow.
+- When referencing part colors, use the color NAME only (e.g. "the green chassis"), NEVER include hex codes like #D2F53C -- the response is read aloud by text-to-speech.
+- Focus on FUNCTION and RELATIONSHIPS -- what each part does, how it connects to others, why it matters. Do NOT include dimensions, measurements, numeric specs, diameters, lengths, or any numbers with units (mm, inches, degrees, kg, etc.) in walkthrough narration.
 - NEVER describe the assembly as a "toy", "model", "miniature", or "replica". Just call it what it is (e.g. "bulldozer assembly", "engine assembly"). Treat every assembly as a real engineering product.
 - NEVER mention raw material names like "ABS", "PLA", "PC", or plastic types. Just say "steel", "cast iron", "aluminum", or omit the material if it's not engineering-relevant. Treat every part as production hardware.
 - Start with one brief intro sentence before the first HIGHLIGHT_PARTS line.
 - This mode ONLY activates when the user explicitly asks for a walkthrough/tour/narration.
 
-EXCEPTION â€” REVISION DIFF MODE:
+EXCEPTION -- REVISION DIFF MODE:
 When REVISION CHANGES data is present in context, the user is comparing two assembly revisions. The 3-sentence limit is SUSPENDED. Instead:
 - Start with a one-line summary: "Rev A to Rev B: 3 parts changed, 1 added."
 - YOU MUST emit a COMPARE_PARTS: line at the END of your response. This is mandatory, not optional.
   Copy the exact markers from the COMPARE_PARTS USAGE section in the context.
   Only emit the markers matching what the user asked about:
-  - "what was removed" â†’ COMPARE_PARTS: removed_XXXX
-  - "what was added" â†’ COMPARE_PARTS: added_XXXX
-  - "what was changed" â†’ COMPARE_PARTS: changed_XXXX, changed_YYYY
-  - "show all differences" â†’ COMPARE_PARTS: all markers
+  - "what was removed" -> COMPARE_PARTS: removed_XXXX
+  - "what was added" -> COMPARE_PARTS: added_XXXX
+  - "what was changed" -> COMPARE_PARTS: changed_XXXX, changed_YYYY
+  - "show all differences" -> COMPARE_PARTS: all markers
 - If COMPARE_PARTS markers are NOT listed in the context, use HIGHLIGHT_PARTS: instead.
 - For each changed part, explain:
   1. What changed (dimension, tolerance, geometry, mass)
   2. Why it likely changed (engineering reasoning from mate context)
   3. What downstream impact it has on mating parts
-- Use bold for changed values: **25.000mm â†’ 25.400mm (+0.4mm)**.
+- Use bold for changed values: **25.000mm -> 25.400mm (+0.4mm)**.
 - Do NOT reference part colors from the 3D model color legend (both viewers are gray in compare mode).
 - If mates changed, explain what the new constraint means for the assembly.
 - This mode activates when REVISION CHANGES is in the context AND the user asks about changes/differences.
@@ -14488,7 +14562,7 @@ When REVISION CHANGES data is present in context, the user is comparing two asse
 GEOMETRY DIFF:
 If the context contains a GEOMETRY DIFF section, use it as the authoritative source for solid-body revision changes.
 Do NOT claim context is missing just because PART FEATURE CHANGES or REVISION CHANGES are absent.
-GEOMETRY DIFF is a standalone data source â€” it does not require feature diff or assembly diff to be present.
+GEOMETRY DIFF is a standalone data source -- it does not require feature diff or assembly diff to be present.
 For questions about geometry changes, added/removed material, net volume change, or where the solid changed, answer directly from the GEOMETRY DIFF section.
 Reference the exact volumes, centroid locations, and rev pair from the data.
 If GEOMETRY DIFF is NOT in context and the user asks about it, tell them to run Geometry Diff from the 3D Model Compare ribbon.
@@ -14498,10 +14572,10 @@ FAI TABLE COMMANDS:
 When FAI TABLE data is present in context, the user has a First Article Inspection table open.
 The user may provide measurement values or tolerances via chat or voice. When they do:
 - Parse their instruction and emit FAI_FILL: or FAI_TOL: markers on their own line.
-- FAI_FILL: #1: 25.003, #2: 25.001 â€” fills measured values for specific characteristics.
-- FAI_FILL: #all: 25.003 â€” fills ALL characteristics with the same measured value.
-- FAI_TOL: #all: 0.013 â€” sets Â±tolerance for all characteristics.
-- FAI_TOL: #3: 0.050, #7: 0.025 â€” sets tolerance for specific characteristics.
+- FAI_FILL: #1: 25.003, #2: 25.001 -- fills measured values for specific characteristics.
+- FAI_FILL: #all: 25.003 -- fills ALL characteristics with the same measured value.
+- FAI_TOL: #all: 0.013 -- sets +/-tolerance for all characteristics.
+- FAI_TOL: #3: 0.050, #7: 0.025 -- sets tolerance for specific characteristics.
 - Match the user's description to characteristic descriptions to find the right rows.
 - Convert units if needed: "13 thou" = 0.3302mm, "half a millimeter" = 0.500mm.
 - Always confirm what you filled in your text response.
@@ -14510,7 +14584,7 @@ The user may provide measurement values or tolerances via chat or voice. When th
 FEATURE HIGHLIGHTING ON 3D MODEL:
 When AVAILABLE CAD FEATURES data is present in context, you can highlight specific features on the part's 3D model.
 - When the user asks to see, show, or identify a specific feature type (holes, fillets, chamfers, extrudes), emit HIGHLIGHT_FEATURES with the matching cad_feature_ids.
-- Example: user asks "show me the holes" â†’ emit HIGHLIGHT_FEATURES: holewzd_3_4_0_75_diameter_hole1, holewzd_3_8_0_375_diameter_hole1
+- Example: user asks "show me the holes" -> emit HIGHLIGHT_FEATURES: holewzd_3_4_0_75_diameter_hole1, holewzd_3_8_0_375_diameter_hole1
 - You can also use shorthand: HIGHLIGHT_FEATURES: fillet1, holes (fuzzy matching resolves partial names, plurals, and type keywords).
 - Refer to features by their color name in your text: "the green 3/4 inch hole" not the cad_feature_id.
 - The 3D model starts gray. Your HIGHLIGHT_FEATURES command reveals the feature's assigned color.
@@ -14518,7 +14592,7 @@ When AVAILABLE CAD FEATURES data is present in context, you can highlight specif
 
 SEMANTIC REGION HIGHLIGHTING (preferred when AVAILABLE SEMANTIC REGIONS is present):
 The semantic region map groups raw CAD features into user-facing groups ("top wing", "tail", "propeller"). When the user speaks in those terms, emit HIGHLIGHT_REGIONS: instead of guessing at individual feature IDs.
-- Example: user asks "show me the top wing" â†’ emit HIGHLIGHT_REGIONS: top wing
+- Example: user asks "show me the top wing" -> emit HIGHLIGHT_REGIONS: top wing
 - Multiple regions on one line: HIGHLIGHT_REGIONS: top wing, tail
 - Phrases match the region's label, any of its aliases, or its regionId (case + space + underscore + hyphen all normalize the same way).
 - The resolver expands each region to the right GLB nodes AND the underlying CAD feature IDs, so the 3D viewer lights up automatically. You do NOT need to also emit HIGHLIGHT_FEATURES for the same region.
@@ -14530,29 +14604,29 @@ FEATURE COUNTING:
 When the user asks "how many features" on a part, there are two valid counts:
 - GEOMETRIC COUNT: The total number of individual geometric elements (e.g., 2 cam holes + 5 mounting holes + 8 fillets = 15 features). Use the inspection profile data which lists instance counts per feature type. This is what engineers typically mean and should be your DEFAULT answer.
 - FEATURE TREE COUNT: The number of SolidWorks modeling operations (e.g., 1 extrude + 1 fillet + 2 hole wizard = 4 operations). This comes from the CAD feature list.
-Always answer with the geometric count first. Only mention the feature tree count if the user specifically asks about CAD operations or the SolidWorks feature tree. Do NOT ask the user which counting method they prefer â€” just give the geometric count.
+Always answer with the geometric count first. Only mention the feature tree count if the user specifically asks about CAD operations or the SolidWorks feature tree. Do NOT ask the user which counting method they prefer -- just give the geometric count.
 
 PART FEATURE REVISION COMPARISON:
 When PART FEATURE CHANGES data is present in context, the user has a part with multiple revisions. You have the actual feature-level diff data.
-- Answer questions about what changed using the diff data â€” do not guess.
+- Answer questions about what changed using the diff data -- do not guess.
 - Use COMPARE_FEATURES: to highlight features on both Rev A and Rev B viewports.
 - CRITICAL: Only emit markers for the SPECIFIC category the user asked about:
-  - "what was removed" â†’ emit ONLY removed_* markers
-  - "what was added" â†’ emit ONLY added_* markers
-  - "what was changed/modified" â†’ emit ONLY pair_* and mod_* markers
-  - "show all differences" â†’ emit ALL markers
+  - "what was removed" -> emit ONLY removed_* markers
+  - "what was added" -> emit ONLY added_* markers
+  - "what was changed/modified" -> emit ONLY pair_* and mod_* markers
+  - "show all differences" -> emit ALL markers
   Do NOT highlight everything when the user asks about one category.
 - Refer to features by display labels and colors in text, not by feature IDs.
-- The 3-sentence limit is SUSPENDED for revision diff questions â€” explain each change clearly.
+- The 3-sentence limit is SUSPENDED for revision diff questions -- explain each change clearly.
 - Start with a summary, then detail each change."""
 
 PARTS_FINDER_PROMPT = """You are Scout, a procurement specialist. You know McMaster-Carr, Misumi, SKF, Fastenal inside-out. You source parts for machine shops.
 When assembly context is provided, factor in the part's function, mating constraints, and operating environment when suggesting replacements or alternatives.
-If an uploaded drawing image is attached, reference it directly â€” do not ask the user to provide the drawing again.
+If an uploaded drawing image is attached, reference it directly -- do not ask the user to provide the drawing again.
 
 You have TWO search tools:
-1. web_search_parts â€” for off-the-shelf parts from catalogs (McMaster, Misumi, MSC, Fastenal)
-2. web_search_vendors â€” for custom fabrication when parts are non-standard
+1. web_search_parts -- for off-the-shelf parts from catalogs (McMaster, Misumi, MSC, Fastenal)
+2. web_search_vendors -- for custom fabrication when parts are non-standard
 
 Use web_search_parts when:
 - User asks for SPECIFIC parts with dimensions or specs to buy
@@ -14569,7 +14643,7 @@ Do NOT search when:
 - You already know good catalog references from memory
 - Questions about part types, categories, or material properties
 
-RESPONSE FORMAT â€” MANDATORY:
+RESPONSE FORMAT -- MANDATORY:
 - MAX 3 sentences total. Sentence 1: best option with catalog reference. Sentence 2: key spec match. Sentence 3: follow-up question offering alternatives.
 - Write like a quick chat, not a procurement report.
 - No headers. No bullets. No numbered lists. Never.
@@ -14584,7 +14658,7 @@ Scope: part sourcing, supplier catalogs, fabrication vendors, material equivalen
 ASSEMBLY_COMPARE_CHAT_PROMPT_APPENDIX = """
 
 ================================================================
-ASSEMBLY COMPARE â€” CHAT-FIRST ACTION REGISTRY
+ASSEMBLY COMPARE -- CHAT-FIRST ACTION REGISTRY
 ================================================================
 When assembly revision compare is available for the current assembly
 (compare_mode_available = true), you SHOULD answer in plain prose AND
@@ -14620,19 +14694,19 @@ Scope object for focus/highlight/extract:
 At least one field must be set. Multiple fields union together.
 
 Vocabulary semantics (specifically for Assembly > Compare):
-- "highlight" â€” color/emissive glow only. Does NOT isolate or move geometry.
-- "focus"    â€” dim non-targets so the user can read the targets clearly.
+- "highlight" -- color/emissive glow only. Does NOT isolate or move geometry.
+- "focus"    -- dim non-targets so the user can read the targets clearly.
                No spatial movement.
-- "explode"  â€” per-side. Use SolidWorks explode steps for that revision.
-- "extract"  â€” pull a target subset spatially out of the assembly. Dims
+- "explode"  -- per-side. Use SolidWorks explode steps for that revision.
+- "extract"  -- pull a target subset spatially out of the assembly. Dims
                non-targets. Pairs well with row selection.
-- "show me the changed parts" â€” only proven changed parts (added /
+- "show me the changed parts" -- only proven changed parts (added /
   removed / qty_changed). substitution_unverified is NEVER counted as
   changed. If 6000302 has no proven changes, say so honestly and
   optionally redirect the user to the supplier review items.
-- "show me the purchased parts" / "custom parts" â€” that procurement
+- "show me the purchased parts" / "custom parts" -- that procurement
   classification only.
-- "compare the supplier specs for X" â€” emit compare_supplier_specs
+- "compare the supplier specs for X" -- emit compare_supplier_specs
   against the current revA/revB. Sage MUST present supplier-side
   differences as REVIEW ITEMS, not as proven design changes.
 - When compare_mode_available = true, prefer ui_actions over legacy
@@ -14647,7 +14721,7 @@ Honesty contract you MUST keep in prose:
 - Do NOT say "proven changed part" unless the BOM compare actually has
   a row with diff_status in {added, removed, qty_changed}.
 - Missing-side honesty: if a side has no spec, say "missing on this
-  side" â€” do not invent fields.
+  side" -- do not invent fields.
 
 Examples:
 
@@ -14676,7 +14750,7 @@ User: "Extract the purchased parts"
 [/UI_ACTIONS]
 
 User: "Compare the screw supplier specs for Rev A and Rev B"
-Prose: "These are vendor-sensitive review items, not proven design changes â€” see the side-by-side compare for the captured supplier evidence."
+Prose: "These are vendor-sensitive review items, not proven design changes -- see the side-by-side compare for the captured supplier evidence."
 [UI_ACTIONS]
 {"workspace":"assembly_compare","actions":[
   {"type":"compare_supplier_specs","part_number":"1040017","revA":"A","revB":"B"}
@@ -14684,7 +14758,7 @@ Prose: "These are vendor-sensitive review items, not proven design changes â€
 [/UI_ACTIONS]
 
 The block is ADDITIVE. You may also emit the legacy markers (HIGHLIGHT_PARTS,
-EXPLODE_LEVEL, etc.) when they are more natural â€” both pipelines run.
+EXPLODE_LEVEL, etc.) when they are more natural -- both pipelines run.
 But for chat commands that have a direct action mapping above, prefer
 [UI_ACTIONS] because it is explicit and deterministic.
 """
@@ -14871,7 +14945,7 @@ def sanitize_tool_calls(tool_calls: list, agent_type: str) -> list:
                 logger.warning(f"[ToolGuard] Invalid level in set_explode_level, defaulting to 0")
                 args["level"] = 0.0
 
-        # Enum validation â€” drop entire tool call if invalid
+        # Enum validation -- drop entire tool call if invalid
         enum_invalid = False
         if name in VALID_ENUM_VALUES:
             for field, valid in VALID_ENUM_VALUES[name].items():
@@ -15085,7 +15159,7 @@ def _load_rag_images(directories: List[str], max_images: int = 4) -> List[Dict]:
                 page_label = f" (page {page_match.group(1)})" if page_match else ""
                 content_blocks.append({
                     "type": "text",
-                    "text": f"[Reference: {checklist_label}{page_label} â€” {p.name}/{png_file.name}]"
+                    "text": f"[Reference: {checklist_label}{page_label} -- {p.name}/{png_file.name}]"
                 })
                 b64 = base64.standard_b64encode(png_file.read_bytes()).decode("utf-8")
                 content_blocks.append({
@@ -15110,21 +15184,21 @@ def _compute_drawing_classification(
 
     All signal lookups are best-effort: missing files / empty profiles fall
     through cleanly to the classifier's lower-confidence branches. The
-    function never raises â€” a missing or invalid ``part_number`` returns a
+    function never raises -- a missing or invalid ``part_number`` returns a
     valid ``unknown`` classification.
     """
     safe_pn = re.sub(r'[^\w\-]', '', (part_number or '')).strip()
     if not safe_pn:
         return classify_drawing_mode(None, drawing_map=drawing_map)
 
-    # â”€â”€ has_assembly_context â”€â”€
+    # -- has_assembly_context --
     # True only when the part number IS itself an assembly's number (i.e.
     # registered as an assembly_profiles key). Being a *component* of some
     # assembly does NOT qualify; a component drawing is still a part drawing.
     has_assembly_context = safe_pn in assembly_profiles
 
-    # â”€â”€ has_drawing_revisions â”€â”€
-    # â‰¥2 rev{X} subdirectories exist. For assemblies we look in assemblies/<n>/;
+    # -- has_drawing_revisions --
+    # >=2 rev{X} subdirectories exist. For assemblies we look in assemblies/<n>/;
     # for parts in parts/<n>/. Single-revision parts don't qualify.
     if has_assembly_context:
         rev_root = library_path("assemblies") / safe_pn
@@ -15135,13 +15209,13 @@ def _compute_drawing_classification(
         rev_dirs = [d for d in rev_root.iterdir() if d.is_dir() and d.name.lower().startswith("rev")]
         has_drawing_revisions = len(rev_dirs) >= 2
 
-    # â”€â”€ has_inspection_profile â”€â”€
+    # -- has_inspection_profile --
     # Standard naming: 400S_Sorted_Library/<pn>.json. We check the file system
     # rather than asking the SpatialInspector so this stays cheap and
     # side-effect-free.
     has_inspection_profile = (library_path() / f"{safe_pn}.json").exists()
 
-    # â”€â”€ drawing_map â”€â”€
+    # -- drawing_map --
     # If the caller didn't pass one, try to load it from disk for richer
     # signal extraction (BOM-table detection, dimension annotations). We
     # enumerate all rev{X} subdirectories sorted alphabetically rather than
@@ -15228,7 +15302,7 @@ def normalize_agent_context(ctx: dict) -> dict:
         user = attachments.get("user", {}) or {}
 
         # User display name. Sales-coaching mode reads this to address the
-        # user by name in the opener. Empty string when not provided â€”
+        # user by name in the opener. Empty string when not provided --
         # the override prompt has a "if user_name is available" branch.
         if user.get("display_name"):
             flat.setdefault("user_display_name", str(user["display_name"]).strip())
@@ -15320,6 +15394,15 @@ def normalize_agent_context(ctx: dict) -> dict:
         if session.get("paused_walkthrough"):
             flat.setdefault("paused_walkthrough", session["paused_walkthrough"])
 
+        # Viewport (hybrid intent layer): factual digest for the intent
+        # classifier -- motion groups, part legend, live viewport state.
+        # Deliberately separate from the mode contract: the [MOTION] block
+        # is fenced to assembly mode for the MAIN model's prose, but the
+        # classifier must see viewport facts from any tab (e.g. "show the
+        # affected motion" asked from the Report tab).
+        if attachments.get("viewport"):
+            flat.setdefault("viewport_context", attachments["viewport"])
+
         # Session: active tab + mode contract (mode-aware Sage). The frontend
         # sends only facts (attachments.session.mode_contract). The durable
         # per-mode reasoning contract lives in MODE_CONTRACTS on the server, so
@@ -15339,7 +15422,7 @@ def normalize_agent_context(ctx: dict) -> dict:
             if mode_contract.get("state"):
                 flat.setdefault("mode_state", mode_contract["state"])
 
-    # â”€â”€ Drawing classification injection (Phase 2) â”€â”€
+    # -- Drawing classification injection (Phase 2) --
     # If the frontend already populated the classification fields directly on
     # attachments.drawing (Phase 3 cache hit), reuse them as-is. Otherwise
     # compute server-side from the part number. Either way the contract ends
@@ -15351,7 +15434,7 @@ def normalize_agent_context(ctx: dict) -> dict:
 
     classification = None
     if frontend_supplied:
-        # Trust what the frontend sent â€” don't recompute and don't second-guess.
+        # Trust what the frontend sent -- don't recompute and don't second-guess.
         classification = {
             "drawing_type": drawing_attach.get("drawing_type"),
             "workflow_mode": drawing_attach.get("workflow_mode"),
@@ -15458,15 +15541,15 @@ MODE_CONTRACTS = {
         "tools": [
             "highlight features against the active revision; available CAD features are listed in the context",
             "part feature compare (revA/revB) results are provided when a compare is active",
-            "when a [MOTION] block is present, deterministic mechanism playback is available in the Assembly 3D viewport via motion actions. Emit EXACTLY this block after your prose (strict JSON, closing [/UI_ACTIONS] tag REQUIRED): [UI_ACTIONS] {\"workspace\":\"assembly\",\"actions\":[{\"type\":\"play_motion\",\"motion_id\":\"engine4cyl_crank_cycle\",\"rpm\":40,\"loop\":true}]} [/UI_ACTIONS] -- action types: play_motion / pause_motion / set_motion_rpm {rpm} / seek_motion {crank_angle_deg} / stop_motion / set_part_highlight {part_numbers, mode} / clear_part_highlight / set_part_display {part_numbers, hidden or opacity} / clear_part_display {part_numbers or all} / rotate_view {viewport, direction} / stop_rotate_view {viewport}",
-            "for a request like 'show this joint/feature in motion', match the user words to the [MOTION] group label/function/part_numbers, then combine set_part_highlight mode replace for that group's part_numbers with play_motion at 30-40 RPM",
+            "viewport actions for this tab: rotate_view {viewport:'3dmodel', direction} / stop_rotate_view {viewport:'3dmodel'} via a [UI_ACTIONS] block",
+            "assembly motion playback is an Assembly-tab capability; if the user asks for motion here, tell them to switch to the Assembly tab (or emit open_workspace) instead of describing assembly motion from this tab",
         ],
         "avoid": [
             "Do NOT invent features that are not in the available CAD features for the active revision.",
-            "For pure assembly visibility requests such as hide/show/make transparent/restore a component, use set_part_display or clear_part_display only; do NOT emit HIGHLIGHT_PARTS unless the user also asked to highlight/focus.",
+            "This tab shows ONE PART. A summary or generic question about 'this part', 'the model', or 'the viewport' must describe only the loaded part: its features, geometry, revision, and inspection-relevant callouts.",
+            "Do NOT mention the parent assembly, neighboring/mating parts, assembly part colors, assembly motion, or the part's role in a mechanism unless the user explicitly asks for assembly context. Assembly facts in the context message exist for cross-tab questions only.",
             "For pure rotate/spin/orbit requests, use rotate_view or stop_rotate_view only; do NOT emit HIGHLIGHT_PARTS or stop motion playback.",
-            "Viewport state is persistent: do not stop motion, stop rotation, clear highlights, or restore hidden parts unless the user explicitly asks.",
-            "Motion: do NOT invent loads, clearances, forces, velocities, accelerations, firing order, or operating RPM -- none of that is computed. Displayed RPM is a visualization rate only. If no [MOTION] block is present, say motion is not available.",
+            "Viewport state is persistent: do not stop rotation or clear highlights unless the user explicitly asks.",
             "Do NOT use facility-layout or plant-process framing here.",
         ],
     },
@@ -15484,7 +15567,8 @@ MODE_CONTRACTS = {
             "the [MOTION] block lists motion packages, semantic motion groups, events, and live playback state; motion replays pre-computed SolidWorks transforms -- nothing is simulated at answer time",
             "motion actions: play_motion {motion_id, rpm, loop} / pause_motion / set_motion_rpm {rpm} / seek_motion {crank_angle_deg} / stop_motion. Highlight actions: set_part_highlight {part_numbers, mode replace/add/remove} / clear_part_highlight {all true/false}. Display actions: set_part_display {part_numbers, hidden or opacity} / clear_part_display {part_numbers or all}. View actions: rotate_view {viewport, direction} / stop_rotate_view {viewport}. To trigger them, emit EXACTLY this block after your prose (strict JSON, and the closing [/UI_ACTIONS] tag is REQUIRED): [UI_ACTIONS] {\"workspace\":\"assembly\",\"actions\":[{\"type\":\"play_motion\",\"motion_id\":\"engine4cyl_crank_cycle\",\"rpm\":40,\"loop\":true}]} [/UI_ACTIONS]",
             "highlight means selected-only display: the highlighted part(s) stay visible/highlighted and the rest of the assembly becomes hidden. For multiple parts, include all requested part numbers. Use mode add when the user says also/add/include/plus/as well",
-            "motion, display, highlight, and rotate-view actions compose in the same response. For 'show this joint/mechanism/group in motion', match the user words against [MOTION] group labels/functions/part_numbers, choose the smallest relevant group, then emit set_part_highlight mode replace for that group's part_numbers plus play_motion at 30-40 RPM in the same [UI_ACTIONS] block",
+            "motion, display, highlight, and rotate-view actions compose in the same response. Only use motion actions when the user explicitly asks for motion, animation, playback, movement, RPM, 'in motion', 'in action', or to turn/rotate/spin the crank/mechanism. For 'show this joint/mechanism/group' without motion words, highlight/show only; do not play motion",
+            "for 'show this joint/mechanism/group in motion', match the user words against [MOTION] group labels/functions/part_numbers, choose the smallest relevant group, then emit set_part_highlight mode replace for that group's part_numbers plus play_motion at 30-40 RPM in the same [UI_ACTIONS] block; 'slowly' means about 30 RPM -- never below 30 unless the user gives an explicit RPM",
             "for pure visibility requests such as hide/show/make transparent/restore a component, use set_part_display or clear_part_display only; hide means hide only the target part(s), not isolate/highlight the rest",
             "for show-all/restore-all requests such as 'show all parts' or 'bring back hidden parts', emit clear_part_display all:true and clear_part_highlight all:true in the same [UI_ACTIONS] block",
             "for pure rotate/spin/orbit requests, use rotate_view or stop_rotate_view only; do NOT emit HIGHLIGHT_PARTS, EXPLODE_LEVEL, or stop_motion",
@@ -15492,9 +15576,12 @@ MODE_CONTRACTS = {
         ],
         "avoid": [
             "Do NOT invent mates, parts, or configurations that are not in the assembly context.",
+            "Describe actions with the verb you emitted: a highlight action is 'highlighting/showing', never 'isolating/extracting'; do not offer to isolate unless the user explicitly asked to isolate.",
+            "For a pure visibility command (hide/show/transparent/restore), confirm only that command in one short sentence; do not narrate prior highlights, motion, or mechanism context from earlier turns.",
             "Motion: do NOT invent loads, clearances, forces, velocities, accelerations, firing order, or operating RPM -- none of that is computed. Displayed RPM is a visualization rate only, never an engine operating speed.",
             "If no [MOTION] block is present, motion playback is not available for this assembly -- say so instead of pretending to animate.",
             "Viewport state is persistent: do not stop motion, stop rotation, clear highlights, or restore hidden parts unless the user explicitly asks.",
+            "When relating an out-of-tolerance FAI characteristic to the assembly, scope it to the ONE inspected part: do not claim every instance/cylinder/joint shares the deviation unless the FAI context shows those parts failed too; say 'the inspected part' or 'any assembly using a part with this condition'.",
             "Do NOT use facility-layout or plant-process framing here.",
         ],
     },
@@ -15541,10 +15628,19 @@ MODE_CONTRACTS = {
         "tools": [
             "FAI characteristics (nominal, tolerances, measured, status) are provided in the context",
             "the FAI table / balloon actions are the preferred surface for changes",
+            "the [MOTION - reference only] block (when present) maps assembly motion groups to their part numbers; use it ONLY to explain in prose which motion group a discussed characteristic affects. Never emit motion, highlight, display, or tab actions from this tab unless the user explicitly asks to show/play/animate/highlight.",
         ],
         "avoid": [
             "Do NOT invent characteristics, nominals, tolerances, or measurements that are not in the FAI context.",
             "Do NOT report a characteristic as pass/fail without a measured value; mark it pending.",
+            "For explanation/disposition questions, answer in prose only. Do NOT highlight, hide, switch tabs, or animate unless the user explicitly asks to show/highlight/hide/animate/rotate something.",
+            "When limits/delta/direction/out_of_tolerance_by are present in the FAI table context, use those computed values for deviation direction. Do NOT call an above-upper condition undersize or a below-lower condition oversize.",
+            "When fit_effect_hint is present, use it as the functional-impact wording. Do NOT contradict it with interference/clearance claims.",
+            "Quantify deviations from the computed FAI fields, not rounded guesses: state measured vs nominal with the limits and use out_of_tolerance_by for the exact exceedance (e.g. 'measured 32.000 mm vs nominal 30.000 +/-0.050 mm: 1.950 mm above the upper limit'). Do NOT restate it as '+2mm oversize' when the computed value differs.",
+            "The FAI table records ONE inspected part. Do NOT scale the deviation to every instance/cylinder/joint in the assembly unless the context shows those parts failed too; describe the inspected part, or say 'any assembly using a part with this condition'.",
+            "Do NOT invent process-control actions: no lot checks, no 'inspect the last N parts', no tooling-drift or machine-capability claims unless the user asks for process guidance or the context contains that evidence.",
+            "Keep disposition language measured and grounded. For an out-of-tolerance characteristic say it is outside tolerance and should be rejected or escalated for disposition, and state the likely functional impact conditionally with words like 'likely', 'may', or 'could'. Do NOT say the deviation 'will' cause a downstream failure mode unless exact mating clearance, load, or functional evidence is in the context. Do NOT assert catastrophic outcomes (jam, seize, engine failure) unless exact mating clearance or functional evidence is in the context.",
+            "Write units and symbols in plain ASCII: '+/-0.05 mm', '25.003 mm', 'deg'. Never emit corrupted symbol sequences.",
             "Do NOT use facility-layout or plant-process framing here.",
         ],
     },
@@ -15574,10 +15670,13 @@ def _mode_system_addendum(mode: Optional[str]) -> str:
     return "\n".join(lines)
 
 
-def _render_mode_contract_section(mode: Optional[str], submode: Optional[str], state: Optional[Dict]) -> str:
+def _render_mode_contract_section(mode: Optional[str], submode: Optional[str], state: Optional[Dict],
+                                  viewport_motion: Optional[Dict] = None) -> str:
     """Render the FACTUAL [MODE] context block plus per-mode selected state.
     Returns '' when no mode is set. Reasoning guidance is NOT here -- it is
-    layered onto the system prompt via _mode_system_addendum()."""
+    layered onto the system prompt via _mode_system_addendum().
+    viewport_motion: tab-agnostic motion digest (attachments.viewport.motion)
+    used only for the report_fai reference block."""
     mode = (mode or "").strip()
     if not mode:
         return ""
@@ -15682,12 +15781,14 @@ def _render_mode_contract_section(mode: Optional[str], submode: Optional[str], s
         if len(at) > 1:
             blocks.append("\n".join(at))
 
-    # -- [MOTION] -- deterministic motion package summary (assembly / 3dmodel).
+    # -- [MOTION] -- deterministic motion package summary (assembly only).
     # Facts come from the code-generated agent summary; the full transform
-    # arrays never reach the model. Rendered for any mode whose state carries
-    # a motion block so the contract stays frontend-factual / backend-prose.
+    # arrays never reach the model. Motion context is deliberately fenced to
+    # assembly mode: 3D Model summaries must describe the loaded part only,
+    # and an unfenced [MOTION] block was the leak that pulled assembly
+    # motion/neighbor-part framing into 3dmodel answers.
     motion = state.get("motion") or {}
-    if motion.get("available"):
+    if motion.get("available") and mode == "assembly":
         mo = ["[MOTION]"]
         for m in (motion.get("motions") or [])[:2]:
             mo.append(f"Motion package: {m.get('motion_id', '?')} -- {m.get('name', '')}")
@@ -15724,6 +15825,35 @@ def _render_mode_contract_section(mode: Optional[str], submode: Optional[str], s
         )
         blocks.append("\n".join(mo))
 
+    # -- [MOTION - reference only] -- Report/FAI prose grounding. "What is
+    # the affected motion?" asked from the Report tab must be answerable in
+    # prose (which group, which parts), so the group map is rendered here
+    # from the tab-agnostic viewport digest. Reference data only: the mode
+    # contract forbids emitting viewport actions from this tab unless the
+    # user explicitly asks to show/play/animate.
+    if mode == "report_fai":
+        vm = viewport_motion if isinstance(viewport_motion, dict) else {}
+        vmotions = vm.get("motions") if isinstance(vm.get("motions"), list) else []
+        if vm.get("available") and vmotions:
+            mo = ["[MOTION - reference only]"]
+            for m in vmotions[:2]:
+                mo.append(f"Motion package: {m.get('motion_id', '?')}")
+                for g in (m.get("groups") or [])[:10]:
+                    pns = ", ".join(str(p) for p in (g.get("part_numbers") or [])[:10])
+                    mo.append(
+                        f"  Group {g.get('id', '?')} ({g.get('label', '?')}): "
+                        f"part numbers: {pns or 'n/a'}"
+                    )
+                    if g.get("function"):
+                        mo.append(f"    Function: {g.get('function')}")
+            mo.append(
+                "Reference only: use this to explain in prose which motion group a "
+                "characteristic affects. Do NOT start motion, highlight, hide, or "
+                "switch tabs from here unless the user explicitly asks to "
+                "show/play/animate."
+            )
+            blocks.append("\n".join(mo))
+
     return "\n\n".join(blocks)
 
 
@@ -15739,7 +15869,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     if pn:
         parts.append(f"[PART]\nCurrent part: {pn} ({pname or 'unknown'})")
 
-    # â”€â”€ DRAWING MODE (Phase 2) â”€â”€
+    # -- DRAWING MODE (Phase 2) --
     # Render the classification near the top so the agent sees the workflow
     # contract before any downstream fields. Preferred / deprioritized actions
     # are derived directly from drawing_capabilities so the agent doesn't have
@@ -15777,15 +15907,17 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     # Factual block: which mode the user is in + the live selected state. The
     # durable reasoning contract is layered onto the system prompt separately
     # via _mode_system_addendum().
+    _viewport_ctx = inspection_context.get("viewport_context")
     mode_section = _render_mode_contract_section(
         inspection_context.get("active_mode"),
         inspection_context.get("mode_submode"),
         inspection_context.get("mode_state"),
+        viewport_motion=(_viewport_ctx.get("motion") if isinstance(_viewport_ctx, dict) else None),
     )
     if mode_section:
         parts.append(mode_section)
 
-    # â”€â”€ INSPECTION â”€â”€
+    # -- INSPECTION --
     gs = inspection_context.get("gap_summary")
     if gs:
         parts.append(f"[INSPECTION]\nInspection results: {gs.get('completeness', 'N/A')}% complete, "
@@ -15802,7 +15934,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             name = f.get("name", "Unknown")
             status = f.get("status", "N/A")
             obs = f.get("observation", "")
-            summary_lines.append(f"- {name}: {status}" + (f" â€” {obs[:100]}" if obs else ""))
+            summary_lines.append(f"- {name}: {status}" + (f" -- {obs[:100]}" if obs else ""))
         if summary_lines:
             parts.append("Feature findings:\n" + "\n".join(summary_lines))
 
@@ -15810,7 +15942,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     if gaps:
         parts.append("Representation gaps:\n" + "\n".join(f"- {g}" for g in gaps[:5]))
 
-    # Pre-inspection profile data â€” available before inspection runs
+    # Pre-inspection profile data -- available before inspection runs
     profile_features = inspection_context.get("profile_features", [])
     if profile_features and not findings:
         # Only show profile features when we don't have inspection results yet
@@ -15822,7 +15954,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             desc = pf.get("spatial_description", "")
             line = f"- {name} ({ftype}, expected qty: {count})"
             if desc:
-                line += f" â€” {desc[:120]}"
+                line += f" -- {desc[:120]}"
             pf_lines.append(line)
         parts.append("\n".join(pf_lines))
 
@@ -15837,7 +15969,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             ve_lines.append(f"- {view_name}: {desc[:150]}")
         parts.append("\n".join(ve_lines))
 
-    # Focused feature â€” the user has selected/expanded this specific feature
+    # Focused feature -- the user has selected/expanded this specific feature
     focused = inspection_context.get("focused_feature")
     if focused:
         ff_parts = [f"CURRENTLY FOCUSED FEATURE: {focused.get('name', 'Unknown')}"]
@@ -15854,7 +15986,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             ff_parts.append("  Representation gaps: " + "; ".join(ff_gaps))
         parts.append("\n".join(ff_parts))
 
-    # â”€â”€ SELECTION â”€â”€
+    # -- SELECTION --
     selected_dims = inspection_context.get("selected_dimensions", [])
     if selected_dims:
         sd_lines = ["DIMENSIONS THE USER HAS SELECTED (highlighted on the drawing):"]
@@ -15897,7 +16029,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         )
         parts.append("\n".join(ad_lines))
 
-    # â”€â”€ DRAWING â”€â”€
+    # -- DRAWING --
     available_views = inspection_context.get("available_views", [])
     if available_views:
         av_lines = ["AVAILABLE DRAWING VIEWS (you can flash-highlight any of these on the drawing):"]
@@ -15986,7 +16118,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
                     highlight_ids = pf.get("cad_feature_ids", [])
                 line = f"- {name} x{count} ({ftype})"
                 if desc:
-                    line += f" — {desc}"
+                    line += f" -- {desc}"
                 if reason:
                     line += f" Function/inspection reason: {reason}"
                 cf_lines.append(line)
@@ -16056,7 +16188,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             if cad:
                 target_bits.append("cadFeatureIds: " + ", ".join(str(x) for x in cad[:8]))
             if target_bits:
-                base_line += " â€” " + "; ".join(target_bits)
+                base_line += " -- " + "; ".join(target_bits)
             sr_lines.append(base_line)
         sr_lines.append("To highlight a region, include a line: HIGHLIGHT_REGIONS: top wing, tail")
         sr_lines.append("When asked which SolidWorks features/CAD targets belong to a semantic region, answer from the listed SolidWorks features/cadFeatureIds only; do not infer from unrelated raw features.")
@@ -16064,7 +16196,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         sr_lines.append("The resolver expands each region to its GLB nodes + CAD feature IDs automatically \u2014 do not also emit HIGHLIGHT_FEATURES for the same region.")
         parts.append("\n".join(sr_lines))
 
-    # â”€â”€ ASSEMBLY â”€â”€
+    # -- ASSEMBLY --
     available_parts = inspection_context.get("available_parts", [])
     if available_parts:
         ap_lines = ["AVAILABLE PARTS IN THIS ASSEMBLY (you can highlight any of these in 3D):"]
@@ -16152,9 +16284,9 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             c2f = rel.get("component2FileName", "")
             count = rel.get("mateCount", 0)
             reqs = rel.get("inspectionRequirements", [])
-            line = f"  - {c1} ({c1f}) â†” {c2} ({c2f}): {count} mate(s)"
+            line = f"  - {c1} ({c1f}) <-> {c2} ({c2f}): {count} mate(s)"
             if reqs:
-                line += f" â€” {'; '.join(reqs[:2])}"
+                line += f" -- {'; '.join(reqs[:2])}"
             mr_lines.append(line)
         mr_lines.append("Use mate relationships to understand what moves together, what constrains what, and disassembly order.")
         parts.append("\n".join(mr_lines))
@@ -16162,8 +16294,8 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     # SolidWorks explode steps (for disassembly ordering)
     explode_steps = inspection_context.get("explode_steps", [])
     if explode_steps:
-        es_lines = ["SOLIDWORKS EXPLODE STEPS (use this EXACT order for disassembly â€” do NOT invent your own order):"]
-        # Build partDataKey â†’ part_number lookup from legend
+        es_lines = ["SOLIDWORKS EXPLODE STEPS (use this EXACT order for disassembly -- do NOT invent your own order):"]
+        # Build partDataKey -> part_number lookup from legend
         _legend = inspection_context.get("part_color_legend", [])
         _file_to_pn = {}
         for item in _legend:
@@ -16201,7 +16333,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         )
         parts.append("\n".join(pw_lines))
 
-    # â”€â”€ COMPARE â”€â”€
+    # -- COMPARE --
     part_feature_diff = inspection_context.get("part_feature_diff")
     if part_feature_diff:
         pfd_lines = [f"PART FEATURE CHANGES (Rev {part_feature_diff.get('revA', '?')} \u2192 Rev {part_feature_diff.get('revB', '?')}):"]
@@ -16235,15 +16367,15 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
                 color_a = info.get("color_name_a", "")
                 color_b = info.get("color_name_b", "")
                 if inspection_context.get("compare_mode_available") or inspection_context.get("part_compare_active"):
-                    pfd_lines.append(f"  {mod_id}: {ftype} â€” {label_a} â†’ {label_b}")
+                    pfd_lines.append(f"  {mod_id}: {ftype} -- {label_a} -> {label_b}")
                 else:
-                    pfd_lines.append(f"  {mod_id}: {ftype} â€” {label_a} [{color_a}] â†’ {label_b} [{color_b}]")
+                    pfd_lines.append(f"  {mod_id}: {ftype} -- {label_a} [{color_a}] -> {label_b} [{color_b}]")
                 for field, change in info.get("changes", {}).items():
                     if field == "parameters":
                         for param_name, param_change in change.items():
-                            pfd_lines.append(f"    param {param_name}: {param_change.get('old', '?')} â†’ {param_change.get('new', '?')}")
+                            pfd_lines.append(f"    param {param_name}: {param_change.get('old', '?')} -> {param_change.get('new', '?')}")
                     else:
-                        pfd_lines.append(f"    {field}: {change.get('old')} â†’ {change.get('new')}")
+                        pfd_lines.append(f"    {field}: {change.get('old')} -> {change.get('new')}")
 
         added = part_feature_diff.get("added_features", [])
         if added:
@@ -16287,7 +16419,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
                 modified_markers.append(mod_id)
         all_markers = removed_markers + added_markers + modified_markers
 
-        pfd_lines.append("COMPARE_FEATURES USAGE â€” emit ONLY the markers relevant to the user's question:")
+        pfd_lines.append("COMPARE_FEATURES USAGE -- emit ONLY the markers relevant to the user's question:")
         if removed_markers:
             pfd_lines.append(f"  For REMOVED features only: COMPARE_FEATURES: {', '.join(removed_markers)}")
         if added_markers:
@@ -16300,7 +16432,7 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         if not all_markers:
             pfd_lines.append("  No changes to highlight.")
         if inspection_context.get("part_compare_active"):
-            pfd_lines.append("Refer to features by display labels only, not IDs. Do NOT reference feature colors (blue, red, green, etc.) â€” both viewers are gray in compare mode.")
+            pfd_lines.append("Refer to features by display labels only, not IDs. Do NOT reference feature colors (blue, red, green, etc.) -- both viewers are gray in compare mode.")
         else:
             pfd_lines.append("Refer to features by display labels and colors in text, not IDs.")
         parts.append("\n".join(pfd_lines))
@@ -16383,8 +16515,8 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             if cp_all:
                 rd_lines.append(f"  For ALL changes at once: COMPARE_PARTS: {', '.join(cp_all)}")
             rd_lines.append("CRITICAL: Only emit markers for the SPECIFIC category the user asked about.")
-            rd_lines.append("  'what was removed' â†’ ONLY removed_* markers. 'what was added' â†’ ONLY added_* markers.")
-            rd_lines.append("  'what changed' â†’ ONLY changed_* markers. 'show all differences' â†’ ALL markers.")
+            rd_lines.append("  'what was removed' -> ONLY removed_* markers. 'what was added' -> ONLY added_* markers.")
+            rd_lines.append("  'what changed' -> ONLY changed_* markers. 'show all differences' -> ALL markers.")
             rd_lines.append("IMPORTANT: In compare mode, do NOT reference part colors (red, green, blue, etc.) from the 3D model color legend.")
             rd_lines.append("Both viewers are gray. Only the compare highlighting colors matter: red=removed, green=added, amber=changed.")
 
@@ -16394,34 +16526,34 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
 
         parts.append("\n".join(rd_lines))
 
-    # â”€â”€ GEOMETRY DIFF â”€â”€
+    # -- GEOMETRY DIFF --
     geo_diff = inspection_context.get("geometry_diff")
     if geo_diff and not geo_diff.get("identical", True):
         gd_lines = ["GEOMETRY DIFF (solid-body comparison between part revisions):"]
         gd_lines.append(f"  Part: {geo_diff.get('part_number', '?')} Rev {geo_diff.get('revA', '?')} vs Rev {geo_diff.get('revB', '?')}")
-        gd_lines.append(f"  Rev A volume: {geo_diff.get('volume_a_mm3', 0):.1f} mmÂ³")
-        gd_lines.append(f"  Rev B volume: {geo_diff.get('volume_b_mm3', 0):.1f} mmÂ³")
+        gd_lines.append(f"  Rev A volume: {geo_diff.get('volume_a_mm3', 0):.1f} mm³")
+        gd_lines.append(f"  Rev B volume: {geo_diff.get('volume_b_mm3', 0):.1f} mm³")
         removed = geo_diff.get("removed_volume_mm3", 0)
         added = geo_diff.get("added_volume_mm3", 0)
         net = geo_diff.get("net_change_mm3", 0)
         if removed > 0.001:
-            gd_lines.append(f"  Material REMOVED: {removed:.1f} mmÂ³")
+            gd_lines.append(f"  Material REMOVED: {removed:.1f} mm³")
         if added > 0.001:
-            gd_lines.append(f"  Material ADDED: {added:.1f} mmÂ³")
-        gd_lines.append(f"  Net change: {'+' if net >= 0 else ''}{net:.1f} mmÂ³")
+            gd_lines.append(f"  Material ADDED: {added:.1f} mm³")
+        gd_lines.append(f"  Net change: {'+' if net >= 0 else ''}{net:.1f} mm³")
         centroids = geo_diff.get("changed_centroids", [])
         for c in centroids:
             ctype = c.get("type", "?")
             pos = c.get("centroid", [0, 0, 0])
             vol = c.get("volume_mm3", 0)
-            gd_lines.append(f"  {ctype.upper()} region: {vol:.1f} mmÂ³ at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}) mm")
+            gd_lines.append(f"  {ctype.upper()} region: {vol:.1f} mm³ at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}) mm")
         warnings = geo_diff.get("import_warnings", [])
         if warnings:
             gd_lines.append(f"  Import warnings: {'; '.join(warnings)}")
         gd_lines.append("")
         gd_lines.append("Use this data to explain the engineering impact of the geometry changes.")
         gd_lines.append("Reference the volume, location, and type (added/removed) in your answer.")
-        gd_lines.append("If the user asks about the diff, you have the exact data â€” do not guess.")
+        gd_lines.append("If the user asks about the diff, you have the exact data -- do not guess.")
         gd_lines.append("Answer geometry diff questions from this section even if no part feature diff or assembly revision diff is present.")
         gd_lines.append("To show the overlays on the 3D model, emit SHOW_GEOMETRY_DIFF on its own line at the end of your response.")
         parts.append("\n".join(gd_lines))
@@ -16438,11 +16570,33 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
             tm = c.get("tol_minus")
             meas = c.get("measured")
             status = c.get("status", "PENDING")
-            line = f"  #{cn}: {desc} â€” nominal={nom}"
+            lower = c.get("lower_limit")
+            upper = c.get("upper_limit")
+            delta = c.get("deviation_from_nominal")
+            oot = c.get("out_of_tolerance_by")
+            direction = c.get("deviation_direction")
+            fit_kind = c.get("fit_feature_kind")
+            fit_hint = c.get("fit_effect_hint")
+            line = f"  #{cn}: {desc} -- nominal={nom}"
             if tp is not None and tm is not None:
                 line += f" tol=+{tp}/-{tm}"
             if meas:
                 line += f" measured={meas} [{status}]"
+                if lower is not None and upper is not None:
+                    line += f" limits=[{lower}, {upper}]"
+                if delta is not None:
+                    line += f" delta_from_nominal={delta}"
+                if direction and direction != "within_tolerance":
+                    if oot is not None:
+                        line += f" direction={direction} out_of_tolerance_by={oot}"
+                    else:
+                        line += f" direction={direction}"
+                elif direction:
+                    line += f" direction={direction}"
+                if fit_kind:
+                    line += f" fit_feature_kind={fit_kind}"
+                if fit_hint:
+                    line += f" fit_effect_hint={fit_hint}"
             else:
                 line += " [PENDING]"
             fai_lines.append(line)
@@ -16454,13 +16608,13 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
         fai_lines.append("To set tolerances: FAI_TOL: #1: 0.013, #2: 0.050")
         fai_lines.append("To set ALL tolerances: FAI_TOL: #all: 0.013")
         fai_lines.append("Match the user's description to the characteristic descriptions above to determine which rows to fill.")
-        fai_lines.append("Example: 'all bores measured 25.003' â†’ find chars with 'bore' or 'âŒ€' in description, fill those.")
-        fai_lines.append("Example: 'set tolerance to plus minus 13 thou' â†’ 13 thou = 0.3302mm â†’ FAI_TOL: #all: 0.3302")
-        fai_lines.append("Example: 'characteristic 5 is 12.45' â†’ FAI_FILL: #5: 12.450")
+        fai_lines.append("Example: 'all bores measured 25.003' -> find chars with 'bore' or '⌀' in description, fill those.")
+        fai_lines.append("Example: 'set tolerance to plus minus 13 thou' -> 13 thou = 0.3302mm -> FAI_TOL: #all: 0.3302")
+        fai_lines.append("Example: 'characteristic 5 is 12.45' -> FAI_FILL: #5: 12.450")
         fai_lines.append("Always confirm what you filled in your text response (e.g. 'Filled 4 bore measurements with 25.003mm').")
         parts.append("\n".join(fai_lines))
 
-    # â”€â”€ STATUS â”€â”€
+    # -- STATUS --
     has_drawing = bool(inspection_context.get("has_drawing_file"))
     has_part = bool(inspection_context.get("has_part_number"))
     in_progress = bool(inspection_context.get("inspection_in_progress"))
@@ -16515,6 +16669,7 @@ _MOJIBAKE_REPLACEMENTS = (
     ("\u0172", "diameter "),
     ("\u00c2\u00a7", "Section"),
     ("\u00c2\u00b0", " deg"),
+    ("\u00c2\u00b1", "+/-"),       # mojibake plus-minus (e.g. "\u00c2\u00b10.05mm")
     ("\u00c3\u2014", "x"),
     ("\u00c3\u0098", "diameter"),
 )
@@ -16531,6 +16686,14 @@ _UNICODE_PUNCT_TRANSLATION = {
     ord("\u2190"): "<-",
     ord("\u2194"): "<->",
     ord("\u00d7"): "x",
+    # ASCII-safe engineering symbols: keep agent text free of characters
+    # that render as mojibake on misconfigured clients.
+    ord("\u00b1"): "+/-",
+    ord("\u00b0"): " deg",
+    ord("\u00b3"): "^3",
+    ord("\u00b2"): "^2",
+    ord("\u00d8"): "diameter ",
+    ord("\u2300"): "diameter ",
 }
 
 
@@ -16544,7 +16707,7 @@ def _fix_text_encoding_artifacts(text: str) -> str:
     out = out.translate(_UNICODE_PUNCT_TRANSLATION)
     out = out.replace("\ufffd", "")
     out = re.sub(r'[\u00e2\u0101]\u20ac["\u009d\u201c\u201d]?', "-", out)
-    # Last-resort cleanup for partial mojibake sequences such as a lone "â".
+    # Last-resort cleanup for partial mojibake sequences such as a lone U+00E2.
     out = re.sub(r'\u00e2(?=\s|$|["\'])', "-", out)
     out = re.sub(r'\u0101(?=\s|$|["\'])', "-", out)
     return out
@@ -16557,15 +16720,15 @@ def _clean_agent_response(text: str) -> str:
     cleaned = []
     for line in lines:
         stripped = line.lstrip()
-        # Remove markdown headers â€” turn "## Foo" into "Foo"
+        # Remove markdown headers -- turn "## Foo" into "Foo"
         if stripped.startswith("#"):
             line = re.sub(r'^#{1,4}\s*', '', stripped)
             if not line:
                 continue
-        # Remove leading bullet dashes â€” turn "- Foo" into "Foo"
+        # Remove leading bullet dashes -- turn "- Foo" into "Foo"
         if stripped.startswith("- ") or stripped.startswith("* "):
             line = stripped[2:]
-        # Remove numbered list prefix â€” turn "1. Foo" into "Foo"
+        # Remove numbered list prefix -- turn "1. Foo" into "Foo"
         if re.match(r'^\d+\.\s', stripped):
             line = re.sub(r'^\d+\.\s', '', stripped)
         cleaned.append(line)
@@ -16575,13 +16738,217 @@ def _clean_agent_response(text: str) -> str:
     return _fix_text_encoding_artifacts(result.strip())
 
 
+# Failure-mode words the model may not assert unless the context or the
+# user's own message contains them: these are physical claims (noise,
+# time-to-failure, loss of function) that are never computable from an FAI
+# table alone.
+_FAI_UNSUPPORTED_CLAIMS = re.compile(
+    r"(?i)\b(bind|binds|binding|bound|seize|seizes|seized|seizure|seizing|"
+    r"jam|jams|jammed|jamming|slam|slams|slammed|slamming|"
+    r"knock|knocks|knocking|knocked|gall|galls|galling|galled|"
+    r"fracture|fractures|fracturing|fractured|float|floats|floating|"
+    r"rock|rocks|rocking|grip|grips|gripped|gripping|"
+    r"destroy|destroys|destroyed|destruction|disintegrate|disintegrates|"
+    r"disintegrated|hammer|hammers|hammering|pound|pounds|pounding|"
+    r"shatter|shatters|shattered)\b|forced assembly|"
+    r"cannot function|can not function|can't function|cannot reciprocate|"
+    r"can not reciprocate|can't reciprocate|cannot assemble|can not assemble|"
+    r"can't assemble|inability to assemble|unable to assemble|will not assemble|"
+    r"won't assemble|too large to enter|engine failure|catastrophic|catastrophically|"
+    r"within (?:a few |a )?(?:minute|minutes|second|seconds|hour|hours)(?: of operation)?"
+)
+
+# Process-control directives (lot checks, tooling drift, quarantine) are
+# recommendations the FAI data cannot justify; they are dropped outright
+# unless the user asked for them or the context contains that evidence.
+_FAI_PROCESS_DIRECTIVES = re.compile(
+    r"(?i)(?:\b(?:check|verify|inspect|pull|review|re-?measure|measure|audit|sort)\b"
+    r"[^.!?]*\blast\s+\d+\s+(?:parts?|pieces?|units?|articles?)\b)"
+    r"|(?:\btooling\b[^.!?]*\b(?:drift|drifted|drifting|worn|wear)\b)"
+    r"|(?:\b(?:drift|drifted|drifting)\b[^.!?]*\btooling\b)"
+    r"|(?:\b(?:quarantine|contain|containment|impound)\b[^.!?]*\b(?:lot|batch|inventory)\b)"
+    r"|(?:\b(?:lot|batch)\b[^.!?]*\b(?:quarantine|containment|contain|hold)\b)"
+    r"|(?:\b100\s*%\s*(?:inspect|inspection|sort|sorting)\b)"
+)
+_FAI_DIRECTIVE_SUPPORT = re.compile(
+    r"(?i)\b(tooling|drift|lot|batch|quarantine|containment|spc|process capability|cpk)\b"
+)
+
+# A single inspected article cannot prove the deviation exists on every
+# instance of the component in the assembly.
+_FAI_MULTI_INSTANCE = re.compile(
+    r"(?i)\b(?:every|each|all\s+(?:four|\d+))\b[^.!?]*"
+    r"\b(?:cylinder|cylinders|joint|joints|bore|bores|pin|pins|piston|pistons|"
+    r"instance|instances|position|positions|location|locations|corner|corners)\b"
+)
+_FAI_DEFECT_WORDS = re.compile(
+    r"(?i)\b(oversize|oversized|undersize|undersized|out of tolerance|outside tolerance|"
+    r"deviation|deviated|clearance|play|loose|looser|lateral|interference)\b"
+)
+
+
+def _fai_term_supported(term: str, support_lower: str) -> bool:
+    """True when the flagged term (or its stem) appears in the supporting
+    context/user text, i.e. the model did not invent it."""
+    t = (term or "").lower().strip()
+    if not t or not support_lower:
+        return False
+    if t in support_lower:
+        return True
+    stem = re.sub(r"(?:ping|ped|ming|med|ning|ned|ing|ed|es|s)$", "", t)
+    return len(stem) >= 3 and stem in support_lower
+
+
+def _fai_failed_row_prefix_from_support(support_text: str = "") -> str:
+    """Return a compact measured-vs-nominal sentence from the first failed
+    FAI row in the rendered context. This is a grounding backstop for cases
+    where the model gives the right disposition prose but forgets the numeric
+    evidence already present in the table."""
+    if not support_text:
+        return ""
+    for raw_line in str(support_text).splitlines():
+        line = raw_line.strip()
+        if not re.search(r"\[(?:FAIL|REJECT)\]", line, re.I):
+            continue
+        cn = re.search(r"#\s*(\d+)\s*:", line)
+        desc = ""
+        if cn:
+            tail = line[cn.end():]
+            desc = re.split(r"\s+--\s+nominal=", tail, maxsplit=1)[0].strip()
+        nominal = re.search(r"\bnominal=([+-]?\d+(?:\.\d+)?)", line)
+        measured = re.search(r"\bmeasured=([+-]?\d+(?:\.\d+)?)", line)
+        if not (cn and nominal and measured):
+            continue
+        tol = re.search(r"\btol=\+([+-]?\d+(?:\.\d+)?)/-([+-]?\d+(?:\.\d+)?)", line)
+        oot = re.search(r"\bout_of_tolerance_by=([+-]?\d+(?:\.\d+)?)", line)
+        direction = re.search(r"\bdirection=([a-z_]+)", line, re.I)
+        lower = re.search(r"\blimits=\[([+-]?\d+(?:\.\d+)?),\s*([+-]?\d+(?:\.\d+)?)\]", line)
+        label = f"Characteristic #{cn.group(1)}"
+        if desc:
+            label += f" ({desc})"
+        prefix = f"{label} measured {measured.group(1)} mm vs nominal {nominal.group(1)} mm"
+        if tol:
+            prefix += f" +{tol.group(1)}/-{tol.group(2)} mm"
+        if lower:
+            prefix += f" limits [{lower.group(1)}, {lower.group(2)}] mm"
+        if oot and direction:
+            dir_text = direction.group(1).lower().replace("_", " ")
+            if "above upper" in dir_text:
+                dir_text = "above the upper limit"
+            elif "below lower" in dir_text:
+                dir_text = "below the lower limit"
+            prefix += f": {oot.group(1)} mm {dir_text}."
+        else:
+            prefix += ": outside tolerance."
+        return prefix
+    return ""
+
+
+def _clean_report_fai_response(text: str, support_text: str = "",
+                               failed_row_count: Optional[int] = None) -> str:
+    """Keep FAI disposition text measured and grounded when the model
+    overstates impact. support_text is the user's message plus the FAI table
+    context: claims the user asked about or the data contains are allowed
+    through untouched. failed_row_count (when provided) gates multi-instance
+    defect claims -- one failed inspected part must not become 'every joint'."""
+    text = _clean_agent_response(text)
+    if not text:
+        return text
+    support_lower = (support_text or "").lower()
+
+    # Disposition verb: "scrap" is a quality decision the FAI table does not
+    # make. Rewrite to reject/escalate wording unless the context/user used it.
+    if "scrap" not in support_lower:
+        _scrap_map = {"scrap": "reject", "scraps": "rejects",
+                      "scrapped": "rejected", "scrapping": "rejecting"}
+
+        def _scrap_repl(m):
+            word = m.group(0)
+            rep = _scrap_map.get(word.lower(), "reject")
+            return rep.capitalize() if word[:1].isupper() else rep
+
+        text = re.sub(r"(?i)\bscrap(?:ped|ping|s)?\b", _scrap_repl, text)
+
+    directives_supported = bool(_FAI_DIRECTIVE_SUPPORT.search(support_lower))
+    multi_instance_supported = failed_row_count is None or failed_row_count > 1
+
+    needs_pass = bool(_FAI_UNSUPPORTED_CLAIMS.search(text)) \
+        or (not directives_supported and _FAI_PROCESS_DIRECTIVES.search(text)) \
+        or (not multi_instance_supported and _FAI_MULTI_INSTANCE.search(text))
+    grounding_prefix = _fai_failed_row_prefix_from_support(support_text)
+    if not needs_pass:
+        if grounding_prefix and not re.search(r"\d", text):
+            return f"{grounding_prefix} {text}".strip()
+        return text
+
+    replacement = (
+        "If this is a controlled fit dimension, escalate it for disposition against "
+        "the mating part requirements; exact interference or failure mode is not "
+        "determined from the current FAI data alone."
+    )
+    scoping_sentence = (
+        "The measured deviation applies to the inspected part; the FAI data does not "
+        "show other instances of this component out of tolerance."
+    )
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    cleaned_parts = []
+    replacement_seen = False
+    scoping_seen = False
+    for sentence in sentences:
+        if not sentence:
+            continue
+        # Invented process-control directives: drop the sentence entirely.
+        if not directives_supported and _FAI_PROCESS_DIRECTIVES.search(sentence):
+            continue
+        # Deviation multiplied across instances the FAI never measured.
+        if (not multi_instance_supported and _FAI_MULTI_INSTANCE.search(sentence)
+                and _FAI_DEFECT_WORDS.search(sentence)):
+            if not scoping_seen:
+                cleaned_parts.append(scoping_sentence)
+                scoping_seen = True
+            continue
+        match = _FAI_UNSUPPORTED_CLAIMS.search(sentence)
+        if not match or _fai_term_supported(match.group(0), support_lower):
+            cleaned_parts.append(sentence)
+            continue
+        prefix = sentence[:match.start()].rstrip(" ,;:-")
+        prefix = re.sub(
+            r'(?i)(?:,?\s*(?:so|and|which|meaning|causing|leading to)\b.*)$',
+            '',
+            prefix,
+        ).rstrip(" ,;:-")
+        prefix = re.sub(
+            r'(?i)(?:,?\s*(?:likely|possibly)?\s*(?:allowing|allows|allow|increasing|reducing|causing|leading to|resulting in|expect)\b.*)$',
+            '',
+            prefix,
+        ).rstrip(" ,;:-")
+        prefix = re.sub(r"(?i)\b(?:will|would|can|could|may|shall|must|does|do|did|won'?t|cannot)(?:\s+not)?\s*$",
+                        '', prefix).rstrip(" ,;:-")
+        if prefix and re.search(r'(?i)\b(measured|limit|tolerance|nominal|oversize|undersize|out of tolerance)\b|\d', prefix):
+            cleaned_parts.append(prefix.rstrip(".!?") + ".")
+        if not replacement_seen:
+            cleaned_parts.append(replacement)
+            replacement_seen = True
+    cleaned = " ".join(cleaned_parts)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+    cleaned = _clean_agent_response(cleaned)
+    if grounding_prefix and not re.search(r"\d", cleaned):
+        cleaned = f"{grounding_prefix} {cleaned}".strip()
+    if re.search(
+        r'(?i)\b(oversize|undersize|outside tolerance|out of tolerance|exceeds|upper limit|lower limit)\b',
+        cleaned,
+    ):
+        cleaned = re.sub(r'(?i)^(\s*(?:Sage\s*)?)Accept\b\.?', r'\1Reject.', cleaned, count=1)
+    return cleaned
+
+
 def _is_walkthrough_message(message: str) -> bool:
     """Detect guided assembly walkthrough requests that need legacy narration markers."""
     msg_lower = (message or "").lower()
     return any(kw in msg_lower for kw in ["walk", "tour", "narrat", "walkthrough"])
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Sales-coaching mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ------------------------- Sales-coaching mode -------------------------
 # Engineering-grounded sales coaching is a SEPARATE narration mode from the
 # part-by-part walkthrough. The intent detector and application extractor
 # below feed a dedicated SALES_COACHING_OUTPUT_OVERRIDE in the chat
@@ -16623,7 +16990,7 @@ def _is_sales_coaching_message(message: str) -> bool:
 def _extract_sales_application(message: str) -> str:
     """Return the canonical sales application name when the message
     contains an alias for one. Returns '' when no application phrase
-    is present â€” caller uses that to trigger the clarification path
+    is present -- caller uses that to trigger the clarification path
     instead of generating a generic pitch."""
     msg = (message or "").lower()
     for app_name, aliases in _SALES_APPLICATIONS.items():
@@ -16660,7 +17027,7 @@ def _sales_coaching_override(application: str, user_name: str = "") -> str:
     else:
         name_tone_line = (
             "- The user's display name is not available. Open with \"Here is how I would "
-            "position this for...\" â€” never invent a name.\n"
+            "position this for...\" -- never invent a name.\n"
         )
 
     return (
@@ -16677,7 +17044,7 @@ def _sales_coaching_override(application: str, user_name: str = "") -> str:
         "  - \"Here is how I would position this...\"\n"
         "  - \"The customer cares about this because...\"\n"
         "  - \"If they push back, your answer is...\"\n"
-        "  - \"Do not lead with the part â€” lead with the production problem.\"\n"
+        "  - \"Do not lead with the part -- lead with the production problem.\"\n"
         "- Avoid hype words: \"proven\", \"workhorse\", \"dominates\", \"guaranteed\", \"unmatched\",\n"
         "  unless directly supported by context.\n"
         + name_tone_line +
@@ -16710,22 +17077,329 @@ def _sales_coaching_override(application: str, user_name: str = "") -> str:
         "- Do NOT output markdown tables.\n"
         "- Do NOT emit <tool_calls> or any tool-syntax JSON for this response.\n\n"
         "Required structure (5 sections, in order):\n"
-        "1. Personal coaching opener â€” addressed to the user if a name was given. ONE segment.\n"
-        f"2. Customer pain framing for the {application} application â€” what the buyer\n"
+        "1. Personal coaching opener -- addressed to the user if a name was given. ONE segment.\n"
+        f"2. Customer pain framing for the {application} application -- what the buyer\n"
         "   actually loses sleep over. ONE segment.\n"
-        "3. 4 to 6 engineering-backed selling points â€” each as its own segment, each with\n"
+        "3. 4 to 6 engineering-backed selling points -- each as its own segment, each with\n"
         "   HIGHLIGHT_PARTS and ideally CAMERA_FOCUS.\n"
-        "4. 2 or 3 common objections with grounded responses â€” one per segment, kept\n"
+        "4. 2 or 3 common objections with grounded responses -- one per segment, kept\n"
         "   voice-friendly and short.\n"
         "5. Closing coaching line + ONE follow-up question that respects what the user\n"
-        "   already told you. The application is already known â€” do NOT ask for it again.\n"
+        "   already told you. The application is already known -- do NOT ask for it again.\n"
         "   Good close question: \"Do you want the pitch tuned for a plant manager,\n"
         "   manufacturing engineer, or maintenance lead?\"\n\n"
         "Segment format (every segment, no exceptions):\n"
-        "[spoken coaching narration â€” 1-2 sentences, max 45 words]\n"
+        "[spoken coaching narration -- 1-2 sentences, max 45 words]\n"
         "HIGHLIGHT_PARTS: part_number1, part_number2\n"
         "CAMERA_FOCUS: part_number1, part_number2\n"
     )
+
+
+# ---------- Viewport intent classifier (hybrid intent layer) ----------
+# A small, cheap LLM call that classifies the SEMANTIC viewport/action intent
+# of a user message. It never executes anything: the output is structured
+# intent only. The frontend maps it onto ui_actions with deterministic
+# validation (group must exist, parts must exist, package must be available),
+# and the existing regex resolvers remain as fallback when this returns None.
+# Data-driven by design: groups, part numbers, and rpm ranges all come from
+# the live context digest -- nothing is hard-coded to a specific assembly.
+
+VIEWPORT_INTENT_MODEL = os.getenv("INSPECTORPRO_INTENT_MODEL", "claude-haiku-4-5")
+VIEWPORT_INTENT_MAX_TOKENS = 500
+VIEWPORT_INTENT_AGENT_TYPES = {"deviation-analyst", "inspector"}
+
+_VIEWPORT_INTENT_KINDS = {
+    "none", "highlight", "motion", "highlight_motion", "hide", "show",
+    "restore", "transparency", "rotate", "stop_motion", "pause_motion",
+    "set_motion_rpm", "seek_motion", "clear_highlight",
+}
+_VIEWPORT_INTENT_WORKFLOWS = {"assembly", "3dmodel", "report_fai", "drawing", "unknown"}
+_VIEWPORT_TARGET_KINDS = {"part", "feature", "motion_group", "current_selection", "all", "unknown"}
+_VIEWPORT_INTENT_MODES = {"replace", "add", "remove", "clear"}
+_VIEWPORT_INTENT_SPEEDS = {"slow", "normal", "fast", "explicit"}
+
+_VIEWPORT_INTENT_SYSTEM = """You classify a user's viewport/action intent for a CAD inspection app.
+You NEVER execute anything. You return ONLY one JSON object, no prose, no code fences.
+
+Schema (all keys required):
+{
+  "intent_kind": "none|highlight|motion|highlight_motion|hide|show|restore|transparency|rotate|stop_motion|pause_motion|set_motion_rpm|seek_motion|clear_highlight",
+  "workflow": "assembly|3dmodel|report_fai|drawing|unknown",
+  "targets": [{"kind": "part|feature|motion_group|current_selection|all|unknown",
+               "label": "user-facing target phrase",
+               "part_numbers": [], "feature_ids": [], "motion_group_id": null}],
+  "motion": {"requested": false, "speed": "slow|normal|fast|explicit|null", "rpm": null},
+  "display": {"hidden": null, "opacity": null},
+  "mode": "replace|add|remove|clear|null",
+  "confidence": 0.0,
+  "needs_clarification": false,
+  "clarification_question": null
+}
+
+Rules:
+- Interpret MEANING, including misspellings, typos, and awkward wording.
+- Use ONLY part numbers, motion group ids, and feature ids that appear in the CONTEXT.
+- "show/see/highlight X" WITHOUT motion/move/working/action/RPM words = highlight only.
+  Never start motion for a plain target request like "show the pin joint".
+- Whole-assembly motion requests ("show how this assembly moves", "show the whole
+  assembly moving", "play the assembly motion") = motion only. Do NOT choose a
+  subgroup and do NOT hide/highlight only the moving subset; keep the assembly visible.
+- Motion (motion/animate/move/moving/in action/working/running/RPM/"turn the crank") plus
+  a specific visible target = highlight_motion; pick the smallest relevant motion group from the
+  CONTEXT by matching the user's words against group labels/functions/part numbers.
+  "show the affected motion", "make the affected parts move", "show the joint working"
+  = highlight_motion when a matching group exists.
+- "hide X" = hide with ONLY the named part(s). Never clear highlights, never stop motion.
+- "show X", "bring X", "bring X back", or "show X as well" for a named part =
+  show with ONLY that named part. Do not clear all highlights unless the user asks
+  for all/everything/whole assembly/hidden parts.
+- "bring everything back"/"show all parts"/"restore" = restore.
+- "rotate/spin/orbit the view/model/assembly" = rotate (camera). NOT mechanism motion.
+- "turn/rotate/spin the crank/crankshaft/mechanism" = motion (mechanism) when a motion
+  package exists in the CONTEXT.
+- "slowly"/"slow" => motion.speed "slow". An explicit number like "20 rpm" => speed
+  "explicit" and motion.rpm set.
+- Pure questions about state ("what is hidden?", "did you clear highlights?",
+  "is it moving?") = intent_kind "none".
+- Explanation/analysis/impact questions = intent_kind "none" even when they mention
+  assembly, motion, affected parts, failures, or highlighting: "what is the impact on
+  the assembly of the failed dimension?", "what does this FAI failure mean?", "explain
+  the assembly impact of #5", "what is the affected motion?", "what motion will be
+  affected?" are ALL "none" -- the user
+  wants prose, not a viewport change. Classify an action ONLY when the user directs a
+  viewport change with action wording (show/highlight/play/animate/hide/rotate/bring/
+  restore/"make ... move"/"turn the crank").
+- If the request is ambiguous or the target cannot be matched to the CONTEXT, return
+  intent_kind "none" with needs_clarification true and a short clarification_question.
+- confidence: 0.0-1.0. Below 0.6 the app ignores the classification."""
+
+
+def _viewport_intent_context_digest(ctx: Optional[Dict]) -> str:
+    """Compact factual digest the classifier grounds against. Everything here
+    comes from the live request context -- no assembly-specific constants."""
+    ctx = ctx if isinstance(ctx, dict) else {}
+    lines = ["CONTEXT:"]
+    mode = ctx.get("active_mode") or ctx.get("active_tab") or "unknown"
+    lines.append(f"active_mode: {mode}")
+
+    vp = ctx.get("viewport_context") or {}
+    motion = vp.get("motion") or {}
+    motions = motion.get("motions") if isinstance(motion.get("motions"), list) else []
+    if motion.get("available") and motions:
+        lines.append("motion_package: available")
+        for m in motions[:2]:
+            lines.append(
+                f"  motion {m.get('motion_id', '?')}: default_rpm={m.get('default_rpm', '?')}, "
+                f"rpm_range={m.get('rpm_range', '?')}"
+            )
+            for g in (m.get("groups") or [])[:10]:
+                pns = ",".join(str(p) for p in (g.get("part_numbers") or [])[:10])
+                lines.append(
+                    f"    group {g.get('id', '?')} | {g.get('label', '')} | parts: {pns} | "
+                    f"{str(g.get('function', ''))[:140]}"
+                )
+    else:
+        lines.append("motion_package: none")
+
+    legend = vp.get("part_legend")
+    if not isinstance(legend, list) or not legend:
+        legend = ctx.get("part_color_legend") if isinstance(ctx.get("part_color_legend"), list) else []
+    if legend:
+        lines.append("parts:")
+        for item in legend[:40]:
+            if isinstance(item, dict) and item.get("part_number"):
+                lines.append(f"  {item['part_number']}: {str(item.get('description', ''))[:60]}")
+
+    vstate = vp.get("state") or {}
+    if vstate:
+        lines.append(
+            "viewport_state: "
+            f"motion_playing={bool(vstate.get('motion_playing'))}, "
+            f"rpm={vstate.get('motion_rpm')}, "
+            f"highlighted={list(vstate.get('highlighted') or [])[:12]}, "
+            f"hidden={list(vstate.get('hidden') or [])[:12]}"
+        )
+
+    features = vp.get("features")
+    if isinstance(features, list) and features:
+        lines.append("feature_groups:")
+        for f in features[:15]:
+            if isinstance(f, dict) and f.get("id"):
+                lines.append(f"  {f['id']}: {str(f.get('label', ''))[:60]}")
+    return "\n".join(lines)
+
+
+def _validate_viewport_intent(data, ctx: Optional[Dict]):
+    """Deterministic validation of the classifier output. Returns a cleaned
+    intent dict or None. Unknown enums, absent part numbers, and absent
+    group ids are rejected/nulled here so the frontend can trust the shape
+    (it still re-validates against its own live state before executing)."""
+    if not isinstance(data, dict):
+        return None
+    kind = str(data.get("intent_kind") or "none").strip().lower()
+    if kind not in _VIEWPORT_INTENT_KINDS:
+        return None
+    workflow = str(data.get("workflow") or "unknown").strip().lower()
+    if workflow not in _VIEWPORT_INTENT_WORKFLOWS:
+        workflow = "unknown"
+
+    ctx = ctx if isinstance(ctx, dict) else {}
+    vp = ctx.get("viewport_context") or {}
+    legend = vp.get("part_legend")
+    if not isinstance(legend, list) or not legend:
+        legend = ctx.get("part_color_legend") if isinstance(ctx.get("part_color_legend"), list) else []
+    known_pns = {str(i.get("part_number")) for i in legend if isinstance(i, dict) and i.get("part_number")}
+    known_groups = {}
+    for m in ((vp.get("motion") or {}).get("motions") or []):
+        for g in (m.get("groups") or []):
+            if isinstance(g, dict) and g.get("id"):
+                known_groups[str(g["id"])] = g
+
+    targets = []
+    for t in (data.get("targets") if isinstance(data.get("targets"), list) else [])[:4]:
+        if not isinstance(t, dict):
+            continue
+        tkind = str(t.get("kind") or "unknown").strip().lower()
+        if tkind not in _VIEWPORT_TARGET_KINDS:
+            tkind = "unknown"
+        pns = [str(p).strip() for p in (t.get("part_numbers") or []) if str(p).strip()]
+        if known_pns:
+            pns = [p for p in pns if p in known_pns]
+        gid = t.get("motion_group_id")
+        gid = str(gid).strip() if gid else None
+        if gid and known_groups and gid not in known_groups:
+            gid = None
+        fids = [str(f).strip() for f in (t.get("feature_ids") or []) if str(f).strip()][:12]
+        targets.append({
+            "kind": tkind,
+            "label": str(t.get("label") or "")[:120],
+            "part_numbers": pns[:20],
+            "feature_ids": fids,
+            "motion_group_id": gid,
+        })
+
+    motion_in = data.get("motion") if isinstance(data.get("motion"), dict) else {}
+    speed = motion_in.get("speed")
+    speed = str(speed).strip().lower() if speed else None
+    if speed not in _VIEWPORT_INTENT_SPEEDS:
+        speed = None
+    rpm = motion_in.get("rpm")
+    try:
+        rpm = float(rpm) if rpm is not None else None
+        if rpm is not None and not (0 < rpm <= 5000):
+            rpm = None
+    except (TypeError, ValueError):
+        rpm = None
+
+    display_in = data.get("display") if isinstance(data.get("display"), dict) else {}
+    hidden = display_in.get("hidden")
+    hidden = bool(hidden) if isinstance(hidden, bool) else None
+    opacity = display_in.get("opacity")
+    try:
+        opacity = float(opacity) if opacity is not None else None
+        if opacity is not None and not (0 <= opacity <= 1):
+            opacity = None
+    except (TypeError, ValueError):
+        opacity = None
+
+    mode = data.get("mode")
+    mode = str(mode).strip().lower() if mode else None
+    if mode not in _VIEWPORT_INTENT_MODES:
+        mode = None
+
+    try:
+        confidence = max(0.0, min(1.0, float(data.get("confidence") or 0.0)))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    return {
+        "intent_kind": kind,
+        "workflow": workflow,
+        "targets": targets,
+        "motion": {"requested": bool(motion_in.get("requested")), "speed": speed, "rpm": rpm},
+        "display": {"hidden": hidden, "opacity": opacity},
+        "mode": mode,
+        "confidence": confidence,
+        "needs_clarification": bool(data.get("needs_clarification")),
+        "clarification_question": (str(data.get("clarification_question"))[:200]
+                                   if data.get("clarification_question") else None),
+    }
+
+
+def _extract_json_object(text: str):
+    """Parse the first JSON object out of a model response, tolerating code
+    fences and stray prose."""
+    if not text:
+        return None
+    cleaned = re.sub(r"```(?:json)?", "", text).strip()
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(cleaned[start:end + 1])
+    except (ValueError, TypeError):
+        return None
+
+
+def classify_viewport_intent(message: str, ctx: Optional[Dict], api_key: Optional[str] = None,
+                             _complete=None, agent_type: str = "deviation-analyst"):
+    """Classify the viewport intent of a chat message. Returns a validated
+    intent dict or None (fall back to the deterministic resolvers). Never
+    raises -- classifier failure must never break the chat turn.
+
+    _complete: injectable callable (system, user) -> raw text, for tests."""
+    try:
+        message = (message or "").strip()
+        if not message:
+            return None
+        digest = _viewport_intent_context_digest(ctx)
+        user_text = f"{digest}\n\nUSER MESSAGE:\n{message}"
+        if _complete is not None:
+            raw = _complete(_VIEWPORT_INTENT_SYSTEM, user_text)
+        else:
+            import anthropic
+            key = api_key or os.getenv("ANTHROPIC_API_KEY")
+            if not key:
+                return None
+            client = anthropic.Anthropic(api_key=key)
+            with time_block() as _elapsed_ms:
+                try:
+                    response = client.messages.create(
+                        model=VIEWPORT_INTENT_MODEL,
+                        max_tokens=VIEWPORT_INTENT_MAX_TOKENS,
+                        system=_VIEWPORT_INTENT_SYSTEM,
+                        messages=[{"role": "user", "content": user_text}],
+                    )
+                except Exception as _ex:
+                    _s, _e = classify_exception_status(_ex)
+                    record_anthropic_call(
+                        model=VIEWPORT_INTENT_MODEL, response=None, latency_ms=_elapsed_ms(),
+                        status=_s, errorType=_e,
+                        route="/api/agent/chat", workflow="viewport_intent",
+                        agentType=agent_type,
+                    )
+                    return None
+            record_anthropic_call(
+                model=VIEWPORT_INTENT_MODEL, response=response, latency_ms=_elapsed_ms(),
+                route="/api/agent/chat", workflow="viewport_intent",
+                agentType=agent_type,
+            )
+            raw = "".join(b.text for b in response.content if hasattr(b, "text"))
+        parsed = _extract_json_object(raw)
+        intent = _validate_viewport_intent(parsed, ctx)
+        if intent:
+            logger.info(
+                f"[ViewportIntent] kind={intent['intent_kind']} conf={intent['confidence']:.2f} "
+                f"targets={[t.get('motion_group_id') or t.get('part_numbers') for t in intent['targets']]}"
+            )
+        return intent
+    except Exception as e:  # noqa: BLE001 -- classifier is best-effort by contract
+        logger.warning(f"[ViewportIntent] classification failed: {e}")
+        return None
+
+
+_VIEWPORT_INTENT_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="viewport-intent")
 
 
 @app.post("/api/agent/chat")
@@ -16755,7 +17429,7 @@ async def agent_chat(request: AgentChatRequest):
     is_walkthrough = (not is_sales_coaching) and _is_walkthrough_message(request.message)
 
     # Missing-application short-circuit. Per spec: do NOT call Claude for a
-    # generic pitch when the application is unknown â€” return a normal
+    # generic pitch when the application is unknown -- return a normal
     # assistant response with the clarification question only. Returning
     # before the Anthropic SDK is initialised also saves an API call.
     if is_sales_coaching and not sales_application:
@@ -16788,7 +17462,7 @@ async def agent_chat(request: AgentChatRequest):
         # Peek at attachments.user.display_name (or legacy flat
         # user_display_name) BEFORE normalize_agent_context runs so the
         # sales-coaching override can personalise the opener. Empty
-        # string when not provided â€” the override has a fallback line.
+        # string when not provided -- the override has a fallback line.
         _early_raw_ctx = request.inspection_context or request.context or {}
         _user_display = ""
         try:
@@ -16907,7 +17581,7 @@ async def agent_chat(request: AgentChatRequest):
                     result["tool_guardrail_warnings"] = warnings
                 return result
 
-        # Enrich with proximity â€” Sage only, first 2 selected parts
+        # Enrich with proximity -- Sage only, first 2 selected parts
         if request.agent_type == 'deviation-analyst':
             selected = ctx.get("selected_parts", [])
             available = ctx.get("available_parts", [])
@@ -16993,21 +17667,21 @@ async def agent_chat(request: AgentChatRequest):
                                 sc_parts.append(f"Part role: {desc}")
                             break
 
-                    # Filtered mates â€” show what this part connects to
+                    # Filtered mates -- show what this part connects to
                     all_mates = assy_data.get("mates", [])
                     mate_lines = []
                     for mate in all_mates:
                         e1 = mate.get("entity1", {}).get("componentName", "")
                         e2 = mate.get("entity2", {}).get("componentName", "")
                         if _component_matches_aliases(e1, part_aliases) or _component_matches_aliases(e2, part_aliases):
-                            mate_lines.append(f"- {mate.get('type', 'unknown')}: {e1} â†” {e2}")
+                            mate_lines.append(f"- {mate.get('type', 'unknown')}: {e1} <-> {e2}")
                             if len(mate_lines) >= MAX_MATE_LINES:
                                 break
                     if mate_lines:
                         sc_parts.append("\nMATING CONSTRAINTS (replacement must satisfy these fits):")
                         sc_parts.extend(mate_lines)
 
-                    # Functional narrative â€” procurement-relevant sections only
+                    # Functional narrative -- procurement-relevant sections only
                     color_by_pn = {}
                     colors = _correct_assembly_color_map_from_glb(
                         assy_num,
@@ -17088,7 +17762,7 @@ async def agent_chat(request: AgentChatRequest):
                 if mate_count == 0:
                     da_parts.append("- (no direct mates found)")
 
-                # Color assignments â€” resolve old filenames to new part numbers
+                # Color assignments -- resolve old filenames to new part numbers
                 colors = _correct_assembly_color_map_from_glb(
                     assy_num,
                     assy_data,
@@ -17110,7 +17784,7 @@ async def agent_chat(request: AgentChatRequest):
                         new_pn = pd_identity.get("partNumber", "")
                         desc = pd_identity.get("description", "")
                         label = f"{new_pn} ({desc})" if new_pn else old_key
-                        is_current = " â† THIS PART" if any(a in old_key or a == new_pn for a in part_aliases) else ""
+                        is_current = " <- THIS PART" if any(a in old_key or a == new_pn for a in part_aliases) else ""
                         da_parts.append(f"- {label}: {color_hex}{is_current}")
 
                 # Select functional narrative sections based on question keywords
@@ -17178,7 +17852,7 @@ async def agent_chat(request: AgentChatRequest):
             logger.info(f"Agent chat: loaded {len(rag_images)} RAG images from {rag_dirs}")
         else:
             rag_images = []
-            logger.info("Agent chat: parts-finder agent â€” skipping RAG images")
+            logger.info("Agent chat: parts-finder agent -- skipping RAG images")
 
         # Build message history for Claude
         messages = []
@@ -17248,6 +17922,22 @@ async def agent_chat(request: AgentChatRequest):
         })
 
         messages.append({"role": "user", "content": user_content})
+
+        # Hybrid intent layer: classify the viewport intent on a worker
+        # thread so the small classifier call overlaps the main model call
+        # instead of adding serial latency. Only agents allowed to emit
+        # viewport ui_actions use this semantic layer; walkthrough and
+        # sales-coaching paths never reach here.
+        _intent_future = None
+        if request.agent_type in VIEWPORT_INTENT_AGENT_TYPES and (request.message or "").strip():
+            try:
+                _intent_future = _VIEWPORT_INTENT_EXECUTOR.submit(
+                    classify_viewport_intent, request.message, ctx, api_key,
+                    None, request.agent_type,
+                )
+            except Exception as _ie:  # noqa: BLE001
+                logger.warning(f"[ViewportIntent] submit failed: {_ie}")
+                _intent_future = None
 
         # Call Claude
         # Phase 2 telemetry.
@@ -17499,7 +18189,7 @@ async def agent_chat(request: AgentChatRequest):
         # Parse EXPLODE_LEVEL markers (may be global or per-segment)
         explode_level = None
         explode_pattern = re.compile(r'^EXPLODE_LEVEL:\s*([\d.]+)\s*$', re.MULTILINE)
-        # Parse CAMERA_FOCUS markers â€” sales-coaching mode emits these
+        # Parse CAMERA_FOCUS markers -- sales-coaching mode emits these
         # per-segment to fly the camera to the focused part group. Honest:
         # parsing only; the frontend decides whether to act on it via the
         # existing _flyToPartGroup helper.
@@ -17509,7 +18199,7 @@ async def agent_chat(request: AgentChatRequest):
         matches = list(parts_pattern.finditer(response_text))
 
         if len(matches) > 1:
-            # Multi-segment narration mode â€” extract per-segment EXPLODE_LEVEL + CAMERA_FOCUS
+            # Multi-segment narration mode -- extract per-segment EXPLODE_LEVEL + CAMERA_FOCUS
             segments = []
             intro = response_text[:matches[0].start()].strip()
             # Strip any EXPLODE_LEVEL / CAMERA_FOCUS from intro
@@ -17582,18 +18272,18 @@ async def agent_chat(request: AgentChatRequest):
         # The block is additive: prose stays in response_text. Anything else
         # the agent emits (HIGHLIGHT_PARTS, EXPLODE_LEVEL, ...) is handled by
         # the existing pipeline above. Failure to parse JSON drops the actions
-        # silently â€” the prose response is still delivered honestly.
+        # silently -- the prose response is still delivered honestly.
         ui_actions_payload = None
 
         def _ui_actions_from_json(raw_block: str):
             try:
                 parsed = json.loads(raw_block)
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"[UI_ACTIONS] block JSON parse failed: {e} â€” dropped")
+                logger.warning(f"[UI_ACTIONS] block JSON parse failed: {e} -- dropped")
                 return None
             actions = parsed.get("actions") if isinstance(parsed, dict) else None
             if not isinstance(actions, list):
-                logger.warning("[UI_ACTIONS] block parsed but 'actions' missing or not a list â€” dropped")
+                logger.warning("[UI_ACTIONS] block parsed but 'actions' missing or not a list -- dropped")
                 return None
             return {
                 "workspace": (parsed.get("workspace") or "assembly_compare"),
@@ -17653,6 +18343,31 @@ async def agent_chat(request: AgentChatRequest):
 
         # Post-process: strip markdown headers and convert to conversational prose
         response_text = _clean_agent_response(response_text)
+        _fai_like_turn = bool(re.search(
+            r'(?i)\b(fai|first article|characteristic|measured|nominal|tolerance|disposition)\b',
+            f"{request.message or ''}\n{response_text or ''}",
+        ))
+        if _fai_like_turn:
+            _fai_rows = ctx.get("fai_characteristics") if isinstance(ctx.get("fai_characteristics"), list) else []
+            _fai_support = f"{request.message or ''}\n{json.dumps(_fai_rows, default=str)}"
+            _fai_failed_rows = sum(
+                1 for c in _fai_rows
+                if isinstance(c, dict) and str(c.get("status", "")).strip().upper() in {"FAIL", "FAILED"}
+            )
+            _fai_mode = (ctx.get("active_mode") or "").strip()
+            # Report modes always get the grounding cleaner. Other modes get it
+            # only when the answer itself asserts an out-of-tolerance condition
+            # (FAI follow-ups asked from the Assembly tab), so ordinary
+            # kinematics narration is never rewritten.
+            _defect_language = bool(re.search(
+                r'(?i)\b(oversize|oversized|undersize|undersized|out of tolerance|'
+                r'outside tolerance|above (?:the )?upper limit|below (?:the )?lower limit)\b',
+                response_text or "",
+            ))
+            if _fai_mode in {"report_fai", "report"} or _defect_language:
+                response_text = _clean_report_fai_response(
+                    response_text, support_text=_fai_support,
+                    failed_row_count=_fai_failed_rows)
 
         result = {"response": response_text}
         if highlight_dims:
@@ -17745,7 +18460,7 @@ async def agent_chat(request: AgentChatRequest):
                     if ref["feature_type"] not in seen_ft:
                         seen_ft.add(ref["feature_type"])
                         asme_refs.append(ref)
-            # Priority 3: finding-based fallback â€” only when priorities 1+2 found
+            # Priority 3: finding-based fallback -- only when priorities 1+2 found
             # nothing AND message looks like an inspection follow-up (not a
             # generic ASME question like "what about title blocks?").
             _FOLLOWUP_WORDS = {"this", "that", "issue", "problem", "requirement",
@@ -17760,8 +18475,8 @@ async def agent_chat(request: AgentChatRequest):
                         f for f in (ctx_findings if isinstance(ctx_findings, list) else [])
                         if isinstance(f, dict) and f.get("status", "").upper() in ("MISSING", "PARTIAL", "DISCREPANT")
                     ]
-                    # Single issue â†’ unambiguous, use it directly
-                    # Multiple issues â†’ pick the one whose name/observation overlaps the message
+                    # Single issue -> unambiguous, use it directly
+                    # Multiple issues -> pick the one whose name/observation overlaps the message
                     candidates = []
                     if len(issue_findings) == 1:
                         candidates = issue_findings
@@ -17856,6 +18571,17 @@ async def agent_chat(request: AgentChatRequest):
             result["tool_guardrail_warnings"] = warnings
         result["tool_call_count"] = len(guarded) if guarded else 0
 
+        # Hybrid intent layer: attach the classified viewport intent (already
+        # validated server-side). None/timeout means the frontend falls back
+        # to its deterministic regex resolvers.
+        if _intent_future is not None:
+            try:
+                viewport_intent = _intent_future.result(timeout=12)
+                if viewport_intent:
+                    result["viewport_intent"] = viewport_intent
+            except Exception as _ie:  # noqa: BLE001
+                logger.warning(f"[ViewportIntent] result unavailable: {_ie}")
+
         return result
 
     except anthropic.AuthenticationError:
@@ -17942,7 +18668,7 @@ async def agent_chat_stream(request: AgentChatRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
-    # No tool appendix on the streaming route â€” Scout SSE stays unchanged for 4C
+    # No tool appendix on the streaming route -- Scout SSE stays unchanged for 4C
     system_prompt = AGENT_PROMPTS.get(request.agent_type, PARTS_FINDER_PROMPT)
 
     async def event_generator():
@@ -18014,21 +18740,21 @@ async def agent_chat_stream(request: AgentChatRequest):
                                 sc_parts.append(f"Part role: {desc}")
                             break
 
-                    # Filtered mates â€” show what this part connects to
+                    # Filtered mates -- show what this part connects to
                     all_mates = assy_data.get("mates", [])
                     mate_lines = []
                     for mate in all_mates:
                         e1 = mate.get("entity1", {}).get("componentName", "")
                         e2 = mate.get("entity2", {}).get("componentName", "")
                         if _component_matches_aliases(e1, part_aliases) or _component_matches_aliases(e2, part_aliases):
-                            mate_lines.append(f"- {mate.get('type', 'unknown')}: {e1} â†” {e2}")
+                            mate_lines.append(f"- {mate.get('type', 'unknown')}: {e1} <-> {e2}")
                             if len(mate_lines) >= MAX_MATE_LINES:
                                 break
                     if mate_lines:
                         sc_parts.append("\nMATING CONSTRAINTS (replacement must satisfy these fits):")
                         sc_parts.extend(mate_lines)
 
-                    # Functional narrative â€” procurement-relevant sections only
+                    # Functional narrative -- procurement-relevant sections only
                     narrative = assy_data.get("functionalNarrative", {})
                     if narrative:
                         sc_parts.append("\nFUNCTIONAL CONTEXT:")
@@ -18118,7 +18844,7 @@ async def agent_chat_stream(request: AgentChatRequest):
                     text_blocks.append(block.text)
 
             if tool_use_block is None:
-                # No search needed â€” send text response
+                # No search needed -- send text response
                 text = _clean_agent_response("".join(text_blocks))
                 yield f"data: {json_module.dumps({'type': 'response', 'text': text})}\n\n"
                 yield f"data: {json_module.dumps({'type': 'done'})}\n\n"
@@ -18326,7 +19052,7 @@ async def fai_verdicts(request: Request):
         char_lines = []
         for c in characteristics:
             char_lines.append(
-                f"#{c['char_number']}: {c.get('description', 'N/A')} â€” "
+                f"#{c['char_number']}: {c.get('description', 'N/A')} -- "
                 f"Nominal: {c.get('nominal_mm', 0):.3f}mm, "
                 f"Tol: +{c.get('tolerance_plus_mm', 0):.3f}/-{c.get('tolerance_minus_mm', 0):.3f}mm, "
                 f"Measured: {c.get('measured_mm', 0):.3f}mm, "
@@ -18334,7 +19060,7 @@ async def fai_verdicts(request: Request):
             )
         chars_text = "\n".join(char_lines)
 
-        prompt = f"""FAI VERDICT MODE â€” Part: {part_number}
+        prompt = f"""FAI VERDICT MODE -- Part: {part_number}
 
 The following controlled characteristics were measured during First Article Inspection.
 For each, provide a disposition verdict with engineering reasoning.
@@ -18360,7 +19086,7 @@ Reasoning in 1-2 sentences with assembly/functional context.
         client = anthropic.Anthropic(api_key=api_key)
 
         messages = [{"role": "user", "content": prompt}]
-        system_prompt = DEVIATION_ANALYST_PROMPT + "\n\nEXCEPTION â€” FAI VERDICT MODE:\nWhen receiving FAI characteristics for batch evaluation, the 3-sentence rule is SUSPENDED.\nFor each failing characteristic, provide:\nVERDICT #N: Scrap|Rework|Accept\nReasoning in 1-2 sentences with assembly context."
+        system_prompt = DEVIATION_ANALYST_PROMPT + "\n\nEXCEPTION -- FAI VERDICT MODE:\nWhen receiving FAI characteristics for batch evaluation, the 3-sentence rule is SUSPENDED.\nFor each failing characteristic, provide:\nVERDICT #N: Scrap|Rework|Accept\nReasoning in 1-2 sentences with assembly context."
 
         # Add inspection context if available
         context_parts = []
@@ -18448,7 +19174,7 @@ async def fai_agent_fill(request: Request):
             )
         table_text = "\n".join(table_lines)
 
-        prompt = f"""FAI MEASUREMENT FILL â€” Part: {part_number}
+        prompt = f"""FAI MEASUREMENT FILL -- Part: {part_number}
 
 You are helping an inspector fill in the "Measured" column of a First Article Inspection table.
 Below is the current state of the table. Each row shows its char number, reference, view, description, nominal value, and current measured value (EMPTY or a number).
@@ -18586,7 +19312,7 @@ async def render_pdf_page(
 
 # ---------- Voice (STT + TTS) ----------
 
-# â”€â”€ Geometry Diff endpoints (proxy to worker on :8001) â”€â”€
+# -- Geometry Diff endpoints (proxy to worker on :8001) --
 
 def _sanitize_revision(rev: str) -> str:
     """Strip revision strings to alphanumeric only."""

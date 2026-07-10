@@ -43,11 +43,19 @@ def classify_shadow_route(
     agent_type: str = "deviation-analyst",
     authorize: Callable[[str, Mapping[str, bool]], Mapping[str, bool]] | None = None,
     complete: Callable[[str, str], str] | None = None,
+    failure: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Return a validated route for telemetry only; never execute it."""
+    """Return a validated route for telemetry only; never execute it.
+
+    When ``failure`` is a dict and the result is None, it receives a
+    ``reason`` key (and ``error_type`` when known) so callers such as the
+    route evaluation harness can distinguish timeout, schema-invalid, and
+    runtime failures without changing the soft-fail return contract.
+    """
     started = time.perf_counter()
     message = str(message or "").strip()
     if not message:
+        _note_failure(failure, "empty_message")
         return None
     key = route_cache_key(
         message,
@@ -83,6 +91,7 @@ def classify_shadow_route(
             key_value = api_key or os.getenv("ANTHROPIC_API_KEY")
             if not key_value:
                 _record_empty_stage("api_key_missing", started, agent_type)
+                _note_failure(failure, "api_key_missing")
                 return None
             client = anthropic.Anthropic(
                 api_key=key_value,
@@ -110,6 +119,7 @@ def classify_shadow_route(
                         agentType=agent_type,
                     )
                     _record_empty_stage("model_error", started, agent_type, error_type)
+                    _note_failure(failure, "model_error", error_type)
                     return None
             record_anthropic_call(
                 model=model,
@@ -125,6 +135,7 @@ def classify_shadow_route(
         route = validate_route_response(parsed, catalog)
         if route is None:
             _record_empty_stage("invalid_route", started, agent_type)
+            _note_failure(failure, "schema_invalid")
             return None
         cache.put(key, route)
         requested = route["requested_side_effects"]
@@ -139,7 +150,16 @@ def classify_shadow_route(
     except Exception as exc:  # noqa: BLE001 -- shadow routing is soft-fail by contract
         logger.warning("Skill shadow route failed: %s", exc)
         _record_empty_stage("runtime_error", started, agent_type, type(exc).__name__)
+        _note_failure(failure, "runtime_error", type(exc).__name__)
         return None
+
+
+def _note_failure(failure: dict[str, Any] | None, reason: str, error_type: str | None = None) -> None:
+    if failure is None:
+        return
+    failure["reason"] = reason
+    if error_type:
+        failure["error_type"] = error_type
 
 
 def _deny_all() -> dict[str, bool]:

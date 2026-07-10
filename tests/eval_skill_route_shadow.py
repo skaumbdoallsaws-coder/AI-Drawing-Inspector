@@ -98,7 +98,7 @@ def _authorize(message, requested):
     return server._authorize_skill_shadow_effects(message, requested)
 
 
-def _route_via_http(endpoint: str, case: dict, context: dict) -> dict | None:
+def _route_via_http(endpoint: str, case: dict, context: dict) -> tuple[dict | None, dict | None]:
     context = dict(context)
     if case.get("workflow_state"):
         context["skill_workflow_state"] = case["workflow_state"]
@@ -119,13 +119,16 @@ def _route_via_http(endpoint: str, case: dict, context: dict) -> dict | None:
     )
     with urllib.request.urlopen(request, timeout=15) as response:
         body = json.loads(response.read().decode("utf-8"))
-    return body.get("route")
+    return body.get("route"), body.get("failure")
 
 
 def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None) -> dict:
     context = _synthetic_context(case["context"])
+    failure_info: dict = {}
     if endpoint:
-        route = _route_via_http(endpoint, case, context)
+        route, http_failure = _route_via_http(endpoint, case, context)
+        if isinstance(http_failure, dict):
+            failure_info.update(http_failure)
     else:
         catalog, facts = server._build_skill_route_catalog(context, "sage")
         route = classify_shadow_route(
@@ -141,6 +144,7 @@ def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None)
             api_key=api_key,
             agent_type="deviation-analyst",
             authorize=_authorize,
+            failure=failure_info,
         )
     expected = case["expected"]
     checks = {
@@ -170,7 +174,12 @@ def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None)
             "needs_clarification": route.get("needs_clarification"),
             "shadow": route.get("_shadow"),
         }
-    return {"id": case["id"], "checks": checks, "route": safe_route}
+    return {
+        "id": case["id"],
+        "checks": checks,
+        "route": safe_route,
+        "failure": failure_info if route is None and failure_info else None,
+    }
 
 
 def _rate(results: list[dict], check: str) -> float:
@@ -210,10 +219,19 @@ def run() -> int:
             try:
                 result = future.result()
             except Exception as exc:  # noqa: BLE001
-                result = {"id": case_id, "checks": {"valid_route": False}, "route": None, "error": type(exc).__name__}
+                result = {
+                    "id": case_id,
+                    "checks": {"valid_route": False},
+                    "route": None,
+                    "failure": {"reason": "harness_error", "error_type": type(exc).__name__},
+                }
             results.append(result)
             failed = [name for name, ok in result["checks"].items() if not ok]
-            print(f"{'PASS' if not failed else 'FAIL'} {case_id}" + (f" :: {', '.join(failed)}" if failed else ""))
+            reason = (result.get("failure") or {}).get("reason")
+            suffix = f" :: {', '.join(failed)}" if failed else ""
+            if failed and reason:
+                suffix += f" [{reason}]"
+            print(f"{'PASS' if not failed else 'FAIL'} {case_id}{suffix}")
 
     results.sort(key=lambda item: item["id"])
     metrics = {
@@ -231,6 +249,14 @@ def run() -> int:
         name: metrics[name] >= threshold
         for name, threshold in thresholds.items()
     }
+    failure_counts: dict = {}
+    for result in results:
+        info = result.get("failure") or {}
+        if info.get("reason"):
+            label = info["reason"]
+            if info.get("error_type"):
+                label = f"{label}:{info['error_type']}"
+            failure_counts[label] = failure_counts.get(label, 0) + 1
     artifact = {
         "schema_version": 1,
         "model": model,
@@ -239,6 +265,7 @@ def run() -> int:
         "thresholds": thresholds,
         "metrics": metrics,
         "threshold_checks": threshold_checks,
+        "failure_counts": failure_counts,
         "results": results,
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)

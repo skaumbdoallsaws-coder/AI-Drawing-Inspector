@@ -398,6 +398,67 @@ def test_shadow_classifier_validates_caches_and_never_marks_output_executable():
     assert second["_shadow"]["cache_hit"] is True
 
 
+def test_shadow_classifier_reports_failure_reasons():
+    catalog = _catalog()
+
+    def run_with_failure(message, complete):
+        failure = {}
+        with patch("ai_inspector.agent_skills.shadow.record_workflow_stage"):
+            route = classify_shadow_route(
+                message,
+                catalog=catalog,
+                context_facts=_facts(),
+                recent_turns=[],
+                workflow_state={},
+                cache=ExactRouteCache(),
+                model="test-model",
+                timeout_seconds=4.75,
+                max_tokens=700,
+                complete=complete,
+                failure=failure,
+            )
+        return route, failure
+
+    route, failure = run_with_failure("", lambda *_args: "unreachable")
+    assert route is None and failure == {"reason": "empty_message"}
+
+    route, failure = run_with_failure("show the affected motion", lambda *_args: "not json at all")
+    assert route is None and failure == {"reason": "schema_invalid"}
+
+    def boom(*_args):
+        raise RuntimeError("provider exploded")
+
+    route, failure = run_with_failure("show the affected motion", boom)
+    assert route is None
+    assert failure == {"reason": "runtime_error", "error_type": "RuntimeError"}
+
+    good = _route(
+        speech_act="command",
+        effects=("highlight_parts", "play_motion"),
+        intent_kind="visualize_affected_context",
+        target_kind="motion_group",
+        target_id="affected-group",
+    )
+    route, failure = run_with_failure("show the affected motion", lambda *_args: json.dumps(good))
+    assert route is not None and failure == {}
+
+    # Omitting the failure dict keeps the original soft-fail contract.
+    with patch("ai_inspector.agent_skills.shadow.record_workflow_stage"):
+        route = classify_shadow_route(
+            "show the affected motion",
+            catalog=catalog,
+            context_facts=_facts(),
+            recent_turns=[],
+            workflow_state={},
+            cache=ExactRouteCache(),
+            model="test-model",
+            timeout_seconds=4.75,
+            max_tokens=700,
+            complete=lambda *_args: "not json at all",
+        )
+    assert route is None
+
+
 def test_server_context_builds_data_driven_targets_and_shadow_is_off_by_default():
     import server
 
@@ -441,6 +502,31 @@ def test_server_context_builds_data_driven_targets_and_shadow_is_off_by_default(
         os.environ["INSPECTORPRO_SKILLS_SHADOW"] = "0"
         request = server.AgentChatRequest(message="show the affected motion", agent_type="deviation-analyst")
         assert server._submit_skill_route_shadow(request, ctx, "unused") is False
+    finally:
+        if original is None:
+            os.environ.pop("INSPECTORPRO_SKILLS_SHADOW", None)
+        else:
+            os.environ["INSPECTORPRO_SKILLS_SHADOW"] = original
+
+
+def test_shadow_submit_builds_context_on_request_thread_and_soft_fails():
+    import server
+
+    original = os.environ.get("INSPECTORPRO_SKILLS_SHADOW")
+    try:
+        os.environ["INSPECTORPRO_SKILLS_SHADOW"] = "1"
+        request = server.AgentChatRequest(
+            message="show the affected motion", agent_type="deviation-analyst"
+        )
+        slots_before = server._SKILL_ROUTE_SHADOW_SLOTS._value
+        with patch.object(
+            server, "_build_skill_route_catalog", side_effect=RuntimeError("boom")
+        ) as build:
+            assert server._submit_skill_route_shadow(request, {}, "unused") is False
+        # The build ran synchronously on the request thread and its failure
+        # neither raised into the caller nor consumed a shadow slot.
+        assert build.call_count == 1
+        assert server._SKILL_ROUTE_SHADOW_SLOTS._value == slots_before
     finally:
         if original is None:
             os.environ.pop("INSPECTORPRO_SKILLS_SHADOW", None)

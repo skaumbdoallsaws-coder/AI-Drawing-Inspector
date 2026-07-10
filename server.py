@@ -17528,19 +17528,23 @@ def _authorize_skill_shadow_effects(message: str, requested: Mapping[str, bool])
 
 def _run_skill_route_shadow(
     message: str,
-    ctx: Dict[str, Any],
-    history: Optional[List[Dict[str, Any]]],
+    catalog: Any,
+    facts: Dict[str, Any],
+    recent_turns: List[Dict[str, str]],
+    workflow_state: Dict[str, Any],
     api_key: str,
     model: str,
     agent_type: str,
 ) -> Optional[Dict[str, Any]]:
-    catalog, facts = _build_skill_route_catalog(ctx, "sage")
+    # Catalog and context facts are built on the request thread before
+    # submission so this worker never reads the live ctx dict concurrently
+    # with the chat handler.
     return classify_shadow_route(
         message,
         catalog=catalog,
         context_facts=facts,
-        recent_turns=_skill_route_recent_turns(history),
-        workflow_state=_skill_route_workflow_state(ctx),
+        recent_turns=recent_turns,
+        workflow_state=workflow_state,
         cache=_SKILL_ROUTE_SHADOW_CACHE,
         model=model,
         timeout_seconds=_SKILL_ROUTE_SHADOW_TIMEOUT_SECONDS,
@@ -17584,6 +17588,13 @@ def _submit_skill_route_shadow(
         return False
     if not settings.shadow:
         return False
+    try:
+        catalog, facts = _build_skill_route_catalog(ctx, "sage")
+        recent_turns = _skill_route_recent_turns(request.history)
+        workflow_state = _skill_route_workflow_state(ctx)
+    except Exception as exc:  # noqa: BLE001 -- shadow submission is soft-fail
+        logger.warning("[SkillRouteShadow] context build failed: %s", exc)
+        return False
     if not _SKILL_ROUTE_SHADOW_SLOTS.acquire(blocking=False):
         record_workflow_stage(
             workflow="skill_route_shadow",
@@ -17599,8 +17610,10 @@ def _submit_skill_route_shadow(
         future = _SKILL_ROUTE_SHADOW_EXECUTOR.submit(
             _run_skill_route_shadow,
             request.message,
-            ctx,
-            request.history,
+            catalog,
+            facts,
+            recent_turns,
+            workflow_state,
             api_key,
             settings.router_model,
             request.agent_type,
@@ -17629,6 +17642,7 @@ async def agent_skill_test_route(request: AgentSkillTestRouteRequest):
         if request.bypass_cache
         else _SKILL_ROUTE_SHADOW_CACHE
     )
+    failure_info: Dict[str, Any] = {}
     route = await asyncio.to_thread(
         classify_shadow_route,
         request.message,
@@ -17642,6 +17656,7 @@ async def agent_skill_test_route(request: AgentSkillTestRouteRequest):
         max_tokens=_SKILL_ROUTE_SHADOW_MAX_TOKENS,
         agent_type="deviation-analyst",
         authorize=_authorize_skill_shadow_effects,
+        failure=failure_info,
     )
     return {
         "phase": 2,
@@ -17649,6 +17664,7 @@ async def agent_skill_test_route(request: AgentSkillTestRouteRequest):
         "used_for_prompt": False,
         "used_for_execution": False,
         "route": route,
+        "failure": failure_info if route is None and failure_info else None,
         "cache": _SKILL_ROUTE_SHADOW_CACHE.stats(),
     }
 

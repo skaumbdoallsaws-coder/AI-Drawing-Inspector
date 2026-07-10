@@ -64,6 +64,8 @@ Final fresh-cache run, model `claude-haiku-4-5`, one worker, 4,750 ms timeout:
 - successful input tokens p50/p95: 1,919 / 1,928
 - successful output tokens p50/p95: 283 / 329
 
+Evaluation artifacts now record per-case `failure.reason` and a `failure_counts` rollup, so provider availability failures such as timeouts remain distinct from route-quality failures such as schema-invalid output.
+
 Parallel evaluation caused provider queuing without improving the local single-user product. Phase 2 therefore uses one nonblocking shadow worker and a three-turn bounded admission limit. The timeout was not increased.
 
 ## Regression Results

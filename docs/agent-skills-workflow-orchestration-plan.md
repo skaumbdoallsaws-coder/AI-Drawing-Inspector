@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation plan, revision 6. Phase 0 through Phase 3 are implemented as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, seven v1 skill packages, selected-skill prompt assembly, registered FAI executor recipes, feature flags, gated internal test endpoints, and a validated semantic router. Phase 3 is off by default and has been live-tested only under controlled activation; normal production activation remains pending router-latency optimization.
+Implementation plan, revision 7. Phase 0 through Phase 4 are implemented as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, seven v1 skill packages, selected-skill prompt assembly, registered FAI executor recipes, feature flags, gated internal test endpoints, a validated semantic router, a typed UI-action contract, browser postcondition receipts, and receipt-grounded same-turn status. Production skills remain off by default; normal activation is still pending router-latency optimization.
 
 ## Purpose
 
@@ -1017,12 +1017,13 @@ Exit gate: all required acceptance cases pass offline and live.
 
 ### Phase 4 - Tool policy and receipts
 
-- Formalize existing UI actions in the tool registry.
-- Add executor/action conflict validation and postcondition receipts.
-- Replace free-form action confirmation with receipt-grounded status.
-- Carry browser-born receipts back in the next turn's `viewport_context` attachment.
-- Do not add a second LLM response pass in v1.
-- Preserve unrelated viewport state by contract and test.
+- Implemented a shared ASCII-only `ui-action-contract-v1.json` covering all 21 existing assembly, motion, display, rotation, navigation, and compare actions. Both the server guardrail and browser runtime validate the same action fields, types, ranges, workspaces, action IDs, bundle size, and conflicts.
+- Added action-level browser receipts with requested and applied arguments, before/after state, evidence, duration, error, and status. A successful receipt requires both successful dispatch and a verified postcondition.
+- Added explicit preservation contracts. Highlight, display, motion, and rotation domains cannot change as an unrelated side effect. Natural crank-angle progression is excluded from preservation comparisons while motion is running.
+- Added deterministic same-turn receipt status. Successful actions are described only from successful receipts; failed or rejected action bundles replace affirmative model prose with a failure status. No second LLM response pass was added.
+- Added bounded in-memory receipt history and a pending queue. Browser-born receipts are attached to the next `viewport_context`, sanitized server-side, exposed to the router as compact prior-turn facts, and acknowledged only after a successful server response. Current viewport state remains authoritative when it differs from a prior receipt.
+- Added Assembly-scene readiness as a precondition for part highlight/display actions. This fixed a live ordering defect where a highlight requested from the Report tab materialized during the following motion action and falsely appeared as unrelated state mutation.
+- Verification passed 148/148 frozen and Phase 4 Python tests, 115/115 browser authorization/mapping checks, 8/8 browser receipt-runtime checks, four embedded-script syntax checks, and a 9/9 live two-turn receipt smoke. The broader FAI workflow passed all 31 viewport/safety checks; one separate model-prose quantification assertion varied on that run and is retained as a visible non-Phase-4 issue.
 
 Exit gate: no action is claimed without a successful receipt.
 

@@ -11840,6 +11840,7 @@
         <div style="padding:8px 14px; cursor:pointer; font-size:13px; color:var(--text-primary); border-top:1px solid var(--border);" id="exportAnnotatedPng">&#128248; Export Annotated Drawing (.png)</div>
     </div>
 
+    <script src="/static/ui_action_runtime.js"></script>
     <script>
         /* ============================================================
            InspectorPro - Frontend Application Logic
@@ -12015,6 +12016,8 @@
             motionPkgMode: false,     // package playback active (vs legacy chain)
             motionPkgAngle: 0,        // current crank angle in degrees [0, 360)
             motionPkgLoop: true,
+            pendingExecutionReceipts: [], // browser receipts sent with the next agent turn
+            executionReceiptHistory: [], // compact in-memory audit for the current page session
         };
 
         // Training tab state — SolidWorks-style command surface for
@@ -29998,15 +30001,20 @@
             return false;
         }
 
-        async function _waitForAssemblyMotionScene(timeoutMs = 7000) {
+        async function _waitForAssemblyScene(timeoutMs = 7000) {
             const start = performance.now();
             while ((performance.now() - start) < timeoutMs) {
-                if (state.assyLiveScene && typeof _motionPkgAvailable === 'function' && _motionPkgAvailable()) {
+                if (state.assyLiveScene && state.assyPartMeshMap) {
                     return true;
                 }
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
-            return !!(state.assyLiveScene && typeof _motionPkgAvailable === 'function' && _motionPkgAvailable());
+            return !!(state.assyLiveScene && state.assyPartMeshMap);
+        }
+
+        async function _waitForAssemblyMotionScene(timeoutMs = 7000) {
+            if (!await _waitForAssemblyScene(timeoutMs)) return false;
+            return !!(typeof _motionPkgAvailable === 'function' && _motionPkgAvailable());
         }
 
         async function _dispatchUiAction(workspace, action) {
@@ -30107,6 +30115,7 @@
 
                 case 'set_part_highlight': {
                     if (state.activeTab !== 'assembly') switchTab('assembly');
+                    if (!await _waitForAssemblyScene()) return false;
                     const rawPartNumbers = Array.isArray(action.part_numbers)
                         ? action.part_numbers
                         : (action.part_number ? [action.part_number] : []);
@@ -30121,12 +30130,14 @@
 
                 case 'clear_part_highlight': {
                     if (state.activeTab !== 'assembly') switchTab('assembly');
+                    if (!await _waitForAssemblyScene()) return false;
                     applyAgentPartHighlights([], null, { mode: action.all === false ? 'clear_agent' : 'clear' });
                     return true;
                 }
 
                 case 'set_part_display': {
                     if (state.activeTab !== 'assembly') switchTab('assembly');
+                    if (!await _waitForAssemblyScene()) return false;
                     const rawPartNumbers = Array.isArray(action.part_numbers)
                         ? action.part_numbers
                         : (action.part_number ? [action.part_number] : []);
@@ -30167,6 +30178,7 @@
 
                 case 'clear_part_display': {
                     if (state.activeTab !== 'assembly') switchTab('assembly');
+                    if (!await _waitForAssemblyScene()) return false;
                     const overrides = _assemblyPartDisplayOverrides();
                     const rawPartNumbers = Array.isArray(action.part_numbers)
                         ? action.part_numbers
@@ -44735,6 +44747,8 @@
                         hidden: hidden.slice(0, 20),
                         transparent: transparent.slice(0, 20),
                     };
+                    const recentReceipts = _pendingExecutionReceiptsForAttachment();
+                    if (recentReceipts.length) out.execution_receipts = recentReceipts;
                     return out;
                 } catch (e) {
                     console.warn('[ViewportIntent] attachment build failed', e);
@@ -47073,7 +47087,234 @@
             window._getCurrentAgent = () => currentAgent;
             // ── End narration helpers ──
 
-            // === Phase 4: Tool Registry + Action Dispatcher ===
+            // === Phase 4: Typed UI actions + browser execution receipts ===
+            let _uiActionContractPromise = null;
+            let _uiToolCallSequence = 0;
+
+            function _newExecutionId(prefix) {
+                try {
+                    if (crypto && typeof crypto.randomUUID === 'function') {
+                        return `${prefix}:${crypto.randomUUID()}`;
+                    }
+                } catch (_) {}
+                _uiToolCallSequence += 1;
+                return `${prefix}:${Date.now()}:${_uiToolCallSequence}`;
+            }
+
+            async function _loadUiActionContract() {
+                if (!_uiActionContractPromise) {
+                    _uiActionContractPromise = fetch('/static/contracts/ui-action-contract-v1.json')
+                        .then(response => {
+                            if (!response.ok) throw new Error(`contract_http_${response.status}`);
+                            return response.json();
+                        })
+                        .then(contract => {
+                            if (!contract || contract.contract_version !== 1 || !contract.actions) {
+                                throw new Error('contract_invalid');
+                            }
+                            return contract;
+                        })
+                        .catch(error => {
+                            _uiActionContractPromise = null;
+                            throw error;
+                        });
+                }
+                return await _uiActionContractPromise;
+            }
+
+            function _captureUiActionState() {
+                const overrides = (typeof _assemblyPartDisplayOverrides === 'function')
+                    ? _assemblyPartDisplayOverrides() : {};
+                const compactOverrides = {};
+                Object.keys(overrides || {}).sort().slice(0, 60).forEach(pn => {
+                    const value = overrides[pn] || {};
+                    const row = {};
+                    if (value.hidden === true) row.hidden = true;
+                    if (typeof value.opacity === 'number') row.opacity = Math.round(value.opacity * 1000) / 1000;
+                    if (Object.keys(row).length) compactOverrides[String(pn)] = row;
+                });
+                return {
+                    active_tab: state.activeTab || null,
+                    highlight: {
+                        agent: Array.from(state.partExplorerAgentParts || []).map(String).sort().slice(0, 60),
+                        manual: Array.from(state.partExplorerSelectedParts || []).map(String).sort().slice(0, 60),
+                    },
+                    display: { overrides: compactOverrides },
+                    motion: {
+                        playing: !!state.motionPlaying,
+                        package_mode: !!state.motionPkgMode,
+                        motion_id: (state.motionPkgMode && state.motionPkg) ? state.motionPkg.motionId : null,
+                        rpm: Number.isFinite(Number(state.motionRpm)) ? Number(state.motionRpm) : null,
+                        angle_deg: state.motionPkgMode && Number.isFinite(Number(state.motionPkgAngle))
+                            ? Math.round(Number(state.motionPkgAngle) * 10) / 10 : null,
+                    },
+                    rotation: {
+                        assembly: !!state._assyAutoRotate,
+                        part: !!state._partAutoRotate,
+                    },
+                };
+            }
+
+            function _uiActionEvidence(action, after) {
+                const evidence = ['ui-action-contract:v1'];
+                const parts = Array.isArray(action.part_numbers)
+                    ? action.part_numbers : (action.part_number ? [action.part_number] : []);
+                parts.slice(0, 12).forEach(pn => evidence.push(`part:${String(pn)}`));
+                if (after && after.motion && after.motion.motion_id) {
+                    evidence.push(`motion-package:${after.motion.motion_id}`);
+                }
+                return evidence;
+            }
+
+            function _uiActionAppliedArgs(action, after) {
+                const applied = { type: action.type };
+                if (Array.isArray(action.part_numbers)) applied.part_numbers = action.part_numbers.slice();
+                else if (action.part_number) applied.part_numbers = [action.part_number];
+                if (action.type === 'play_motion' || action.type === 'set_motion_rpm') {
+                    applied.rpm = after && after.motion ? after.motion.rpm : null;
+                }
+                if (action.type === 'seek_motion') {
+                    applied.crank_angle_deg = after && after.motion ? after.motion.angle_deg : null;
+                }
+                if (action.type === 'set_part_display' || action.type === 'clear_part_display') {
+                    applied.display_overrides = after && after.display ? after.display.overrides : {};
+                }
+                if (action.type === 'set_part_highlight' || action.type === 'clear_part_highlight') {
+                    applied.highlighted = after && after.highlight ? after.highlight.agent : [];
+                }
+                return applied;
+            }
+
+            function _recordExecutionReceipts(receipts) {
+                if (!Array.isArray(receipts) || !receipts.length) return;
+                const known = new Set((state.executionReceiptHistory || []).map(item => item.receipt_id));
+                receipts.forEach(receipt => {
+                    if (!receipt || !receipt.receipt_id || known.has(receipt.receipt_id)) return;
+                    state.executionReceiptHistory.push(receipt);
+                    state.pendingExecutionReceipts.push(receipt);
+                    known.add(receipt.receipt_id);
+                });
+                state.executionReceiptHistory = state.executionReceiptHistory.slice(-80);
+                state.pendingExecutionReceipts = state.pendingExecutionReceipts.slice(-20);
+            }
+
+            function _pendingExecutionReceiptsForAttachment() {
+                return (state.pendingExecutionReceipts || []).slice(-12).map(receipt =>
+                    JSON.parse(JSON.stringify(receipt))
+                );
+            }
+
+            function _ackExecutionReceipts(receiptIds) {
+                const sent = new Set((receiptIds || []).map(String));
+                if (!sent.size) return;
+                state.pendingExecutionReceipts = (state.pendingExecutionReceipts || [])
+                    .filter(receipt => !sent.has(String(receipt.receipt_id)));
+            }
+
+            function _executionReceiptsFromResults(results) {
+                return (results || []).flatMap(result =>
+                    Array.isArray(result && result.receipts) ? result.receipts : []
+                );
+            }
+
+            function _receiptPartLabels(partNumbers) {
+                return (partNumbers || []).map(pn => {
+                    try { return _assemblyDisplayPartLabel(String(pn)); }
+                    catch (_) { return String(pn); }
+                }).filter(Boolean);
+            }
+
+            function _receiptMotionGroupLabel(data, summary) {
+                if (summary && summary.groupLabel) return summary.groupLabel;
+                const targetIds = data && data.skill_execution && Array.isArray(data.skill_execution.target_ids)
+                    ? data.skill_execution.target_ids : [];
+                const wanted = targetIds[0];
+                const motions = state.motionPkgInfo && state.motionPkgInfo.summary
+                    && Array.isArray(state.motionPkgInfo.summary.available_motions)
+                    ? state.motionPkgInfo.summary.available_motions : [];
+                for (const motion of motions) {
+                    const group = (motion.groups || []).find(item => item && item.id === wanted);
+                    if (group) return group.label || group.id;
+                }
+                return null;
+            }
+
+            function _receiptGroundedStatusLine(receipts, data, summary) {
+                if (!Array.isArray(receipts) || !receipts.length) return null;
+                const succeeded = receipts.filter(receipt => receipt.status === 'succeeded');
+                const failed = receipts.filter(receipt => receipt.status !== 'succeeded');
+                const firstFailure = failed[0];
+                const byType = type => succeeded.filter(receipt => receipt.tool_id === type);
+                const play = byType('play_motion')[0];
+                const highlight = byType('set_part_highlight')[0];
+                const hide = byType('set_part_display').find(receipt => receipt.requested_args.hidden === true
+                    || ['hide', 'hidden'].includes(String(receipt.requested_args.display || receipt.requested_args.mode || '')));
+                const opacity = byType('set_part_display').find(receipt => typeof receipt.requested_args.opacity === 'number');
+                const clearDisplay = byType('clear_part_display')[0];
+                const clearHighlight = byType('clear_part_highlight')[0];
+                if (!succeeded.length) {
+                    const action = firstFailure ? firstFailure.tool_id : 'viewport action';
+                    const reason = firstFailure && firstFailure.error ? firstFailure.error : 'postcondition failed';
+                    return action === 'play_motion'
+                        ? `Motion playback did not start (${reason}).`
+                        : `The requested viewport change was not applied (${reason}).`;
+                }
+                if (play) {
+                    const rpm = Number(play.applied_args && play.applied_args.rpm);
+                    const label = _receiptMotionGroupLabel(data, summary) || 'the mechanism';
+                    let line = `Showing ${label}${Number.isFinite(rpm) ? ` at ${Math.round(rpm)} RPM` : ''}.`;
+                    if (highlight) line += ' Related parts are highlighted in the assembly viewport.';
+                    if (failed.length) line += ` ${failed.length} additional action${failed.length === 1 ? '' : 's'} failed.`;
+                    return line;
+                }
+                if (hide) {
+                    const labels = _receiptPartLabels(hide.applied_args.part_numbers || hide.requested_args.part_numbers);
+                    return `Hidden ${labels.length ? labels.join(', ') : 'the selected component'}.`;
+                }
+                if (opacity) {
+                    const labels = _receiptPartLabels(opacity.applied_args.part_numbers || opacity.requested_args.part_numbers);
+                    return `Set ${labels.length ? labels.join(', ') : 'the selected component'} to reduced opacity.`;
+                }
+                if (clearDisplay && clearHighlight) {
+                    return 'Restored all hidden parts and cleared assembly highlights.';
+                }
+                if (clearDisplay && highlight) {
+                    const labels = _receiptPartLabels(
+                        highlight.applied_args.part_numbers || highlight.requested_args.part_numbers
+                    );
+                    return `Showing ${labels.length ? labels.join(', ') : 'the selected component'} in the assembly viewport.`;
+                }
+                if (clearDisplay) {
+                    const labels = _receiptPartLabels(clearDisplay.requested_args.part_numbers);
+                    return labels.length ? `Restored ${labels.join(', ')}.` : 'Restored all hidden parts.';
+                }
+                if (highlight) {
+                    const labels = _receiptPartLabels(highlight.applied_args.part_numbers || highlight.requested_args.part_numbers);
+                    return `Highlighted ${labels.length ? labels.join(', ') : 'the selected components'} in the assembly viewport.`;
+                }
+                if (byType('clear_part_highlight').length) return 'Cleared assembly highlights.';
+                if (byType('pause_motion').length) return 'Paused motion playback.';
+                if (byType('stop_motion').length) return 'Stopped motion playback.';
+                if (byType('set_motion_rpm').length) {
+                    const rpm = Number(byType('set_motion_rpm')[0].applied_args.rpm);
+                    return Number.isFinite(rpm) ? `Set motion playback to ${Math.round(rpm)} RPM.` : 'Updated motion speed.';
+                }
+                if (byType('rotate_view').length) return 'Started viewport rotation.';
+                if (byType('stop_rotate_view').length) return 'Stopped viewport rotation.';
+                return `${succeeded.length} viewport action${succeeded.length === 1 ? '' : 's'} completed.`;
+            }
+
+            window.__phase4Receipts = {
+                pending: () => _pendingExecutionReceiptsForAttachment(),
+                history: () => JSON.parse(JSON.stringify(state.executionReceiptHistory || [])),
+                contract: () => _loadUiActionContract(),
+                clear: () => {
+                    state.pendingExecutionReceipts = [];
+                    state.executionReceiptHistory = [];
+                },
+            };
+
+            // === Tool Registry + Action Dispatcher ===
             const TOOL_REGISTRY = {
                 run_inspection: {
                     agents: ['inspector'],
@@ -47360,23 +47601,67 @@
                     // chat agent); compare-only actions still no-op safely
                     // outside compare mode.
                     agents: ['deviation-analyst', 'inspector'],
-                    async execute(args) {
-                        if (!args || !Array.isArray(args.actions)) {
-                            return { ok: false, error: 'no_actions' };
+                    async execute(args, execution = {}) {
+                        const runtime = window.InspectorProUiActions;
+                        if (!runtime) return { ok: false, error: 'action_runtime_unavailable', receipts: [] };
+                        let contract;
+                        try {
+                            contract = await _loadUiActionContract();
+                        } catch (err) {
+                            return { ok: false, error: String(err && err.message || err), receipts: [] };
                         }
-                        const workspace = args.workspace || 'assembly_compare';
+                        const validation = runtime.validateBundle(contract, args);
+                        if (!validation.ok) {
+                            return {
+                                ok: false,
+                                error: 'action_contract_rejected',
+                                contract_errors: validation.errors,
+                                receipts: [],
+                            };
+                        }
+                        const workspace = validation.bundle.workspace;
                         let applied = 0;
                         const errors = [];
-                        for (const action of args.actions) {
+                        const receipts = [];
+                        for (const action of validation.bundle.actions) {
+                            const before = _captureUiActionState();
+                            const started = performance.now();
+                            let dispatchOk = false;
+                            let dispatchError = null;
                             try {
-                                const ok = await _dispatchUiAction(workspace, action);
-                                if (ok) applied++;
+                                dispatchOk = !!(await _dispatchUiAction(workspace, action));
                             } catch (err) {
-                                errors.push({ type: action && action.type, error: String(err && err.message || err) });
+                                dispatchError = String(err && err.message || err);
                                 console.warn('[ui_actions] dispatch error', action, err);
                             }
+                            const after = _captureUiActionState();
+                            const verification = runtime.verifyPostcondition(
+                                contract, action, before, after, dispatchOk
+                            );
+                            const receipt = runtime.makeReceipt({
+                                receiptId: _newExecutionId('receipt'),
+                                toolCallId: execution.toolCallId || _newExecutionId('tool'),
+                                action,
+                                before,
+                                after,
+                                appliedArgs: _uiActionAppliedArgs(action, after),
+                                evidence: _uiActionEvidence(action, after),
+                                verification,
+                                error: dispatchError || verification.error,
+                                durationMs: Math.round(performance.now() - started),
+                            });
+                            receipts.push(receipt);
+                            if (receipt.status === 'succeeded') applied++;
+                            else errors.push({ type: action.type, error: receipt.error });
                         }
-                        return { ok: applied > 0, applied, attempted: args.actions.length, errors };
+                        return {
+                            ok: applied > 0 && errors.length === 0,
+                            applied,
+                            attempted: validation.bundle.actions.length,
+                            errors,
+                            receipts,
+                            contract_version: contract.contract_version,
+                        };
                     }
                 },
             };
@@ -47501,18 +47786,20 @@
                 if (tool.agents && !tool.agents.includes(originAgent)) return { ok: false, name: toolCall.name, error: 'agent_not_allowed' };
                 const timeout = TOOL_TIMEOUT_MS[toolCall.name] || DEFAULT_TOOL_TIMEOUT_MS;
                 const t0 = performance.now();
+                const toolCallId = (typeof toolCall.tool_call_id === 'string' && toolCall.tool_call_id)
+                    ? toolCall.tool_call_id : _newExecutionId('tool');
                 try {
                     const result = await Promise.race([
-                        Promise.resolve(tool.execute(toolCall.args || {})),
+                        Promise.resolve(tool.execute(toolCall.args || {}, { toolCallId, originAgent })),
                         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout)),
                     ]);
                     const dur = Math.round(performance.now() - t0);
                     console.log('[ToolDispatch]', toolCall.name, result, dur + 'ms');
-                    return { ...result, name: toolCall.name, duration_ms: dur };
+                    return { ...result, name: toolCall.name, tool_call_id: toolCallId, duration_ms: dur };
                 } catch (err) {
                     const dur = Math.round(performance.now() - t0);
                     console.error('[ToolDispatch]', toolCall.name, err.message, dur + 'ms');
-                    return { ok: false, name: toolCall.name, error: err.message, duration_ms: dur };
+                    return { ok: false, name: toolCall.name, tool_call_id: toolCallId, error: err.message, duration_ms: dur };
                 }
             }
 
@@ -47523,6 +47810,7 @@
             for (const tc of guarded) {
                 results.push(await executeToolCall(tc, originAgent));
                 }
+                _recordExecutionReceipts(_executionReceiptsFromResults(results));
                 if (guarded.length > 0) {
                     console.log('[ToolDispatch] Summary:', {
                         agent: originAgent,
@@ -49023,6 +49311,8 @@
 
                 let response = '';
                 let toolCalls = [];
+                let turnExecutionReceipts = [];
+                let turnToolResults = [];
                 try {
                     // Viewport display state is persistent. Highlights, hidden
                     // parts, rotation, and motion are only changed by explicit
@@ -49076,6 +49366,13 @@
                         inspection_context: inspCtx,
                         agent_type: originAgent,
                     };
+                    const sentExecutionReceiptIds = inspCtx.attachments
+                        && inspCtx.attachments.viewport
+                        && Array.isArray(inspCtx.attachments.viewport.execution_receipts)
+                        ? inspCtx.attachments.viewport.execution_receipts
+                            .map(receipt => receipt && receipt.receipt_id)
+                            .filter(Boolean)
+                        : [];
                     // Feature #142: Inject cross-agent context if available (one-time)
                     if (originSession.pendingCrossContext) {
                         payload.cross_agent_context = originSession.pendingCrossContext;
@@ -49091,6 +49388,7 @@
                     });
                     if (res.ok) {
                         const data = await res.json();
+                        _ackExecutionReceipts(sentExecutionReceiptIds);
                         response = data.response || data.message || 'No response from agent.';
                         console.log('[Handler] Response keys:', Object.keys(data),
                             'highlight_parts:', data.highlight_parts,
@@ -49179,7 +49477,8 @@
                                     || rotateToolResult.intent
                                 );
                                 if (toolCalls.length > 0) {
-                                    await executeToolCalls(toolCalls, originAgent);
+                                    turnToolResults = await executeToolCalls(toolCalls, originAgent);
+                                    turnExecutionReceipts = _executionReceiptsFromResults(turnToolResults);
                                 }
                                 await _maybeApplyAssemblyCompareCommandFallback(messageText, toolCalls, originAgent);
                                 await _maybeApplySupplierSpecCompareFallback(messageText, toolCalls, originAgent);
@@ -49192,7 +49491,21 @@
                                 // confirms the action actually took effect. A
                                 // motion claim is never displayed if playMotion
                                 // refused (pin mismatch, no package, bind fail).
-                                if (classifiedIntentResult.applied) {
+                                const receiptStatus = _receiptGroundedStatusLine(
+                                    turnExecutionReceipts,
+                                    data,
+                                    classifiedIntentResult.summary
+                                );
+                                const uiActionFailure = turnToolResults.find(result =>
+                                    result && result.name === 'ui_actions' && result.ok === false
+                                    && (!Array.isArray(result.receipts) || result.receipts.length === 0)
+                                );
+                                if (receiptStatus && typeof response === 'string') {
+                                    response = receiptStatus;
+                                } else if (uiActionFailure && typeof response === 'string') {
+                                    response = 'The requested viewport change was not applied ('
+                                        + String(uiActionFailure.error || 'action validation failed') + ').';
+                                } else if (classifiedIntentResult.applied) {
                                     const _statusLine = _viewportExecutionStatusLine(classifiedIntentResult.summary);
                                     if (_statusLine && typeof response === 'string') {
                                         response = _statusLine;

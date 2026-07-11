@@ -308,7 +308,7 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
         os.environ["INSPECTORPRO_SKILLS_SHADOW"] = "0"
         server._reset_agent_skill_runtime_cache_for_tests()
         status = asyncio.run(server.agent_skill_runtime_status())
-        assert status["phase"] == 3
+        assert status["phase"] == 4
         assert status["production_chat_integration"] is False
         assert status["runtime_loaded"] is False
         assert status["skills"] == []
@@ -322,7 +322,7 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
         os.environ["INSPECTORPRO_SKILLS_ENABLED"] = "1"
         server._reset_agent_skill_runtime_cache_for_tests()
         status = asyncio.run(server.agent_skill_runtime_status())
-        assert status["phase"] == 3
+        assert status["phase"] == 4
         assert status["production_chat_integration"] is True
         assert status["runtime_loaded"] is True
         assert len(status["skills"]) == 7

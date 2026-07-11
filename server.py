@@ -92,6 +92,9 @@ from ai_inspector.agent_skills import (
     compose_prompt_sections,
     merge_executor_tool_calls,
     plan_registered_executor,
+    sanitize_execution_receipts,
+    tool_policy_metadata,
+    validate_ui_action_bundle,
 )
 
 # Configure logging
@@ -14795,7 +14798,7 @@ AGENT_TOOL_SPECS = {
         {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers", "camera_view": "optional: front/top/right/back/bottom/left"}},
         {"name": "fai_fill", "description": "Fill FAI measured values", "args": {"values": "dict of char_number -> measured_value"}},
         {"name": "fai_tol", "description": "Set FAI tolerances", "args": {"values": "dict of char_number -> tolerance_value"}},
-        {"name": "ui_actions", "description": "Declarative UI action block -- used for deterministic assembly actions: motion playback (play_motion, pause_motion, set_motion_rpm, seek_motion, stop_motion), highlight control (set_part_highlight, clear_part_highlight), display control (set_part_display, clear_part_display), and viewport rotation (rotate_view, stop_rotate_view).", "args": {"workspace": "string", "actions": "list of action objects"}},
+        {"name": "ui_actions", "description": "Declarative UI action block validated against UI action contract v1 -- used for deterministic assembly motion, highlight, display, and viewport-rotation actions.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
     ],
     "deviation-analyst": [
         {"name": "highlight_dimensions", "description": "Highlight dimensions on the drawing", "args": {"dim_keys": "list of dim_key strings"}},
@@ -14808,7 +14811,7 @@ AGENT_TOOL_SPECS = {
         {"name": "show_geometry_diff", "description": "Show geometry diff overlay on 3D compare viewer", "args": {}},
         {"name": "animate_motion", "description": "Start or stop motion animation", "args": {"action": "start or stop"}},
         {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
-        {"name": "ui_actions", "description": "Chat-first action registry -- workspace + ordered list of declarative UI actions (open_workspace, set_compare_revisions, explode, focus, highlight, extract, select_bom_rows, open_supplier_spec, compare_supplier_specs, clear_compare_overlays, play_motion, pause_motion, set_motion_rpm, seek_motion, stop_motion, set_part_highlight, clear_part_highlight, set_part_display, clear_part_display, rotate_view, stop_rotate_view).", "args": {"workspace": "string", "actions": "list of action objects"}},
+        {"name": "ui_actions", "description": "Chat-first action registry validated against UI action contract v1 -- workspace plus an ordered list of compare, motion, highlight, display, rotation, or navigation actions.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
         {"name": "create_edit_session", "description": "Create an edit-session audit record from a cad-edit-handoff payload; does not execute CAD edits.", "args": {"handoffPayload": "cad-edit-handoff payload object", "notes": "optional note string"}},
     ],
     "parts-finder": [
@@ -14936,6 +14939,17 @@ def sanitize_tool_calls(tool_calls: list, agent_type: str) -> list:
         args = tc.get("args")
         if not isinstance(args, dict):
             args = {}
+
+        if name == "ui_actions":
+            normalized_bundle, action_errors = validate_ui_action_bundle(args)
+            if normalized_bundle is None:
+                logger.warning(
+                    "[ToolGuard] Dropped ui_actions contract violation for %s: %s",
+                    agent_type,
+                    action_errors,
+                )
+                continue
+            args = normalized_bundle
 
         # List field coercion + capping
         for list_field in ("dim_keys", "view_names", "feature_ids", "part_numbers", "markers"):
@@ -15418,7 +15432,15 @@ def normalize_agent_context(ctx: dict) -> dict:
         # classifier must see viewport facts from any tab (e.g. "show the
         # affected motion" asked from the Report tab).
         if attachments.get("viewport"):
-            flat.setdefault("viewport_context", attachments["viewport"])
+            viewport_attachment = dict(attachments["viewport"])
+            receipts = sanitize_execution_receipts(
+                viewport_attachment.get("execution_receipts")
+            )
+            if receipts:
+                viewport_attachment["execution_receipts"] = receipts
+            else:
+                viewport_attachment.pop("execution_receipts", None)
+            flat.setdefault("viewport_context", viewport_attachment)
 
         # Session: active tab + mode contract (mode-aware Sage). The frontend
         # sends only facts (attachments.session.mode_contract). The durable
@@ -15933,6 +15955,24 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     )
     if mode_section:
         parts.append(mode_section)
+
+    recent_receipts = sanitize_execution_receipts(
+        _viewport_ctx.get("execution_receipts") if isinstance(_viewport_ctx, dict) else None
+    )
+    if recent_receipts:
+        receipt_lines = ["[BROWSER EXECUTION RECEIPTS - PREVIOUS TURN]"]
+        for receipt in recent_receipts[-8:]:
+            line = (
+                f"- {receipt['receipt_id']}: {receipt['tool_id']} "
+                f"{receipt['status']}"
+            )
+            if receipt.get("error"):
+                line += f" ({receipt['error']})"
+            receipt_lines.append(line)
+        receipt_lines.append(
+            "These are browser-verified results from the prior turn. Current viewport state wins if it differs."
+        )
+        parts.append("\n".join(receipt_lines))
 
     # -- INSPECTION --
     gs = inspection_context.get("gap_summary")
@@ -17316,7 +17356,7 @@ async def agent_skill_runtime_status():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     result: Dict[str, Any] = {
-        "phase": 3,
+        "phase": 4,
         "flags": settings.to_dict(),
         "production_chat_integration": settings.enabled,
         "shadow_router": {
@@ -17329,6 +17369,7 @@ async def agent_skill_runtime_status():
             "workflow": "supplier-fai-disposition",
             "cache": _SKILL_ROUTE_PRODUCTION_CACHE.stats(),
         },
+        "tool_policy": tool_policy_metadata(),
         "runtime_loaded": False,
         "skills": [],
         "workflows": [],
@@ -17423,7 +17464,7 @@ async def agent_skill_test_compose(request: AgentSkillTestComposeRequest):
             }
         )
     return {
-        "phase": 3,
+        "phase": 4,
         "flags": settings.to_dict(),
         "production_chat_integration": settings.enabled,
         "workflow": {
@@ -17615,6 +17656,21 @@ def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[
             "hidden_count": len(viewport_state.get("hidden") or []),
         }
 
+    execution_receipts = sanitize_execution_receipts(
+        viewport.get("execution_receipts")
+    )
+    if execution_receipts:
+        contexts.add("viewport.execution_receipts")
+        facts["execution_receipts"] = [
+            {
+                "receipt_id": receipt["receipt_id"],
+                "tool_id": receipt["tool_id"],
+                "status": receipt["status"],
+                "error": receipt.get("error"),
+            }
+            for receipt in execution_receipts[-8:]
+        ]
+
     for kind, values in facts["target_index"].items():
         facts["target_index"][kind] = list(dict.fromkeys(str(value) for value in values if str(value)))
     return assets, contexts, facts
@@ -17637,9 +17693,8 @@ def _skill_route_recent_turns(history: Optional[List[Dict[str, Any]]]) -> List[D
 def _skill_route_workflow_state(ctx: Optional[Dict]) -> Dict[str, Any]:
     ctx = ctx if isinstance(ctx, dict) else {}
     state = ctx.get("skill_workflow_state")
-    if not isinstance(state, dict):
-        return {}
-    return {
+    state = state if isinstance(state, dict) else {}
+    result = {
         "workflow_id": _skill_route_text(state.get("workflow_id"), 80),
         "version": _skill_route_text(state.get("version"), 30),
         "stage": _skill_route_text(state.get("stage"), 80),
@@ -17647,6 +17702,18 @@ def _skill_route_workflow_state(ctx: Optional[Dict]) -> Dict[str, Any]:
         "entities": state.get("entities") if isinstance(state.get("entities"), dict) else {},
         "pending_clarification": _skill_route_text(state.get("pending_clarification"), 200),
     }
+    viewport = ctx.get("viewport_context") if isinstance(ctx.get("viewport_context"), dict) else {}
+    receipts = sanitize_execution_receipts(viewport.get("execution_receipts"))
+    if receipts:
+        result["last_execution_receipts"] = [
+            {
+                "receipt_id": receipt["receipt_id"],
+                "tool_id": receipt["tool_id"],
+                "status": receipt["status"],
+            }
+            for receipt in receipts[-8:]
+        ]
+    return {key: value for key, value in result.items() if value not in (None, "", {}, [])}
 
 
 def _build_skill_route_catalog(ctx: Optional[Dict], public_agent: str):

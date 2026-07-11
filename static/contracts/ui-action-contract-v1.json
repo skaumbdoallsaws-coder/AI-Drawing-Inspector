@@ -1,0 +1,212 @@
+{
+  "contract_version": 1,
+  "max_actions": 25,
+  "workspaces": ["assembly", "assembly_compare", "3dmodel", "part", "drawing", "report", "current"],
+  "actions": {
+    "open_workspace": {
+      "effect": "navigation",
+      "required": [],
+      "fields": {
+        "tab": {"type": "string", "max_length": 40},
+        "subtab": {"type": "string", "max_length": 40}
+      },
+      "preserves": ["highlight", "display", "motion", "rotation"]
+    },
+    "set_compare_revisions": {
+      "effect": "compare",
+      "required": [],
+      "require_any": ["revA", "revB"],
+      "fields": {
+        "revA": {"type": "string", "max_length": 40},
+        "revB": {"type": "string", "max_length": 40},
+        "run_compare": {"type": "boolean"}
+      },
+      "preserves": ["motion", "rotation"]
+    },
+    "play_motion": {
+      "effect": "motion",
+      "required": [],
+      "fields": {
+        "motion_id": {"type": "string", "max_length": 120},
+        "rpm": {"type": "number", "minimum": 0.1, "maximum": 100000},
+        "loop": {"type": "boolean"}
+      },
+      "preserves": ["highlight", "display", "rotation"]
+    },
+    "pause_motion": {
+      "effect": "motion",
+      "required": [],
+      "fields": {},
+      "preserves": ["highlight", "display", "rotation"]
+    },
+    "set_motion_rpm": {
+      "effect": "motion",
+      "required": ["rpm"],
+      "fields": {
+        "rpm": {"type": "number", "minimum": 0.1, "maximum": 100000}
+      },
+      "preserves": ["highlight", "display", "rotation"]
+    },
+    "seek_motion": {
+      "effect": "motion",
+      "required": ["crank_angle_deg"],
+      "fields": {
+        "crank_angle_deg": {"type": "number", "minimum": -100000, "maximum": 100000}
+      },
+      "preserves": ["highlight", "display", "rotation"]
+    },
+    "stop_motion": {
+      "effect": "motion",
+      "required": [],
+      "fields": {},
+      "preserves": ["highlight", "display", "rotation"]
+    },
+    "rotate_view": {
+      "effect": "rotation",
+      "required": [],
+      "fields": {
+        "viewport": {"type": "enum", "values": ["assembly", "3dmodel", "part", "current"]},
+        "direction": {"type": "enum", "values": ["left", "right", "reverse", "ccw", "cw"]},
+        "speed": {"type": "number", "minimum": 0.0001, "maximum": 0.05}
+      },
+      "preserves": ["highlight", "display", "motion"]
+    },
+    "stop_rotate_view": {
+      "effect": "rotation",
+      "required": [],
+      "fields": {
+        "viewport": {"type": "enum", "values": ["assembly", "3dmodel", "part", "current"]}
+      },
+      "preserves": ["highlight", "display", "motion"]
+    },
+    "set_part_highlight": {
+      "effect": "highlight",
+      "required": [],
+      "require_any": ["part_numbers", "part_number"],
+      "fields": {
+        "part_numbers": {"type": "string_array", "max_items": 30},
+        "part_number": {"type": "string", "max_length": 80},
+        "mode": {"type": "enum", "values": ["replace", "add", "remove", "clear"]},
+        "camera_view": {"type": "enum", "values": ["front", "top", "right", "back", "bottom", "left"]}
+      },
+      "preserves": ["display", "motion", "rotation"]
+    },
+    "clear_part_highlight": {
+      "effect": "highlight",
+      "required": [],
+      "fields": {
+        "all": {"type": "boolean"}
+      },
+      "preserves": ["display", "motion", "rotation"]
+    },
+    "set_part_display": {
+      "effect": "display",
+      "required": [],
+      "require_any": ["part_numbers", "part_number"],
+      "require_effect_any": ["hidden", "visible", "display", "mode", "opacity"],
+      "fields": {
+        "part_numbers": {"type": "string_array", "max_items": 30},
+        "part_number": {"type": "string", "max_length": 80},
+        "hidden": {"type": "boolean"},
+        "visible": {"type": "boolean"},
+        "display": {"type": "enum", "values": ["hide", "hidden", "show", "visible", "transparent", "solid", "opaque"]},
+        "mode": {"type": "enum", "values": ["hide", "hidden", "show", "visible", "transparent", "solid", "opaque"]},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "preserves": ["highlight", "motion", "rotation"]
+    },
+    "clear_part_display": {
+      "effect": "display",
+      "required": [],
+      "require_any": ["part_numbers", "part_number", "all"],
+      "fields": {
+        "part_numbers": {"type": "string_array", "max_items": 30},
+        "part_number": {"type": "string", "max_length": 80},
+        "all": {"type": "boolean"}
+      },
+      "preserves": ["highlight", "motion", "rotation"]
+    },
+    "explode": {
+      "effect": "compare",
+      "required": ["enabled"],
+      "fields": {
+        "enabled": {"type": "boolean"},
+        "side": {"type": "enum", "values": ["A", "B", "both"]}
+      },
+      "preserves": ["motion", "rotation"]
+    },
+    "focus": {
+      "effect": "compare",
+      "required": ["scope"],
+      "fields": {
+        "scope": {"type": "object"},
+        "side": {"type": "enum", "values": ["A", "B", "both"]}
+      },
+      "preserves": ["motion", "rotation"]
+    },
+    "highlight": {
+      "effect": "compare",
+      "required": ["scope"],
+      "fields": {
+        "scope": {"type": "object"},
+        "side": {"type": "enum", "values": ["A", "B", "both"]}
+      },
+      "preserves": ["motion", "rotation"]
+    },
+    "extract": {
+      "effect": "compare",
+      "required": ["scope"],
+      "fields": {
+        "scope": {"type": "object"},
+        "side": {"type": "enum", "values": ["A", "B", "both"]},
+        "camera": {"type": "string", "max_length": 40}
+      },
+      "preserves": ["motion", "rotation"]
+    },
+    "select_bom_rows": {
+      "effect": "compare",
+      "required": ["keys"],
+      "fields": {
+        "mode": {"type": "enum", "values": ["replace", "add", "remove", "clear"]},
+        "keys": {"type": "string_array", "max_items": 60},
+        "primary": {"type": "string", "max_length": 160},
+        "open_drawer": {"type": "boolean"}
+      },
+      "preserves": ["motion", "rotation"]
+    },
+    "open_supplier_spec": {
+      "effect": "navigation",
+      "required": ["part_number"],
+      "fields": {
+        "part_number": {"type": "string", "max_length": 80},
+        "revision": {"type": "string", "max_length": 40}
+      },
+      "preserves": ["highlight", "display", "motion", "rotation"]
+    },
+    "compare_supplier_specs": {
+      "effect": "compare",
+      "required": ["part_number"],
+      "fields": {
+        "part_number": {"type": "string", "max_length": 80},
+        "revA": {"type": "string", "max_length": 40},
+        "revB": {"type": "string", "max_length": 40}
+      },
+      "preserves": ["highlight", "display", "motion", "rotation"]
+    },
+    "clear_compare_overlays": {
+      "effect": "compare",
+      "required": [],
+      "fields": {
+        "clear_selection": {"type": "boolean"}
+      },
+      "preserves": ["motion", "rotation"]
+    }
+  },
+  "conflicts": [
+    {"types": ["play_motion", "pause_motion"], "reason": "play_and_pause_conflict"},
+    {"types": ["play_motion", "stop_motion"], "reason": "play_and_stop_conflict"},
+    {"types": ["rotate_view", "stop_rotate_view"], "reason": "rotate_and_stop_conflict"},
+    {"types": ["set_part_highlight", "clear_part_highlight"], "reason": "set_and_clear_highlight_conflict"},
+    {"types": ["set_part_display", "clear_part_display"], "reason": "set_and_clear_display_conflict"}
+  ]
+}

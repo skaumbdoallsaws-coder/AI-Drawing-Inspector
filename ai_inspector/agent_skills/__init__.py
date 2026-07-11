@@ -32,6 +32,14 @@ from .executors import (
     plan_registered_executor,
 )
 from .shadow import classify_production_route, classify_shadow_route
+from .tool_policy import (
+    ToolPolicyError,
+    load_ui_action_contract,
+    reset_tool_policy_cache_for_tests,
+    sanitize_execution_receipts,
+    tool_policy_metadata,
+    validate_ui_action_bundle,
+)
 
 __all__ = [
     "ManifestValidationError",
@@ -61,4 +69,10 @@ __all__ = [
     "plan_registered_executor",
     "classify_production_route",
     "classify_shadow_route",
+    "ToolPolicyError",
+    "load_ui_action_contract",
+    "reset_tool_policy_cache_for_tests",
+    "sanitize_execution_receipts",
+    "tool_policy_metadata",
+    "validate_ui_action_bundle",
 ]

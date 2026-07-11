@@ -134,6 +134,37 @@ def test_missing_numeric_answer_gets_failed_row_prefix():
     assert "1.95 mm above the upper limit" in cleaned, cleaned
 
 
+def test_missing_numeric_answer_gets_prefix_from_production_json_support():
+    # Reproduces the live T1 miss: the cleaner call site passes the user
+    # message plus json.dumps(fai_characteristics), NOT rendered context
+    # lines. The backstop must fire on that shape too.
+    import json as _json
+
+    rows = [
+        {"char_number": "1", "description": "Overall length", "nominal": 90.0,
+         "tol_plus": 0.0, "tol_minus": 0.0, "measured": None, "status": "PENDING"},
+        {"char_number": "5", "description": "Pin bore diameter", "nominal": 30.0,
+         "tol_plus": 0.05, "tol_minus": 0.05, "measured": 32.0, "status": "FAIL",
+         "lower_limit": 29.95, "upper_limit": 30.05,
+         "deviation_direction": "above_upper", "out_of_tolerance_by": 1.95},
+    ]
+    support = (
+        "what is the impact on the assembly of the failed dimension in the fai table?\n"
+        + _json.dumps(rows, default=str)
+    )
+    text = (
+        "The measured deviation applies to the inspected part; the FAI data "
+        "does not show other instances of this component out of tolerance. "
+        "If this is a controlled fit dimension, escalate it for disposition "
+        "against the mating part requirements."
+    )
+    cleaned = server._clean_report_fai_response(text, support_text=support,
+                                                failed_row_count=1)
+    assert "Characteristic #5" in cleaned, cleaned
+    assert "measured 32.0 mm vs nominal 30.0 mm" in cleaned, cleaned
+    assert "1.95 mm above the upper limit" in cleaned, cleaned
+
+
 if __name__ == "__main__":
     import traceback
 

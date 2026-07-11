@@ -16856,13 +16856,65 @@ def _fai_term_supported(term: str, support_lower: str) -> bool:
     return len(stem) >= 3 and stem in support_lower
 
 
+def _fai_failed_row_prefix_from_rows(rows: Any) -> str:
+    """Build the grounding prefix directly from structured FAI rows (the
+    production support text embeds rows as a JSON array, not rendered
+    context lines)."""
+    if not isinstance(rows, list):
+        return ""
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("status", "")).strip().upper() not in {"FAIL", "FAILED", "REJECT"}:
+            continue
+        cn = row.get("char_number")
+        nominal = row.get("nominal")
+        measured = row.get("measured")
+        if cn is None or nominal is None or measured is None:
+            continue
+        label = f"Characteristic #{cn}"
+        desc = str(row.get("description") or "").strip()
+        if desc:
+            label += f" ({desc})"
+        prefix = f"{label} measured {measured} mm vs nominal {nominal} mm"
+        tp, tm = row.get("tol_plus"), row.get("tol_minus")
+        if tp is not None and tm is not None:
+            prefix += f" +{tp}/-{tm} mm"
+        lower, upper = row.get("lower_limit"), row.get("upper_limit")
+        if lower is not None and upper is not None:
+            prefix += f" limits [{lower}, {upper}] mm"
+        oot = row.get("out_of_tolerance_by")
+        direction = str(row.get("deviation_direction") or "").lower().replace("_", " ")
+        if oot is not None and direction:
+            if "above upper" in direction:
+                direction = "above the upper limit"
+            elif "below lower" in direction:
+                direction = "below the lower limit"
+            prefix += f": {oot} mm {direction}."
+        else:
+            prefix += ": outside tolerance."
+        return prefix
+    return ""
+
+
 def _fai_failed_row_prefix_from_support(support_text: str = "") -> str:
     """Return a compact measured-vs-nominal sentence from the first failed
-    FAI row in the rendered context. This is a grounding backstop for cases
+    FAI row in the support text. This is a grounding backstop for cases
     where the model gives the right disposition prose but forgets the numeric
-    evidence already present in the table."""
+    evidence already present in the table. Handles both the rendered
+    context-line format (#N: ... nominal=... measured=... [FAIL]) and the
+    production JSON-array format embedded by the cleaner call site."""
     if not support_text:
         return ""
+    for raw_line in str(support_text).splitlines():
+        candidate = raw_line.strip()
+        if candidate.startswith("[") and candidate.endswith("]"):
+            try:
+                prefix = _fai_failed_row_prefix_from_rows(json.loads(candidate))
+            except (TypeError, ValueError):
+                prefix = ""
+            if prefix:
+                return prefix
     for raw_line in str(support_text).splitlines():
         line = raw_line.strip()
         if not re.search(r"\[(?:FAIL|REJECT)\]", line, re.I):

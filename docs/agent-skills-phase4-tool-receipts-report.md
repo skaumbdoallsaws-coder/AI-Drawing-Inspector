@@ -61,14 +61,14 @@ The dispatcher now waits for the Assembly scene and part mesh map before highlig
 
 ## Verification
 
-- Python policy and frozen regressions: 148/148
+- Python policy and frozen regressions: 149/149
 - Browser authorization and intent mapping: 115/115
 - Browser receipt runtime: 8/8
 - Inline application scripts: 4/4 syntax checks
 - Phase 4 live receipt round trip: 9/9
-- Existing FAI-to-motion live workflow: 31/32 total, with every viewport and safety assertion passing
+- Existing FAI-to-motion live workflow: 32/32
 
-The one broader-workflow failure was a read-only model answer that omitted a numeric deviation on one run. It did not execute a tool, produce a receipt, or affect the Phase 4 exit gate; the frozen assertion remains unchanged.
+The initial broader-workflow run was 31/32 because a read-only model answer omitted the numeric deviation. Investigation found that the deterministic grounding backstop only parsed rendered `[FAIL]` lines while production supplied `fai_characteristics` as JSON. The parser now handles both formats through one failed-row prefix builder, and a regression test reproduces the exact production call shape. After restart, the full live workflow passed 32/32.
 
 ## Operational State
 

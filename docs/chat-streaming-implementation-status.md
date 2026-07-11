@@ -1,6 +1,7 @@
 # Chat Streaming Implementation Status
 
-Status: implemented for the Sage and Iris main chat path; controlled rollout pending checkpoint.
+Status: implemented for the Sage, Iris, and Scout main chat paths; structured
+task surfaces remain in the next rollout slice.
 
 This document records the code that landed from revision 2 of
 `docs/chat-streaming-implementation-plan.md`. It distinguishes the completed
@@ -10,6 +11,9 @@ every model endpoint streams yet.
 ## Completed Scope
 
 - `POST /api/agent/chat/v2/stream` provides SSE-over-POST for Sage and Iris.
+- Scout's existing `POST /api/agent/chat/stream` keeps its search-browser
+  events and now streams provider text deltas plus a final cleaned response
+  when the shared allowlist includes `scout`.
 - The legacy `POST /api/agent/chat` endpoint remains available and is the
   fallback when streaming is disabled or fails before visible text.
 - Provider generation uses `AsyncAnthropic.messages.stream` on the streaming
@@ -44,7 +48,7 @@ All flags default to off. Controlled local rollout uses:
 
 ```text
 INSPECTORPRO_CHAT_STREAMING=1
-INSPECTORPRO_STREAMING_AGENTS=sage,iris
+INSPECTORPRO_STREAMING_AGENTS=sage,iris,scout
 INSPECTORPRO_STREAMING_HIGH_RISK_MODES=1
 ```
 
@@ -84,7 +88,6 @@ weaken the authoritative final-commit contract.
 
 The following remain intentionally outside this checkpoint:
 
-- Scout's existing special-purpose stream endpoint.
 - Guided narration and voice synthesis.
 - Batch endpoints for summaries, FAI verdicts/fill, and profile generation.
 - Mid-stream reconnect/resume and retaining partial text after cancellation.

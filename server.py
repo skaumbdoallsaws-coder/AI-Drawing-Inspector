@@ -20745,12 +20745,70 @@ async def agent_chat_stream(request: AgentChatRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
+    stream_settings = _chat_stream_settings()
+    provider_streaming = bool(
+        stream_settings["enabled"] and "scout" in set(stream_settings["agents"])
+    )
+
     # No tool appendix on the streaming route -- Scout SSE stays unchanged for 4C
     system_prompt = AGENT_PROMPTS.get(request.agent_type, PARTS_FINDER_PROMPT)
 
     async def event_generator():
+        def _sse(payload: Dict[str, Any]) -> str:
+            return "data: " + json_module.dumps(payload, ensure_ascii=True) + "\n\n"
+
         try:
-            client = anthropic.Anthropic(api_key=api_key)
+            client = anthropic.AsyncAnthropic(api_key=api_key)
+
+            def _final_display_text(raw_text: str) -> str:
+                firewall = StreamDirectiveFilter()
+                release = firewall.feed(raw_text or "")
+                tail = firewall.finish()
+                return _clean_agent_response((release.text or "") + (tail.text or ""))
+
+            async def _provider_events(create_kwargs: Dict[str, Any], stage: str):
+                """Yield provider text deltas then the final message.
+
+                Scout keeps its existing search-event protocol. This narrow
+                adapter only changes how the model's natural-language text is
+                delivered when the shared streaming flag includes Scout.
+                """
+                started = time.perf_counter()
+                first_token = None
+                response = None
+                try:
+                    if provider_streaming:
+                        async with client.messages.stream(**create_kwargs) as stream:
+                            async for text_delta in stream.text_stream:
+                                if first_token is None:
+                                    first_token = time.perf_counter()
+                                yield "delta", str(text_delta or "")
+                            response = await stream.get_final_message()
+                    else:
+                        response = await client.messages.create(**create_kwargs)
+                except Exception as ex:
+                    status, error_type = classify_exception_status(ex)
+                    record_anthropic_call(
+                        model="claude-sonnet-4-5-20250929", response=None,
+                        latency_ms=(time.perf_counter() - started) * 1000.0,
+                        status=status, errorType=error_type,
+                        route="/api/agent/chat/stream", workflow="agent_chat_stream",
+                        agentType=getattr(request, "agent_type", None) or "none",
+                    )
+                    raise
+                tags: Dict[str, Any] = {}
+                if first_token is not None:
+                    tags["firstTokenLatencyMs"] = (first_token - started) * 1000.0
+                record_anthropic_call(
+                    model="claude-sonnet-4-5-20250929", response=response,
+                    latency_ms=(time.perf_counter() - started) * 1000.0,
+                    route="/api/agent/chat/stream", workflow="agent_chat_stream",
+                    agentType=getattr(request, "agent_type", None) or "none",
+                    **tags,
+                )
+                yield "final", response
+
+            yield _sse({"type": "status", "phase": "generating"})
 
             # Build context (same as agent_chat)
             raw_ctx = request.inspection_context or request.context or {}
@@ -20888,28 +20946,15 @@ async def agent_chat_stream(request: AgentChatRequest):
                 create_kwargs["tools"] = tools
                 create_kwargs["tool_choice"] = tool_choice
 
-            # Phase 2 telemetry: stream main response.
-            _stream_agent_type = getattr(request, "agent_type", None) or "none"
-            with time_block() as _stream_elapsed_ms:
-                try:
-                    response = client.messages.create(**create_kwargs)
-                except Exception as _ex:
-                    _s, _e = classify_exception_status(_ex)
-                    record_anthropic_call(
-                        model="claude-sonnet-4-5-20250929", response=None,
-                        latency_ms=_stream_elapsed_ms(),
-                        status=_s, errorType=_e,
-                        route="/api/agent/chat/stream", workflow="agent_chat_stream",
-                        agentType=_stream_agent_type,
-                    )
-                    raise
-
-            record_anthropic_call(
-                model="claude-sonnet-4-5-20250929", response=response,
-                latency_ms=_stream_elapsed_ms(),
-                route="/api/agent/chat/stream", workflow="agent_chat_stream",
-                agentType=_stream_agent_type,
-            )
+            initial_firewall = StreamDirectiveFilter()
+            response = None
+            async for event_kind, event_value in _provider_events(create_kwargs, "initial"):
+                if event_kind == "delta":
+                    release = initial_firewall.feed(str(event_value or ""))
+                    if release.text:
+                        yield _sse({"type": "text_delta", "text": release.text})
+                else:
+                    response = event_value
 
             # Check for tool_use
             tool_use_block = None
@@ -20922,9 +20967,9 @@ async def agent_chat_stream(request: AgentChatRequest):
 
             if tool_use_block is None:
                 # No search needed -- send text response
-                text = _clean_agent_response("".join(text_blocks))
-                yield f"data: {json_module.dumps({'type': 'response', 'text': text})}\n\n"
-                yield f"data: {json_module.dumps({'type': 'done'})}\n\n"
+                text = _final_display_text("".join(text_blocks))
+                yield _sse({"type": "response", "text": text})
+                yield _sse({"type": "done"})
                 return
 
             # Execute browser search, streaming events
@@ -20988,46 +21033,35 @@ async def agent_chat_stream(request: AgentChatRequest):
                 }]
             })
 
-            # Phase 2 telemetry: stream summary response (tool-use round-trip).
-            with time_block() as _summary_elapsed_ms:
-                try:
-                    summary_response = client.messages.create(
-                        model="claude-sonnet-4-5-20250929",
-                        max_tokens=2048,
-                        system=system_prompt,
-                        messages=messages,
-                    )
-                except Exception as _ex:
-                    _s, _e = classify_exception_status(_ex)
-                    record_anthropic_call(
-                        model="claude-sonnet-4-5-20250929", response=None,
-                        latency_ms=_summary_elapsed_ms(),
-                        status=_s, errorType=_e,
-                        route="/api/agent/chat/stream", workflow="agent_chat_stream",
-                        agentType=_stream_agent_type,
-                    )
-                    raise
-
-            record_anthropic_call(
-                model="claude-sonnet-4-5-20250929", response=summary_response,
-                latency_ms=_summary_elapsed_ms(),
-                route="/api/agent/chat/stream", workflow="agent_chat_stream",
-                agentType=_stream_agent_type,
-            )
+            summary_firewall = StreamDirectiveFilter()
+            summary_response = None
+            summary_kwargs = {
+                "model": "claude-sonnet-4-5-20250929",
+                "max_tokens": 2048,
+                "system": system_prompt,
+                "messages": messages,
+            }
+            async for event_kind, event_value in _provider_events(summary_kwargs, "summary"):
+                if event_kind == "delta":
+                    release = summary_firewall.feed(str(event_value or ""))
+                    if release.text:
+                        yield _sse({"type": "text_delta", "text": release.text})
+                else:
+                    summary_response = event_value
 
             summary_text = ""
             for block in summary_response.content:
                 if hasattr(block, "text"):
                     summary_text += block.text
-            summary_text = _clean_agent_response(summary_text)
+            summary_text = _final_display_text(summary_text)
 
-            yield f"data: {json_module.dumps({'type': 'response', 'text': summary_text, 'results': results})}\n\n"
-            yield f"data: {json_module.dumps({'type': 'done'})}\n\n"
+            yield _sse({"type": "response", "text": summary_text, "results": results})
+            yield _sse({"type": "done"})
 
         except Exception as e:
             logger.error(f"Scout stream error: {e}")
-            yield f"data: {json_module.dumps({'type': 'error', 'message': str(e)})}\n\n"
-            yield f"data: {json_module.dumps({'type': 'done'})}\n\n"
+            yield _sse({"type": "error", "message": str(e)})
+            yield _sse({"type": "done"})
 
     return StreamingResponse(
         event_generator(),

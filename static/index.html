@@ -50454,6 +50454,14 @@
                     updateSendButtonState();
                     showTypingIndicator();
                 }
+                const scoutController = new AbortController();
+                const scoutActiveStream = {
+                    controller: scoutController,
+                    turnId,
+                    partial: false,
+                    streamingMessage: null,
+                };
+                originSession.activeStream = scoutActiveStream;
                 setWaiting(true, originAgent);
 
                 const messageText = text || 'What can you see in this screenshot?';
@@ -50492,11 +50500,13 @@
                 }
                 if (imageToSend) payload.image = imageToSend;
 
+                let scoutStreamingMessage = null;
                 try {
                     const res = await fetch('/api/agent/chat/stream', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
+                        body: JSON.stringify(payload),
+                        signal: scoutController.signal,
                     });
 
                     if (!res.ok) {
@@ -50504,10 +50514,18 @@
                         throw new Error(errData.detail || 'API returned ' + res.status);
                     }
 
+                    if (currentAgent === originAgent) removeTypingIndicator();
+                    scoutStreamingMessage = createStreamingAssistantMessage(originAgent, {
+                        source: 'scout_provider_stream',
+                        status: 'Generating',
+                    });
+                    scoutActiveStream.streamingMessage = scoutStreamingMessage;
+
                     const reader = res.body.getReader();
                     const decoder = new TextDecoder();
                     let buffer = '';
                     let searchActive = false;
+                    let scoutStreamFailed = false;
                     let responseText = '';
                     let resultCards = [];
                     let pagesVisited = 0;
@@ -50528,10 +50546,22 @@
                             try { ev = JSON.parse(jsonStr); } catch { continue; }
 
                             switch (ev.type) {
+                                case 'status':
+                                    scoutStreamingMessage.setStatus(
+                                        ev.phase === 'searching' ? 'Searching' : 'Generating'
+                                    );
+                                    break;
+
+                                case 'text_delta':
+                                    scoutActiveStream.partial = scoutActiveStream.partial || !!ev.text;
+                                    scoutStreamingMessage.appendText(ev.text || '');
+                                    break;
+
                                 case 'search_start':
                                     if (currentAgent === originAgent) removeTypingIndicator();
                                     showScoutBrowser();
                                     searchActive = true;
+                                    scoutStreamingMessage.setStatus('Searching');
                                     scoutStatusText.textContent = 'Searching: ' + (ev.query || '');
                                     scoutProgressBar.style.width = '10%';
                                     break;
@@ -50596,13 +50626,15 @@
                                 case 'response':
                                     responseText = ev.text || '';
                                     if (ev.results) resultCards = ev.results;
+                                    scoutStreamingMessage.setStatus('Finalizing');
                                     break;
 
                                 case 'done':
+                                    if (scoutStreamFailed) break;
                                     if (!searchActive && currentAgent === originAgent) removeTypingIndicator();
                                     const cards = formatPartCards(resultCards);
                                     const fullResponse = responseText + (cards ? '\n\n' + cards : '');
-                                    addMessage(fullResponse || 'Search completed.', 'assistant', originAgent);
+                                    scoutStreamingMessage.commit(fullResponse || 'Search completed.');
                                     // Voice reply for Scout — only if still visible
                                     if (voiceTriggered && responseText && currentAgent === originAgent) {
                                         playVoiceReply(responseText, originAgent);
@@ -50611,8 +50643,10 @@
                                     break;
 
                                 case 'error':
+                                    scoutStreamFailed = true;
                                     if (currentAgent === originAgent) removeTypingIndicator();
                                     if (searchActive) hideScoutBrowser();
+                                    scoutStreamingMessage.discard();
                                     addMessage('Search error: ' + (ev.message || 'Unknown error'), 'assistant', originAgent);
                                     voiceTriggered = false;
                                     break;
@@ -50623,6 +50657,12 @@
                     if (currentAgent === originAgent) removeTypingIndicator();
                     hideScoutBrowser();
                     voiceTriggered = false;
+                    if (scoutStreamingMessage) scoutStreamingMessage.discard();
+                    if (err && err.name === 'AbortError') return;
+                    if (scoutActiveStream.partial) {
+                        addMessage('Scout response interrupted. Retry the request to continue.', 'assistant', originAgent);
+                        return;
+                    }
                     // Fallback to non-streaming endpoint
                     try {
                         const fallbackRes = await fetch('/api/agent/chat', {
@@ -50639,9 +50679,12 @@
                     } catch {
                         addMessage('Scout is unavailable right now. Try again later.', 'assistant', originAgent);
                     }
+                } finally {
+                    if (originSession.activeStream === scoutActiveStream) {
+                        originSession.activeStream = null;
+                    }
+                    setWaiting(false, originAgent);
                 }
-
-                setWaiting(false, originAgent);
             }
 
             // Add a system-style notification message to the chat

@@ -44,4 +44,25 @@ test('send button aborts instead of starting a second turn', () => {
     assert(html.includes('session.activeStream.controller.abort()'));
 });
 
+test('Scout owns its streaming controller and provisional message', () => {
+    const start = html.indexOf('async function handleScoutSearchSend()');
+    const end = html.indexOf('// Add a system-style notification message', start);
+    const scout = html.slice(start, end);
+    assert(start >= 0 && end > start);
+    assert(scout.includes('const scoutController = new AbortController()'));
+    assert(scout.includes('signal: scoutController.signal'));
+    assert(scout.includes("source: 'scout_provider_stream'"));
+    assert(scout.includes("case 'text_delta'"));
+    assert(scout.includes("scoutStreamingMessage.commit(fullResponse || 'Search completed.')"));
+});
+
+test('Scout state does not leak into the Sage or Iris send path', () => {
+    const mainStart = html.indexOf('async function handleAgentSend()');
+    const scoutStart = html.indexOf('async function handleScoutSearchSend()');
+    const main = html.slice(mainStart, scoutStart);
+    assert(mainStart >= 0 && scoutStart > mainStart);
+    assert(!main.includes('scoutController'));
+    assert(!main.includes('scoutActiveStream'));
+});
+
 console.log(passed + ' passed, ' + (process.exitCode ? 1 : 0) + ' failed');

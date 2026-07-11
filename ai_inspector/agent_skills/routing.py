@@ -221,13 +221,55 @@ class CandidateCatalog:
         return next((row for row in self.skills if row["id"] == skill_id), None)
 
     def router_payload(self) -> dict[str, Any]:
+        # The router needs identifiers, eligibility, dependencies, and the
+        # declared evidence/tool boundaries. The validator retains the full
+        # catalog locally; omitting redundant metadata reduces every routing
+        # request without changing what can be selected or executed.
+        workflows = [
+            {
+                key: row[key]
+                for key in (
+                    "id",
+                    "description",
+                    "entry_signals",
+                    "required_assets",
+                    "optional_assets",
+                    "stages",
+                    "status",
+                    "unavailable_reasons",
+                )
+                if key in row
+            }
+            for row in self.workflows
+        ]
+        skills = [
+            {
+                key: row[key]
+                for key in (
+                    "id",
+                    "description",
+                    "workflows",
+                    "requires_context",
+                    "optional_context",
+                    "allowed_tools",
+                    "side_effects",
+                    "depends_on",
+                    "conflicts_with",
+                    "composable_with",
+                    "status",
+                    "unavailable_reasons",
+                )
+                if key in row
+            }
+            for row in self.skills
+        ]
         return {
             "agent": self.agent,
             "active_mode": self.mode,
             "available_assets": list(self.available_assets),
             "available_context": list(self.available_context),
-            "workflows": list(self.workflows),
-            "skills": list(self.skills),
+            "workflows": workflows,
+            "skills": skills,
         }
 
 
@@ -632,6 +674,7 @@ def build_route_user_text(
     recent_turns: Sequence[Mapping[str, str]] = (),
     workflow_state: Mapping[str, Any] | None = None,
 ) -> str:
+    prompt_facts = _route_prompt_facts(context_facts)
     safe_recent = []
     for turn in recent_turns[-4:]:
         role = str(turn.get("role") or "unknown")[:20]
@@ -643,7 +686,7 @@ def build_route_user_text(
         + json.dumps(catalog.router_payload(), ensure_ascii=True, separators=(",", ":"))
         + "\n</CANDIDATE_CATALOG>\n"
         + "<LIVE_CONTEXT_UNTRUSTED>\n"
-        + json.dumps(dict(context_facts), ensure_ascii=True, separators=(",", ":"))
+        + json.dumps(prompt_facts, ensure_ascii=True, separators=(",", ":"))
         + "\n</LIVE_CONTEXT_UNTRUSTED>\n"
         + "<ACTIVE_WORKFLOW_STATE_UNTRUSTED>\n"
         + json.dumps(dict(workflow_state or {}), ensure_ascii=True, separators=(",", ":"))
@@ -655,6 +698,29 @@ def build_route_user_text(
         + safe_message
         + "\n</USER_MESSAGE_UNTRUSTED>"
     )
+
+
+def _route_prompt_facts(context_facts: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep classifier evidence focused while preserving execution facts.
+
+    The complete facts mapping remains available to the server and executor.
+    Mate prose and detailed receipt errors are useful after routing, but they
+    do not help choose a workflow or target and were a material token/latency
+    cost on every classifier call.
+    """
+    facts = dict(context_facts or {})
+    allowed = (
+        "active_mode",
+        "target_index",
+        "part",
+        "fai",
+        "features",
+        "assembly_parts",
+        "assembly_number",
+        "motions",
+        "viewport_state",
+    )
+    return {key: facts[key] for key in allowed if key in facts}
 
 
 def normalize_route_message(message: str) -> str:

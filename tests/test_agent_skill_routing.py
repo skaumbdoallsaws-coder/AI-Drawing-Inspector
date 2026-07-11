@@ -400,6 +400,18 @@ def test_route_prompt_contains_metadata_not_skill_body_and_delimits_untrusted_te
     assert "Grounding Rules" not in prompt
 
 
+def test_route_prompt_omits_execution_only_context_and_redundant_catalog_fields():
+    catalog = _catalog()
+    facts = _facts()
+    facts["assembly_mates"] = [{"type": "Concentric", "description": "test mate"}]
+    facts["execution_receipts"] = [{"receipt_id": "r1", "status": "failed", "error": "detail"}]
+    prompt = build_route_user_text("what does this affect?", catalog, context_facts=facts)
+    assert "assembly_mates" not in prompt
+    assert "execution_receipts" not in prompt
+    assert '"version"' not in prompt.split("</CANDIDATE_CATALOG>", 1)[0]
+    assert "assess-fai-characteristic" in prompt
+
+
 def test_shadow_classifier_validates_caches_and_never_marks_output_executable():
     catalog = _catalog()
     cache = ExactRouteCache()

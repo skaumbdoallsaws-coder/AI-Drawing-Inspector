@@ -192,7 +192,8 @@ def run() -> int:
         record(
             "workflow_advanced_to_visualization",
             bool(shown_state.get("workflow_state"))
-            and shown_state["workflow_state"].get("stage") == "visualize_affected_context",
+            and shown_state["workflow_state"].get("stage")
+            in {"trace_assembly_impact", "visualize_affected_context"},
             shown_state,
         )
 
@@ -221,7 +222,9 @@ def run() -> int:
         }
         record(
             "prior_visualization_receipts_reconciled",
-            {"set_part_highlight", "play_motion"}.issubset(prior_receipt_tools),
+            {"set_part_highlight", "play_motion"}.issubset(prior_receipt_tools)
+            and (hidden_state.get("workflow_state") or {}).get("stage")
+            == "visualize_affected_context",
             {"receipt_tools": sorted(prior_receipt_tools), "state": hidden_state},
         )
 

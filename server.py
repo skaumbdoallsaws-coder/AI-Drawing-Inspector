@@ -16876,12 +16876,29 @@ def _fai_failed_row_prefix_from_rows(rows: Any) -> str:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        if str(row.get("status", "")).strip().upper() not in {"FAIL", "FAILED", "REJECT"}:
-            continue
         cn = row.get("char_number")
         nominal = row.get("nominal")
         measured = row.get("measured")
         if cn is None or nominal is None or measured is None:
+            continue
+        status = str(row.get("status", "")).strip().upper()
+        numerically_out = False
+        try:
+            measured_value = float(measured)
+            nominal_value = float(nominal)
+            if row.get("lower_limit") is not None and row.get("upper_limit") is not None:
+                numerically_out = (
+                    measured_value < float(row["lower_limit"])
+                    or measured_value > float(row["upper_limit"])
+                )
+            elif row.get("tol_plus") is not None and row.get("tol_minus") is not None:
+                numerically_out = (
+                    measured_value > nominal_value + float(row["tol_plus"])
+                    or measured_value < nominal_value - float(row["tol_minus"])
+                )
+        except (TypeError, ValueError):
+            numerically_out = False
+        if status not in {"FAIL", "FAILED", "REJECT"} and not numerically_out:
             continue
         label = f"Characteristic #{cn}"
         desc = str(row.get("description") or "").strip()

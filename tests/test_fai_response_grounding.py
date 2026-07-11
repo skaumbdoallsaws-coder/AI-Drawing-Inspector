@@ -165,6 +165,23 @@ def test_missing_numeric_answer_gets_prefix_from_production_json_support():
     assert "1.95 mm above the upper limit" in cleaned, cleaned
 
 
+def test_numeric_out_of_tolerance_row_is_grounded_while_status_is_pending():
+    import json as _json
+
+    rows = [
+        {"char_number": "5", "description": "Pin bore diameter", "nominal": 30.0,
+         "tol_plus": 0.0, "tol_minus": 0.0, "measured": 32.0, "status": "PENDING"}
+    ]
+    support = "FAI TABLE:\n" + _json.dumps(rows, default=str)
+    cleaned = server._clean_report_fai_response(
+        "The measured deviation applies to the inspected part.",
+        support_text=support,
+        failed_row_count=0,
+    )
+    assert "Characteristic #5" in cleaned, cleaned
+    assert "measured 32.0 mm vs nominal 30.0 mm" in cleaned, cleaned
+
+
 if __name__ == "__main__":
     import traceback
 

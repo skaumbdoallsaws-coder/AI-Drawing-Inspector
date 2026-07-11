@@ -1045,7 +1045,8 @@ Exit gate: follow-up behavior remains correct across tab changes and session tur
 - Reduced the classifier-only catalog payload to selection-relevant metadata while retaining the complete catalog for deterministic validation and execution.
 - Removed execution-only mate prose and detailed receipt errors from the router prompt; those facts remain available to the main agent and executors.
 - Kept the 700-token route JSON decode budget after live testing showed that a lower budget can truncate otherwise valid routes. The fixed schema remains strictly validated.
-- The optimized synthetic route prompt is approximately 5.7k characters, and the 27-case live evaluation passes all routing thresholds.
+- Added route schema v2: the classifier emits only workflow confidence, intent effects/IDs, skill IDs/confidence, and clarification text when needed. The server derives context requirements, side-effect categories, target labels, intent confidence, and skill roles.
+- The optimized synthetic route prompt is approximately 5.7k characters, and the 27-case live evaluation passes all routing thresholds. The latest telemetry measured approximately 2.0 s p50 and 2.54 s p95 for 27 successful route calls, with output-token median reduced to 198.
 
 Production activation remains gated on a fresh p50/p95 latency measurement after this change.
 

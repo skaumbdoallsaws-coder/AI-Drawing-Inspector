@@ -672,9 +672,28 @@ def test_route_schema_matches_runtime_top_level_contract():
     schema = json.loads(
         (SKILL_ROOT / "schemas" / "route.schema.json").read_text(encoding="ascii")
     )
-    assert set(schema["required"]) == set(schema["properties"])
-    assert schema["properties"]["route_version"] == {"const": 1}
+    assert set(schema["required"]) <= set(schema["properties"])
+    assert schema["properties"]["route_version"] == {"const": 2}
     assert schema["additionalProperties"] is False
+
+
+def test_compact_v2_route_derives_server_owned_fields():
+    raw = _route()
+    raw["route_version"] = 2
+    raw.pop("context_requirements")
+    raw.pop("requested_side_effects")
+    raw.pop("clarification_question")
+    for intent in raw["intents"]:
+        intent.pop("confidence")
+        for target in intent["targets"]:
+            target.pop("label")
+    for skill in raw["skill_candidates"]:
+        skill.pop("role")
+    cleaned = validate_route_response(raw, _catalog())
+    assert cleaned is not None
+    assert cleaned["route_version"] == 2
+    assert cleaned["context_requirements"] == ["fai.characteristics"]
+    assert cleaned["requested_side_effects"]["viewport_write"] is False
 
 
 def test_labeled_route_fixture_is_ascii_unique_and_has_fixed_effect_expectations():

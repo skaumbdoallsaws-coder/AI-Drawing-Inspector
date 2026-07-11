@@ -91,10 +91,14 @@ from ai_inspector.agent_skills import (
     classify_shadow_route,
     compose_prompt_sections,
     merge_executor_tool_calls,
+    normalize_route_effect_semantics,
     plan_registered_executor,
+    resolve_route_referents,
     sanitize_execution_receipts,
+    sanitize_workflow_state,
     tool_policy_metadata,
     validate_ui_action_bundle,
+    WorkflowStateStore,
 )
 
 # Configure logging
@@ -13971,6 +13975,7 @@ class AgentChatRequest(BaseModel):
     image: Optional[str] = None  # Base64-encoded screenshot from camera button
     agent_type: Optional[str] = "inspector"  # "inspector", "deviation-analyst", or "parts-finder"
     cross_agent_context: Optional[str] = None  # Summary from a prior agent conversation
+    session_id: Optional[str] = None  # Stable browser chat/agent session for workflow continuity
 
 
 class AgentSuggestionsRequest(BaseModel):
@@ -15415,6 +15420,8 @@ def normalize_agent_context(ctx: dict) -> dict:
             flat.setdefault("assembly_configurations", assembly["configurations"])
         if assembly.get("active_config"):
             flat.setdefault("active_assembly_config", assembly["active_config"])
+        if assembly.get("assembly_number"):
+            flat.setdefault("assembly_number", assembly["assembly_number"])
         if assembly.get("part_properties"):
             flat.setdefault("part_properties", assembly["part_properties"])
         if assembly.get("explode_steps"):
@@ -15424,6 +15431,10 @@ def normalize_agent_context(ctx: dict) -> dict:
         # Session
         if session.get("paused_walkthrough"):
             flat.setdefault("paused_walkthrough", session["paused_walkthrough"])
+        if isinstance(session.get("asset_identity"), dict):
+            flat.setdefault("asset_identity", session["asset_identity"])
+        if isinstance(session.get("skill_workflow_state"), dict):
+            flat.setdefault("skill_workflow_state", session["skill_workflow_state"])
 
         # Viewport (hybrid intent layer): factual digest for the intent
         # classifier -- motion groups, part legend, live viewport state.
@@ -17291,6 +17302,7 @@ def _compose_production_skill_prompt(
     route: Optional[Dict[str, Any]],
     *,
     mode: str,
+    workflow_state: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     """Build the selected-skill Sage prompt or return a legacy fallback reason."""
     if not route:
@@ -17336,8 +17348,25 @@ def _compose_production_skill_prompt(
         "ACTIVE WORKFLOW",
         f"Workflow: {workflow.manifest.id}@{workflow.manifest.version}",
         f"Mode: {mode}",
-        "Selected skills:",
     ]
+    if workflow_state and workflow_state.get("workflow_id") == workflow.manifest.id:
+        selection_lines.extend([
+            f"Current status: {workflow_state.get('status') or 'active'}",
+            f"Current stage: {workflow_state.get('stage') or workflow.manifest.stages[0]}",
+            f"Objective: {workflow_state.get('objective') or workflow.manifest.description}",
+        ])
+        referents = workflow_state.get("referents")
+        if isinstance(referents, dict) and referents:
+            selection_lines.append(
+                "Resolved referents: "
+                + json.dumps(referents, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            )
+        selection_lines.extend([
+            "Workflow state preserves semantic history only; it is not current viewport state.",
+            "For visibility, highlights, motion, RPM, and active tab, current live viewport facts override workflow state, prior receipts, and conversation history.",
+            "Never describe a prior visual state as current after a refresh or when live viewport facts disagree.",
+        ])
+    selection_lines.append("Selected skills:")
     for package in selected:
         manifest = package.manifest
         selection_lines.append(
@@ -17408,7 +17437,7 @@ async def agent_skill_runtime_status():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     result: Dict[str, Any] = {
-        "phase": 4,
+        "phase": 5,
         "flags": settings.to_dict(),
         "production_chat_integration": settings.enabled,
         "shadow_router": {
@@ -17422,6 +17451,10 @@ async def agent_skill_runtime_status():
             "cache": _SKILL_ROUTE_PRODUCTION_CACHE.stats(),
         },
         "tool_policy": tool_policy_metadata(),
+        "workflow_state": {
+            "production": _SKILL_WORKFLOW_STATE_STORE.stats(),
+            "shadow": _SKILL_WORKFLOW_STATE_SHADOW_STORE.stats(),
+        },
         "runtime_loaded": False,
         "skills": [],
         "workflows": [],
@@ -17516,7 +17549,7 @@ async def agent_skill_test_compose(request: AgentSkillTestComposeRequest):
             }
         )
     return {
-        "phase": 4,
+        "phase": 5,
         "flags": settings.to_dict(),
         "production_chat_integration": settings.enabled,
         "workflow": {
@@ -17536,6 +17569,190 @@ _SKILL_ROUTE_SHADOW_CACHE = ExactRouteCache(max_entries=256, ttl_seconds=600.0)
 _SKILL_ROUTE_PRODUCTION_CACHE = ExactRouteCache(max_entries=256, ttl_seconds=600.0)
 _SKILL_ROUTE_SHADOW_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="skill-route-shadow")
 _SKILL_ROUTE_SHADOW_SLOTS = threading.BoundedSemaphore(3)
+
+
+def _workflow_state_float_env(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _workflow_state_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+_SKILL_WORKFLOW_STATE_STORE = WorkflowStateStore(
+    ttl_seconds=_workflow_state_float_env(
+        "INSPECTORPRO_WORKFLOW_STATE_TTL_SECONDS", 1800.0, 60.0, 86400.0
+    ),
+    max_sessions=_workflow_state_int_env(
+        "INSPECTORPRO_WORKFLOW_STATE_MAX_SESSIONS", 512, 8, 4096
+    ),
+)
+_SKILL_WORKFLOW_STATE_SHADOW_STORE = WorkflowStateStore(
+    ttl_seconds=_workflow_state_float_env(
+        "INSPECTORPRO_WORKFLOW_STATE_TTL_SECONDS", 1800.0, 60.0, 86400.0
+    ),
+    max_sessions=_workflow_state_int_env(
+        "INSPECTORPRO_WORKFLOW_STATE_MAX_SESSIONS", 512, 8, 4096
+    ),
+)
+
+
+def _workflow_asset_fingerprint(ctx: Optional[Dict[str, Any]]) -> str:
+    """Compute continuity identity from asset IDs only, never from viewport state."""
+    ctx = ctx if isinstance(ctx, dict) else {}
+    supplied = ctx.get("asset_identity") if isinstance(ctx.get("asset_identity"), dict) else {}
+    viewport = ctx.get("viewport_context") if isinstance(ctx.get("viewport_context"), dict) else {}
+    motion = viewport.get("motion") if isinstance(viewport.get("motion"), dict) else {}
+    motions = motion.get("motions") if isinstance(motion.get("motions"), list) else []
+    motion_ids = sorted({
+        _skill_route_text(item.get("motion_id"), 120)
+        for item in motions
+        if isinstance(item, dict) and _skill_route_text(item.get("motion_id"), 120)
+    })
+    supplied_motion_ids = supplied.get("motion_package_ids")
+    if isinstance(supplied_motion_ids, list):
+        motion_ids = sorted({
+            *motion_ids,
+            *[_skill_route_text(item, 120) for item in supplied_motion_ids if _skill_route_text(item, 120)],
+        })
+    identity = {
+        "part_number": _skill_route_text(ctx.get("part_number") or supplied.get("part_number"), 120),
+        "part_revision": _skill_route_text(
+            ctx.get("revision") or ctx.get("active_revision") or supplied.get("part_revision"), 40
+        ),
+        "assembly_number": _skill_route_text(ctx.get("assembly_number") or supplied.get("assembly_number"), 120),
+        "assembly_config": _skill_route_text(
+            ctx.get("active_assembly_config") or supplied.get("assembly_config"), 80
+        ),
+        "fai_revision": _skill_route_text(supplied.get("fai_revision"), 40),
+        "motion_package_ids": motion_ids,
+        "motion_asset_pin": _skill_route_text(supplied.get("motion_asset_pin"), 100),
+    }
+    if not any((identity["part_number"], identity["assembly_number"], identity["motion_package_ids"])):
+        return ""
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "asset-v1:" + hashlib.sha256(canonical.encode("ascii")).hexdigest()[:32]
+
+
+def _validated_workflow_state_mirror(value: Any, asset_fingerprint: str) -> Optional[Dict[str, Any]]:
+    state = sanitize_workflow_state(
+        value,
+        expected_asset_fingerprint=asset_fingerprint,
+        now_epoch=time.time(),
+    )
+    if not state:
+        return None
+    try:
+        workflows, _skills = _get_agent_skill_runtime()
+        package = workflows.get(state["workflow_id"], state["version"])
+    except SkillRuntimeError:
+        return None
+    if state["stage"] not in package.manifest.stages:
+        return None
+    return state
+
+
+def _workflow_abandonment_requested(message: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
+    return bool(re.search(
+        r"^(?:please )?(?:cancel|abandon|end) (?:this |the )?(?:workflow|disposition|analysis)$"
+        r"|^(?:please )?(?:forget (?:this|that)|start over)(?: (?:workflow|analysis|disposition))?$",
+        normalized,
+    ))
+
+
+def _record_workflow_state_event(event: str) -> None:
+    if event not in {"expired", "invalidated_asset_change", "abandoned:user_requested"}:
+        return
+    record_workflow_stage(
+        workflow="skill_workflow_state",
+        stage=event.split(":", 1)[0],
+        latency_ms=0.0,
+        route=event,
+        agentType="deviation-analyst",
+    )
+
+
+def _reconcile_workflow_state_store(
+    request: AgentChatRequest,
+    ctx: Dict[str, Any],
+    *,
+    store: WorkflowStateStore,
+    accept_client_mirror: bool,
+    record_events: bool,
+) -> Tuple[str, str, Any]:
+    session_id = store.valid_session_id(request.session_id)
+    asset_fingerprint = _workflow_asset_fingerprint(ctx)
+    if not session_id:
+        return "", asset_fingerprint, None
+    if _workflow_abandonment_requested(request.message):
+        result = store.abandon(session_id, reason="user_requested")
+        if record_events:
+            _record_workflow_state_event(result.event)
+        return session_id, asset_fingerprint, result
+    viewport = ctx.get("viewport_context") if isinstance(ctx.get("viewport_context"), dict) else {}
+    receipts = sanitize_execution_receipts(viewport.get("execution_receipts"))
+    mirror = None
+    if accept_client_mirror and asset_fingerprint:
+        mirror = _validated_workflow_state_mirror(
+            ctx.get("skill_workflow_state"), asset_fingerprint
+        )
+    result = store.reconcile(
+        session_id,
+        asset_fingerprint=asset_fingerprint,
+        client_state=mirror,
+        receipts=receipts,
+    )
+    if record_events:
+        _record_workflow_state_event(result.event)
+    return session_id, asset_fingerprint, result
+
+
+def _reconcile_workflow_state(
+    request: AgentChatRequest,
+    ctx: Dict[str, Any],
+) -> Tuple[str, str, Any]:
+    return _reconcile_workflow_state_store(
+        request,
+        ctx,
+        store=_SKILL_WORKFLOW_STATE_STORE,
+        accept_client_mirror=True,
+        record_events=True,
+    )
+
+
+def _advance_server_workflow_state(
+    session_id: str,
+    asset_fingerprint: str,
+    route: Optional[Dict[str, Any]],
+    context_facts: Dict[str, Any],
+    *,
+    store: Optional[WorkflowStateStore] = None,
+):
+    if not session_id or not asset_fingerprint or not route or not route.get("primary_workflow"):
+        return None
+    try:
+        workflows, _skills = _get_agent_skill_runtime()
+        workflow = workflows.get(str(route["primary_workflow"]))
+    except SkillRuntimeError:
+        return None
+    target_store = store or _SKILL_WORKFLOW_STATE_STORE
+    return target_store.advance(
+        session_id,
+        asset_fingerprint=asset_fingerprint,
+        route=route,
+        context_facts=context_facts,
+        workflow_version=workflow.manifest.version,
+        workflow_stages=workflow.manifest.stages,
+    )
 
 
 def _skill_route_text(value: Any, limit: int = 120) -> str:
@@ -17651,6 +17868,10 @@ def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[
         assets.add("parent_assembly")
         facts["assembly_parts"] = compact_parts
         facts["target_index"]["assembly"].append("current")
+        assembly_number = _skill_route_text(ctx.get("assembly_number"), 120)
+        if assembly_number:
+            facts["assembly_number"] = assembly_number
+            facts["target_index"]["assembly"].append(assembly_number)
     if compact_parts:
         contexts.add("assembly.parts")
     mate_relationships = ctx.get("mate_relationships")
@@ -17749,9 +17970,13 @@ def _skill_route_workflow_state(ctx: Optional[Dict]) -> Dict[str, Any]:
     result = {
         "workflow_id": _skill_route_text(state.get("workflow_id"), 80),
         "version": _skill_route_text(state.get("version"), 30),
+        "status": _skill_route_text(state.get("status"), 20),
         "stage": _skill_route_text(state.get("stage"), 80),
         "objective": _skill_route_text(state.get("objective"), 160),
         "entities": state.get("entities") if isinstance(state.get("entities"), dict) else {},
+        "evidence_refs": state.get("evidence_refs") if isinstance(state.get("evidence_refs"), list) else [],
+        "referents": state.get("referents") if isinstance(state.get("referents"), dict) else {},
+        "milestones": state.get("milestones") if isinstance(state.get("milestones"), dict) else {},
         "pending_clarification": _skill_route_text(state.get("pending_clarification"), 200),
     }
     viewport = ctx.get("viewport_context") if isinstance(ctx.get("viewport_context"), dict) else {}
@@ -17850,7 +18075,13 @@ def _run_skill_route_production(
     )
 
 
-def _skill_route_shadow_done(future) -> None:
+def _skill_route_shadow_done(
+    future,
+    *,
+    session_id: str = "",
+    asset_fingerprint: str = "",
+    context_facts: Optional[Dict[str, Any]] = None,
+) -> None:
     try:
         route = future.result()
         if route:
@@ -17863,6 +18094,14 @@ def _skill_route_shadow_done(future) -> None:
                 (route.get("_shadow") or {}).get("authorized_side_effects"),
                 (route.get("_shadow") or {}).get("cache_hit"),
             )
+            if session_id and asset_fingerprint:
+                _advance_server_workflow_state(
+                    session_id,
+                    asset_fingerprint,
+                    route,
+                    context_facts or {},
+                    store=_SKILL_WORKFLOW_STATE_SHADOW_STORE,
+                )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[SkillRouteShadow] callback failed: %s", exc)
     finally:
@@ -17884,9 +18123,21 @@ def _submit_skill_route_shadow(
     if not settings.shadow:
         return False
     try:
-        catalog, facts = _build_skill_route_catalog(ctx, "sage")
+        session_id, asset_fingerprint, reconciled = _reconcile_workflow_state_store(
+            request,
+            ctx,
+            store=_SKILL_WORKFLOW_STATE_SHADOW_STORE,
+            accept_client_mirror=False,
+            record_events=False,
+        )
+        shadow_ctx = dict(ctx)
+        if reconciled and reconciled.state:
+            shadow_ctx["skill_workflow_state"] = reconciled.state
+        else:
+            shadow_ctx.pop("skill_workflow_state", None)
+        catalog, facts = _build_skill_route_catalog(shadow_ctx, "sage")
         recent_turns = _skill_route_recent_turns(request.history)
-        workflow_state = _skill_route_workflow_state(ctx)
+        workflow_state = _skill_route_workflow_state(shadow_ctx)
     except Exception as exc:  # noqa: BLE001 -- shadow submission is soft-fail
         logger.warning("[SkillRouteShadow] context build failed: %s", exc)
         return False
@@ -17913,7 +18164,14 @@ def _submit_skill_route_shadow(
             settings.router_model,
             request.agent_type,
         )
-        future.add_done_callback(_skill_route_shadow_done)
+        future.add_done_callback(
+            lambda done: _skill_route_shadow_done(
+                done,
+                session_id=session_id,
+                asset_fingerprint=asset_fingerprint,
+                context_facts=facts,
+            )
+        )
         return True
     except Exception as exc:  # noqa: BLE001
         _SKILL_ROUTE_SHADOW_SLOTS.release()
@@ -18042,6 +18300,10 @@ def _message_explicitly_requests_viewport_change(text: Any) -> bool:
     ):
         return True
     if re.search(r"\b(highlight|unhighlight|isolate|zoom|fit|pan|focus|select)\b", query):
+        return True
+    if re.search(r"\b(show|display|visualize)\s+(it|that|them)\b", query):
+        return True
+    if re.search(r"\b(add|include)\b", query):
         return True
     if re.search(
         r"\b(show|display|visualize|see|demonstrate|watch|view)\b.*\b(affected|part|"
@@ -18467,6 +18729,9 @@ async def agent_chat(request: AgentChatRequest):
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
         ctx["_user_message"] = request.message
+        _workflow_session_id = ""
+        _workflow_asset_fp = ""
+        _workflow_reconcile_result = None
 
         # Phase 3: Sage's supplier-FAI slice may consume a validated route to
         # assemble a selected-skill prompt. All other turns retain the legacy
@@ -18483,6 +18748,14 @@ async def agent_chat(request: AgentChatRequest):
             and not is_walkthrough
             and not is_sales_coaching
         )
+        if _skill_turn_allowed and _skill_settings and _skill_settings.enabled:
+            _workflow_session_id, _workflow_asset_fp, _workflow_reconcile_result = (
+                _reconcile_workflow_state(request, ctx)
+            )
+            if _workflow_reconcile_result and _workflow_reconcile_result.state:
+                ctx["skill_workflow_state"] = _workflow_reconcile_result.state
+            elif _workflow_reconcile_result:
+                ctx.pop("skill_workflow_state", None)
         if _skill_turn_allowed and _skill_settings and _skill_settings.enabled:
             _skill_failure: Dict[str, Any] = {}
             try:
@@ -18501,10 +18774,21 @@ async def agent_chat(request: AgentChatRequest):
                     request.agent_type,
                     _skill_failure,
                 )
+                _skill_route = resolve_route_referents(
+                    _skill_route,
+                    workflow_state=_skill_workflow_state,
+                    context_facts=_skill_context_facts,
+                )
+                _skill_route = normalize_route_effect_semantics(
+                    _skill_route,
+                    message=request.message,
+                    workflow_state=_skill_workflow_state,
+                )
                 _skill_mode = str(ctx.get("active_mode") or _active_mode or "report_fai").strip()
                 _skill_prompt_plan, _skill_fallback_reason = _compose_production_skill_prompt(
                     _skill_route,
                     mode=_skill_mode,
+                    workflow_state=_skill_workflow_state,
                 )
                 if _skill_prompt_plan:
                     system_prompt = _skill_prompt_plan["prompt"]
@@ -18541,12 +18825,16 @@ async def agent_chat(request: AgentChatRequest):
         elif _skill_turn_allowed:
             _submit_skill_route_shadow(request, ctx, api_key)
 
-        if request.agent_type in {"inspector", "deviation-analyst"} and _is_user_facing_feature_list_request(request.message):
+        if (
+            not _skill_prompt_plan
+            and request.agent_type in {"inspector", "deviation-analyst"}
+            and _is_user_facing_feature_list_request(request.message)
+        ):
             feature_list_result = _feature_list_chat_result(ctx, request.agent_type)
             if feature_list_result:
                 return feature_list_result
 
-        if request.agent_type in {"inspector", "deviation-analyst"}:
+        if not _skill_prompt_plan and request.agent_type in {"inspector", "deviation-analyst"}:
             profile_feature_result = _profile_feature_highlight_chat_result(
                 ctx, request.message, request.agent_type,
             )
@@ -19647,6 +19935,34 @@ async def agent_chat(request: AgentChatRequest):
                 "prompt_accounting": _skill_prompt_plan["accounting"],
                 "fallback": False,
             }
+
+        # Phase 5 continuity is returned only on the controlled production
+        # skills path. Shadow routing may maintain a private shadow state,
+        # but it cannot change browser/session behavior.
+        if _skill_turn_allowed and _skill_settings and _skill_settings.enabled:
+            _workflow_output = _workflow_reconcile_result
+            if (
+                _skill_route
+                and float(_skill_route.get("workflow_confidence") or 0.0)
+                    >= _SKILL_PRODUCTION_MIN_WORKFLOW_CONFIDENCE
+            ):
+                _advanced = _advance_server_workflow_state(
+                    _workflow_session_id,
+                    _workflow_asset_fp,
+                    _skill_route,
+                    _skill_context_facts,
+                )
+                if _advanced is not None:
+                    _workflow_output = _advanced
+            if _workflow_output is not None and _workflow_output.event not in {
+                "empty", "asset_context_unavailable", "invalid_session"
+            }:
+                result["workflow_state"] = _workflow_output.state
+                result["workflow_state_event"] = {
+                    "event": _workflow_output.event,
+                    "asset_fingerprint": _workflow_asset_fp or None,
+                    "server_authoritative": True,
+                }
 
         # Hybrid intent layer: attach the classified viewport intent (already
         # validated server-side). None/timeout means the frontend falls back

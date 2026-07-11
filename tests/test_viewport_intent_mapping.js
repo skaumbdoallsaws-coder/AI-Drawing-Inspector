@@ -400,6 +400,16 @@ for (const item of authorizationFixture.cases || []) {
     });
     check('S classifier motion.requested preserves playback',
         kept.length === 1 && kept[0].args.actions.some(a => a.type === 'play_motion'));
+    const skillKept = _stripUnrequestedMotionPlayback(calls, 'show it', null, {
+        requested_effects: ['highlight_parts', 'play_motion'],
+    });
+    check('S resolved workflow motion preserves playback for explicit pronoun command',
+        skillKept.length === 1 && skillKept[0].args.actions.some(a => a.type === 'play_motion'));
+    const skillQuestion = _stripUnrequestedMotionPlayback(calls, 'what is it?', null, {
+        requested_effects: ['highlight_parts', 'play_motion'],
+    });
+    check('S resolved workflow motion cannot bypass raw question veto',
+        !(skillQuestion[0] && skillQuestion[0].args.actions.some(a => a.type === 'play_motion')));
     const stripped = _stripUnrequestedMotionPlayback(calls, 'show the pin joint', null);
     check('S unrequested playback still stripped without classifier',
         !(stripped[0] && stripped[0].args.actions.some(a => a.type === 'play_motion')));

@@ -39,6 +39,12 @@
       "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
     },
     {
+      "id": "add-named-component",
+      "message": "also add the crankshaft",
+      "source": "phase5-continuity",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
+    },
+    {
       "id": "rotate-view",
       "message": "rotate the view",
       "source": "viewport-mapping-suite",
@@ -133,6 +139,12 @@
       "message": "show the thing",
       "source": "viewport-mapping-suite",
       "expected": {"explicit_action": false, "state_question": false, "allow_additive": false, "allow_destructive": false}
+    },
+    {
+      "id": "show-resolved-pronoun",
+      "message": "show it",
+      "source": "phase5-continuity",
+      "expected": {"explicit_action": true, "state_question": false, "allow_additive": true, "allow_destructive": true}
     },
     {
       "id": "explicit-rpm",

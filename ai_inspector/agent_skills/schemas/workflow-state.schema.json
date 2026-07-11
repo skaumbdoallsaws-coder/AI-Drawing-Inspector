@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:inspectorpro:schema:workflow-state:v1",
+  "title": "InspectorPro Workflow State v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "state_version",
+    "workflow_id",
+    "version",
+    "status",
+    "stage",
+    "objective",
+    "entities",
+    "evidence_refs",
+    "referents",
+    "milestones",
+    "last_execution_receipts",
+    "pending_clarification",
+    "asset_fingerprint",
+    "revision",
+    "created_at",
+    "updated_at",
+    "expires_at"
+  ],
+  "properties": {
+    "state_version": {"const": 1},
+    "workflow_id": {"type": "string", "pattern": "^[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$", "maxLength": 80},
+    "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "status": {"enum": ["active", "completed"]},
+    "stage": {"type": "string", "maxLength": 80},
+    "objective": {"type": "string", "maxLength": 180},
+    "entities": {"type": "object", "maxProperties": 20},
+    "evidence_refs": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 180}},
+    "referents": {"type": "object", "maxProperties": 12},
+    "milestones": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failed_characteristic_identified", "disposition_grounded", "visualization_requested", "visualization_succeeded"],
+      "properties": {
+        "failed_characteristic_identified": {"type": "boolean"},
+        "disposition_grounded": {"type": "boolean"},
+        "visualization_requested": {"type": "boolean"},
+        "visualization_succeeded": {"type": "boolean"}
+      }
+    },
+    "last_execution_receipts": {"type": "array", "maxItems": 8, "items": {"type": "object"}},
+    "pending_clarification": {"oneOf": [{"type": "null"}, {"type": "string", "maxLength": 240}]},
+    "asset_fingerprint": {"type": "string", "minLength": 1, "maxLength": 100},
+    "revision": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "maxLength": 40},
+    "updated_at": {"type": "string", "maxLength": 40},
+    "expires_at": {"type": "string", "maxLength": 40}
+  }
+}

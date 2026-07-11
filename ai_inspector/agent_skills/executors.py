@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 _RPM_RE = re.compile(r"(?i)\b(\d+(?:\.\d+)?)\s*rpm\b")
 _ADD_RE = re.compile(r"(?i)\b(also|add|include|plus|as well|keep)\b")
+_RESTORE_RE = re.compile(r"(?i)\b(back|again|restore|reveal|visible|unhide)\b")
 _SLOW_RE = re.compile(r"(?i)\b(slow|slowly|detail|carefully)\b")
 
 
@@ -46,7 +47,79 @@ EXECUTOR_RECIPES: dict[str, dict[str, Any]] = {
         "effects": ("highlight_features",),
         "preserves": ("viewport.motion", "viewport.hidden_parts", "viewport.rotation"),
     },
+    "hide-resolved-parts": {
+        "effects": ("hide_parts",),
+        "preserves": ("viewport.highlight", "viewport.motion", "viewport.rotation"),
+    },
+    "show-resolved-parts": {
+        "effects": ("show_parts",),
+        "preserves": ("viewport.highlight", "viewport.motion", "viewport.rotation"),
+    },
+    "restore-assembly-display": {
+        "effects": ("show_parts", "clear_highlight"),
+        "preserves": ("viewport.motion", "viewport.rotation"),
+    },
+    "clear-assembly-highlight": {
+        "effects": ("clear_highlight",),
+        "preserves": ("viewport.hidden_parts", "viewport.motion", "viewport.rotation"),
+    },
 }
+
+
+def normalize_route_effect_semantics(
+    route: Mapping[str, Any] | None,
+    *,
+    message: str,
+    workflow_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Normalize ambiguous display vocabulary into the app's tool semantics.
+
+    The semantic router still decides the target and requested write. This
+    deterministic layer only distinguishes additive selection from restoring
+    a hidden part, which are separate viewport state domains.
+    """
+    if not route:
+        return None
+    normalized = copy.deepcopy(dict(route))
+    additive = bool(_ADD_RE.search(message or "")) and not bool(_RESTORE_RE.search(message or ""))
+    compact_message = re.sub(r"[^a-z]+", " ", str(message or "").lower()).strip()
+    pronoun_show = bool(re.fullmatch(
+        r"(?:please )?(?:show|display|visualize)(?: me)? (?:it|that|them)(?: please)?",
+        compact_message,
+    ))
+    referents = workflow_state.get("referents") if isinstance(workflow_state, Mapping) else {}
+    referents = referents if isinstance(referents, Mapping) else {}
+    prior_intents = {str(value) for value in (referents.get("last_intent_kinds") or [])}
+    for intent in normalized.get("intents") or []:
+        if not isinstance(intent, dict):
+            continue
+        targets = intent.get("targets") or []
+        has_part = any(
+            isinstance(target, Mapping) and target.get("kind") == "part" and target.get("id")
+            for target in targets
+        )
+        has_motion_group = any(
+            isinstance(target, Mapping) and target.get("kind") == "motion_group" and target.get("id")
+            for target in targets
+        )
+        effects = list(intent.get("requested_effects") or [])
+        if (
+            pronoun_show
+            and has_motion_group
+            and "explain_motion" in prior_intents
+            and "play_motion" not in effects
+        ):
+            effects.append("play_motion")
+        if has_motion_group and "play_motion" in effects and "highlight_parts" not in effects:
+            effects = [effect for effect in effects if effect != "highlight_features"]
+            effects.insert(0, "highlight_parts")
+            intent["requested_effects"] = list(dict.fromkeys(effects))
+        elif additive and has_part and "show_parts" in effects and "highlight_parts" not in effects:
+            effects = [
+                "highlight_parts" if effect == "show_parts" else effect for effect in effects
+            ]
+        intent["requested_effects"] = list(dict.fromkeys(effects))
+    return normalized
 
 
 def _intent_effects(route: Mapping[str, Any]) -> set[str]:
@@ -151,6 +224,42 @@ def plan_registered_executor(
             )
 
     part_ids = _target_ids(route, "part")
+    if "hide_parts" in effects and part_ids:
+        action = {"type": "set_part_display", "part_numbers": part_ids, "hidden": True}
+        return ExecutorPlan(
+            executor_id="hide-resolved-parts",
+            target_ids=tuple(part_ids),
+            requested_effects=("hide_parts",),
+            tool_calls=({"name": "ui_actions", "args": {"workspace": "assembly", "actions": [action]}},),
+        )
+    if "show_parts" in effects and part_ids:
+        action = {"type": "clear_part_display", "part_numbers": part_ids}
+        return ExecutorPlan(
+            executor_id="show-resolved-parts",
+            target_ids=tuple(part_ids),
+            requested_effects=("show_parts",),
+            tool_calls=({"name": "ui_actions", "args": {"workspace": "assembly", "actions": [action]}},),
+        )
+    if "show_parts" in effects and not part_ids:
+        actions = [{"type": "clear_part_display", "all": True}]
+        requested_effects = ["show_parts"]
+        if "clear_highlight" in effects:
+            actions.append({"type": "clear_part_highlight", "all": True})
+            requested_effects.append("clear_highlight")
+        return ExecutorPlan(
+            executor_id="restore-assembly-display",
+            target_ids=("all",),
+            requested_effects=tuple(requested_effects),
+            tool_calls=({"name": "ui_actions", "args": {"workspace": "assembly", "actions": actions}},),
+        )
+    if "clear_highlight" in effects:
+        action = {"type": "clear_part_highlight", "all": True}
+        return ExecutorPlan(
+            executor_id="clear-assembly-highlight",
+            target_ids=("all",),
+            requested_effects=("clear_highlight",),
+            tool_calls=({"name": "ui_actions", "args": {"workspace": "assembly", "actions": [action]}},),
+        )
     if "highlight_parts" in effects and part_ids:
         action = {
             "type": "set_part_highlight",
@@ -188,6 +297,14 @@ def merge_executor_tool_calls(
         for action in ((call.get("args") or {}).get("actions") or [])
         if isinstance(action, dict) and action.get("type")
     }
+    for family in (
+        {"set_part_highlight", "clear_part_highlight"},
+        {"set_part_display", "clear_part_display"},
+        {"play_motion", "pause_motion", "stop_motion", "set_motion_rpm", "seek_motion"},
+        {"rotate_view", "stop_rotate_view"},
+    ):
+        if managed_action_types.intersection(family):
+            managed_action_types.update(family)
     manages_features = any(call.get("name") == "highlight_features" for call in executor_calls)
     merged: list[dict[str, Any]] = []
     for original in existing_calls:

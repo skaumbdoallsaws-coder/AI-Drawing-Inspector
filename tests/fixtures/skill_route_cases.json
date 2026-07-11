@@ -8,7 +8,8 @@
     "viewport_effect_accuracy": 1.0,
     "asset_effect_accuracy": 1.0,
     "skill_accuracy": 0.85,
-    "skill_precision_accuracy": 1.0
+    "skill_precision_accuracy": 1.0,
+    "continuation_accuracy": 0.90
   },
   "cases": [
     {
@@ -163,8 +164,79 @@
         {"role": "user", "text": "What motion will be affected by characteristic 5?"},
         {"role": "assistant", "text": "The failed characteristic affects the pin-joint motion group."}
       ],
-      "workflow_state": {"workflow_id": "supplier-fai-disposition", "version": "1.0.0", "stage": "motion_explanation"},
+      "workflow_state": {
+        "workflow_id": "supplier-fai-disposition",
+        "version": "1.0.0",
+        "status": "active",
+        "stage": "trace_assembly_impact",
+        "objective": "Disposition failed characteristic 5",
+        "entities": {
+          "characteristic_numbers": ["5"],
+          "motion_group_ids": ["synthetic-affected-group"]
+        },
+        "evidence_refs": ["fai:SYNTH-P1:5", "motion-group:synthetic-affected-group"],
+        "referents": {
+          "last_characteristic_numbers": ["5"],
+          "last_motion_group_ids": ["synthetic-affected-group"],
+          "last_intent_kinds": ["explain_motion"]
+        }
+      },
       "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion", "control-cad-viewport"], "viewport_write": true, "asset_write": false, "continue_existing_workflow": true}
+    },
+    {
+      "id": "fai-follow-up-bring-that-back",
+      "context": "fai_motion",
+      "message": "Bring that back.",
+      "history": [
+        {"role": "user", "text": "Hide the synthetic lower housing."},
+        {"role": "assistant", "text": "The synthetic lower housing is hidden."}
+      ],
+      "workflow_state": {
+        "workflow_id": "supplier-fai-disposition",
+        "version": "1.0.0",
+        "status": "active",
+        "stage": "visualize_affected_context",
+        "objective": "Disposition failed characteristic 5",
+        "entities": {
+          "characteristic_numbers": ["5"],
+          "part_numbers": ["SYNTH-H1"]
+        },
+        "evidence_refs": ["fai:SYNTH-P1:5"],
+        "referents": {
+          "last_part_numbers": ["SYNTH-H1"],
+          "last_requested_effects": ["hide_parts"],
+          "last_targets": [
+            {"kind": "part", "id": "SYNTH-H1", "label": "Synthetic lower housing"}
+          ]
+        }
+      },
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["control-cad-viewport"], "viewport_write": true, "asset_write": false, "continue_existing_workflow": true}
+    },
+    {
+      "id": "fai-follow-up-add-named-part",
+      "context": "fai_motion",
+      "message": "Also add the synthetic link.",
+      "history": [
+        {"role": "user", "text": "Show the affected joint."},
+        {"role": "assistant", "text": "The affected joint parts are highlighted."}
+      ],
+      "workflow_state": {
+        "workflow_id": "supplier-fai-disposition",
+        "version": "1.0.0",
+        "status": "active",
+        "stage": "visualize_affected_context",
+        "objective": "Disposition failed characteristic 5",
+        "entities": {
+          "characteristic_numbers": ["5"],
+          "motion_group_ids": ["synthetic-affected-group"]
+        },
+        "evidence_refs": ["fai:SYNTH-P1:5", "motion-group:synthetic-affected-group"],
+        "referents": {
+          "last_motion_group_ids": ["synthetic-affected-group"],
+          "last_requested_effects": ["highlight_parts"]
+        }
+      },
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["command"], "skills": ["control-cad-viewport"], "viewport_write": true, "asset_write": false, "continue_existing_workflow": true}
     }
   ]
 }

@@ -16,6 +16,7 @@ from ai_inspector.agent_skills import (  # noqa: E402
     ExactRouteCache,
     classify_production_route,
     merge_executor_tool_calls,
+    normalize_route_effect_semantics,
     plan_registered_executor,
 )
 
@@ -72,6 +73,17 @@ def _facts():
             }
         ]
     }
+
+
+def _part_display_route(effect: str, *, part_id: str | None = "SYNTH-H1"):
+    route = _motion_route(effects=(effect,))
+    route["intents"][0]["kind"] = "visualize_affected_context"
+    route["intents"][0]["targets"] = (
+        [{"kind": "part", "id": part_id, "label": "Synthetic lower housing"}]
+        if part_id else []
+    )
+    route["intents"][0]["requested_effects"] = [effect]
+    return route
 
 
 def test_phase3_registry_resolves_dependency_bounded_skill_compositions():
@@ -172,6 +184,94 @@ def test_registered_executor_resolves_live_group_and_preserves_unrelated_actions
         _motion_route(), context_facts=_facts(), message="what is the affected motion?",
         viewport_authorized=False,
     ) is None
+
+
+def test_registered_executor_owns_hide_reveal_and_restore_followups():
+    hide = plan_registered_executor(
+        _part_display_route("hide_parts"),
+        context_facts=_facts(),
+        message="hide the lower housing",
+        viewport_authorized=True,
+    )
+    assert hide.executor_id == "hide-resolved-parts"
+    assert hide.tool_calls[0]["args"]["actions"] == [{
+        "type": "set_part_display", "part_numbers": ["SYNTH-H1"], "hidden": True,
+    }]
+
+    reveal = plan_registered_executor(
+        _part_display_route("show_parts"),
+        context_facts=_facts(),
+        message="bring that back",
+        viewport_authorized=True,
+    )
+    assert reveal.executor_id == "show-resolved-parts"
+    assert reveal.tool_calls[0]["args"]["actions"] == [{
+        "type": "clear_part_display", "part_numbers": ["SYNTH-H1"],
+    }]
+
+    restore_route = _part_display_route("show_parts", part_id=None)
+    restore_route["intents"][0]["requested_effects"] = ["show_parts", "clear_highlight"]
+    restore = plan_registered_executor(
+        restore_route,
+        context_facts=_facts(),
+        message="bring everything back",
+        viewport_authorized=True,
+    )
+    assert restore.executor_id == "restore-assembly-display"
+    assert restore.tool_calls[0]["args"]["actions"] == [
+        {"type": "clear_part_display", "all": True},
+        {"type": "clear_part_highlight", "all": True},
+    ]
+
+    merged = merge_executor_tool_calls([
+        {"name": "ui_actions", "args": {"workspace": "assembly", "actions": [
+            {"type": "set_part_display", "part_numbers": ["SYNTH-P1"], "hidden": True},
+            {"type": "play_motion", "motion_id": "synthetic-cycle", "rpm": 30},
+        ]}},
+    ], reveal)
+    assert merged[0]["args"]["actions"] == [
+        {"type": "play_motion", "motion_id": "synthetic-cycle", "rpm": 30}
+    ]
+    assert merged[1] == reveal.tool_calls[0]
+
+
+def test_add_named_part_normalizes_selection_without_changing_restore_semantics():
+    pronoun_motion = normalize_route_effect_semantics(
+        _motion_route(effects=("highlight_features",)),
+        message="show it",
+        workflow_state={"referents": {"last_intent_kinds": ["explain_motion"]}},
+    )
+    assert pronoun_motion["intents"][0]["requested_effects"] == [
+        "highlight_parts", "play_motion",
+    ]
+
+    focused_motion = normalize_route_effect_semantics(
+        _motion_route(effects=("highlight_features", "play_motion")),
+        message="show it",
+    )
+    assert focused_motion["intents"][0]["requested_effects"] == [
+        "highlight_parts", "play_motion",
+    ]
+
+    additive = normalize_route_effect_semantics(
+        _part_display_route("show_parts", part_id="SYNTH-P3"),
+        message="also add the synthetic link",
+    )
+    assert additive["intents"][0]["requested_effects"] == ["highlight_parts"]
+    plan = plan_registered_executor(
+        additive,
+        context_facts=_facts(),
+        message="also add the synthetic link",
+        viewport_authorized=True,
+    )
+    assert plan.executor_id == "highlight-resolved-parts"
+    assert plan.tool_calls[0]["args"]["actions"][0]["mode"] == "add"
+
+    restore = normalize_route_effect_semantics(
+        _part_display_route("show_parts", part_id="SYNTH-H1"),
+        message="add the lower housing back",
+    )
+    assert restore["intents"][0]["requested_effects"] == ["show_parts"]
 
 
 def test_production_classifier_metadata_is_distinct_from_shadow():

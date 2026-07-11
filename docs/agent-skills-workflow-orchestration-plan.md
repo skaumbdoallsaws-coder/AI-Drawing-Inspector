@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation plan, revision 7. Phase 0 through Phase 4 are implemented as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, seven v1 skill packages, selected-skill prompt assembly, registered FAI executor recipes, feature flags, gated internal test endpoints, a validated semantic router, a typed UI-action contract, browser postcondition receipts, and receipt-grounded same-turn status. Production skills remain off by default; normal activation is still pending router-latency optimization.
+Implementation plan, revision 8. Phase 0 through Phase 5 are implemented as of 2026-07-10. The current implementation provides measured baselines, shared authorization fixtures, strict versioned skill/workflow registries, prompt-section accounting, seven v1 skill packages, selected-skill prompt assembly, registered FAI executor recipes, feature flags, gated internal test endpoints, a validated semantic router, a typed UI-action contract, browser postcondition receipts, receipt-grounded same-turn status, and bounded multi-turn workflow continuity with refresh and asset reconciliation. Production skills remain off by default; normal activation is still pending router-latency optimization.
 
 ## Purpose
 
@@ -1029,11 +1029,14 @@ Exit gate: no action is claimed without a successful receipt.
 
 ### Phase 5 - Multi-turn workflow state
 
-- Persist workflow stage, entities, evidence references, and referents.
-- Support follow-ups such as "show it", "bring that back", and "add the crankshaft" without replaying stale assumptions.
-- Add workflow completion and abandonment rules.
-- Reconcile page refreshes with the asset fingerprint and live frontend state; invalidate stale references when assets change.
-- Apply configurable inactivity expiry without changing the viewport.
+- Implemented a strict workflow-state contract carrying workflow stage, objective, entities, evidence references, semantic referents, milestones, bounded receipts, asset fingerprint, revision, and expiry.
+- Added separate bounded TTL/LRU production and shadow stores keyed by a stable browser chat-session ID. Shadow state cannot leak into production continuity.
+- Added deterministic continuation-target resolution against current live IDs. `Show it`, `Bring that back`, and additive named-part commands now compose with the semantic router without replaying prior effects.
+- Extended registered executors for hide, reveal, restore, and clear-highlight behavior while preserving unrelated motion, display, highlight, and rotation domains.
+- Added idempotent receipt reconciliation. A multi-effect visualization succeeds only when every required browser action has a successful receipt.
+- Added completion and narrow explicit-abandonment rules.
+- Added browser persistence for semantic state only. Refresh does not replay viewport effects; matching assets resume, changed assets invalidate stale references, and configurable inactivity expiry changes no viewport state.
+- Verification passed 164/164 Python checks, 135/135 browser/runtime checks, a 27-case semantic evaluation with 100% workflow/effect/skill/continuation accuracy, and a 22/22 live continuity smoke.
 
 Exit gate: follow-up behavior remains correct across tab changes and session turns.
 

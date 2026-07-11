@@ -176,7 +176,7 @@ def test_internal_status_reports_phase4_tool_policy():
             os.environ.pop("INSPECTORPRO_SKILLS_SHADOW", None)
         else:
             os.environ["INSPECTORPRO_SKILLS_SHADOW"] = previous_shadow
-    assert result["phase"] == 4
+    assert result["phase"] == 5
     assert result["tool_policy"]["contract_version"] == 1
     assert result["tool_policy"]["action_count"] == 21
 

@@ -29,6 +29,7 @@ from .executors import (
     EXECUTOR_RECIPES,
     ExecutorPlan,
     merge_executor_tool_calls,
+    normalize_route_effect_semantics,
     plan_registered_executor,
 )
 from .shadow import classify_production_route, classify_shadow_route
@@ -39,6 +40,15 @@ from .tool_policy import (
     sanitize_execution_receipts,
     tool_policy_metadata,
     validate_ui_action_bundle,
+)
+from .workflow_state import (
+    WORKFLOW_STATE_VERSION,
+    WorkflowStateResult,
+    WorkflowStateStore,
+    advance_workflow_state,
+    compact_execution_receipts,
+    resolve_route_referents,
+    sanitize_workflow_state,
 )
 
 __all__ = [
@@ -66,6 +76,7 @@ __all__ = [
     "EXECUTOR_RECIPES",
     "ExecutorPlan",
     "merge_executor_tool_calls",
+    "normalize_route_effect_semantics",
     "plan_registered_executor",
     "classify_production_route",
     "classify_shadow_route",
@@ -75,4 +86,11 @@ __all__ = [
     "sanitize_execution_receipts",
     "tool_policy_metadata",
     "validate_ui_action_bundle",
+    "WORKFLOW_STATE_VERSION",
+    "WorkflowStateResult",
+    "WorkflowStateStore",
+    "advance_workflow_state",
+    "compact_execution_receipts",
+    "resolve_route_referents",
+    "sanitize_workflow_state",
 ]

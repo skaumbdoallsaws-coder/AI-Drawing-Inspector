@@ -109,6 +109,19 @@ Required schema:
 
 Routing rules:
 - Interpret the user's meaning, including typos, awkward grammar, and recent referents.
+- Treat ACTIVE_WORKFLOW_STATE_UNTRUSTED as continuity evidence only after resolving
+  its IDs against the current candidate catalog and live target index. A tab change
+  does not end an active workflow; an asset change is handled outside this router.
+- When a short follow-up such as "show it", "bring that back", or "add this part"
+  clearly refers to validated recent targets or referents, keep the registered
+  workflow and set continue_existing_workflow true. If more than one current target
+  fits, ask for clarification instead of guessing.
+- Never repeat a prior turn's requested effect merely because it appears in workflow
+  state. Side effects must be explicitly requested by the current user message and
+  must still pass the independent deterministic authorization gate.
+- Set continue_existing_workflow false for a new objective, an explicit restart, or
+  when there is no matching active workflow state. Do not carry stale referents into
+  a newly selected workflow.
 - Resolve a named component against LIVE_CONTEXT_UNTRUSTED assembly_parts descriptions
   and target IDs. When one description clearly matches, use that part ID and do not
   ask for clarification. For example, a direct "hide the lower housing" command is
@@ -165,6 +178,9 @@ Routing rules:
   clear_highlight, fill_fai, set_fai_tolerance, navigate_tab.
 - Use hide_parts for a hide command, show_parts for reveal/restore of named parts,
   highlight_parts for a part highlight, and fill_fai for measured-value entry.
+- In an existing visual selection, "add/include [named part]" requests
+  highlight_parts for that part with additive selection semantics. Use show_parts
+  only for visibility restoration such as "bring that back", "unhide", or "reveal".
 - "Restore all", "bring everything back", and equivalent commands request
   show_parts and clear_highlight viewport effects.
 - A command to fill all FAI rows with stated exclusions is an edit request for

@@ -43861,9 +43861,20 @@
             // === Session Engine (Phase 1) ===
             // Single session object per agent replaces scattered parallel maps.
             // UI is a projection of session state, not the source of truth.
+            let _agentChatSessionSeq = 0;
+            function _newAgentChatSessionId(agentKey) {
+                _agentChatSessionSeq += 1;
+                let suffix = Date.now().toString(36) + ':' + _agentChatSessionSeq;
+                try {
+                    if (crypto && typeof crypto.randomUUID === 'function') suffix = crypto.randomUUID();
+                } catch (_) {}
+                return `agent-session:${String(agentKey || 'unknown')}:${suffix}`;
+            }
+
             function createAgentSession(agentKey) {
                 return {
                     key: agentKey,
+                    chatSessionId: _newAgentChatSessionId(agentKey),
                     messages: [],                // canonical conversation history
                     summary: '',                 // cross-agent summary for this session
                     scrollTop: 0,
@@ -43873,6 +43884,8 @@
                     requestId: 0,
                     lastPayload: null,
                     pendingCrossContext: null,
+                    workflowState: null,
+                    workflowStateEvent: null,
                 };
             }
 
@@ -44111,6 +44124,9 @@
                     scrollTop: session.scrollTop,
                     pendingInput: session.pendingInput,
                     pendingCrossContext: session.pendingCrossContext,
+                    chatSessionId: session.chatSessionId,
+                    workflowState: session.workflowState,
+                    workflowStateEvent: session.workflowStateEvent,
                 };
             }
 
@@ -44151,6 +44167,11 @@
                 session.scrollTop = rawSession.scrollTop || 0;
                 session.pendingInput = rawSession.pendingInput || '';
                 session.pendingCrossContext = rawSession.pendingCrossContext || null;
+                session.chatSessionId = rawSession.chatSessionId || _newAgentChatSessionId(agentKey);
+                session.workflowState = rawSession.workflowState && typeof rawSession.workflowState === 'object'
+                    ? JSON.parse(JSON.stringify(rawSession.workflowState)) : null;
+                session.workflowStateEvent = rawSession.workflowStateEvent && typeof rawSession.workflowStateEvent === 'object'
+                    ? JSON.parse(JSON.stringify(rawSession.workflowStateEvent)) : null;
                 session.waiting = false;
                 session.requestId = 0;
                 session.pendingCapture = null;
@@ -44166,6 +44187,8 @@
                     s.messages = []; s.summary = ''; s.scrollTop = 0;
                     s.pendingInput = ''; s.pendingCrossContext = null;
                     s.waiting = false; s.requestId = 0; s.pendingCapture = null;
+                    s.chatSessionId = _newAgentChatSessionId(key);
+                    s.workflowState = null; s.workflowStateEvent = null;
                 }
             }
 
@@ -44294,6 +44317,8 @@
                         s.messages = []; s.summary = ''; s.scrollTop = 0;
                         s.pendingInput = ''; s.pendingCrossContext = null;
                         s.waiting = false; s.requestId = 0; s.pendingCapture = null;
+                        s.chatSessionId = _newAgentChatSessionId(key);
+                        s.workflowState = null; s.workflowStateEvent = null;
                     }
                 }
                 return true;
@@ -44893,14 +44918,63 @@
                 return { contract_version: 1, tab, mode: mode || null, submode, state: st };
             }
 
+            function _workflowAssetIdentity() {
+                const summary = state.motionPkgInfo && state.motionPkgInfo.summary;
+                const motions = summary && Array.isArray(summary.available_motions)
+                    ? summary.available_motions : [];
+                const motionIds = motions
+                    .map(item => String(item && item.motion_id || '').trim())
+                    .filter(Boolean)
+                    .sort();
+                const pin = state.motionPkgInfo && state.motionPkgInfo.pin;
+                return {
+                    part_number: state.partNumber || null,
+                    part_revision: state.activeRevision || null,
+                    assembly_number: assemblyContext && assemblyContext.assembly_number
+                        ? String(assemblyContext.assembly_number) : null,
+                    assembly_config: state.activeAssemblyConfig || null,
+                    fai_revision: state.faiDrawingMapRevision || null,
+                    motion_package_ids: motionIds,
+                    motion_asset_pin: pin && pin.sha256 ? String(pin.sha256) : null,
+                };
+            }
+
+            function _applyServerWorkflowState(session, data) {
+                if (!session || !data || typeof data !== 'object') return;
+                const hasState = Object.prototype.hasOwnProperty.call(data, 'workflow_state');
+                const event = data.workflow_state_event;
+                if (!hasState && (!event || typeof event !== 'object')) return;
+                if (hasState) {
+                    const value = data.workflow_state;
+                    session.workflowState = value && typeof value === 'object' && value.state_version === 1
+                        ? JSON.parse(JSON.stringify(value)) : null;
+                }
+                session.workflowStateEvent = event && typeof event === 'object'
+                    ? JSON.parse(JSON.stringify(event)) : null;
+                scheduleChatRegistrySave();
+                console.log('[WorkflowState]', {
+                    session: session.chatSessionId,
+                    event: session.workflowStateEvent && session.workflowStateEvent.event,
+                    workflow: session.workflowState && session.workflowState.workflow_id,
+                    stage: session.workflowState && session.workflowState.stage,
+                });
+            }
+
             function buildAgentAttachments(agentType) {
                 const att = { schema_version: 1 };
+                const agentSession = getAgentSession(agentType || currentAgent);
 
                 // SESSION
                 att.session = {
                     agent: agentType || currentAgent,
                     active_tab: state.activeTab || null,
+                    asset_identity: _workflowAssetIdentity(),
                 };
+                if (agentSession && agentSession.workflowState) {
+                    att.session.skill_workflow_state = JSON.parse(
+                        JSON.stringify(agentSession.workflowState)
+                    );
+                }
                 // MODE CONTRACT (mode-aware Sage): facts only — see buildModeContract().
                 const _modeContract = buildModeContract();
                 att.session.active_mode = _modeContract.mode;
@@ -45126,6 +45200,8 @@
                 att.assembly = {
                     context_available: !!assemblyContextAvailable,
                     active_config: state.activeAssemblyConfig || null,
+                    assembly_number: assemblyContext && assemblyContext.assembly_number
+                        ? String(assemblyContext.assembly_number) : null,
                 };
                 if (assemblyContext) {
                     if (assemblyContext.all_mate_relationships?.length) {
@@ -45145,6 +45221,30 @@
 
                 return att;
             }
+
+            window.__workflowDbg = {
+                current: () => {
+                    const session = getCurrentAgentSession();
+                    return {
+                        chat_session_id: session && session.chatSessionId,
+                        workflow_state: session && session.workflowState
+                            ? JSON.parse(JSON.stringify(session.workflowState)) : null,
+                        workflow_state_event: session && session.workflowStateEvent
+                            ? JSON.parse(JSON.stringify(session.workflowStateEvent)) : null,
+                        asset_identity: _workflowAssetIdentity(),
+                    };
+                },
+                forAgent: agentKey => {
+                    const session = getAgentSession(agentKey);
+                    return session ? {
+                        chat_session_id: session.chatSessionId,
+                        workflow_state: session.workflowState
+                            ? JSON.parse(JSON.stringify(session.workflowState)) : null,
+                        workflow_state_event: session.workflowStateEvent
+                            ? JSON.parse(JSON.stringify(session.workflowStateEvent)) : null,
+                    } : null;
+                },
+            };
 
             function buildInspectionContext() {
                 return { attachments: buildAgentAttachments(currentAgent) };
@@ -48045,6 +48145,8 @@
             if (/\b(slow|speed)\b.*\b(down|up)\b/.test(query) || /\b(faster|slower)\b/.test(query) || /\b\d{1,4}\s*rpm\b/.test(query)) return true;
             if (/\b(hide|unhide|conceal|restore|bring|reveal|transparent|transparency|opaque|solid|ghost)\b/.test(query)) return true;
             if (/\b(highlight|unhighlight|isolate|zoom|fit|pan|focus|select)\b/.test(query)) return true;
+            if (/\b(show|display|visualize)\s+(it|that|them)\b/.test(query)) return true;
+            if (/\b(add|include)\b/.test(query)) return true;
             // "show/display/see" counts only when it names a visual target
             // or a motion participle. "show me what this failure means in
             // the assembly" names neither -- it is an explanation request.
@@ -48326,11 +48428,19 @@
             return (explicitWhole || (broadSubject && broadAction)) && !targeted;
         }
 
-        function _stripUnrequestedMotionPlayback(toolCalls, messageText, classifiedIntent = null) {
+        function _stripUnrequestedMotionPlayback(
+            toolCalls, messageText, classifiedIntent = null, skillExecution = null
+        ) {
             // The semantic classifier is a second, wording-independent signal
             // that motion WAS requested ("show the joint working"). Union it
             // with the regex so neither channel can wrongly kill playback.
             if (classifiedIntent && classifiedIntent.motion && classifiedIntent.motion.requested === true) {
+                return toolCalls;
+            }
+            const skillEffects = skillExecution && Array.isArray(skillExecution.requested_effects)
+                ? skillExecution.requested_effects : [];
+            if (skillEffects.includes('play_motion')
+                && _messageExplicitlyRequestsViewportChange(messageText)) {
                 return toolCalls;
             }
             // Motion vocabulary alone is not authorization: "what is the
@@ -49365,6 +49475,7 @@
                         history: historyForApi,
                         inspection_context: inspCtx,
                         agent_type: originAgent,
+                        session_id: originSession.chatSessionId,
                     };
                     const sentExecutionReceiptIds = inspCtx.attachments
                         && inspCtx.attachments.viewport
@@ -49389,6 +49500,7 @@
                     if (res.ok) {
                         const data = await res.json();
                         _ackExecutionReceipts(sentExecutionReceiptIds);
+                        _applyServerWorkflowState(originSession, data);
                         response = data.response || data.message || 'No response from agent.';
                         console.log('[Handler] Response keys:', Object.keys(data),
                             'highlight_parts:', data.highlight_parts,
@@ -49467,7 +49579,8 @@
                                     }
                                 }
                                 toolCalls = _stripUnrequestedMotionPlayback(
-                                    toolCalls, messageText, classifiedIntentResult.intent);
+                                    toolCalls, messageText, classifiedIntentResult.intent,
+                                    data.skill_execution);
                                 toolCalls = _normalizeMotionRpmToolCalls(toolCalls, messageText);
                                 const viewportIntentFired = !!(
                                     classifiedIntentResult.applied

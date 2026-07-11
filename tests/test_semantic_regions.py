@@ -2356,11 +2356,27 @@ class _StubAnthropic:
         self.messages = _StubAnthropic._messages_for_test
 
 
+class _StubAsyncMessages:
+    def __init__(self, sync_messages: _StubMessages):
+        self._sync_messages = sync_messages
+
+    async def create(self, **kwargs):
+        return self._sync_messages.create(**kwargs)
+
+
+class _StubAsyncAnthropic:
+    """Async companion used by the main /api/agent/chat provider seam."""
+
+    def __init__(self, *args, **kwargs):
+        self.messages = _StubAsyncMessages(_StubAnthropic._messages_for_test)
+
+
 def _stub_anthropic_response(monkeypatch: pytest.MonkeyPatch, response_text: str) -> _StubMessages:
     import anthropic
     msgs = _StubMessages(response_text)
     _StubAnthropic._messages_for_test = msgs  # type: ignore[attr-defined]
     monkeypatch.setattr(anthropic, "Anthropic", _StubAnthropic)
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _StubAsyncAnthropic)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-stub-key-not-real")
     return msgs
 

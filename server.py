@@ -22,12 +22,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import importlib.util
+import inspect
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any, Tuple
+from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
+from typing import Optional, List, Dict, Any, Tuple, Callable, Awaitable
 
 from dotenv import load_dotenv
 
@@ -100,6 +102,7 @@ from ai_inspector.agent_skills import (
     validate_ui_action_bundle,
     WorkflowStateStore,
 )
+from ai_inspector.chat_streaming import SentenceStreamBuffer, StreamDirectiveFilter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -6204,7 +6207,6 @@ def _resolve_semantic_regions_in_highlight_tool_calls(
     semantic label/regionId (e.g. 'top_wing') instead of a CAD feature
     ID. Valid feature IDs are preserved; semantic tokens are expanded
     to the region's cadFeatureIds."""
-    available_ids = _available_feature_ids_from_context(ctx)
     region_payloads: List[Dict[str, Any]] = []
     seen_regions: set[str] = set()
 
@@ -6220,12 +6222,6 @@ def _resolve_semantic_regions_in_highlight_tool_calls(
             token = str(raw or "").strip()
             if not token:
                 continue
-            feature_ids = _feature_highlight_targets_from_context(ctx, [token])
-            if feature_ids:
-                for fid in feature_ids:
-                    if fid not in repaired:
-                        repaired.append(fid)
-                continue
             semantic_ids, semantic_regions = _semantic_region_highlight_targets(ctx, [token])
             if semantic_ids:
                 for fid in semantic_ids:
@@ -6236,6 +6232,13 @@ def _resolve_semantic_regions_in_highlight_tool_calls(
                     if rid and rid not in seen_regions:
                         region_payloads.append(reg)
                         seen_regions.add(rid)
+                continue
+
+            feature_ids = _feature_highlight_targets_from_context(ctx, [token])
+            if feature_ids:
+                for fid in feature_ids:
+                    if fid not in repaired:
+                        repaired.append(fid)
             else:
                 # Preserve legacy native-tool behavior for unknown tokens:
                 # the frontend may still know how to handle them, and if it
@@ -13962,6 +13965,108 @@ async def get_drawing_render(part_number: str, revision: str = Query(...)):
 
 # ---------- Agent Chat ----------
 
+
+_AGENT_CHAT_STREAM_SINK: ContextVar[Optional[Callable[[str], Optional[Awaitable[None]]]]] = (
+    ContextVar("agent_chat_stream_sink", default=None)
+)
+_AGENT_CHAT_STREAM_META: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "agent_chat_stream_meta", default=None
+)
+
+
+async def _invoke_agent_model(
+    client: Any,
+    *,
+    model: str,
+    max_tokens: int,
+    system: str,
+    messages: List[Dict[str, Any]],
+    stream_sink: Optional[Callable[[str], Optional[Awaitable[None]]]] = None,
+    complete: Optional[Callable[..., Any]] = None,
+) -> Any:
+    """Invoke the main chat model through one injectable async seam.
+
+    The legacy endpoint uses the normal async create path. The streaming
+    endpoint supplies ``stream_sink`` and receives provider text deltas while
+    still returning the provider's final Message object for the unchanged
+    authoritative batch pipeline.
+    """
+
+    kwargs = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": messages,
+    }
+    if complete is not None:
+        response = complete(**kwargs)
+        return await response if inspect.isawaitable(response) else response
+    if stream_sink is None:
+        return await client.messages.create(**kwargs)
+
+    stream_meta = _AGENT_CHAT_STREAM_META.get()
+    if stream_meta is not None:
+        stream_meta["provider_started_perf"] = time.perf_counter()
+    async with client.messages.stream(**kwargs) as stream:
+        async for text_delta in stream.text_stream:
+            if stream_meta is not None and "first_token_perf" not in stream_meta:
+                stream_meta["first_token_perf"] = time.perf_counter()
+            pending = stream_sink(str(text_delta or ""))
+            if inspect.isawaitable(pending):
+                await pending
+        response = await stream.get_final_message()
+    if stream_meta is not None:
+        stream_meta["provider_completed_perf"] = time.perf_counter()
+        usage = getattr(response, "usage", None)
+        stream_meta["usage"] = {
+            "input": int(getattr(usage, "input_tokens", 0) or 0),
+            "output": int(getattr(usage, "output_tokens", 0) or 0),
+            "cache_read": int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            "cache_write": int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+        }
+    return response
+
+
+def _accumulate_response_text(response: Any) -> str:
+    """Accumulate text blocks from a complete Anthropic Message."""
+
+    if isinstance(response, str):
+        return response
+    return "".join(
+        str(block.text)
+        for block in (getattr(response, "content", None) or [])
+        if hasattr(block, "text") and getattr(block, "text", None) is not None
+    )
+
+
+def _extract_agent_directives(
+    text: str,
+    agent_type: str,
+    ctx: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """Extract the provider-native directive channel.
+
+    Legacy line markers are resolved later because they depend on mode-specific
+    target sets. Keeping the native block behind this seam prevents stream and
+    batch provider paths from acquiring separate extraction logic.
+    """
+
+    remaining, native_calls = extract_tool_calls_from_response(text, agent_type)
+    return remaining, {"native_tool_calls": native_calls, "context": ctx or {}}
+
+
+def _assemble_agent_result(response_text: str, **fields: Any) -> Dict[str, Any]:
+    """Build the initial result object from parsed directive fields."""
+
+    result: Dict[str, Any] = {"response": response_text}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        if isinstance(value, (list, dict, str)) and not value:
+            continue
+        result[key] = value
+    return result
+
 class AgentMessage(BaseModel):
     role: str
     content: Optional[str] = None
@@ -16981,6 +17086,103 @@ def _fai_failed_row_prefix_from_support(support_text: str = "") -> str:
     return ""
 
 
+@dataclass
+class _FaiSentenceCleanState:
+    support_lower: str
+    directives_supported: bool
+    multi_instance_supported: bool
+    replacement_seen: bool = False
+    scoping_seen: bool = False
+
+
+def _new_fai_sentence_clean_state(
+    support_text: str = "", failed_row_count: Optional[int] = None
+) -> _FaiSentenceCleanState:
+    support_lower = (support_text or "").lower()
+    return _FaiSentenceCleanState(
+        support_lower=support_lower,
+        directives_supported=bool(_FAI_DIRECTIVE_SUPPORT.search(support_lower)),
+        multi_instance_supported=(failed_row_count is None or failed_row_count > 1),
+    )
+
+
+def _clean_fai_sentence(
+    sentence: str, state: _FaiSentenceCleanState
+) -> List[str]:
+    """Clean one complete FAI sentence using the batch safety rules."""
+
+    sentence = _clean_agent_response(sentence or "")
+    if not sentence:
+        return []
+
+    if "scrap" not in state.support_lower:
+        scrap_map = {
+            "scrap": "reject",
+            "scraps": "rejects",
+            "scrapped": "rejected",
+            "scrapping": "rejecting",
+        }
+
+        def _scrap_repl(match):
+            word = match.group(0)
+            replacement = scrap_map.get(word.lower(), "reject")
+            return replacement.capitalize() if word[:1].isupper() else replacement
+
+        sentence = re.sub(r"(?i)\bscrap(?:ped|ping|s)?\b", _scrap_repl, sentence)
+
+    if not state.directives_supported and _FAI_PROCESS_DIRECTIVES.search(sentence):
+        return []
+
+    scoping_sentence = (
+        "The measured deviation applies to the inspected part; the FAI data does not "
+        "show other instances of this component out of tolerance."
+    )
+    if (
+        not state.multi_instance_supported
+        and _FAI_MULTI_INSTANCE.search(sentence)
+        and _FAI_DEFECT_WORDS.search(sentence)
+    ):
+        if state.scoping_seen:
+            return []
+        state.scoping_seen = True
+        return [scoping_sentence]
+
+    match = _FAI_UNSUPPORTED_CLAIMS.search(sentence)
+    if not match or _fai_term_supported(match.group(0), state.support_lower):
+        return [sentence]
+
+    cleaned = []
+    prefix = sentence[:match.start()].rstrip(" ,;:-")
+    prefix = re.sub(
+        r"(?i)(?:,?\s*(?:so|and|which|meaning|causing|leading to)\b.*)$",
+        "",
+        prefix,
+    ).rstrip(" ,;:-")
+    prefix = re.sub(
+        r"(?i)(?:,?\s*(?:likely|possibly)?\s*(?:allowing|allows|allow|increasing|reducing|causing|leading to|resulting in|expect)\b.*)$",
+        "",
+        prefix,
+    ).rstrip(" ,;:-")
+    prefix = re.sub(
+        r"(?i)\b(?:will|would|can|could|may|shall|must|does|do|did|won'?t|cannot)(?:\s+not)?\s*$",
+        "",
+        prefix,
+    ).rstrip(" ,;:-")
+    if prefix and re.search(
+        r"(?i)\b(measured|limit|tolerance|nominal|oversize|undersize|out of tolerance)\b|\d",
+        prefix,
+    ):
+        cleaned.append(prefix.rstrip(".!?") + ".")
+    if not state.replacement_seen:
+        cleaned.append(
+            "If this is a controlled fit dimension, escalate it for disposition against "
+            "the mating part requirements; exact interference or failure mode is not "
+            "determined from the current FAI data alone."
+        )
+        state.replacement_seen = True
+    return cleaned
+
+
 def _clean_report_fai_response(text: str, support_text: str = "",
                                failed_row_count: Optional[int] = None) -> str:
     """Keep FAI disposition text measured and grounded when the model
@@ -17018,54 +17220,13 @@ def _clean_report_fai_response(text: str, support_text: str = "",
             return f"{grounding_prefix} {text}".strip()
         return text
 
-    replacement = (
-        "If this is a controlled fit dimension, escalate it for disposition against "
-        "the mating part requirements; exact interference or failure mode is not "
-        "determined from the current FAI data alone."
-    )
-    scoping_sentence = (
-        "The measured deviation applies to the inspected part; the FAI data does not "
-        "show other instances of this component out of tolerance."
-    )
     sentences = re.split(r'(?<=[.!?])\s+', text)
     cleaned_parts = []
-    replacement_seen = False
-    scoping_seen = False
+    sentence_state = _new_fai_sentence_clean_state(support_text, failed_row_count)
     for sentence in sentences:
         if not sentence:
             continue
-        # Invented process-control directives: drop the sentence entirely.
-        if not directives_supported and _FAI_PROCESS_DIRECTIVES.search(sentence):
-            continue
-        # Deviation multiplied across instances the FAI never measured.
-        if (not multi_instance_supported and _FAI_MULTI_INSTANCE.search(sentence)
-                and _FAI_DEFECT_WORDS.search(sentence)):
-            if not scoping_seen:
-                cleaned_parts.append(scoping_sentence)
-                scoping_seen = True
-            continue
-        match = _FAI_UNSUPPORTED_CLAIMS.search(sentence)
-        if not match or _fai_term_supported(match.group(0), support_lower):
-            cleaned_parts.append(sentence)
-            continue
-        prefix = sentence[:match.start()].rstrip(" ,;:-")
-        prefix = re.sub(
-            r'(?i)(?:,?\s*(?:so|and|which|meaning|causing|leading to)\b.*)$',
-            '',
-            prefix,
-        ).rstrip(" ,;:-")
-        prefix = re.sub(
-            r'(?i)(?:,?\s*(?:likely|possibly)?\s*(?:allowing|allows|allow|increasing|reducing|causing|leading to|resulting in|expect)\b.*)$',
-            '',
-            prefix,
-        ).rstrip(" ,;:-")
-        prefix = re.sub(r"(?i)\b(?:will|would|can|could|may|shall|must|does|do|did|won'?t|cannot)(?:\s+not)?\s*$",
-                        '', prefix).rstrip(" ,;:-")
-        if prefix and re.search(r'(?i)\b(measured|limit|tolerance|nominal|oversize|undersize|out of tolerance)\b|\d', prefix):
-            cleaned_parts.append(prefix.rstrip(".!?") + ".")
-        if not replacement_seen:
-            cleaned_parts.append(replacement)
-            replacement_seen = True
+        cleaned_parts.extend(_clean_fai_sentence(sentence, sentence_state))
     cleaned = " ".join(cleaned_parts)
     cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
     cleaned = _clean_agent_response(cleaned)
@@ -17076,6 +17237,47 @@ def _clean_report_fai_response(text: str, support_text: str = "",
         cleaned,
     ):
         cleaned = re.sub(r'(?i)^(\s*(?:Sage\s*)?)Accept\b\.?', r'\1Reject.', cleaned, count=1)
+    return cleaned
+
+
+def _clean_agent_answer(
+    text: str,
+    ctx: Optional[Dict[str, Any]],
+    request_message: str,
+) -> str:
+    """Apply the authoritative whole-answer cleaner in legacy order."""
+
+    ctx = ctx if isinstance(ctx, dict) else {}
+    cleaned = _clean_agent_response(text)
+    fai_like_turn = bool(re.search(
+        r"(?i)\b(fai|first article|characteristic|measured|nominal|tolerance|disposition)\b",
+        f"{request_message or ''}\n{cleaned or ''}",
+    ))
+    if not fai_like_turn:
+        return cleaned
+    fai_rows = (
+        ctx.get("fai_characteristics")
+        if isinstance(ctx.get("fai_characteristics"), list)
+        else []
+    )
+    support = f"{request_message or ''}\n{json.dumps(fai_rows, default=str)}"
+    failed_rows = sum(
+        1 for row in fai_rows
+        if isinstance(row, dict)
+        and str(row.get("status", "")).strip().upper() in {"FAIL", "FAILED"}
+    )
+    active_mode = str(ctx.get("active_mode") or "").strip()
+    defect_language = bool(re.search(
+        r"(?i)\b(oversize|oversized|undersize|undersized|out of tolerance|"
+        r"outside tolerance|above (?:the )?upper limit|below (?:the )?lower limit)\b",
+        cleaned or "",
+    ))
+    if active_mode in {"report_fai", "report"} or defect_language:
+        cleaned = _clean_report_fai_response(
+            cleaned,
+            support_text=support,
+            failed_row_count=failed_rows,
+        )
     return cleaned
 
 
@@ -18739,7 +18941,7 @@ async def agent_chat(request: AgentChatRequest):
             system_prompt += _mode_system_addendum(_active_mode)
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.AsyncAnthropic(api_key=api_key)
 
         # Merge inspection_context from either field name, then normalize
         raw_ctx = request.inspection_context or request.context or {}
@@ -18766,9 +18968,34 @@ async def agent_chat(request: AgentChatRequest):
             and not is_sales_coaching
         )
         if _skill_turn_allowed and _skill_settings and _skill_settings.enabled:
-            _workflow_session_id, _workflow_asset_fp, _workflow_reconcile_result = (
-                _reconcile_workflow_state(request, ctx)
-            )
+            _active_stream_meta = _AGENT_CHAT_STREAM_META.get()
+            if _active_stream_meta is not None:
+                _temporary_store = WorkflowStateStore()
+                _temporary_ctx = dict(ctx)
+                _valid_stream_session = _SKILL_WORKFLOW_STATE_STORE.valid_session_id(
+                    request.session_id
+                )
+                _prior_stream_state = (
+                    _SKILL_WORKFLOW_STATE_STORE.get(_valid_stream_session)
+                    if _valid_stream_session else None
+                )
+                if _prior_stream_state is not None:
+                    _temporary_ctx["skill_workflow_state"] = _prior_stream_state
+                _workflow_session_id, _workflow_asset_fp, _workflow_reconcile_result = (
+                    _reconcile_workflow_state_store(
+                        request,
+                        _temporary_ctx,
+                        store=_temporary_store,
+                        accept_client_mirror=True,
+                        record_events=False,
+                    )
+                )
+                _active_stream_meta["workflow_temporary_store"] = _temporary_store
+                _active_stream_meta["workflow_commit_context"] = ctx
+            else:
+                _workflow_session_id, _workflow_asset_fp, _workflow_reconcile_result = (
+                    _reconcile_workflow_state(request, ctx)
+                )
             if _workflow_reconcile_result and _workflow_reconcile_result.state:
                 ctx["skill_workflow_state"] = _workflow_reconcile_result.state
             elif _workflow_reconcile_result:
@@ -19297,35 +19524,61 @@ async def agent_chat(request: AgentChatRequest):
         # Phase 2 telemetry.
         _model = "claude-sonnet-4-5-20250929"
         _agent_type = getattr(request, "agent_type", None) or "none"
+        _stream_sink = _AGENT_CHAT_STREAM_SINK.get()
+        _stream_meta = _AGENT_CHAT_STREAM_META.get()
         with time_block() as _elapsed_ms:
             try:
-                response = client.messages.create(
+                response = await _invoke_agent_model(
+                    client,
                     model=_model,
                     max_tokens=2048,
                     system=system_prompt,
                     messages=messages,
+                    stream_sink=_stream_sink,
                 )
             except Exception as _ex:
                 _s, _e = classify_exception_status(_ex)
+                _stream_tags = {}
+                if _stream_meta:
+                    _provider_start = _stream_meta.get("provider_started_perf")
+                    _first_token = _stream_meta.get("first_token_perf")
+                    if _provider_start is not None and _first_token is not None:
+                        _stream_tags["firstTokenLatencyMs"] = (
+                            float(_first_token) - float(_provider_start)
+                        ) * 1000.0
                 record_anthropic_call(
                     model=_model, response=None, latency_ms=_elapsed_ms(),
                     status=_s, errorType=_e,
-                    route="/api/agent/chat", workflow="agent_chat",
+                    route=("/api/agent/chat/v2/stream" if _stream_meta else "/api/agent/chat"),
+                    workflow=("agent_chat_stream_v2" if _stream_meta else "agent_chat"),
                     agentType=_agent_type,
+                    **_stream_tags,
                 )
                 raise
 
+        _stream_tags = {}
+        if _stream_meta:
+            _provider_start = _stream_meta.get("provider_started_perf")
+            _first_token = _stream_meta.get("first_token_perf")
+            _provider_end = _stream_meta.get("provider_completed_perf")
+            if _provider_start is not None and _first_token is not None:
+                _stream_tags["firstTokenLatencyMs"] = (
+                    float(_first_token) - float(_provider_start)
+                ) * 1000.0
+            if _first_token is not None and _provider_end is not None:
+                _stream_tags["streamDurationMs"] = (
+                    float(_provider_end) - float(_first_token)
+                ) * 1000.0
         record_anthropic_call(
             model=_model, response=response, latency_ms=_elapsed_ms(),
-            route="/api/agent/chat", workflow="agent_chat",
+            route=("/api/agent/chat/v2/stream" if _stream_meta else "/api/agent/chat"),
+            workflow=("agent_chat_stream_v2" if _stream_meta else "agent_chat"),
             agentType=_agent_type,
+            **_stream_tags,
         )
 
         # Extract text response
-        response_text = ""
-        for block in response.content:
-            if hasattr(block, "text"):
-                response_text += block.text
+        response_text = _accumulate_response_text(response)
 
         # Log raw response for debugging marker extraction
         logger.info(f"[Sage raw response] first 500 chars: {response_text[:500]}")
@@ -19333,8 +19586,10 @@ async def agent_chat(request: AgentChatRequest):
 
         # Phase 4C: Extract native <tool_calls> block before legacy marker parsing.
         # Strip the block from text so markers don't double-parse the same actions.
-        native_tool_calls = []
-        response_text, native_tool_calls = extract_tool_calls_from_response(response_text, request.agent_type)
+        response_text, _directive_state = _extract_agent_directives(
+            response_text, request.agent_type, ctx
+        )
+        native_tool_calls = _directive_state["native_tool_calls"]
 
         # Extract dimension highlight commands before cleaning
         highlight_dims = []
@@ -19695,64 +19950,29 @@ async def agent_chat(request: AgentChatRequest):
                     f"ui_actions={(len(ui_actions_payload['actions']) if ui_actions_payload else 0)}, "
                     f"available_pns sample={list(available_pns)[:5]}")
 
-        # Post-process: strip markdown headers and convert to conversational prose
-        response_text = _clean_agent_response(response_text)
-        _fai_like_turn = bool(re.search(
-            r'(?i)\b(fai|first article|characteristic|measured|nominal|tolerance|disposition)\b',
-            f"{request.message or ''}\n{response_text or ''}",
-        ))
-        if _fai_like_turn:
-            _fai_rows = ctx.get("fai_characteristics") if isinstance(ctx.get("fai_characteristics"), list) else []
-            _fai_support = f"{request.message or ''}\n{json.dumps(_fai_rows, default=str)}"
-            _fai_failed_rows = sum(
-                1 for c in _fai_rows
-                if isinstance(c, dict) and str(c.get("status", "")).strip().upper() in {"FAIL", "FAILED"}
-            )
-            _fai_mode = (ctx.get("active_mode") or "").strip()
-            # Report modes always get the grounding cleaner. Other modes get it
-            # only when the answer itself asserts an out-of-tolerance condition
-            # (FAI follow-ups asked from the Assembly tab), so ordinary
-            # kinematics narration is never rewritten.
-            _defect_language = bool(re.search(
-                r'(?i)\b(oversize|oversized|undersize|undersized|out of tolerance|'
-                r'outside tolerance|above (?:the )?upper limit|below (?:the )?lower limit)\b',
-                response_text or "",
-            ))
-            if _fai_mode in {"report_fai", "report"} or _defect_language:
-                response_text = _clean_report_fai_response(
-                    response_text, support_text=_fai_support,
-                    failed_row_count=_fai_failed_rows)
+        # Post-process through the shared whole-answer cleaning seam.
+        response_text = _clean_agent_answer(response_text, ctx, request.message)
 
-        result = {"response": response_text}
-        if highlight_dims:
-            result["highlight_dimensions"] = highlight_dims
-        if highlight_views:
-            result["highlight_views"] = highlight_views
-        if highlight_features:
-            result["highlight_features"] = highlight_features
-        if highlight_regions:
-            result["highlight_regions"] = highlight_regions
-        if compare_features:
-            result["compare_features"] = compare_features
-        if compare_parts:
-            result["compare_parts"] = compare_parts
-        if highlight_parts:
-            result["highlight_parts"] = highlight_parts
-        if isolate_parts:
-            result["isolate_parts"] = isolate_parts
-        if narration_segments:
-            result["narration_segments"] = narration_segments
+        result = _assemble_agent_result(
+            response_text,
+            highlight_dimensions=highlight_dims,
+            highlight_views=highlight_views,
+            highlight_features=highlight_features,
+            highlight_regions=highlight_regions,
+            compare_features=compare_features,
+            compare_parts=compare_parts,
+            highlight_parts=highlight_parts,
+            isolate_parts=isolate_parts,
+            narration_segments=narration_segments,
+            camera_view=camera_view,
+            explode_level=explode_level,
+            ui_actions=ui_actions_payload,
+        )
         if is_sales_coaching:
             result["sales_coaching"] = {
                 "application": sales_application,
                 "awaiting_application": False,
             }
-        if camera_view:
-            result["camera_view"] = camera_view
-        if explode_level is not None:
-            result["explode_level"] = explode_level
-        if ui_actions_payload:
-            result["ui_actions"] = ui_actions_payload
 
         # Parse FAI_FILL markers (chat-driven measurement fills)
         fai_fills = {}
@@ -19968,6 +20188,10 @@ async def agent_chat(request: AgentChatRequest):
                     _workflow_asset_fp,
                     _skill_route,
                     _skill_context_facts,
+                    store=(
+                        _stream_meta.get("workflow_temporary_store")
+                        if _stream_meta else None
+                    ),
                 )
                 if _advanced is not None:
                     _workflow_output = _advanced
@@ -19979,6 +20203,13 @@ async def agent_chat(request: AgentChatRequest):
                     "event": _workflow_output.event,
                     "asset_fingerprint": _workflow_asset_fp or None,
                     "server_authoritative": True,
+                }
+            if _stream_meta is not None:
+                _stream_meta["workflow_commit"] = {
+                    "session_id": _workflow_session_id,
+                    "asset_fingerprint": _workflow_asset_fp,
+                    "route": _skill_route,
+                    "context_facts": _skill_context_facts,
                 }
 
         # Hybrid intent layer: attach the classified viewport intent (already
@@ -20008,6 +20239,442 @@ async def agent_chat(request: AgentChatRequest):
     except Exception as e:
         logger.error(f"Agent chat error: {e}")
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+
+def _chat_stream_env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _chat_stream_agent_name(agent_type: str) -> str:
+    return {
+        "inspector": "iris",
+        "deviation-analyst": "sage",
+        "parts-finder": "scout",
+        "builder": "builder",
+    }.get(str(agent_type or "").strip().lower(), str(agent_type or "").strip().lower())
+
+
+def _chat_stream_settings() -> Dict[str, Any]:
+    allowlist = {
+        item.strip().lower()
+        for item in os.getenv("INSPECTORPRO_STREAMING_AGENTS", "sage,iris").split(",")
+        if item.strip()
+    }
+    return {
+        "enabled": _chat_stream_env_bool("INSPECTORPRO_CHAT_STREAMING", False),
+        "agents": sorted(allowlist),
+        "high_risk_modes": _chat_stream_env_bool(
+            "INSPECTORPRO_STREAMING_HIGH_RISK_MODES", False
+        ),
+    }
+
+
+def _chat_stream_active_mode(payload: AgentChatRequest) -> str:
+    raw = payload.inspection_context or payload.context or {}
+    try:
+        session = ((raw.get("attachments") or {}).get("session") or {})
+        contract = session.get("mode_contract") or {}
+        return str(
+            session.get("active_mode")
+            or contract.get("mode")
+            or raw.get("active_mode")
+            or ""
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _stream_reconciliation_delta(provisional: str, final: str) -> int:
+    """Count the changed middle after removing a shared prefix/suffix."""
+
+    left = str(provisional or "")
+    right = str(final or "")
+    prefix = 0
+    limit = min(len(left), len(right))
+    while prefix < limit and left[prefix] == right[prefix]:
+        prefix += 1
+    suffix = 0
+    left_remaining = len(left) - prefix
+    right_remaining = len(right) - prefix
+    while (
+        suffix < left_remaining
+        and suffix < right_remaining
+        and left[len(left) - 1 - suffix] == right[len(right) - 1 - suffix]
+    ):
+        suffix += 1
+    return max(left_remaining - suffix, right_remaining - suffix)
+
+
+def _commit_stream_workflow_state(
+    payload: AgentChatRequest,
+    stream_meta: Dict[str, Any],
+    final_result: Dict[str, Any],
+) -> None:
+    """Commit deferred Phase 5 state at the terminal SSE boundary."""
+
+    commit = stream_meta.get("workflow_commit")
+    ctx = stream_meta.get("workflow_commit_context")
+    if not isinstance(commit, dict) or not isinstance(ctx, dict):
+        return
+    session_id, asset_fingerprint, output = _reconcile_workflow_state(payload, ctx)
+    route = commit.get("route")
+    if (
+        route
+        and float(route.get("workflow_confidence") or 0.0)
+            >= _SKILL_PRODUCTION_MIN_WORKFLOW_CONFIDENCE
+    ):
+        advanced = _advance_server_workflow_state(
+            session_id,
+            asset_fingerprint,
+            route,
+            commit.get("context_facts") or {},
+        )
+        if advanced is not None:
+            output = advanced
+    if output is not None and output.event not in {
+        "empty", "asset_context_unavailable", "invalid_session"
+    }:
+        final_result["workflow_state"] = output.state
+        final_result["workflow_state_event"] = {
+            "event": output.event,
+            "asset_fingerprint": asset_fingerprint or None,
+            "server_authoritative": True,
+        }
+
+
+@app.get("/api/agent/chat/streaming-status")
+def agent_chat_streaming_status():
+    settings = _chat_stream_settings()
+    return {
+        "contract_version": 1,
+        "endpoint": "/api/agent/chat/v2/stream",
+        **settings,
+    }
+
+
+@app.post("/api/agent/chat/v2/stream")
+async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request):
+    """Provider-token streaming with authoritative terminal commit."""
+
+    settings = _chat_stream_settings()
+    agent_name = _chat_stream_agent_name(payload.agent_type or "")
+    if not settings["enabled"] or agent_name not in set(settings["agents"]):
+        raise HTTPException(status_code=404, detail="Chat streaming is not enabled for this agent")
+
+    active_mode = _chat_stream_active_mode(payload)
+    high_risk = active_mode in {"report", "report_fai"}
+    if high_risk and not settings["high_risk_modes"]:
+        raise HTTPException(
+            status_code=409,
+            detail="High-risk mode streaming is not enabled; use the legacy endpoint",
+        )
+
+    response_id = "stream_" + secrets.token_hex(12)
+    message_id = "assistant_" + secrets.token_hex(8)
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+    stream_meta: Dict[str, Any] = {
+        "request_started_perf": time.perf_counter(),
+        "usage": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+    }
+    fai_sentence_buffer = SentenceStreamBuffer() if high_risk else None
+    fai_sentence_state = None
+    fai_sentence_queue: List[str] = []
+    if high_risk:
+        normalized_stream_ctx = normalize_agent_context(
+            payload.inspection_context or payload.context or {}
+        )["flat"]
+        stream_fai_rows = (
+            normalized_stream_ctx.get("fai_characteristics")
+            if isinstance(normalized_stream_ctx.get("fai_characteristics"), list)
+            else []
+        )
+        stream_fai_support = (
+            f"{payload.message or ''}\n{json.dumps(stream_fai_rows, default=str)}"
+        )
+        stream_failed_count = sum(
+            1 for row in stream_fai_rows
+            if isinstance(row, dict)
+            and str(row.get("status", "")).strip().upper() in {"FAIL", "FAILED"}
+        )
+        fai_sentence_state = _new_fai_sentence_clean_state(
+            stream_fai_support, stream_failed_count
+        )
+
+    async def _sink(delta: str) -> None:
+        await queue.put(("delta", delta))
+
+    async def _run_authoritative_pipeline() -> None:
+        sink_token = _AGENT_CHAT_STREAM_SINK.set(_sink)
+        meta_token = _AGENT_CHAT_STREAM_META.set(stream_meta)
+        try:
+            final_result = await agent_chat(payload)
+            stream_meta["pipeline_completed_perf"] = time.perf_counter()
+            await queue.put(("final", final_result))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- converted to terminal SSE error
+            await queue.put(("error", exc))
+        finally:
+            _AGENT_CHAT_STREAM_META.reset(meta_token)
+            _AGENT_CHAT_STREAM_SINK.reset(sink_token)
+
+    async def _events():
+        sequence = 0
+        terminal_sent = False
+        provisional_parts: List[str] = []
+        firewall = StreamDirectiveFilter()
+        tool_block_opened = False
+        action_turn = _viewport_write_authorized(payload.message, destructive=False)
+        task = asyncio.create_task(_run_authoritative_pipeline())
+
+        def _clean_ready_fai_sentences(sentences: List[str], final: bool = False) -> str:
+            if not high_risk or fai_sentence_state is None:
+                return ""
+            fai_sentence_queue.extend(sentence for sentence in sentences if sentence)
+            output = []
+            disposition = re.compile(
+                r"(?i)^\s*(?:accept|pass|reject|rework|use[- ]as[- ]is|scrap)\b"
+            )
+            while fai_sentence_queue:
+                first = fai_sentence_queue[0]
+                if disposition.search(first) and len(fai_sentence_queue) < 2 and not final:
+                    break
+                sentence = fai_sentence_queue.pop(0)
+                if disposition.search(sentence) and fai_sentence_queue:
+                    lookahead = fai_sentence_queue[0]
+                    if re.search(
+                        r"(?i)\b(oversize|undersize|outside tolerance|out of tolerance|"
+                        r"exceeds|upper limit|lower limit)\b",
+                        lookahead,
+                    ):
+                        sentence = re.sub(
+                            r"(?i)^(\s*(?:Sage\s*)?)Accept\b\.?",
+                            r"\1Reject.",
+                            sentence,
+                            count=1,
+                        )
+                cleaned_parts = _clean_fai_sentence(sentence, fai_sentence_state)
+                if cleaned_parts:
+                    output.append(" ".join(cleaned_parts))
+            cleaned = " ".join(output).strip()
+            if cleaned and stream_meta.get("first_clean_sentence_ms") is None:
+                provider_start = stream_meta.get("provider_started_perf")
+                if provider_start is not None:
+                    stream_meta["first_clean_sentence_ms"] = (
+                        time.perf_counter() - float(provider_start)
+                    ) * 1000.0
+            return (cleaned + (" " if cleaned and not final else "")) if cleaned else ""
+
+        def _event(event: str, **fields: Any) -> str:
+            nonlocal sequence
+            body = {
+                "v": 1,
+                "event": event,
+                "response_id": response_id,
+                "seq": sequence,
+                "ts": int(time.time() * 1000),
+                **fields,
+            }
+            sequence += 1
+            return "data: " + json.dumps(body, ensure_ascii=True, separators=(",", ":")) + "\n\n"
+
+        try:
+            route_path = "legacy"
+            try:
+                skill_settings = _agent_skill_runtime_settings()
+                if agent_name == "sage" and skill_settings.enabled:
+                    route_path = "skills"
+            except Exception:
+                route_path = "legacy"
+            yield _event(
+                "response_started",
+                chat_session_id=payload.session_id,
+                message_id=message_id,
+                agent_type=payload.agent_type,
+                mode=active_mode,
+                routing={"path": route_path},
+            )
+            yield _event("status", phase="routing")
+
+            while True:
+                if await http_request.is_disconnected():
+                    task.cancel()
+                    record_workflow_stage(
+                        workflow="agent_chat_stream_v2",
+                        stage="stream_cancelled",
+                        latency_ms=(time.perf_counter() - stream_meta["request_started_perf"]) * 1000.0,
+                        status="cancelled",
+                        route="/api/agent/chat/v2/stream",
+                        agentType=payload.agent_type,
+                    )
+                    return
+                try:
+                    kind, value = await asyncio.wait_for(queue.get(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    continue
+
+                if kind == "delta":
+                    release = firewall.feed(str(value or ""))
+                    if release.directive and not tool_block_opened:
+                        tool_block_opened = True
+                        yield _event(
+                            "tool_block_started",
+                            kind=release.directive.kind,
+                            marker=release.directive.marker,
+                        )
+                    if release.text and not action_turn:
+                        if high_risk and fai_sentence_buffer is not None:
+                            cleaned = _clean_ready_fai_sentences(
+                                list(fai_sentence_buffer.feed(release.text))
+                            )
+                        else:
+                            cleaned = _fix_text_encoding_artifacts(release.text)
+                        if cleaned:
+                            provisional_parts.append(cleaned)
+                            yield _event("status", phase="generating")
+                            yield _event("text_delta", text=cleaned)
+                    continue
+
+                if kind == "error":
+                    exc = value
+                    code = getattr(exc, "status_code", 500)
+                    detail = getattr(exc, "detail", None) or "The response could not be generated."
+                    yield _event(
+                        "response_error",
+                        code=str(code),
+                        message=str(detail)[:240],
+                        retryable=int(code) >= 500,
+                    )
+                    terminal_sent = True
+                    return
+
+                if kind == "final":
+                    final_result = value if isinstance(value, dict) else {"response": str(value or "")}
+                    if await http_request.is_disconnected():
+                        task.cancel()
+                        record_workflow_stage(
+                            workflow="agent_chat_stream_v2",
+                            stage="stream_cancelled",
+                            latency_ms=(time.perf_counter() - stream_meta["request_started_perf"]) * 1000.0,
+                            status="cancelled",
+                            route="/api/agent/chat/v2/stream",
+                            agentType=payload.agent_type,
+                        )
+                        return
+                    _commit_stream_workflow_state(payload, stream_meta, final_result)
+                    tail = firewall.finish()
+                    if tail.directive and not tool_block_opened:
+                        tool_block_opened = True
+                        yield _event(
+                            "tool_block_started",
+                            kind=tail.directive.kind,
+                            marker=tail.directive.marker,
+                        )
+                    cleaned_tail = ""
+                    if not action_turn and high_risk and fai_sentence_buffer is not None:
+                        final_sentences = []
+                        if tail.text:
+                            final_sentences.extend(fai_sentence_buffer.feed(tail.text))
+                        final_sentences.extend(fai_sentence_buffer.finish())
+                        cleaned_tail = _clean_ready_fai_sentences(
+                            list(final_sentences), final=True
+                        )
+                    elif tail.text and not action_turn:
+                        cleaned_tail = _fix_text_encoding_artifacts(tail.text)
+                    if cleaned_tail:
+                        provisional_parts.append(cleaned_tail)
+                        yield _event("text_delta", text=cleaned_tail)
+
+                    yield _event("status", phase="finalizing")
+                    if tool_block_opened:
+                        yield _event(
+                            "tool_block_completed",
+                            kind=(firewall.directive.kind if firewall.directive else "line_marker"),
+                            count=int(final_result.get("tool_call_count") or 0),
+                        )
+                    if final_result.get("tool_call_count"):
+                        yield _event(
+                            "action_bundle_validated",
+                            source=str(final_result.get("tool_source") or "model"),
+                        )
+
+                    provisional = "".join(provisional_parts)
+                    final_text = str(final_result.get("response") or "")
+                    # Action turns intentionally stream no success prose before
+                    # browser receipts. Exclude that policy holdback from the
+                    # cleaner-reconciliation metric.
+                    delta_chars = (
+                        None if action_turn
+                        else _stream_reconciliation_delta(provisional, final_text)
+                    )
+                    now = time.perf_counter()
+                    provider_start = stream_meta.get("provider_started_perf")
+                    first_token = stream_meta.get("first_token_perf")
+                    provider_end = stream_meta.get("provider_completed_perf")
+                    pipeline_end = stream_meta.get("pipeline_completed_perf") or now
+                    timings = {
+                        "route_ms": (
+                            (float(provider_start) - stream_meta["request_started_perf"]) * 1000.0
+                            if provider_start is not None else None
+                        ),
+                        "first_token_ms": (
+                            (float(first_token) - float(provider_start)) * 1000.0
+                            if provider_start is not None and first_token is not None else None
+                        ),
+                        "first_clean_sentence_ms": stream_meta.get("first_clean_sentence_ms"),
+                        "stream_ms": (
+                            (float(provider_end) - float(first_token)) * 1000.0
+                            if provider_end is not None and first_token is not None else None
+                        ),
+                        "pipeline_ms": (
+                            (float(pipeline_end) - float(provider_end)) * 1000.0
+                            if provider_end is not None else None
+                        ),
+                        "total_ms": (now - stream_meta["request_started_perf"]) * 1000.0,
+                    }
+                    record_workflow_stage(
+                        workflow="agent_chat_stream_v2",
+                        stage="terminal_commit",
+                        latency_ms=timings["total_ms"],
+                        route="/api/agent/chat/v2/stream",
+                        agentType=payload.agent_type,
+                        firstTokenLatencyMs=timings["first_token_ms"],
+                        firstCleanSentenceMs=timings["first_clean_sentence_ms"],
+                        streamDurationMs=timings["stream_ms"],
+                        pipelineLatencyMs=timings["pipeline_ms"],
+                        finalizeDeltaChars=delta_chars,
+                    )
+                    yield _event(
+                        "response_completed",
+                        final=final_result,
+                        usage=stream_meta.get("usage") or {},
+                        timings=timings,
+                    )
+                    terminal_sent = True
+                    return
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        finally:
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+            if not terminal_sent and not await http_request.is_disconnected():
+                logger.warning("Chat stream ended without a terminal event: %s", response_id)
+
+    return StreamingResponse(
+        _events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # ---------- Scout Browser Search (SSE Streaming) ----------

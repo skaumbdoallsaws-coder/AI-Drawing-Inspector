@@ -30,7 +30,7 @@ from .models import TelemetryEvent
 # columns onto an existing table (CREATE TABLE IF NOT EXISTS does not).
 #
 # v2 (Phase 3) — added httpStatus + stage columns (additive).
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # SCHEMA_SQL handles the fresh-DB case (CREATE TABLE IF NOT EXISTS) and
 # indexes that reference columns present since the original Phase 1
@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
     estimatedCostUsd REAL NOT NULL DEFAULT 0.0,
     pricingConfidence TEXT,
     latencyMs REAL NOT NULL DEFAULT 0.0,
+    firstTokenLatencyMs REAL,
+    firstCleanSentenceMs REAL,
+    streamDurationMs REAL,
+    pipelineLatencyMs REAL,
+    finalizeDeltaChars INTEGER,
     retryCount INTEGER NOT NULL DEFAULT 0,
     toolCallCount INTEGER NOT NULL DEFAULT 0,
     partNumber TEXT,
@@ -94,6 +99,11 @@ _POST_MIGRATION_INDEXES = [
 _ADDITIVE_COLUMNS = [
     ("httpStatus", "INTEGER"),  # added v2
     ("stage",      "TEXT"),     # added v2
+    ("firstTokenLatencyMs",  "REAL"),     # added v3
+    ("firstCleanSentenceMs", "REAL"),     # added v3
+    ("streamDurationMs",     "REAL"),     # added v3
+    ("pipelineLatencyMs",    "REAL"),     # added v3
+    ("finalizeDeltaChars",   "INTEGER"),  # added v3
 ]
 
 # Path convention (§6 of the plan). Override at runtime with the env var.

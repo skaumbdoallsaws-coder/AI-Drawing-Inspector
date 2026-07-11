@@ -63,6 +63,12 @@ class TelemetryEvent:
 
     # ── Latency + retry ──────────────────────────────────────────────
     latencyMs:    float = 0.0
+    # Streaming-specific timings remain nullable for legacy and batch calls.
+    firstTokenLatencyMs:   Optional[float] = None
+    firstCleanSentenceMs:  Optional[float] = None
+    streamDurationMs:      Optional[float] = None
+    pipelineLatencyMs:     Optional[float] = None
+    finalizeDeltaChars:    Optional[int] = None
     retryCount:   int   = 0
     toolCallCount: int  = 0
 

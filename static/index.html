@@ -8722,6 +8722,25 @@
         #agentSendBtn:disabled:hover {
             filter: none;
         }
+        .agent-stream-status {
+            margin-top: 4px;
+            color: var(--text-secondary);
+            font-size: 10px;
+            line-height: 1.2;
+        }
+        .agent-stream-pending .agent-msg {
+            min-height: 18px;
+        }
+        .agent-stream-retry {
+            margin-top: 6px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--accent);
+            font: inherit;
+            font-size: 11px;
+            padding: 3px 8px;
+            cursor: pointer;
+        }
         .agent-beta-disclaimer {
             padding: 4px 12px 8px;
             text-align: center;
@@ -11841,6 +11860,7 @@
     </div>
 
     <script src="/static/ui_action_runtime.js"></script>
+    <script src="/static/chat_stream_runtime.js"></script>
     <script>
         /* ============================================================
            InspectorPro - Frontend Application Logic
@@ -43820,6 +43840,7 @@
             const agentPanel = $('agentPanel');
             const agentInput = $('agentInput');
             const agentSendBtn = $('agentSendBtn');
+            const _agentSendDefaultMarkup = agentSendBtn ? agentSendBtn.innerHTML : '';
             const agentMessages = $('agentMessages');
             const agentCameraBtn = $('agentCameraBtn');
             const agentModelBtn = $('agentModelBtn');
@@ -43886,6 +43907,7 @@
                     pendingCrossContext: null,
                     workflowState: null,
                     workflowStateEvent: null,
+                    activeStream: null,
                 };
             }
 
@@ -44061,6 +44083,16 @@
                     content.appendChild(renderBlockToDOM(block, msg.role));
                 }
 
+                if (msg.meta && msg.meta.pending) {
+                    row.classList.add('agent-stream-pending');
+                    const textEl = content.querySelector('.agent-msg');
+                    if (textEl) textEl.insertAdjacentHTML('beforeend', '<span class="typing-cursor"></span>');
+                    const status = document.createElement('div');
+                    status.className = 'agent-stream-status';
+                    status.textContent = msg.meta.streamStatus || 'Generating';
+                    content.appendChild(status);
+                }
+
                 row.appendChild(avatar);
                 row.appendChild(content);
                 return row;
@@ -44076,7 +44108,8 @@
 
             function flattenMessagesForApi(messages) {
                 return messages
-                    .filter(m => m.role === 'user' || m.role === 'assistant')
+                    .filter(m => (m.role === 'user' || m.role === 'assistant')
+                        && !(m.meta && m.meta.pending))
                     .map(m => {
                         // Handle both new structured and legacy { role, text } formats
                         if (m.blocks) {
@@ -44119,7 +44152,9 @@
             function serializeSessionForPersistence(session) {
                 return {
                     key: session.key,
-                    messages: session.messages.map(serializeMessageForPersistence),
+                    messages: session.messages
+                        .filter(msg => !(msg.meta && msg.meta.pending))
+                        .map(serializeMessageForPersistence),
                     summary: session.summary,
                     scrollTop: session.scrollTop,
                     pendingInput: session.pendingInput,
@@ -44173,6 +44208,7 @@
                 session.workflowStateEvent = rawSession.workflowStateEvent && typeof rawSession.workflowStateEvent === 'object'
                     ? JSON.parse(JSON.stringify(rawSession.workflowStateEvent)) : null;
                 session.waiting = false;
+                session.activeStream = null;
                 session.requestId = 0;
                 session.pendingCapture = null;
                 for (const msg of session.messages) {
@@ -44187,6 +44223,7 @@
                     s.messages = []; s.summary = ''; s.scrollTop = 0;
                     s.pendingInput = ''; s.pendingCrossContext = null;
                     s.waiting = false; s.requestId = 0; s.pendingCapture = null;
+                    s.activeStream = null;
                     s.chatSessionId = _newAgentChatSessionId(key);
                     s.workflowState = null; s.workflowStateEvent = null;
                 }
@@ -45500,8 +45537,18 @@
                     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                     .replace(/\n/g, '<br>');
                 // Convert markdown links [text](url) to clickable links
-                html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-                    '<a href="$2" target="_blank" rel="noopener" style="color:#00E676;text-decoration:underline;">$1</a>');
+                html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, encodedUrl) => {
+                    const candidate = String(encodedUrl || '')
+                        .replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+                    try {
+                        const parsed = new URL(candidate, window.location.origin);
+                        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return label;
+                        const safeHref = parsed.href.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+                        return '<a href="' + safeHref + '" target="_blank" rel="noopener" style="color:#00E676;text-decoration:underline;">' + label + '</a>';
+                    } catch (_) {
+                        return label;
+                    }
+                });
                 // Convert --- to styled dividers
                 html = html.replace(/<br>---<br>/g,
                     '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:8px 0;">');
@@ -45605,41 +45652,128 @@
                 return appendTextMessage(text, role, targetAgentKey);
             }
 
-            function createPlantWalkStreamingMessage(targetAgentKey) {
+            function _agentMessagesNearBottom() {
+                return (agentMessages.scrollHeight - agentMessages.scrollTop - agentMessages.clientHeight) < 48;
+            }
+
+            function createStreamingAssistantMessage(targetAgentKey, options) {
                 const agentKey = targetAgentKey || currentAgent || 'deviation-analyst';
                 const session = getAgentSession(agentKey);
-                const msg = createMessage('assistant', [createTextBlock('')], { source: 'plant_process_walkthrough' });
+                const opts = options || {};
+                const msg = createMessage('assistant', [createTextBlock('')], {
+                    source: opts.source || 'provider_stream',
+                    pending: true,
+                    streamStatus: opts.status || 'Routing',
+                    responseId: opts.responseId || null,
+                });
                 session.messages.push(msg);
 
-                let row = null;
-                let msgEl = null;
-                if (agentKey === currentAgent) {
-                    const welcome = agentMessages.querySelector('.agent-welcome');
-                    if (welcome) welcome.remove();
-                    removeSuggestions();
-                    row = renderMessageToDOM(msg, agentKey);
-                    agentMessages.appendChild(row);
-                    msgEl = row.querySelector('.agent-msg');
-                    agentMessages.scrollTop = agentMessages.scrollHeight;
-                }
+                let pendingDelta = '';
+                let frameId = 0;
 
-                const setText = (text, cursor) => {
-                    const value = String(text || '');
-                    msg.blocks[0].text = value;
+                const liveRow = () => agentKey === currentAgent
+                    ? agentMessages.querySelector('[data-msg-id="' + msg.id + '"]')
+                    : null;
+
+                const render = (cursor) => {
+                    const row = liveRow();
+                    if (!row) return;
+                    row.classList.toggle('agent-stream-pending', !!msg.meta.pending);
+                    const msgEl = row.querySelector('.agent-msg');
                     if (msgEl) {
-                        msgEl.innerHTML = formatMessageText(value) + (cursor ? '<span class="typing-cursor"></span>' : '');
+                        msgEl.innerHTML = formatMessageText(msg.blocks[0].text || '')
+                            + (cursor && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                                ? '<span class="typing-cursor"></span>' : '');
+                    }
+                    let statusEl = row.querySelector('.agent-stream-status');
+                    if (msg.meta.pending) {
+                        if (!statusEl) {
+                            statusEl = document.createElement('div');
+                            statusEl.className = 'agent-stream-status';
+                            row.querySelector('.agent-msg-content').appendChild(statusEl);
+                        }
+                        statusEl.textContent = msg.meta.streamStatus || 'Generating';
+                    } else if (statusEl) {
+                        statusEl.remove();
+                    }
+                };
+
+                const flush = () => {
+                    frameId = 0;
+                    if (pendingDelta) {
+                        msg.blocks[0].text += pendingDelta;
+                        pendingDelta = '';
+                    }
+                    const keepBottom = _agentMessagesNearBottom();
+                    render(true);
+                    if (keepBottom && agentKey === currentAgent) {
                         agentMessages.scrollTop = agentMessages.scrollHeight;
                     }
                 };
 
-                return {
-                    setText,
-                    finish: (text) => {
-                        setText(text || msg.blocks[0].text || '', false);
+                if (agentKey === currentAgent) {
+                    const welcome = agentMessages.querySelector('.agent-welcome');
+                    if (welcome) welcome.remove();
+                    removeSuggestions();
+                    agentMessages.appendChild(renderMessageToDOM(msg, agentKey));
+                    agentMessages.scrollTop = agentMessages.scrollHeight;
+                }
+
+                const api = {
+                    appendText: (text) => {
+                        pendingDelta += String(text || '');
+                        if (!frameId) frameId = requestAnimationFrame(flush);
+                    },
+                    setText: (text, cursor) => {
+                        if (frameId) cancelAnimationFrame(frameId);
+                        frameId = 0;
+                        pendingDelta = '';
+                        msg.blocks[0].text = String(text || '');
+                        render(cursor !== false);
+                    },
+                    setStatus: (status) => {
+                        msg.meta.streamStatus = String(status || 'Generating');
+                        render(true);
+                    },
+                    commit: (text) => {
+                        if (frameId) cancelAnimationFrame(frameId);
+                        frameId = 0;
+                        if (pendingDelta) msg.blocks[0].text += pendingDelta;
+                        pendingDelta = '';
+                        if (text !== undefined && text !== null) msg.blocks[0].text = String(text);
+                        msg.meta.pending = false;
+                        msg.meta.streamStatus = 'Complete';
+                        render(false);
                         scheduleAgentStateSave();
+                        return msg;
+                    },
+                    discard: () => {
+                        if (frameId) cancelAnimationFrame(frameId);
+                        const index = session.messages.indexOf(msg);
+                        if (index >= 0) session.messages.splice(index, 1);
+                        const row = liveRow();
+                        if (row) row.remove();
+                    },
+                    get visibleText() {
+                        return String(msg.blocks[0].text || '') + pendingDelta;
                     },
                     message: msg,
-                    row,
+                };
+                return api;
+            }
+
+            function createPlantWalkStreamingMessage(targetAgentKey) {
+                const stream = createStreamingAssistantMessage(targetAgentKey, {
+                    source: 'plant_process_walkthrough',
+                    status: 'Generating',
+                });
+                return {
+                    setText: stream.setText,
+                    finish: (text) => stream.commit(text || stream.visibleText || ''),
+                    message: stream.message,
+                    row: targetAgentKey === currentAgent
+                        ? agentMessages.querySelector('[data-msg-id="' + stream.message.id + '"]')
+                        : null,
                 };
             }
 
@@ -45683,7 +45817,17 @@
                 session.waiting = waiting;
                 // Only update DOM if this agent is currently visible
                 if (agentKey === currentAgent) {
-                    agentSendBtn.disabled = waiting || !agentInput.value.trim();
+                    const stopping = !!(session.activeStream && session.activeStream.controller);
+                    agentSendBtn.disabled = stopping ? false : (waiting || !agentInput.value.trim());
+                    if (stopping) {
+                        agentSendBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="#fff"></rect></svg>';
+                        agentSendBtn.title = 'Stop generating';
+                        agentSendBtn.setAttribute('aria-label', 'Stop generating');
+                    } else {
+                        agentSendBtn.innerHTML = _agentSendDefaultMarkup;
+                        agentSendBtn.title = 'Send message';
+                        agentSendBtn.setAttribute('aria-label', 'Send message');
+                    }
                     agentInput.disabled = waiting;
                     // Keep mic enabled during narration barge-in states
                     const narrationActive = state.narrationState !== 'idle';
@@ -45738,7 +45882,17 @@
                 const hasText = agentInput.value.trim().length > 0;
                 const hasImage = !!agentCapturedImage;
                 const _w = getCurrentAgentSession().waiting;
-                agentSendBtn.disabled = _w || (!hasText && !hasImage);
+                const _streaming = !!getCurrentAgentSession().activeStream;
+                agentSendBtn.disabled = _streaming ? false : (_w || (!hasText && !hasImage));
+                if (_streaming) {
+                    agentSendBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="#fff"></rect></svg>';
+                    agentSendBtn.title = 'Stop generating';
+                    agentSendBtn.setAttribute('aria-label', 'Stop generating');
+                } else {
+                    agentSendBtn.innerHTML = _agentSendDefaultMarkup;
+                    agentSendBtn.title = 'Send message';
+                    agentSendBtn.setAttribute('aria-label', 'Send message');
+                }
                 voiceMicBtn.disabled = _w || micState === 'transcribing';
                 syncAgentInputHeight();
             }
@@ -48734,6 +48888,35 @@
             return `Showing ${label}${rate}. Related parts are highlighted in the assembly viewport.`;
         }
 
+        function _referenceOnlyFaiMotionResponse(messageText) {
+            // A direct FAI question about affected motion has a deterministic,
+            // data-backed answer in the loaded motion summary. Keep it
+            // reference-only unless the user independently authorizes a
+            // viewport change; this avoids relying on the model to restate a
+            // known group while preserving normal explanation turns.
+            const query = _normalizeAssemblyDisplayText(messageText);
+            const asksAboutMotion = /\b(motion|mechanism|articulation)\b/.test(query);
+            const asksAboutFailure = /\b(affected|impact|failure|failed|fai|deviation|dimension|characteristic|tolerance)\b/.test(query);
+            if (!asksAboutMotion || !asksAboutFailure
+                || _messageExplicitlyRequestsViewportChange(messageText)) {
+                return null;
+            }
+            const affected = _faiAffectedMotionGroup();
+            if (!affected || !affected.group) return null;
+            const group = affected.group;
+            const label = String(group.label || group.id || 'the affected motion group')
+                .replace(/\s+/g, ' ').trim();
+            const partLabels = (affected.partNumbers || [])
+                .map(pn => (typeof _assemblyDisplayPartLabel === 'function')
+                    ? _assemblyDisplayPartLabel(pn) : String(pn))
+                .filter(Boolean);
+            const functionText = String(group.function || '').replace(/\s+/g, ' ').trim();
+            let line = `The affected motion is ${label}.`;
+            if (partLabels.length) line += ` It involves ${partLabels.join(', ')}.`;
+            if (functionText) line += ` ${functionText}`;
+            return line + ' This is an explanation only; the viewport has not changed.';
+        }
+
         function _suppressedFaiViewportHonestyResponse(messageText, responseText) {
             const response = String(responseText || '').trim();
             if (!response) return null;
@@ -49347,6 +49530,219 @@
             }
             // === End Tool Registry ===
 
+            let _chatStreamingStatusPromise = null;
+
+            function _agentStreamingName(agentKey) {
+                return ({
+                    'inspector': 'iris',
+                    'deviation-analyst': 'sage',
+                    'parts-finder': 'scout',
+                })[agentKey] || agentKey;
+            }
+
+            async function _getChatStreamingStatus() {
+                if (!_chatStreamingStatusPromise) {
+                    _chatStreamingStatusPromise = fetch('/api/agent/chat/streaming-status', {
+                        cache: 'no-store',
+                    }).then(res => res.ok ? res.json() : null).catch(() => null);
+                }
+                return _chatStreamingStatusPromise;
+            }
+
+            function _parseAgentStreamEventLine(line) {
+                if (window.InspectorProChatStreamRuntime) {
+                    return window.InspectorProChatStreamRuntime.parseEventLine(line);
+                }
+                if (!String(line || '').startsWith('data: ')) return null;
+                try {
+                    const parsed = JSON.parse(String(line).slice(6).trim());
+                    return parsed && parsed.v === 1 && parsed.event ? parsed : null;
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            function _showAgentStreamRetry(agentKey, originalText) {
+                const msg = addMessage('The response stopped before completion.', 'system', agentKey);
+                if (agentKey !== currentAgent) return;
+                const row = agentMessages.querySelector('[data-msg-id="' + msg.id + '"]');
+                const content = row && row.querySelector('.agent-msg-content');
+                if (!content) return;
+                const retry = document.createElement('button');
+                retry.type = 'button';
+                retry.className = 'agent-stream-retry';
+                retry.textContent = 'Retry';
+                retry.addEventListener('click', () => {
+                    retry.disabled = true;
+                    if (currentAgent !== agentKey && window._selectAgent) window._selectAgent(agentKey);
+                    agentInput.value = originalText || '';
+                    updateSendButtonState();
+                    handleAgentSend();
+                });
+                content.appendChild(retry);
+            }
+
+            async function _requestAgentChatStream(payload, originAgent, originSession, turnId) {
+                const status = await _getChatStreamingStatus();
+                const allowed = status && status.enabled
+                    && Array.isArray(status.agents)
+                    && status.agents.includes(_agentStreamingName(originAgent));
+                if (!allowed) return null;
+
+                const activeMode = payload.inspection_context
+                    && payload.inspection_context.attachments
+                    && payload.inspection_context.attachments.session
+                    && payload.inspection_context.attachments.session.active_mode;
+                if ((activeMode === 'report' || activeMode === 'report_fai') && !status.high_risk_modes) {
+                    return null;
+                }
+                if (/walk\s*(me\s+)?through|narrat|guided\s+tour|sales\s+coach|sales\s+walkthrough/i.test(payload.message || '')) {
+                    return null;
+                }
+
+                const controller = new AbortController();
+                const active = {
+                    controller,
+                    turnId,
+                    partial: false,
+                    streamingMessage: null,
+                };
+                originSession.activeStream = active;
+                setWaiting(true, originAgent);
+
+                let response;
+                try {
+                    response = await fetch('/api/agent/chat/v2/stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        signal: controller.signal,
+                    });
+                } catch (error) {
+                    originSession.activeStream = null;
+                    setWaiting(true, originAgent);
+                    if (error && error.name === 'AbortError') {
+                        error.streamCancelled = true;
+                        throw error;
+                    }
+                    return null;
+                }
+                if (!response.ok) {
+                    originSession.activeStream = null;
+                    setWaiting(true, originAgent);
+                    if (response.status === 404 || response.status === 409) return null;
+                    return null;
+                }
+
+                if (currentAgent === originAgent) removeTypingIndicator();
+                const streamMessage = createStreamingAssistantMessage(originAgent, {
+                    source: 'provider_stream',
+                    status: 'Routing',
+                });
+                active.streamingMessage = streamMessage;
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                const eventGate = window.InspectorProChatStreamRuntime
+                    ? window.InspectorProChatStreamRuntime.createEventGate()
+                    : null;
+                let responseId = null;
+                let lastSeq = -1;
+                let finalData = null;
+                let terminal = false;
+                try {
+                    while (true) {
+                        const packet = await reader.read();
+                        if (packet.done) break;
+                        buffer += decoder.decode(packet.value, { stream: true });
+                        const lines = buffer.split(/\r?\n/);
+                        buffer = lines.pop() || '';
+                        for (const line of lines) {
+                            const event = _parseAgentStreamEventLine(line);
+                            if (!event) continue;
+                            if (eventGate) {
+                                if (!eventGate.accept(event)) continue;
+                            } else {
+                                if (responseId && event.response_id !== responseId) continue;
+                                if (!responseId) responseId = event.response_id;
+                                if (event.seq <= lastSeq) continue;
+                                lastSeq = event.seq;
+                            }
+                            if (originSession.requestId !== turnId) {
+                                controller.abort();
+                                const stale = new Error('Stale streamed turn');
+                                stale.streamCancelled = true;
+                                throw stale;
+                            }
+                            switch (event.event) {
+                                case 'response_started':
+                                    streamMessage.message.meta.responseId = event.response_id;
+                                    streamMessage.setStatus('Routing');
+                                    break;
+                                case 'status':
+                                    streamMessage.setStatus({
+                                        routing: 'Routing',
+                                        context: 'Reading context',
+                                        generating: 'Generating',
+                                        executing: 'Executing',
+                                        finalizing: 'Finalizing',
+                                    }[event.phase] || 'Generating');
+                                    break;
+                                case 'text_delta':
+                                    active.partial = active.partial || !!event.text;
+                                    streamMessage.appendText(event.text || '');
+                                    break;
+                                case 'tool_block_started':
+                                case 'action_bundle_validated':
+                                    streamMessage.setStatus('Preparing actions');
+                                    break;
+                                case 'response_completed':
+                                    finalData = event.final || null;
+                                    streamMessage.setStatus('Finalizing');
+                                    terminal = true;
+                                    break;
+                                case 'response_cancelled': {
+                                    const cancelled = new Error('Generation stopped');
+                                    cancelled.streamCancelled = true;
+                                    throw cancelled;
+                                }
+                                case 'response_error': {
+                                    const failed = new Error(event.message || 'Stream generation failed');
+                                    failed.streamPartial = active.partial;
+                                    failed.streamRetryable = event.retryable !== false;
+                                    throw failed;
+                                }
+                            }
+                        }
+                        if (terminal) break;
+                    }
+                    if (!terminal || !finalData) {
+                        const incomplete = new Error('Stream ended before terminal commit');
+                        incomplete.streamPartial = active.partial;
+                        throw incomplete;
+                    }
+                    return { data: finalData, streamingMessage: streamMessage, streamed: true };
+                } catch (error) {
+                    if (error && error.name === 'AbortError') error.streamCancelled = true;
+                    if (error && !error.streamCancelled && !error.streamPartial && !active.partial) {
+                        streamMessage.discard();
+                        return null;
+                    }
+                    error.streamingMessage = streamMessage;
+                    throw error;
+                } finally {
+                    originSession.activeStream = null;
+                    setWaiting(true, originAgent);
+                    try { reader.releaseLock(); } catch (_) {}
+                }
+            }
+
+            window.__agentChatStreamV1 = {
+                parseEventLine: _parseAgentStreamEventLine,
+                createMessage: createStreamingAssistantMessage,
+            };
+
             async function handleAgentSend() {
                 const isBargeIn = state.narrationState === 'answering';
                 const bargeInSessionId = state.narrationSessionId;
@@ -49423,6 +49819,9 @@
                 let toolCalls = [];
                 let turnExecutionReceipts = [];
                 let turnToolResults = [];
+                let streamingAssistant = null;
+                let streamTurnCancelled = false;
+                let streamTurnFailed = false;
                 try {
                     // Viewport display state is persistent. Highlights, hidden
                     // parts, rotation, and motion are only changed by explicit
@@ -49492,13 +49891,25 @@
                     if (imageToSend) {
                         payload.image = imageToSend;
                     }
-                    const res = await fetch('/api/agent/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
+                    let data = null;
+                    const streamedReply = await _requestAgentChatStream(
+                        payload, originAgent, originSession, turnId
+                    );
+                    if (streamedReply) {
+                        data = streamedReply.data;
+                        streamingAssistant = streamedReply.streamingMessage;
+                    } else {
+                        const res = await fetch('/api/agent/chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        if (!res.ok) {
+                            const errData = await res.json().catch(() => ({}));
+                            throw new Error(errData.detail || 'API returned ' + res.status);
+                        }
+                        data = await res.json();
+                    }
                         _ackExecutionReceipts(sentExecutionReceiptIds);
                         _applyServerWorkflowState(originSession, data);
                         response = data.response || data.message || 'No response from agent.';
@@ -49596,7 +50007,8 @@
                                 await _maybeApplyAssemblyCompareCommandFallback(messageText, toolCalls, originAgent);
                                 await _maybeApplySupplierSpecCompareFallback(messageText, toolCalls, originAgent);
                                 if (implicitFaiViewportActionsSuppressed && typeof response === 'string') {
-                                    const _honestSuppressed = _suppressedFaiViewportHonestyResponse(messageText, response);
+                                    const _honestSuppressed = _referenceOnlyFaiMotionResponse(messageText)
+                                        || _suppressedFaiViewportHonestyResponse(messageText, response);
                                     if (_honestSuppressed) response = _honestSuppressed;
                                 }
                                 // Execution honesty: deterministic confirmations
@@ -49679,11 +50091,22 @@
                         if (data._isNarration) {
                             response = data;
                         }
-                    } else {
-                        const errData = await res.json().catch(() => ({}));
-                        throw new Error(errData.detail || 'API returned ' + res.status);
-                    }
                 } catch (err) {
+                    if (!(err && (err.streamCancelled || err.name === 'AbortError'))) {
+                        console.error('[AgentSend] request or stream handling failed:', err);
+                    }
+                    if (err && err.streamingMessage) {
+                        err.streamingMessage.discard();
+                        streamingAssistant = null;
+                    }
+                    if (err && err.streamCancelled) {
+                        streamTurnCancelled = true;
+                        response = '';
+                    } else if (err && err.streamPartial) {
+                        _showAgentStreamRetry(originAgent, messageText);
+                        streamTurnFailed = true;
+                        response = '';
+                    } else {
                     // Fallback: provide contextual response locally
                     if (state.results) {
                         const gs = state.results.gap_summary;
@@ -49697,6 +50120,13 @@
                     } else {
                         response = `Upload a drawing and run an inspection first, then I can help you analyze the results.`;
                     }
+                    }
+                }
+
+                if (streamTurnCancelled || streamTurnFailed) {
+                    if (currentAgent === originAgent) removeTypingIndicator();
+                    setWaiting(false, originAgent);
+                    return;
                 }
 
                 // Stale-turn guard after fetch completes
@@ -49724,7 +50154,9 @@
                     // Always store the full text in the message (canonical data).
                     // For auto-play, the DOM is cleared by _enhanceWithNarrationSegments —
                     // but the session message retains the text for restore.
-                    const narrationMsg = addMessage(textResponse, 'assistant', originAgent);
+                    const narrationMsg = streamingAssistant
+                        ? streamingAssistant.commit(textResponse)
+                        : addMessage(textResponse, 'assistant', originAgent);
 
                     // Apply explode level for narration responses (stop motion first)
                     if (data.explode_level !== undefined && data.explode_level !== null) {
@@ -49759,7 +50191,10 @@
                 } else {
                     const suppressAssistantResponse = shouldSuppressAssistantResponseForToolCalls(response, toolCalls);
                     if (!suppressAssistantResponse) {
-                        addMessage(response, 'assistant', originAgent);
+                        if (streamingAssistant) streamingAssistant.commit(response);
+                        else addMessage(response, 'assistant', originAgent);
+                    } else if (streamingAssistant) {
+                        streamingAssistant.discard();
                     }
                     // Barge-in response: route through barge-in handler (plays TTS, then prompts resume)
                     // Guard: only if session is still valid (user didn't cancel during Sage API call)
@@ -50741,7 +51176,14 @@
             agentToggleBtn.addEventListener('click', () => {
                 toggleAgentPanel();
             });
-            agentSendBtn.addEventListener('click', handleAgentSend);
+            agentSendBtn.addEventListener('click', () => {
+                const session = getCurrentAgentSession();
+                if (session.activeStream && session.activeStream.controller) {
+                    session.activeStream.controller.abort();
+                    return;
+                }
+                handleAgentSend();
+            });
             voiceMicBtn.addEventListener('click', handleMicClick);
 
             // ---- Spacebar push-to-talk barge-in (Phase 1) ----

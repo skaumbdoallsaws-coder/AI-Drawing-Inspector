@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "plain-prose",
+      "raw": "The bore is 0.20 mm above its upper limit.",
+      "visible_prefix": "The bore is 0.20 mm above its upper limit."
+    },
+    {
+      "id": "native-tool-block",
+      "raw": "I can show the affected components.\n<tool_calls>\n[{\"name\":\"highlight_parts\",\"args\":{\"part_numbers\":[\"SYNTH-P1\"]}}]\n</tool_calls>",
+      "visible_prefix": "I can show the affected components.\n"
+    },
+    {
+      "id": "ui-actions-block",
+      "raw": "Preparing the requested viewport change.\n[ UI_ACTIONS ] {\"workspace\":\"assembly\",\"actions\":[]} [/UI_ACTIONS]",
+      "visible_prefix": "Preparing the requested viewport change.\n"
+    },
+    {
+      "id": "line-marker",
+      "raw": "The selected parts form the joint.\n  HIGHLIGHT_PARTS : SYNTH-P1, SYNTH-P2",
+      "visible_prefix": "The selected parts form the joint.\n"
+    },
+    {
+      "id": "malformed-partial-block",
+      "raw": "This prose is safe.\n[UI_ACT",
+      "visible_prefix": "This prose is safe.\n"
+    }
+  ]
+}

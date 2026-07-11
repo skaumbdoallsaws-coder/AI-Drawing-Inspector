@@ -230,7 +230,7 @@ def test_store_schema_version_persisted(tmp_path: Path):
     store = TelemetryStore(db_path=tmp_path / "m.sqlite")
     store.write(TelemetryEvent())  # triggers init
     # v2: Phase 3 added httpStatus + stage columns.
-    assert store.schema_version() == 2
+    assert store.schema_version() == 3
 
 
 def test_store_creates_parent_directory(tmp_path: Path):
@@ -667,6 +667,44 @@ def test_event_phase3_fields_roundtrip_via_dict():
     assert restored.stage == "inspect"
 
 
+def test_event_streaming_fields_roundtrip_via_dict():
+    e = TelemetryEvent(
+        firstTokenLatencyMs=120.5,
+        firstCleanSentenceMs=340.0,
+        streamDurationMs=1450.25,
+        pipelineLatencyMs=18.75,
+        finalizeDeltaChars=12,
+    )
+    restored = TelemetryEvent.from_dict(e.to_dict())
+    assert restored.firstTokenLatencyMs == 120.5
+    assert restored.firstCleanSentenceMs == 340.0
+    assert restored.streamDurationMs == 1450.25
+    assert restored.pipelineLatencyMs == 18.75
+    assert restored.finalizeDeltaChars == 12
+
+
+def test_store_persists_streaming_columns(tmp_path: Path):
+    store = TelemetryStore(db_path=tmp_path / "stream.sqlite")
+    try:
+        store.write(TelemetryEvent(
+            workflow="agent_chat_stream_v2",
+            firstTokenLatencyMs=100.0,
+            firstCleanSentenceMs=250.0,
+            streamDurationMs=900.0,
+            pipelineLatencyMs=20.0,
+            finalizeDeltaChars=4,
+        ))
+        row = store.query_recent(1)[0]
+        assert row.firstTokenLatencyMs == 100.0
+        assert row.firstCleanSentenceMs == 250.0
+        assert row.streamDurationMs == 900.0
+        assert row.pipelineLatencyMs == 20.0
+        assert row.finalizeDeltaChars == 4
+        assert store.schema_version() == 3
+    finally:
+        store.close()
+
+
 def test_store_persists_phase3_columns(tmp_path: Path):
     store = TelemetryStore(db_path=tmp_path / "m.sqlite")
     e = TelemetryEvent(
@@ -740,7 +778,7 @@ def test_store_migrates_v1_database_to_v2(tmp_path: Path):
         assert len(rows) == 1
         assert rows[0].httpStatus == 200
         assert rows[0].stage == "total"
-        assert store.schema_version() == 2
+        assert store.schema_version() == 3
     finally:
         store.close()  # truncate WAL so tmp_path cleanup can rmtree on Windows
 

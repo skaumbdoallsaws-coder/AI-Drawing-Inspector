@@ -468,6 +468,18 @@ for (const item of authorizationFixture.cases || []) {
             && honest.includes('The affected motion is')
             && honest.includes('I did not change the viewport'),
         honest);
+
+    // A direct FAI question about affected motion is answered from the
+    // declared live motion group even when the model prose omits that fact.
+    // This is reference-only: a show command remains an action turn.
+    const referenceOnly = _referenceOnlyFaiMotionResponse('what motion will be affected?');
+    check('10 reference-only FAI motion answer is grounded in the live group',
+        typeof referenceOnly === 'string'
+            && referenceOnly.includes('Pin bore affected motion group')
+            && referenceOnly.includes('viewport has not changed'),
+        referenceOnly);
+    check('10 reference-only FAI motion answer never hijacks a show command',
+        _referenceOnlyFaiMotionResponse('show the affected motion') === null);
 }
 
 // 11. "show/play the affected motion" -> highlight + play emitted TOGETHER,

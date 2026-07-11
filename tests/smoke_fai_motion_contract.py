@@ -141,6 +141,7 @@ def run() -> int:
             """)
 
         def ask(question: str) -> str:
+            prior_assistant_count = page.locator("#agentMessages .agent-msg-row.assistant").count()
             sent = page.evaluate(
                 "async (q) => { try { window._agentInput.value = q;"
                 " await window._handleAgentSend(); return { sent: true }; }"
@@ -148,7 +149,19 @@ def run() -> int:
                 question)
             if not sent.get("sent"):
                 raise RuntimeError(f"send failed: {sent.get('error')}")
-            page.wait_for_timeout(1000)
+            # Streaming replies are provisionally rendered before their
+            # authoritative terminal commit. Acceptance checks must inspect
+            # the committed reply, not a sentence that happened to arrive
+            # after the old fixed one-second wait.
+            page.wait_for_function(
+                "(prior) => { const rows = Array.from(document.querySelectorAll("
+                "'#agentMessages .agent-msg-row.assistant'));"
+                " const last = rows[rows.length - 1];"
+                " return rows.length > prior && last"
+                " && !last.classList.contains('agent-stream-pending'); }",
+                arg=prior_assistant_count,
+                timeout=120_000,
+            )
             answer = page.evaluate(
                 "() => { const m = document.querySelectorAll('#agentMessages .agent-msg-row.assistant');"
                 " return m.length ? m[m.length - 1].innerText : ''; }")

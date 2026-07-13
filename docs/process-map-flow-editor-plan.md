@@ -1,11 +1,12 @@
 # Process Map Flow Editor (n8n-style) - Implementation Plan
 
-Status: revision 2 - PHASE 1 IMPLEMENTED (2026-07-12).
+Status: revision 2 - PHASES 1-2 IMPLEMENTED (2026-07-12).
 Supersedes the chat-delivered revision 1. Incorporates all four binding
 corrections from the approval review plus the resolved open decisions.
 Phase 1 (schema v2 migration, deterministic validation, revision-safe
-endpoints, backups, and atomic persistence) is implemented. Phases 2-6 are
-not implemented yet.
+endpoints, backups, and atomic persistence) and Phase 2 (read-only flow
+canvas, deterministic layout, pan/zoom/fit, rich card reuse, type badges,
+and subassembly focus) are implemented. Phases 3-6 are not implemented yet.
 
 ## 0. Approval record (binding corrections)
 

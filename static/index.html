@@ -5552,6 +5552,267 @@
             text-transform: uppercase;
             white-space: nowrap;
         }
+        .pm-editor {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            grid-template-rows: 48px minmax(0, 1fr);
+            overflow: hidden;
+            background: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .pm-toolbar {
+            position: relative;
+            z-index: 4;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-width: 0;
+            padding: 0 14px 0 18px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-toolbar);
+        }
+        .pm-toolbar-copy {
+            min-width: 0;
+        }
+        .pm-toolbar-title {
+            overflow: hidden;
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 800;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pm-toolbar-subtitle {
+            overflow: hidden;
+            margin-top: 2px;
+            color: var(--text-secondary);
+            font-size: 9px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pm-toolbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex: 0 0 auto;
+        }
+        .pm-structure-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+        .pm-toolbar-button {
+            min-width: 28px;
+            height: 28px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            font: inherit;
+            font-size: 10px;
+            padding: 0 8px;
+        }
+        .pm-toolbar-button:hover:not(:disabled) {
+            border-color: var(--border);
+            background: var(--bg-hover);
+        }
+        .pm-toolbar-button:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+        .pm-toolbar-button:disabled {
+            cursor: default;
+            opacity: 0.35;
+        }
+        .pm-back-button {
+            font-size: 15px;
+            padding-bottom: 2px;
+        }
+        .pm-viewport {
+            position: relative;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+            cursor: grab;
+            background-color: var(--bg-main);
+            background-image:
+                linear-gradient(rgba(92, 116, 137, 0.10) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(92, 116, 137, 0.10) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+        .pm-viewport.panning {
+            cursor: grabbing;
+        }
+        .pm-world {
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform-origin: 0 0;
+            will-change: transform;
+        }
+        .pm-edge-layer,
+        .pm-node-layer {
+            position: absolute;
+            inset: 0;
+        }
+        .pm-edge {
+            fill: none;
+            stroke: #4f91ba;
+            stroke-linecap: round;
+            stroke-width: 2;
+            vector-effect: non-scaling-stroke;
+        }
+        .pm-edge-rework,
+        .pm-edge-feedback {
+            stroke: #b17a32;
+            stroke-dasharray: 6 5;
+        }
+        .pm-edge-material {
+            stroke: #5e9b70;
+        }
+        .pm-arrow-head {
+            fill: #4f91ba;
+        }
+        .pm-node {
+            position: absolute;
+            box-sizing: border-box;
+            border-radius: 6px;
+        }
+        .pm-node.selected {
+            outline: 2px solid var(--accent);
+            outline-offset: 3px;
+        }
+        .pm-node-card {
+            box-sizing: border-box;
+            width: 100% !important;
+            height: 100% !important;
+            min-height: 0 !important;
+            overflow: hidden;
+            padding-top: 26px !important;
+            border-radius: 6px !important;
+            border-left: 4px solid #6089a5 !important;
+        }
+        .pm-node-card .train-diagram-assembly-shot,
+        .pm-node-card .train-diagram-node-visual {
+            min-height: 54px;
+            max-height: 62px;
+        }
+        .pm-node-card .train-diagram-thumb-strip {
+            min-height: 48px;
+            max-height: 58px;
+            overflow: hidden;
+        }
+        .pm-node-card .train-diagram-card-title {
+            font-size: 12px;
+            line-height: 1.25;
+        }
+        .pm-node-type {
+            position: absolute;
+            z-index: 3;
+            left: 12px;
+            top: 8px;
+            max-width: 190px;
+            overflow: hidden;
+            color: #3f6077;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-overflow: ellipsis;
+            text-transform: uppercase;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        .pm-node-finding {
+            position: absolute;
+            z-index: 4;
+            right: 10px;
+            top: 7px;
+            display: grid;
+            width: 18px;
+            height: 18px;
+            place-items: center;
+            border: 1px solid rgba(125, 78, 0, 0.28);
+            border-radius: 50%;
+            background: #ffd36a;
+            color: #5f3b00;
+            font-size: 9px;
+            font-weight: 900;
+            pointer-events: auto;
+        }
+        .pm-node-finding.error {
+            border-color: rgba(128, 27, 27, 0.32);
+            background: #f28b82;
+            color: #5d1111;
+        }
+        .pm-port {
+            position: absolute;
+            z-index: 5;
+            top: 50%;
+            display: grid;
+            width: 18px;
+            height: 18px;
+            place-items: center;
+            transform: translateY(-50%);
+            border: 2px solid var(--bg-main);
+            border-radius: 50%;
+            background: #58a8d4;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1;
+            pointer-events: none;
+        }
+        .pm-port-in { left: -9px; }
+        .pm-port-out { right: -9px; }
+        .pm-node-type-assembly .pm-node-card { border-left-color: #3f83b4 !important; }
+        .pm-node-type-subassembly .pm-node-card { border-left-color: #2f9b91 !important; }
+        .pm-node-type-operation .pm-node-card { border-left-color: #c38a2f !important; }
+        .pm-node-type-inspection .pm-node-card { border-left-color: #5b9d62 !important; }
+        .pm-node-type-decision .pm-node-card { border-left-color: #ad5e9a !important; }
+        .pm-node-type-input .pm-node-card { border-left-color: #71899b !important; }
+        .pm-node-type-output .pm-node-card { border-left-color: #4b9b72 !important; }
+        .pm-fallback-card {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            padding: 26px 18px 14px;
+            text-align: left;
+        }
+        .pm-fallback-card span {
+            color: var(--text-secondary);
+            font-size: 10px;
+        }
+        html[data-theme="dark"] .pm-viewport {
+            background-image:
+                linear-gradient(rgba(132, 159, 181, 0.10) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(132, 159, 181, 0.10) 1px, transparent 1px);
+        }
+        html[data-theme="dark"] .pm-node-type {
+            color: #a8c5d7;
+        }
+        html[data-theme="dark"] .pm-edge {
+            stroke: #69b5df;
+        }
+        html[data-theme="dark"] .pm-arrow-head {
+            fill: #69b5df;
+        }
+        @media (max-width: 860px) {
+            .pm-toolbar-subtitle { display: none; }
+            .pm-toolbar-button { padding: 0 6px; }
+            .pm-toolbar-actions { gap: 1px; }
+        }
         .train-plant-process-diagram {
             position: absolute;
             inset: 0;
@@ -11861,6 +12122,7 @@
 
     <script src="/static/ui_action_runtime.js"></script>
     <script src="/static/chat_stream_runtime.js"></script>
+    <script src="/static/process_map_editor.js"></script>
     <script>
         /* ============================================================
            InspectorPro - Frontend Application Logic
@@ -12160,6 +12422,8 @@
             },
             // Internal: latest mock generation seed for stable rerolls
             _generationSeed: 0,
+            processMapProductId: 'racing-bike',
+            processMapApiUrl: '/api/training/process-map/racing-bike',
             processMapUrl: '/generated/training/racing-bike/racing_bike_process_map_working_draft.json',
             uniqueItemsUrl: '/generated/training/racing-bike/racing_bike_unique_items.json',
             subassemblyVisualsUrl: '/generated/training/racing-bike/racing_bike_subassembly_visuals.json',
@@ -12220,6 +12484,10 @@
             facilityLayoutCapacityLoading: false,
             facilityLayoutCapacityError: null,
             processMap: null,
+            processMapRevision: null,
+            processMapFindings: [],
+            processMapFlowAvailable: false,
+            processMapFlowFocusNodeId: null,
             uniqueItems: null,
             subassemblyVisuals: null,
             guidedBuildPlan: null,
@@ -21848,9 +22116,31 @@
             if (_trainIsPlantProcessMode()) _trainRenderPlantProcessDiagram();
             else _trainRenderProcessDiagram();
             trainingState.processMapLoadPromise = (async () => {
-                const res = await fetch(trainingState.processMapUrl, { cache: 'no-store' });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const data = await res.json();
+                let data = null;
+                trainingState.processMapFlowAvailable = false;
+                trainingState.processMapRevision = null;
+                trainingState.processMapFindings = [];
+                try {
+                    const apiRes = await fetch(trainingState.processMapApiUrl, { cache: 'no-store' });
+                    if (apiRes.ok) {
+                        const payload = await apiRes.json();
+                        if (payload && payload.map && Array.isArray(payload.map.nodes)) {
+                            data = payload.map;
+                            trainingState.processMapFlowAvailable = true;
+                            trainingState.processMapRevision = payload.revision || null;
+                            trainingState.processMapFindings = Array.isArray(payload.findings)
+                                ? payload.findings
+                                : [];
+                        }
+                    }
+                } catch (_) {
+                    data = null;
+                }
+                if (!data) {
+                    const res = await fetch(trainingState.processMapUrl, { cache: 'no-store' });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    data = await res.json();
+                }
                 trainingState.processMap = data;
                 try {
                     const itemsRes = await fetch(trainingState.uniqueItemsUrl, { cache: 'no-store' });
@@ -24205,7 +24495,8 @@
             } else {
                 card.addEventListener('click', () => _trainSelectProcessNode(node.nodeId));
             }
-            const renderedNodeVisual = (opts.root || (node && (node.level === 1 || node.level === 2)))
+            const renderedNodeVisual = !opts.disablePreview
+                && (opts.root || (node && (node.level === 1 || node.level === 2)))
                 ? _trainAppendNodeVisual(card, node, opts)
                 : false;
             if (!renderedNodeVisual) {
@@ -24466,13 +24757,99 @@
             return true;
         }
 
+        function _trainDisposeProcessFlowEditor(host) {
+            const target = host || document.getElementById('trainViewportHost');
+            const editor = target && target.__processMapEditor;
+            if (editor && typeof editor.destroy === 'function') editor.destroy();
+        }
+
+        function _trainCreateProcessFlowCard(node, opts = {}) {
+            const childCount = _trainChildProcessNodes(node.nodeId).length;
+            return _trainDiagramCard(node, {
+                className: 'pm-source-card',
+                selected: !!opts.selected,
+                compactThumbs: true,
+                disablePreview: true,
+                thumbCount: 3,
+                countLabel: childCount
+                    ? `${childCount} child node${childCount === 1 ? '' : 's'}`
+                    : `${(node.partIds || []).length} part reference${(node.partIds || []).length === 1 ? '' : 's'}`,
+                onClick: () => {
+                    if (typeof opts.onSelect === 'function') opts.onSelect(node.nodeId);
+                },
+            });
+        }
+        window._pmCreateNodeCard = _trainCreateProcessFlowCard;
+
+        function _trainSelectProcessFlowNode(nodeId) {
+            const node = _trainProcessNodeById(nodeId);
+            if (!node) return;
+            trainingState.selectedProcessNodeId = node.nodeId;
+            trainingState.selectedUniqueItemId = null;
+            trainingState.type = 'assembly';
+            trainingState.targetComponent = node.name || '';
+            trainingState.goal = `Review ${node.name || 'selected process node'} in the process flow`;
+            const body = document.getElementById('trainSetupBody');
+            if (body) _trainRenderSetupBody(body);
+            _trainRenderProcessStructurePanel();
+            renderRibbon();
+        }
+
+        function _trainOpenProcessFlow() {
+            if (!trainingState.processMapFlowAvailable) return false;
+            trainingState.viewportMode = 'process_flow';
+            _trainDisposeLiveAssemblyViewer();
+            return _trainRenderProcessFlow();
+        }
+
+        function _trainRenderProcessFlow() {
+            const host = document.getElementById('trainViewportHost');
+            const runtime = window.InspectorProProcessMap;
+            if (!host || !runtime || typeof runtime.mount !== 'function') return false;
+            if (!trainingState.processMapFlowAvailable || !trainingState.processMap) return false;
+            trainingState.viewportMode = 'process_flow';
+            runtime.mount(host, {
+                map: trainingState.processMap,
+                findings: trainingState.processMapFindings,
+                selectedNodeId: trainingState.selectedProcessNodeId,
+                focusNodeId: trainingState.processMapFlowFocusNodeId,
+                createNodeCard: _trainCreateProcessFlowCard,
+                onSelect: _trainSelectProcessFlowNode,
+                onFocusChange: (nodeId) => {
+                    trainingState.processMapFlowFocusNodeId = nodeId || null;
+                },
+                onExit: () => {
+                    trainingState.viewportMode = 'structure';
+                    trainingState.processMapFlowFocusNodeId = null;
+                    _trainRenderProcessDiagram();
+                },
+            });
+            return true;
+        }
+
+        window.__processMapFlow = {
+            open: _trainOpenProcessFlow,
+            close: () => {
+                trainingState.viewportMode = 'structure';
+                trainingState.processMapFlowFocusNodeId = null;
+                return _trainRenderProcessDiagram();
+            },
+            get editor() {
+                const host = document.getElementById('trainViewportHost');
+                return host && host.__processMapEditor;
+            },
+            get available() { return !!trainingState.processMapFlowAvailable; },
+        };
+
         function _trainRenderProcessDiagram() {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
             if (trainingState.viewportMode === 'assembly3d') return false;
+            if (trainingState.viewportMode === 'process_flow') return _trainRenderProcessFlow();
             if (_trainIsFacilityLayoutMode()) return _trainRenderFacilityLayoutViewer();
             if (!trainingState.processMap && !trainingState.processMapLoading && !trainingState.processMapError) return false;
 
+            _trainDisposeProcessFlowEditor(host);
             host.innerHTML = '';
             const diagram = document.createElement('div');
             diagram.className = 'train-process-diagram';
@@ -24499,7 +24876,20 @@
             stamp.className = 'train-process-board-stamp';
             stamp.textContent = 'Working Draft';
             head.appendChild(headCopy);
-            head.appendChild(stamp);
+            const headActions = document.createElement('div');
+            headActions.className = 'pm-structure-actions';
+            if (trainingState.processMapFlowAvailable) {
+                const flowButton = document.createElement('button');
+                flowButton.type = 'button';
+                flowButton.className = 'train-secondary-btn';
+                flowButton.setAttribute('data-training-open-process-flow', 'true');
+                flowButton.textContent = 'Flow view';
+                flowButton.title = 'Open the read-only process flow canvas';
+                flowButton.addEventListener('click', _trainOpenProcessFlow);
+                headActions.appendChild(flowButton);
+            }
+            headActions.appendChild(stamp);
+            head.appendChild(headActions);
             board.appendChild(head);
 
             if (trainingState.processMapLoading) {

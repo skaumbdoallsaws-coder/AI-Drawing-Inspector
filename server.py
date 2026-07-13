@@ -103,6 +103,15 @@ from ai_inspector.agent_skills import (
     WorkflowStateStore,
 )
 from ai_inspector.chat_streaming import SentenceStreamBuffer, StreamDirectiveFilter
+from ai_inspector.process_map import (
+    ProcessMapAssetError,
+    ProcessMapConflictError,
+    ProcessMapNotFoundError,
+    ProcessMapValidationError,
+    ProcessMapWriteError,
+    load_process_map,
+    save_process_map,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -10718,6 +10727,73 @@ async def training_guided_narration(body: TrainingNarrationBody):
         "stepCount": len(body.steps),
         "narration": narration,
     }
+
+
+PROCESS_MAP_TRAINING_ROOT = REPO_ROOT / "generated" / "training"
+
+
+class ProcessMapPutBody(BaseModel):
+    map: Dict[str, Any]
+    baseRevision: str
+
+
+def _process_map_edit_enabled() -> bool:
+    value = (os.getenv("INSPECTORPRO_PROCESS_MAP_EDIT") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _require_process_map_edit_enabled() -> None:
+    if not _process_map_edit_enabled():
+        raise HTTPException(status_code=404, detail="Process-map editor is not enabled")
+
+
+@app.get("/api/training/process-map/{productId}")
+def training_process_map_get(productId: str):
+    """Load a process map, migrating older schemas in memory."""
+    _require_process_map_edit_enabled()
+    try:
+        result = load_process_map(PROCESS_MAP_TRAINING_ROOT, productId)
+    except ProcessMapNotFoundError:
+        raise HTTPException(status_code=404, detail="Process map not found")
+    except ProcessMapAssetError as ex:
+        logger.error("training.process_map.get failed product=%s msg=%s", productId, ex)
+        raise HTTPException(status_code=500, detail="Process map could not be loaded")
+    return {"success": True, **result}
+
+
+@app.put("/api/training/process-map/{productId}")
+def training_process_map_put(productId: str, body: ProcessMapPutBody):
+    """Validate and atomically save a revision-matched process map."""
+    _require_process_map_edit_enabled()
+    try:
+        result = save_process_map(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            body.map,
+            body.baseRevision,
+        )
+    except ProcessMapNotFoundError:
+        raise HTTPException(status_code=404, detail="Process map not found")
+    except ProcessMapConflictError as ex:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "revision_conflict",
+                "currentRevision": ex.current_revision,
+            },
+        )
+    except ProcessMapValidationError as ex:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "validation_failed", "findings": ex.findings},
+        )
+    except ProcessMapWriteError as ex:
+        logger.error("training.process_map.put failed product=%s msg=%s", productId, ex)
+        raise HTTPException(status_code=500, detail="Process map could not be saved")
+    except ProcessMapAssetError as ex:
+        logger.error("training.process_map.put failed product=%s msg=%s", productId, ex)
+        raise HTTPException(status_code=500, detail="Process map could not be loaded")
+    return {"success": True, **result}
 
 
 class FacilityCapacityBody(BaseModel):

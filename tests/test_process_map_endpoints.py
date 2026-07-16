@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 import server
 from ai_inspector.process_map import repository
-from ai_inspector.process_map import validate_process_map
+from ai_inspector.process_map import validate_placement_map
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -92,24 +92,45 @@ def test_get_migrates_v1_in_memory_and_returns_stored_revision(process_map_asset
     assert payload["success"] is True
     assert payload["assetName"] == "fixture_process_map_working_draft.json"
     assert len(payload["revision"]) == 64
-    assert payload["map"]["schemaVersion"] == 2
-    assert payload["map"]["edges"] == []
-    assert [node["type"] for node in payload["map"]["nodes"]] == [
+    assert payload["map"]["schemaVersion"] == 3
+    assert payload["map"]["canvasNodes"] == []
+    assert payload["map"]["canvasEdges"] == []
+    assert payload["map"]["sourceStructureRevision"] == payload["structureRevision"]
+    assert [item["kind"] for item in payload["productStructure"]["occurrences"]] == [
         "assembly",
         "subassembly",
-        "input",
+        "part",
     ]
     assert {finding["severity"] for finding in payload["findings"]} == {"info"}
     stored = json.loads(process_map_asset["asset"].read_text(encoding="utf-8"))
     assert stored["schemaVersion"] == "fixture-process-map-1"
 
 
-def test_put_round_trip_creates_backup_and_ascii_v2_asset(process_map_asset: dict):
+def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process_map_asset: dict):
     client = TestClient(server.app)
     loaded = client.get("/api/training/process-map/fixture-product").json()
     edited = loaded["map"]
-    edited["nodes"][1]["name"] = "Caf\u00e9 Module"
-    edited["nodes"][1]["position"] = {"x": 120, "y": 240}
+    edited["canvasNodes"].append(
+        {
+            "nodeId": "canvas-module",
+            "nodeKind": "product_occurrence",
+            "sourceOccurrenceId": "module",
+            "nameSnapshot": "Caf\u00e9 Module",
+            "itemIdSnapshot": "P-001",
+            "labelOverride": "Primary fixture module",
+            "note": "Verify alignment before the inspection step.",
+            "referenceIds": ["machine-1"],
+            "position": {"x": 120, "y": 240},
+        }
+    )
+    edited["referenceCatalog"] = [
+        {
+            "referenceId": "machine-1",
+            "kind": "machine",
+            "name": "Five-axis machining center",
+            "identifier": "MC-01",
+        }
+    ]
 
     response = client.put(
         "/api/training/process-map/fixture-product",
@@ -125,15 +146,27 @@ def test_put_round_trip_creates_backup_and_ascii_v2_asset(process_map_asset: dic
     raw.decode("ascii")
     assert b"Caf\\u00e9 Module" in raw
     stored = json.loads(raw.decode("ascii"))
-    assert stored["schemaVersion"] == 2
-    assert stored["nodes"][1]["position"] == {"x": 120, "y": 240}
+    assert stored["schemaVersion"] == 3
+    assert stored["canvasNodes"][0]["position"] == {"x": 120, "y": 240}
+    assert stored["canvasNodes"][0]["labelOverride"] == "Primary fixture module"
+    assert stored["canvasNodes"][0]["note"] == "Verify alignment before the inspection step."
+    assert stored["canvasNodes"][0]["referenceIds"] == ["machine-1"]
+    assert stored["referenceCatalog"][0]["identifier"] == "MC-01"
+    structure_asset = process_map_asset["productDir"] / "fixture_product_product_structure.json"
+    assert structure_asset.is_file()
+    structure_asset.read_bytes().decode("ascii")
     backups = list(process_map_asset["productDir"].glob("*.backup-*.json"))
     assert len(backups) == 1
     assert json.loads(backups[0].read_text(encoding="utf-8"))["schemaVersion"] == "fixture-process-map-1"
 
     reloaded = client.get("/api/training/process-map/fixture-product").json()
     assert reloaded["revision"] == payload["revision"]
-    assert reloaded["map"]["nodes"][1]["name"] == "Caf\u00e9 Module"
+    assert reloaded["map"]["canvasNodes"][0]["nameSnapshot"] == "Caf\u00e9 Module"
+    assert reloaded["map"]["canvasNodes"][0]["labelOverride"] == "Primary fixture module"
+    assert reloaded["map"]["canvasNodes"][0]["note"] == "Verify alignment before the inspection step."
+    assert reloaded["map"]["canvasNodes"][0]["referenceIds"] == ["machine-1"]
+    assert reloaded["map"]["referenceCatalog"][0]["identifier"] == "MC-01"
+    assert len(reloaded["productStructure"]["occurrences"]) == 3
 
 
 def test_stale_revision_returns_409_without_modifying_asset(process_map_asset: dict):
@@ -157,25 +190,39 @@ def test_structural_errors_return_422_but_warnings_can_save(process_map_asset: d
     client = TestClient(server.app)
     loaded = client.get("/api/training/process-map/fixture-product").json()
     invalid = deepcopy(loaded["map"])
-    invalid["nodes"][1]["type"] = "component"
+    invalid["canvasNodes"].append(
+        {
+            "nodeId": "bad",
+            "nodeKind": "component",
+            "position": {"x": 0, "y": 0},
+        }
+    )
     response = client.put(
         "/api/training/process-map/fixture-product",
         json={"map": invalid, "baseRevision": loaded["revision"]},
     )
     assert response.status_code == 422
     assert response.json()["error"] == "validation_failed"
-    assert "unknown_node_type" in {
+    assert "unknown_canvas_node_kind" in {
         finding["code"] for finding in response.json()["findings"]
     }
 
     warning_only = deepcopy(loaded["map"])
-    warning_only["nodes"][1]["partIds"] = ["UNKNOWN"]
+    warning_only["canvasNodes"].append(
+        {
+            "nodeId": "decision",
+            "nodeKind": "process_step",
+            "processType": "decision",
+            "name": "Review result",
+            "position": {"x": 0, "y": 0},
+        }
+    )
     response = client.put(
         "/api/training/process-map/fixture-product",
         json={"map": warning_only, "baseRevision": loaded["revision"]},
     )
     assert response.status_code == 200
-    assert "unknown_part_reference" in {
+    assert "decision_has_fewer_than_two_outputs" in {
         finding["code"] for finding in response.json()["findings"]
     }
 
@@ -210,7 +257,7 @@ def test_backup_retention_keeps_only_configured_latest_files(
     for index in range(4):
         loaded = client.get("/api/training/process-map/fixture-product").json()
         edited = deepcopy(loaded["map"])
-        edited["nodes"][1]["name"] = f"Fixture Module {index}"
+        edited["productName"] = f"Fixture Product {index}"
         response = client.put(
             "/api/training/process-map/fixture-product",
             json={"map": edited, "baseRevision": loaded["revision"]},
@@ -228,14 +275,65 @@ def test_real_racing_bike_part_manifest_activates_reference_validation():
     assert {"RB-001", "RB-024", "RB-047"}.issubset(known_parts)
 
     loaded = repository.load_process_map(product_dir.parent, "racing-bike")
+    assert loaded["map"]["schemaVersion"] == 3
+    assert isinstance(loaded["map"]["canvasNodes"], list)
+    assert len(loaded["productStructure"]["occurrences"]) == 56
     modified = deepcopy(loaded["map"])
-    modified["nodes"][0]["partIds"].append("RB-UNKNOWN")
-    findings = validate_process_map(modified, known_parts)
+    modified["canvasNodes"].append(
+        {
+            "nodeId": "missing-source",
+            "nodeKind": "product_occurrence",
+            "sourceOccurrenceId": "RB-UNKNOWN",
+            "position": {"x": 0, "y": 0},
+        }
+    )
+    occurrence_ids = {
+        item["occurrenceId"] for item in loaded["productStructure"]["occurrences"]
+    }
+    findings = validate_placement_map(modified, occurrence_ids)
     assert any(
-        finding["code"] == "unknown_part_reference"
+        finding["code"] == "dangling_source_occurrence"
         and "RB-UNKNOWN" in finding["message"]
         for finding in findings
     )
+
+
+def test_product_structure_endpoint_returns_same_revision(process_map_asset: dict):
+    client = TestClient(server.app)
+    map_payload = client.get("/api/training/process-map/fixture-product").json()
+    response = client.get("/api/training/product-structure/fixture-product")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["structureRevision"] == map_payload["structureRevision"]
+    assert len(payload["productStructure"]["occurrences"]) == 3
+
+
+def test_source_structure_revision_conflict_fails_closed(process_map_asset: dict):
+    client = TestClient(server.app)
+    loaded = client.get("/api/training/process-map/fixture-product").json()
+    edited = deepcopy(loaded["map"])
+    edited["sourceStructureRevision"] = "0" * 64
+    response = client.put(
+        "/api/training/process-map/fixture-product",
+        json={"map": edited, "baseRevision": loaded["revision"]},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"] == "source_structure_conflict"
+
+
+def test_color_manifest_only_product_activates_reference_validation(tmp_path: Path):
+    product_dir = tmp_path / "color-manifest-product"
+    product_dir.mkdir()
+    colors = {f"P-{index:03d}": "#4f91ba" for index in range(1, 473)}
+    (product_dir / "part_colored_iso_manifest.json").write_text(
+        json.dumps({"colors": colors}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    known_parts = repository._known_product_part_ids(product_dir)
+    assert known_parts is not None
+    assert len(known_parts) == 472
+    assert {"P-001", "P-236", "P-472"}.issubset(known_parts)
 
 
 @pytest.mark.parametrize(

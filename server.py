@@ -107,9 +107,11 @@ from ai_inspector.process_map import (
     ProcessMapAssetError,
     ProcessMapConflictError,
     ProcessMapNotFoundError,
+    ProcessMapSourceConflictError,
     ProcessMapValidationError,
     ProcessMapWriteError,
     load_process_map,
+    load_product_structure,
     save_process_map,
 )
 
@@ -10761,6 +10763,20 @@ def training_process_map_get(productId: str):
     return {"success": True, **result}
 
 
+@app.get("/api/training/product-structure/{productId}")
+def training_product_structure_get(productId: str):
+    """Load the immutable source catalog used by the process-map editor."""
+    _require_process_map_edit_enabled()
+    try:
+        result = load_product_structure(PROCESS_MAP_TRAINING_ROOT, productId)
+    except ProcessMapNotFoundError:
+        raise HTTPException(status_code=404, detail="Product structure not found")
+    except ProcessMapAssetError as ex:
+        logger.error("training.product_structure.get failed product=%s msg=%s", productId, ex)
+        raise HTTPException(status_code=500, detail="Product structure could not be loaded")
+    return {"success": True, **result}
+
+
 @app.put("/api/training/process-map/{productId}")
 def training_process_map_put(productId: str, body: ProcessMapPutBody):
     """Validate and atomically save a revision-matched process map."""
@@ -10780,6 +10796,14 @@ def training_process_map_put(productId: str, body: ProcessMapPutBody):
             content={
                 "error": "revision_conflict",
                 "currentRevision": ex.current_revision,
+            },
+        )
+    except ProcessMapSourceConflictError as ex:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "source_structure_conflict",
+                "currentStructureRevision": ex.current_revision,
             },
         )
     except ProcessMapValidationError as ex:

@@ -13,7 +13,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .validate import has_structural_errors, migrate_process_map, validate_process_map
+from .schema_v3 import (
+    PROCESS_MAP_PLACEMENT_SCHEMA_VERSION,
+    migrate_to_placement_map,
+    product_structure_from_legacy,
+    validate_placement_map,
+    validate_product_structure,
+)
+from .validate import has_structural_errors
 
 
 _PRODUCT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -31,6 +38,12 @@ class ProcessMapNotFoundError(ProcessMapAssetError):
 class ProcessMapConflictError(ProcessMapAssetError):
     def __init__(self, current_revision: str):
         super().__init__("process map revision conflict")
+        self.current_revision = current_revision
+
+
+class ProcessMapSourceConflictError(ProcessMapAssetError):
+    def __init__(self, current_revision: str):
+        super().__init__("product structure revision conflict")
         self.current_revision = current_revision
 
 
@@ -124,10 +137,26 @@ def _read_json_object(path: Path) -> Dict[str, Any]:
     return value
 
 
+def _product_structure_asset(product_dir: Path, product_id: str) -> Path:
+    product_stem = product_id.replace("-", "_")
+    return product_dir / f"{product_stem}_product_structure.json"
+
+
+def _load_product_structure(
+    product_dir: Path,
+    product_id: str,
+    stored_process_map: Dict[str, Any],
+) -> tuple[Dict[str, Any], List[Dict[str, Any]], Path, bool]:
+    asset = _product_structure_asset(product_dir, product_id)
+    if asset.is_file():
+        structure = _read_json_object(asset)
+        return structure, validate_product_structure(structure), asset, True
+    structure, findings = product_structure_from_legacy(stored_process_map, product_id)
+    return structure, findings, asset, False
+
+
 def _known_product_part_ids(product_dir: Path) -> Optional[set[str]]:
     manifests = sorted(product_dir.glob("*_unique_items.json"))
-    if not manifests:
-        return None
     known: set[str] = set()
     for manifest in manifests:
         try:
@@ -159,16 +188,52 @@ def _known_product_part_ids(product_dir: Path) -> Optional[set[str]]:
 def load_process_map(training_root: Path, product_id: str) -> Dict[str, Any]:
     asset = resolve_process_map_asset(training_root, product_id)
     stored = _read_json_object(asset)
-    migrated, migration_findings = migrate_process_map(stored)
-    findings = migration_findings + validate_process_map(
-        migrated,
-        _known_product_part_ids(asset.parent),
+    structure, structure_findings, _structure_asset, _persisted = _load_product_structure(
+        asset.parent,
+        product_id,
+        stored,
+    )
+    structure_revision = process_map_revision(structure)
+    migrated, migration_findings = migrate_to_placement_map(
+        stored,
+        product_id=product_id,
+        structure_revision=structure_revision,
+        product_structure=structure,
+    )
+    occurrence_ids = {
+        occurrence.get("occurrenceId")
+        for occurrence in structure.get("occurrences", [])
+        if isinstance(occurrence, dict) and isinstance(occurrence.get("occurrenceId"), str)
+    }
+    findings = (
+        structure_findings
+        + migration_findings
+        + validate_placement_map(migrated, occurrence_ids)
     )
     return {
         "map": migrated,
         "revision": process_map_revision(stored),
         "findings": findings,
         "assetName": asset.name,
+        "productStructure": structure,
+        "structureRevision": structure_revision,
+    }
+
+
+def load_product_structure(training_root: Path, product_id: str) -> Dict[str, Any]:
+    asset = resolve_process_map_asset(training_root, product_id)
+    stored = _read_json_object(asset)
+    structure, findings, structure_asset, persisted = _load_product_structure(
+        asset.parent,
+        product_id,
+        stored,
+    )
+    return {
+        "productStructure": structure,
+        "structureRevision": process_map_revision(structure),
+        "findings": findings,
+        "assetName": structure_asset.name,
+        "persisted": persisted,
     }
 
 
@@ -212,12 +277,37 @@ def save_process_map(
         if supplied_revision != current_revision:
             raise ProcessMapConflictError(current_revision)
 
-        findings = validate_process_map(
-            process_map,
-            _known_product_part_ids(asset.parent),
+        structure, structure_findings, structure_asset, structure_persisted = _load_product_structure(
+            asset.parent,
+            product_id,
+            stored,
         )
+        structure_revision = process_map_revision(structure)
+        supplied_structure_revision = process_map.get("sourceStructureRevision")
+        if supplied_structure_revision != structure_revision:
+            raise ProcessMapSourceConflictError(structure_revision)
+        occurrence_ids = {
+            occurrence.get("occurrenceId")
+            for occurrence in structure.get("occurrences", [])
+            if isinstance(occurrence, dict) and isinstance(occurrence.get("occurrenceId"), str)
+        }
+        findings = structure_findings + validate_placement_map(process_map, occurrence_ids)
         if has_structural_errors(findings):
             raise ProcessMapValidationError(findings)
+
+        if process_map.get("schemaVersion") != PROCESS_MAP_PLACEMENT_SCHEMA_VERSION:
+            raise ProcessMapValidationError(
+                [
+                    {
+                        "severity": "error",
+                        "code": "unsupported_schema_version",
+                        "message": (
+                            "Only placement-only process-map schema "
+                            f"{PROCESS_MAP_PLACEMENT_SCHEMA_VERSION} can be saved."
+                        ),
+                    }
+                ]
+            )
 
         try:
             payload = canonical_process_map_bytes(process_map)
@@ -234,7 +324,22 @@ def save_process_map(
 
         backup = _backup_path(asset)
         temp_path: Optional[Path] = None
+        structure_temp_path: Optional[Path] = None
         try:
+            if not structure_persisted:
+                structure_payload = canonical_process_map_bytes(structure)
+                structure_fd, structure_temp_name = tempfile.mkstemp(
+                    prefix=f".{structure_asset.stem}.tmp-",
+                    suffix=structure_asset.suffix,
+                    dir=str(structure_asset.parent),
+                )
+                structure_temp_path = Path(structure_temp_name)
+                with os.fdopen(structure_fd, "wb") as structure_handle:
+                    structure_handle.write(structure_payload)
+                    structure_handle.flush()
+                    os.fsync(structure_handle.fileno())
+                _replace_file(structure_temp_path, structure_asset)
+                structure_temp_path = None
             shutil.copy2(asset, backup)
             fd, temp_name = tempfile.mkstemp(
                 prefix=f".{asset.stem}.tmp-",
@@ -257,6 +362,11 @@ def save_process_map(
                     temp_path.unlink(missing_ok=True)
                 except OSError:
                     pass
+            if structure_temp_path is not None:
+                try:
+                    structure_temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         return {
             "map": process_map,
@@ -264,4 +374,6 @@ def save_process_map(
             "findings": findings,
             "assetName": asset.name,
             "backupName": backup.name,
+            "productStructure": structure,
+            "structureRevision": structure_revision,
         }

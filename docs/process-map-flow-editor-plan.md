@@ -1,12 +1,79 @@
 # Process Map Flow Editor (n8n-style) - Implementation Plan
 
-Status: revision 2 - PHASES 1-2 IMPLEMENTED (2026-07-12).
+Status: revision 7 - PER-CARD PORT LAYOUT IMPLEMENTED (2026-07-13).
 Supersedes the chat-delivered revision 1. Incorporates all four binding
 corrections from the approval review plus the resolved open decisions.
 Phase 1 (schema v2 migration, deterministic validation, revision-safe
-endpoints, backups, and atomic persistence) and Phase 2 (read-only flow
-canvas, deterministic layout, pan/zoom/fit, rich card reuse, type badges,
-and subassembly focus) are implemented. Phases 3-6 are not implemented yet.
+endpoints, backups, and atomic persistence), Phase 2 (read-only flow canvas,
+deterministic layout, pan/zoom/fit, rich card reuse, type badges, and
+subassembly focus), and Phase 3 (drag editing, typed connections, edge
+selection/deletion, node retyping, bounded undo/redo, dirty guards,
+revision-aware save/reload, and validation/conflict UX) are implemented.
+Revision 4 also implements the SolidWorks-style product-structure source
+tree and schema-v3 placement model described below. AI analysis, suggestions,
+ and Builder convergence remain future phases. Revision 5 adds persistent
+ wire branch points without changing the schema version. Revision 6 adds a
+ persisted per-card choice between left/right and top/bottom connection ports.
+ Revision 7 adds independent input/output ordering within either orientation.
+
+### Revision 7 card-port ordering amendment
+
+- Every non-junction card may persist `portOrder` as `input_first` or
+  `output_first`, independently of its horizontal or vertical orientation.
+- The selected-card toolbar names the actual input side: left/right for
+  horizontal cards and top/bottom for vertical cards.
+- Reversing the order moves both visible ports and their Bezier tangents, so
+  existing wires leave and approach the card from the correct sides.
+- Port ordering is one undoable mutation and survives revision-safe save and
+  reload without moving the card itself.
+
+### Revision 6 card-port amendment
+
+- Every non-junction canvas node may persist `portOrientation` as `horizontal`
+  or `vertical`; omitted values remain horizontal for backward compatibility.
+- The selected-card toolbar exposes `Ports: left / right` and
+  `Ports: top / bottom`. Junctions are intentionally excluded.
+- Port positions and Bezier control tangents share the same saved orientation,
+  so existing connections reroute immediately without changing graph topology.
+- The setting participates in undo/redo, revision-safe save, and reload.
+
+### Revision 5 wire-junction amendment
+
+- `junction` is a first-class canvas node kind with a stable ID, point
+  position, and `wire_branch` type. It is not product structure and never
+  appears in the source tree.
+- Dropping a connection on the rendered path of an existing wire atomically
+  replaces `A -> B` with `A -> J`, `J -> B`, and `C -> J`.
+- The split trunk segments share `logicalConnectionId`; direction, edge kind,
+  style, and a single copy of any label are preserved.
+- Browser hit testing uses the actual SVG Bezier path in screen space. It
+  highlights the nearest eligible wire and shows a preview point before drop.
+- Junctions are selectable, draggable, valid connection targets, and valid
+  connection sources. A 14-pixel screen-space threshold is stable across pan
+  and zoom, and nearby existing junctions or edge endpoints are reused.
+- Deleting a branch leaves unrelated branches intact. An unannotated
+  one-in/one-out junction collapses only when both remaining segments share
+  the same logical connection and direction.
+- Split, cleanup, movement, undo/redo, save, and reload are covered by pure
+  graph tests, schema tests, and the live process-flow Playwright smoke.
+
+### Revision 4 source-catalog amendment
+
+Product structure and process-map authorship are now physically separate:
+
+- `productStructure.occurrences` is the immutable catalog of every assembly,
+  subassembly, and part occurrence. Occurrence IDs, rather than part numbers,
+  preserve repeated instances.
+- `canvasNodes` contains only product occurrences explicitly dragged onto the
+  map plus authored process steps.
+- `canvasEdges` contains only authored process relationships.
+- New maps open with an empty canvas while the complete product structure is
+  available in the fixed, independently scrollable source tree.
+- Legacy hierarchy assets migrate on read to a source catalog and blank map
+  unless they contain explicit authored positions, edges, or process-step
+  evidence. Existing Training views continue to consume the legacy hierarchy.
+- Saves validate both the map revision and source-structure revision. The
+  source catalog is persisted as a separate sidecar on the first edit.
 
 ## 0. Approval record (binding corrections)
 
@@ -26,8 +93,9 @@ and subassembly focus) are implemented. Phases 3-6 are not implemented yet.
    validator change.
 
 Resolved decisions:
-- Canvas shows levels 1-2 initially, with focus-into-subassembly so level-3
-  nodes remain editable.
+- The legacy read-only canvas shows levels 1-2 initially. The revision-4
+  authoring canvas starts blank; every product level stays available through
+  the expandable source tree.
 - Saves with warnings are allowed; structural errors block.
 - Lives inside Training as a viewport mode for v1.
 - AI describes fan-in as a "bottleneck candidate" only; actual bottleneck
@@ -72,11 +140,14 @@ path with validation and backup, and the analyze skill.
 ## 2. Target architecture
 
 ```
-generated/.../<product>_process_map.json  (schema v2 - single source of truth)
-        ^ GET / PUT (revision-checked, validated, backed up, atomic)
+generated/.../<product>_product_structure.json (read-only occurrence catalog)
+generated/.../<product>_process_map.json       (schema v3 authored placements)
+        ^ GET / PUT (map + source revisions, validated, backed up, atomic)
 server: ai_inspector/process_map/ (schema + deterministic validators)
         endpoints /api/training/process-map/{productId}
+                  /api/training/product-structure/{productId}
 frontend: static/process_map_editor.js  (self-contained editor module)
+        - fixed source tree: complete occurrence hierarchy, search, placed state
         - DOM node layer: reused _trainDiagramCard bodies wrapped in
           .pm-node with type badge and ports
         - SVG edge underlay: cubic beziers, live pending wire, hit-area
@@ -223,26 +294,33 @@ every edit batch and badges the canvas.
 
 ## 4. Phases with checkable artifacts
 
-1. Schema v2 + types + validators + endpoints (no UI): validator unit tests
+1. Schema v2 + types + validators + endpoints (implemented): validator tests
    green including kind-filtered cycle detection and type-shape warnings;
    PUT round trip proven with backup file, atomic write, and revision
    conflict (409); v1 fixture loads migrated with default types.
    Artifacts: `tests/test_process_map_validate.py`,
    `tests/test_process_map_endpoints.py`.
-2. Read-only canvas: flow view renders the 56-node fixture with layered
+2. Read-only canvas (implemented): flow view renders the authored fixture with layered
    auto-layout, type badges, pan/zoom/fit, cards reused.
    Artifact: Playwright render + node-harness layout tests.
-3. Editing: node drag, port-drag wiring with live bezier, edge
+3. Editing (implemented): node drag, port-drag wiring with live bezier, edge
    select/delete, node retype, undo/redo, dirty-guard, revision-aware save.
    Artifact: Playwright edit-save-reload round trip including a stale-save
    409 path.
-4. Validation UX + AI: canvas badges from validator; `analyze-process-map`
+4. Source-tree authoring (implemented): schema-v3 catalog/placement split;
+   blank new maps; fixed expandable/searchable occurrence tree; drag/drop at
+   cursor after pan/zoom; duplicate-occurrence prevention; repeated part
+   occurrences; delete/re-place; process-step authoring; source-revision
+   conflict handling; placement-only save/reload.
+   Artifacts: `tests/test_process_map_schema_v3.py`, editor node harness, and
+   the 15-case Playwright source-tree smoke.
+5. Validation UX + AI: canvas badges from validator; `analyze-process-map`
    skill + digest + button.
    Artifact: skill registry green (runtime suite); one live analyze turn in
    Playwright; digest content test.
-5. Suggestions (deferrable): ghost edges from shared `partIds`/mate data,
+6. Suggestions (deferrable): ghost edges from shared `partIds`/mate data,
    accept/dismiss.
-6. Builder convergence (later): Builder's
+7. Builder convergence (later): Builder's
    `write_asset`/`validate_process_map` tools call the same module and
    endpoints - no second implementation. Revision-aware PUT is what makes
    concurrent Builder/user edits safe when that day comes.

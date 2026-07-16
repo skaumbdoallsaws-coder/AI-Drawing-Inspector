@@ -166,6 +166,8 @@
            script that sets data-theme — keeps :root token references
            valid even before the attribute is on <html>. */
         :root {
+            /* Contextual layers: card tools 5150, modal backdrop 5200, modal shell 5201. */
+            --ip-z-contextual: 5150;
             --bg-main: #252B36;
             --bg-panel: #1C2029;
             --bg-toolbar: #0D1016;
@@ -5576,6 +5578,159 @@
         .pm-toolbar-copy {
             min-width: 0;
         }
+        .pm-workspace {
+            display: grid;
+            grid-template-columns: 300px minmax(0, 1fr);
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .pm-structure-sidebar {
+            --cad-ui-stroke: #31586b;
+            --cad-blue-top: #b7dfea;
+            --cad-blue-left: #68a4bb;
+            --cad-blue-right: #36758d;
+            --cad-amber-top: #ffe58a;
+            --cad-amber-left: #daa132;
+            --cad-amber-right: #986214;
+            --cad-folder-body: #e2a52e;
+            --cad-folder-tab: #ffd166;
+            --cad-folder-stroke: #6b4a12;
+            --cad-folder-badge-top: #b7dfea;
+            --cad-folder-badge-left: #68a4bb;
+            --cad-folder-badge-right: #36758d;
+            position: relative;
+            z-index: 3;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+            border-right: 1px solid var(--border);
+            background: var(--bg-panel);
+        }
+        .pm-structure-header {
+            padding: 12px 12px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .pm-structure-title {
+            overflow: hidden;
+            color: var(--text-primary);
+            font-size: 11px;
+            font-weight: 800;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pm-structure-hint {
+            margin-top: 3px;
+            color: var(--text-secondary);
+            font-size: 9px;
+        }
+        .pm-tree-search {
+            box-sizing: border-box;
+            width: 100%;
+            height: 28px;
+            margin-top: 9px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font: inherit;
+            font-size: 10px;
+            padding: 0 8px;
+        }
+        .pm-tree-search:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+        .pm-structure-tree {
+            min-height: 0;
+            overflow-x: hidden;
+            overflow-y: auto;
+            padding: 6px 4px 16px;
+        }
+        .pm-tree-row {
+            display: grid;
+            grid-template-columns: 18px 22px minmax(0, 1fr) auto;
+            align-items: center;
+            min-height: 34px;
+            gap: 3px;
+            margin: 1px 0;
+            padding: 2px 7px 2px calc(5px + var(--pm-tree-depth) * 14px);
+            border: 1px solid transparent;
+            border-radius: 4px;
+            color: var(--text-primary);
+            cursor: grab;
+            user-select: none;
+        }
+        .pm-tree-row:hover {
+            background: var(--bg-hover);
+        }
+        .pm-tree-row.selected {
+            border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+            background: color-mix(in srgb, var(--accent) 12%, transparent);
+        }
+        .pm-tree-row.drag-source {
+            opacity: 0.55;
+        }
+        .pm-tree-caret {
+            display: grid;
+            width: 18px;
+            height: 22px;
+            place-items: center;
+            border: 0;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font: inherit;
+            font-size: 12px;
+            padding: 0;
+        }
+        .pm-tree-caret:disabled {
+            cursor: default;
+            opacity: 0;
+        }
+        .pm-tree-icon {
+            width: 19px;
+            height: 19px;
+            overflow: visible;
+        }
+        .pm-tree-copy {
+            display: flex;
+            min-width: 0;
+            flex-direction: column;
+            gap: 1px;
+        }
+        .pm-tree-name,
+        .pm-tree-item-id {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pm-tree-name {
+            font-size: 10px;
+            font-weight: 650;
+        }
+        .pm-tree-item-id {
+            color: var(--text-secondary);
+            font-size: 8px;
+        }
+        .pm-tree-placed {
+            border: 1px solid color-mix(in srgb, #2d8a5f 36%, transparent);
+            border-radius: 999px;
+            background: color-mix(in srgb, #54b486 14%, transparent);
+            color: #26714f;
+            font-size: 8px;
+            font-weight: 750;
+            padding: 2px 5px;
+        }
+        html[data-theme="dark"] .pm-tree-placed { color: #8ed3b2; }
+        .pm-tree-empty {
+            color: var(--text-secondary);
+            font-size: 10px;
+            line-height: 1.45;
+            padding: 14px 10px;
+        }
         .pm-toolbar-title {
             overflow: hidden;
             color: var(--text-primary);
@@ -5628,6 +5783,295 @@
             cursor: default;
             opacity: 0.35;
         }
+        .pm-type-select,
+        .pm-port-orientation-select,
+        .pm-port-order-select {
+            height: 28px;
+            max-width: 136px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            font: inherit;
+            font-size: 10px;
+            padding: 0 22px 0 7px;
+        }
+        .pm-type-select:focus-visible,
+        .pm-port-orientation-select:focus-visible,
+        .pm-port-order-select:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+        .ip-floating-surface {
+            position: fixed;
+            z-index: var(--ip-z-contextual);
+            box-sizing: border-box;
+        }
+        .pm-card-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 3px;
+            min-height: 36px;
+            max-width: min(420px, calc(100vw - 24px));
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            box-shadow: 0 10px 26px var(--shadow-color);
+            padding: 3px;
+            animation: pm-card-toolbar-in 120ms ease-out;
+        }
+        .pm-card-toolbar .pm-toolbar-button {
+            width: 30px;
+            min-width: 30px;
+            padding: 0;
+            font-size: 15px;
+            line-height: 1;
+        }
+        .pm-card-toolbar .pm-card-toolbar-preview {
+            width: 34px;
+            min-width: 34px;
+            color: var(--accent-strong);
+            font-size: 10px;
+            font-weight: 800;
+        }
+        .pm-card-toolbar .pm-card-toolbar-label,
+        .pm-card-toolbar .pm-card-toolbar-note {
+            font-size: 11px;
+            font-weight: 800;
+        }
+        .pm-card-toolbar .pm-card-toolbar-references {
+            width: 38px;
+            min-width: 38px;
+            font-size: 9px;
+            font-weight: 800;
+        }
+        .pm-card-toolbar .pm-card-toolbar-note.has-note {
+            border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+            background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
+            color: var(--accent-strong);
+        }
+        .pm-card-toolbar .pm-card-toolbar-delete:hover:not(:disabled) {
+            border-color: color-mix(in srgb, var(--severity-critical) 42%, transparent);
+            background: color-mix(in srgb, var(--severity-critical) 12%, transparent);
+            color: var(--severity-critical);
+        }
+        .pm-card-toolbar-select {
+            box-sizing: border-box;
+            height: 28px;
+            max-width: 126px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font: inherit;
+            font-size: 10px;
+            padding: 0 22px 0 7px;
+        }
+        .pm-card-toolbar-add {
+            width: 30px;
+            min-width: 30px;
+            padding: 0;
+            appearance: none;
+            color: var(--accent-strong);
+            font-size: 13px;
+            font-weight: 900;
+            text-align: center;
+            text-align-last: center;
+        }
+        .pm-card-toolbar-select:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+        .pm-card-toolbar-editor {
+            display: grid;
+            flex: 1 0 100%;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 6px;
+            width: min(310px, calc(100vw - 36px));
+            padding: 6px 3px 2px;
+            border-top: 1px solid var(--border);
+        }
+        .pm-card-toolbar-editor[hidden] {
+            display: none;
+        }
+        .pm-card-toolbar-field {
+            box-sizing: border-box;
+            min-width: 0;
+            width: 100%;
+            min-height: 30px;
+            resize: vertical;
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font: inherit;
+            font-size: 11px;
+            line-height: 1.35;
+            padding: 6px 8px;
+        }
+        .pm-card-toolbar-field:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+        .pm-card-toolbar-editor-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .pm-card-toolbar-editor-actions button {
+            min-width: 48px;
+            height: 26px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            cursor: pointer;
+            font: inherit;
+            font-size: 9px;
+        }
+        .pm-card-toolbar-editor-actions .pm-card-editor-save {
+            border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+            background: var(--accent);
+            color: #ffffff;
+        }
+        .pm-card-toolbar.editing-references {
+            max-width: min(470px, calc(100vw - 24px));
+        }
+        .pm-card-toolbar.editing-references .pm-card-toolbar-editor {
+            display: block;
+            width: min(450px, calc(100vw - 36px));
+        }
+        .pm-reference-editor-title {
+            margin-bottom: 6px;
+            color: var(--text-primary);
+            font-size: 11px;
+            font-weight: 800;
+        }
+        .pm-reference-list {
+            display: grid;
+            gap: 4px;
+            max-height: 116px;
+            overflow-y: auto;
+            margin-bottom: 6px;
+        }
+        .pm-reference-empty {
+            color: var(--text-secondary);
+            font-size: 10px;
+            padding: 4px 2px;
+        }
+        .pm-reference-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) 24px;
+            align-items: center;
+            gap: 6px;
+            min-height: 28px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-main);
+            padding: 2px 3px 2px 6px;
+        }
+        .pm-reference-kind {
+            border-radius: 3px;
+            color: #ffffff;
+            font-size: 8px;
+            font-weight: 800;
+            line-height: 18px;
+            padding: 0 5px;
+            text-transform: uppercase;
+        }
+        .pm-reference-kind-machine { background: #397ea8; }
+        .pm-reference-kind-tool { background: #397e67; }
+        .pm-reference-kind-requirement { background: #9b6c29; }
+        .pm-reference-kind-standard { background: #755c99; }
+        .pm-reference-row-text {
+            overflow: hidden;
+            color: var(--text-primary);
+            font-size: 10px;
+            line-height: 1.25;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pm-reference-remove {
+            width: 24px;
+            min-width: 24px;
+            height: 22px;
+            border: 0;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .pm-reference-remove:hover {
+            color: var(--severity-critical);
+        }
+        .pm-reference-existing {
+            margin-bottom: 6px;
+        }
+        .pm-reference-form {
+            display: grid;
+            grid-template-columns: 112px minmax(0, 1fr) minmax(86px, 0.55fr);
+            gap: 5px;
+            border-top: 1px solid var(--border);
+            padding-top: 6px;
+        }
+        .pm-reference-form [data-reference-field="details"] {
+            grid-column: 1 / -1;
+        }
+        .pm-reference-form [data-reference-field="name"] {
+            grid-column: 2 / -1;
+        }
+        .pm-reference-form [data-reference-field="identifier"] {
+            grid-column: 1 / 3;
+        }
+        .pm-reference-form [data-reference-field="revision"] {
+            grid-column: 3 / -1;
+        }
+        .pm-reference-form [data-reference-field="clause"] {
+            grid-column: 1 / -1;
+        }
+        .pm-reference-error {
+            grid-column: 1 / -1;
+            min-height: 14px;
+            color: var(--severity-critical);
+            font-size: 9px;
+            line-height: 1.3;
+        }
+        .pm-reference-actions {
+            grid-column: 1 / -1;
+            flex-direction: row;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .pm-card-toolbar .pm-reference-actions .pm-toolbar-button {
+            width: 58px;
+            min-width: 58px;
+            padding: 0 8px;
+        }
+        .pm-card-toolbar .pm-reference-actions .pm-card-editor-cancel {
+            border-color: var(--border);
+            background: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .pm-card-toolbar .pm-reference-actions .pm-card-editor-save {
+            border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+            background: var(--accent);
+            color: #ffffff;
+        }
+        @keyframes pm-card-toolbar-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .pm-editor-status {
+            min-height: 12px;
+            margin-top: 2px;
+            color: var(--text-secondary);
+            font-size: 9px;
+        }
+        .pm-editor-status.dirty { color: #9a6a16; }
+        .pm-editor-status.error,
+        .pm-editor-status.conflict { color: #b1463c; }
         .pm-back-button {
             font-size: 15px;
             padding-bottom: 2px;
@@ -5638,17 +6082,44 @@
             min-height: 0;
             overflow: hidden;
             cursor: grab;
-            background-color: var(--bg-main);
-            background-image:
-                linear-gradient(rgba(92, 116, 137, 0.10) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(92, 116, 137, 0.10) 1px, transparent 1px);
-            background-size: 24px 24px;
+            background: var(--viewport-bg-gradient);
+        }
+        .pm-viewport::before {
+            content: '';
+            position: absolute;
+            z-index: 0;
+            inset: 0;
+            background-image: radial-gradient(
+                circle,
+                color-mix(in srgb, var(--text-secondary) 28%, transparent) 1px,
+                transparent 1.2px
+            );
+            background-position: 0 0;
+            background-size: 22px 22px;
+            pointer-events: none;
         }
         .pm-viewport.panning {
             cursor: grabbing;
         }
+        .pm-viewport.drop-target {
+            box-shadow: inset 0 0 0 2px var(--accent);
+        }
+        .pm-empty-state {
+            position: absolute;
+            z-index: 2;
+            left: 50%;
+            top: 48%;
+            width: min(420px, calc(100% - 48px));
+            transform: translate(-50%, -50%);
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.5;
+            text-align: center;
+            pointer-events: none;
+        }
         .pm-world {
             position: absolute;
+            z-index: 1;
             left: 0;
             top: 0;
             transform-origin: 0 0;
@@ -5659,12 +6130,65 @@
             position: absolute;
             inset: 0;
         }
+        .pm-node-layer {
+            pointer-events: none;
+        }
         .pm-edge {
             fill: none;
             stroke: #4f91ba;
             stroke-linecap: round;
             stroke-width: 2;
             vector-effect: non-scaling-stroke;
+            pointer-events: none;
+        }
+        .pm-edge.selected {
+            stroke: var(--accent);
+            stroke-width: 3.5;
+        }
+        .pm-edge.branch-target {
+            stroke: var(--accent);
+            stroke-width: 4;
+        }
+        .pm-edge.invalid {
+            stroke: #d34f45;
+            stroke-dasharray: 5 4;
+        }
+        .pm-edge-pending {
+            stroke: var(--accent);
+            stroke-dasharray: 5 4;
+        }
+        .pm-edge-hit {
+            fill: none;
+            stroke: transparent;
+            stroke-width: 16;
+            vector-effect: non-scaling-stroke;
+            pointer-events: stroke;
+            cursor: pointer;
+        }
+        .pm-edge-hit.branch-target {
+            stroke-width: 22;
+        }
+        .pm-edge-context-label {
+            pointer-events: none;
+        }
+        .pm-edge-context-label rect {
+            fill: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+            stroke: color-mix(in srgb, #4f91ba 62%, var(--border));
+            stroke-width: 1;
+            vector-effect: non-scaling-stroke;
+        }
+        .pm-edge-context-label text {
+            fill: var(--text-primary);
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0;
+        }
+        .pm-junction-preview {
+            fill: var(--accent);
+            stroke: var(--bg-main);
+            stroke-width: 2;
+            vector-effect: non-scaling-stroke;
+            pointer-events: none;
         }
         .pm-edge-rework,
         .pm-edge-feedback {
@@ -5679,12 +6203,68 @@
         }
         .pm-node {
             position: absolute;
+            pointer-events: auto;
             box-sizing: border-box;
             border-radius: 6px;
         }
         .pm-node.selected {
             outline: 2px solid var(--accent);
             outline-offset: 3px;
+        }
+        .pm-junction {
+            position: absolute;
+            z-index: 6;
+            display: grid;
+            place-items: center;
+            box-sizing: border-box;
+            border-radius: 50%;
+            cursor: grab;
+            pointer-events: auto;
+        }
+        .pm-junction-dot {
+            display: block;
+            box-sizing: border-box;
+            border: 2px solid var(--bg-main);
+            border-radius: 50%;
+            background: #4f91ba;
+            box-shadow: 0 0 0 1px rgba(27, 79, 111, 0.45);
+            pointer-events: none;
+            transition: box-shadow 120ms ease, transform 120ms ease;
+        }
+        .pm-junction:hover .pm-junction-dot,
+        .pm-junction:focus-visible .pm-junction-dot,
+        .pm-junction.selected .pm-junction-dot,
+        .pm-junction.snap-target .pm-junction-dot {
+            background: var(--accent);
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent);
+            transform: scale(1.22);
+        }
+        .pm-junction.dragging {
+            cursor: grabbing;
+        }
+        .pm-junction-handle {
+            left: calc(100% + 1px);
+            right: auto;
+            width: 16px;
+            height: 16px;
+            opacity: 0;
+            transform: translateY(-50%) scale(0.82);
+            transition: opacity 120ms ease, transform 120ms ease;
+        }
+        .pm-editor.editable .pm-junction-handle {
+            pointer-events: none;
+        }
+        .pm-junction:hover .pm-junction-handle,
+        .pm-junction:focus-within .pm-junction-handle,
+        .pm-junction.selected .pm-junction-handle {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(-50%) scale(1);
+        }
+        .pm-editor.editable .pm-node-card { cursor: grab; }
+        .pm-editor.editable .pm-node.dragging .pm-node-card {
+            cursor: grabbing;
+            box-shadow: 0 6px 18px rgba(10, 35, 55, 0.24);
         }
         .pm-node-card {
             box-sizing: border-box;
@@ -5748,6 +6328,63 @@
             background: #f28b82;
             color: #5d1111;
         }
+        .pm-node-note-indicator {
+            position: absolute;
+            z-index: 4;
+            right: 34px;
+            top: 7px;
+            display: grid;
+            width: 18px;
+            height: 18px;
+            place-items: center;
+            border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+            border-radius: 3px;
+            background: color-mix(in srgb, var(--accent) 13%, var(--bg-panel));
+            color: var(--accent-strong);
+            font-size: 9px;
+            font-weight: 900;
+            pointer-events: auto;
+        }
+        .pm-reference-badges {
+            position: absolute;
+            z-index: 4;
+            right: 9px;
+            bottom: 8px;
+            display: flex;
+            max-width: calc(100% - 18px);
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 3px;
+            pointer-events: none;
+        }
+        .pm-reference-badge {
+            min-width: 22px;
+            box-sizing: border-box;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            color: #ffffff;
+            font-size: 8px;
+            font-weight: 800;
+            line-height: 16px;
+            text-align: center;
+            padding: 0 4px;
+        }
+        .pm-reference-badge-machine {
+            border-color: #2d6e96;
+            background: #397ea8;
+        }
+        .pm-reference-badge-tool {
+            border-color: #2e705b;
+            background: #397e67;
+        }
+        .pm-reference-badge-requirement {
+            border-color: #845a20;
+            background: #9b6c29;
+        }
+        .pm-reference-badge-standard {
+            border-color: #634c84;
+            background: #755c99;
+        }
         .pm-port {
             position: absolute;
             z-index: 5;
@@ -5765,11 +6402,52 @@
             font-weight: 700;
             line-height: 1;
             pointer-events: none;
+            padding: 0;
         }
         .pm-port-in { left: -9px; }
         .pm-port-out { right: -9px; }
+        .pm-node-port-order-output_first:not(.pm-node-ports-vertical) > .pm-port-in {
+            right: -9px;
+            left: auto;
+        }
+        .pm-node-port-order-output_first:not(.pm-node-ports-vertical) > .pm-port-out {
+            right: auto;
+            left: -9px;
+        }
+        .pm-node-ports-vertical > .pm-port {
+            right: auto;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .pm-node-ports-vertical > .pm-port-in {
+            top: -9px;
+            bottom: auto;
+        }
+        .pm-node-ports-vertical > .pm-port-out {
+            top: auto;
+            bottom: -9px;
+        }
+        .pm-node-ports-vertical.pm-node-port-order-output_first > .pm-port-in {
+            top: auto;
+            bottom: -9px;
+        }
+        .pm-node-ports-vertical.pm-node-port-order-output_first > .pm-port-out {
+            top: -9px;
+            bottom: auto;
+        }
+        .pm-editor.editable .pm-port {
+            pointer-events: auto;
+            cursor: crosshair;
+        }
+        .pm-editor.editable .pm-port:hover,
+        .pm-editor.editable .pm-port:focus-visible,
+        .pm-editor.editable .pm-port.snap-target {
+            outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+            background: var(--accent);
+        }
         .pm-node-type-assembly .pm-node-card { border-left-color: #3f83b4 !important; }
         .pm-node-type-subassembly .pm-node-card { border-left-color: #2f9b91 !important; }
+        .pm-node-type-part .pm-node-card { border-left-color: #4f91ba !important; }
         .pm-node-type-operation .pm-node-card { border-left-color: #c38a2f !important; }
         .pm-node-type-inspection .pm-node-card { border-left-color: #5b9d62 !important; }
         .pm-node-type-decision .pm-node-card { border-left-color: #ad5e9a !important; }
@@ -5794,11 +6472,6 @@
             color: var(--text-secondary);
             font-size: 10px;
         }
-        html[data-theme="dark"] .pm-viewport {
-            background-image:
-                linear-gradient(rgba(132, 159, 181, 0.10) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(132, 159, 181, 0.10) 1px, transparent 1px);
-        }
         html[data-theme="dark"] .pm-node-type {
             color: #a8c5d7;
         }
@@ -5808,10 +6481,24 @@
         html[data-theme="dark"] .pm-arrow-head {
             fill: #69b5df;
         }
+        @keyframes pm-duplicate-pulse {
+            0%, 100% { outline-color: var(--accent); }
+            45% { outline-color: #e0a92f; box-shadow: 0 0 0 5px rgba(224, 169, 47, 0.18); }
+        }
+        .pm-node.duplicate-pulse {
+            outline: 2px solid var(--accent);
+            outline-offset: 3px;
+            animation: pm-duplicate-pulse 620ms ease-out;
+        }
         @media (max-width: 860px) {
             .pm-toolbar-subtitle { display: none; }
             .pm-toolbar-button { padding: 0 6px; }
             .pm-toolbar-actions { gap: 1px; }
+            .pm-workspace { grid-template-columns: 240px minmax(0, 1fr); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .pm-node.duplicate-pulse,
+            .pm-card-toolbar { animation: none; }
         }
         .train-plant-process-diagram {
             position: absolute;
@@ -12122,11 +12809,16 @@
 
     <script src="/static/ui_action_runtime.js"></script>
     <script src="/static/chat_stream_runtime.js"></script>
+    <script src="/static/vendor/floating-ui/floating-ui.core.umd.min.js"></script>
+    <script src="/static/vendor/floating-ui/floating-ui.dom.umd.min.js"></script>
+    <script src="/static/floating_surface.js"></script>
     <script src="/static/process_map_editor.js"></script>
     <script>
         /* ============================================================
            InspectorPro - Frontend Application Logic
            ============================================================ */
+
+        const PM_CARD_TOOLBAR = true;
 
         // State
         const state = {
@@ -12484,10 +13176,14 @@
             facilityLayoutCapacityLoading: false,
             facilityLayoutCapacityError: null,
             processMap: null,
+            processFlowMap: null,
+            processFlowProductStructure: null,
+            processFlowStructureRevision: null,
             processMapRevision: null,
             processMapFindings: [],
             processMapFlowAvailable: false,
             processMapFlowFocusNodeId: null,
+            processMapFlowDirty: false,
             uniqueItems: null,
             subassemblyVisuals: null,
             guidedBuildPlan: null,
@@ -13630,6 +14326,11 @@
         // ---- Viewport Rendering ----
         function switchTab(tab) {
             const previousTab = state.activeTab;
+            if (previousTab === 'training' && tab !== 'training'
+                && typeof _trainConfirmProcessFlowDiscard === 'function'
+                && !_trainConfirmProcessFlowDiscard()) {
+                return false;
+            }
             // Stop an in-flight Training guided narration when leaving a tab so
             // background TTS and the shared guided-collapse animation don't keep
             // running after navigation. Non-training (Sage/sales-coaching)
@@ -21884,6 +22585,12 @@
         } catch (_) {}
 
         function _trainApplyTrainingTypeDefaults(prevType) {
+            if (prevType && prevType !== trainingState.type
+                && trainingState.viewportMode === 'process_flow'
+                && !_trainConfirmProcessFlowDiscard()) {
+                trainingState.type = prevType;
+                return false;
+            }
             const wasSpecial = prevType === 'plant_process' || prevType === 'facility_layout';
             const isSpecial = trainingState.type === 'plant_process' || trainingState.type === 'facility_layout';
             if (prevType && (wasSpecial || isSpecial) && prevType !== trainingState.type) {
@@ -22118,14 +22825,20 @@
             trainingState.processMapLoadPromise = (async () => {
                 let data = null;
                 trainingState.processMapFlowAvailable = false;
+                trainingState.processFlowMap = null;
+                trainingState.processFlowProductStructure = null;
+                trainingState.processFlowStructureRevision = null;
                 trainingState.processMapRevision = null;
                 trainingState.processMapFindings = [];
+                trainingState.processMapFlowDirty = false;
                 try {
                     const apiRes = await fetch(trainingState.processMapApiUrl, { cache: 'no-store' });
                     if (apiRes.ok) {
                         const payload = await apiRes.json();
-                        if (payload && payload.map && Array.isArray(payload.map.nodes)) {
-                            data = payload.map;
+                        if (payload && payload.map && Array.isArray(payload.map.canvasNodes)) {
+                            trainingState.processFlowMap = payload.map;
+                            trainingState.processFlowProductStructure = payload.productStructure || null;
+                            trainingState.processFlowStructureRevision = payload.structureRevision || null;
                             trainingState.processMapFlowAvailable = true;
                             trainingState.processMapRevision = payload.revision || null;
                             trainingState.processMapFindings = Array.isArray(payload.findings)
@@ -22136,11 +22849,9 @@
                 } catch (_) {
                     data = null;
                 }
-                if (!data) {
-                    const res = await fetch(trainingState.processMapUrl, { cache: 'no-store' });
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    data = await res.json();
-                }
+                const res = await fetch(trainingState.processMapUrl, { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                data = await res.json();
                 trainingState.processMap = data;
                 try {
                     const itemsRes = await fetch(trainingState.uniqueItemsUrl, { cache: 'no-store' });
@@ -23921,6 +24632,7 @@
             trainingState.uniqueItemPreview = {
                 partId,
                 originRect: fromRect,
+                returnViewportMode: trainingState.viewportMode,
             };
 
             requestAnimationFrame(() => {
@@ -23977,6 +24689,7 @@
             trainingState.assemblyPreview = {
                 nodeId: node.nodeId,
                 originRect: fromRect,
+                returnViewportMode: trainingState.viewportMode,
             };
 
             requestAnimationFrame(() => {
@@ -24006,7 +24719,16 @@
                 shell.style.height = '0px';
                 shell.innerHTML = '';
                 trainingState.uniqueItemPreview = null;
-                _trainRenderProcessDiagram();
+                if (preview.returnViewportMode === 'process_flow') {
+                    trainingState.viewportMode = 'process_flow';
+                    const flowHost = document.getElementById('trainViewportHost');
+                    if (state.activeTab === 'training'
+                        && (!flowHost || !flowHost.__processMapEditor)) {
+                        _trainRenderProcessFlow();
+                    }
+                } else {
+                    _trainRenderProcessDiagram();
+                }
             };
 
             if (opts.immediate) {
@@ -24044,7 +24766,16 @@
                 shell.style.height = '0px';
                 shell.innerHTML = '';
                 trainingState.assemblyPreview = null;
-                _trainRenderProcessDiagram();
+                if (preview.returnViewportMode === 'process_flow') {
+                    trainingState.viewportMode = 'process_flow';
+                    const flowHost = document.getElementById('trainViewportHost');
+                    if (state.activeTab === 'training'
+                        && (!flowHost || !flowHost.__processMapEditor)) {
+                        _trainRenderProcessFlow();
+                    }
+                } else {
+                    _trainRenderProcessDiagram();
+                }
             };
 
             if (opts.immediate) {
@@ -24763,9 +25494,94 @@
             if (editor && typeof editor.destroy === 'function') editor.destroy();
         }
 
+        function _trainCurrentProcessFlowEditor() {
+            const host = document.getElementById('trainViewportHost');
+            return host && host.__processMapEditor;
+        }
+
+        function _trainConfirmProcessFlowDiscard() {
+            const editor = _trainCurrentProcessFlowEditor();
+            if (!editor || typeof editor.confirmDiscard !== 'function') return true;
+            return editor.confirmDiscard();
+        }
+
+        async function _trainSaveProcessFlowMap(processMap, baseRevision) {
+            const response = await fetch(trainingState.processMapApiUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    map: processMap,
+                    baseRevision: baseRevision || trainingState.processMapRevision || '',
+                }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: payload.error || payload.detail || 'save_failed',
+                    currentRevision: payload.currentRevision || null,
+                    findings: Array.isArray(payload.findings) ? payload.findings : [],
+                };
+            }
+            trainingState.processFlowMap = payload.map || processMap;
+            if (payload.productStructure) {
+                trainingState.processFlowProductStructure = payload.productStructure;
+            }
+            if (payload.structureRevision) {
+                trainingState.processFlowStructureRevision = payload.structureRevision;
+            }
+            trainingState.processMapRevision = payload.revision || baseRevision || null;
+            trainingState.processMapFindings = Array.isArray(payload.findings)
+                ? payload.findings
+                : [];
+            trainingState.processMapFlowDirty = false;
+            _trainRenderProcessStructurePanel();
+            return { ok: true, ...payload };
+        }
+
+        async function _trainReloadProcessFlowMap() {
+            const response = await fetch(trainingState.processMapApiUrl, { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.map) {
+                return { ok: false, status: response.status, error: payload.detail || 'reload_failed' };
+            }
+            trainingState.processFlowMap = payload.map;
+            trainingState.processFlowProductStructure = payload.productStructure
+                || trainingState.processFlowProductStructure;
+            trainingState.processFlowStructureRevision = payload.structureRevision
+                || trainingState.processFlowStructureRevision;
+            trainingState.processMapRevision = payload.revision || null;
+            trainingState.processMapFindings = Array.isArray(payload.findings)
+                ? payload.findings
+                : [];
+            trainingState.processMapFlowDirty = false;
+            _trainRenderProcessStructurePanel();
+            return { ok: true, ...payload };
+        }
+
+        function _trainOpenProcessFlowCardPreview(node, sourceEl) {
+            if (!node || node.nodeKind !== 'product_occurrence' || !sourceEl) return false;
+            const partIds = Array.isArray(node.partIds) ? node.partIds : [];
+            const partId = node.itemId || node.itemIdSnapshot
+                || (partIds.length === 1 ? partIds[0] : null);
+            const productKind = node.productKind || node.type;
+            if (productKind === 'part' && partId && _trainUniqueItemById(partId)) {
+                _trainOpenUniqueItemPreview(partId, sourceEl);
+                return true;
+            }
+            const sourceId = node.sourceOccurrenceId;
+            const sourceNode = sourceId ? _trainProcessNodeById(sourceId) : null;
+            if (sourceNode && productKind !== 'part') {
+                _trainOpenAssemblyPreview(sourceNode, sourceEl);
+                return true;
+            }
+            return false;
+        }
+
         function _trainCreateProcessFlowCard(node, opts = {}) {
-            const childCount = _trainChildProcessNodes(node.nodeId).length;
-            return _trainDiagramCard(node, {
+            const childCount = Number(node.childOccurrenceCount || 0);
+            const card = _trainDiagramCard(node, {
                 className: 'pm-source-card',
                 selected: !!opts.selected,
                 compactThumbs: true,
@@ -24778,13 +25594,18 @@
                     if (typeof opts.onSelect === 'function') opts.onSelect(node.nodeId);
                 },
             });
+            if (node && node.nodeKind === 'product_occurrence') {
+                card.title = 'Select card to open its actions';
+            }
+            return card;
         }
         window._pmCreateNodeCard = _trainCreateProcessFlowCard;
 
-        function _trainSelectProcessFlowNode(nodeId) {
-            const node = _trainProcessNodeById(nodeId);
+        function _trainSelectProcessFlowNode(nodeId, resolvedNode) {
+            const sourceId = resolvedNode && resolvedNode.sourceOccurrenceId;
+            const node = (sourceId && _trainProcessNodeById(sourceId)) || resolvedNode;
             if (!node) return;
-            trainingState.selectedProcessNodeId = node.nodeId;
+            trainingState.selectedProcessNodeId = sourceId || node.nodeId;
             trainingState.selectedUniqueItemId = null;
             trainingState.type = 'assembly';
             trainingState.targetComponent = node.name || '';
@@ -24806,18 +25627,35 @@
             const host = document.getElementById('trainViewportHost');
             const runtime = window.InspectorProProcessMap;
             if (!host || !runtime || typeof runtime.mount !== 'function') return false;
-            if (!trainingState.processMapFlowAvailable || !trainingState.processMap) return false;
+            if (!trainingState.processMapFlowAvailable || !trainingState.processFlowMap) return false;
             trainingState.viewportMode = 'process_flow';
             runtime.mount(host, {
-                map: trainingState.processMap,
+                map: trainingState.processFlowMap,
+                productStructure: trainingState.processFlowProductStructure,
                 findings: trainingState.processMapFindings,
+                revision: trainingState.processMapRevision,
+                editable: true,
                 selectedNodeId: trainingState.selectedProcessNodeId,
                 focusNodeId: trainingState.processMapFlowFocusNodeId,
                 createNodeCard: _trainCreateProcessFlowCard,
+                cardToolbar: PM_CARD_TOOLBAR,
+                onOpenPreview: _trainOpenProcessFlowCardPreview,
                 onSelect: _trainSelectProcessFlowNode,
+                onSourceSelect: (occurrenceId) => {
+                    const sourceNode = _trainProcessNodeById(occurrenceId);
+                    if (sourceNode) _trainSelectProcessNode(sourceNode.nodeId);
+                },
                 onFocusChange: (nodeId) => {
                     trainingState.processMapFlowFocusNodeId = nodeId || null;
                 },
+                onMapChange: (processMap) => {
+                    trainingState.processFlowMap = processMap;
+                },
+                onDirtyChange: (dirty) => {
+                    trainingState.processMapFlowDirty = !!dirty;
+                },
+                onSave: _trainSaveProcessFlowMap,
+                onReload: _trainReloadProcessFlowMap,
                 onExit: () => {
                     trainingState.viewportMode = 'structure';
                     trainingState.processMapFlowFocusNodeId = null;
@@ -24830,6 +25668,8 @@
         window.__processMapFlow = {
             open: _trainOpenProcessFlow,
             close: () => {
+                const editor = _trainCurrentProcessFlowEditor();
+                if (editor && typeof editor.exit === 'function') return editor.exit();
                 trainingState.viewportMode = 'structure';
                 trainingState.processMapFlowFocusNodeId = null;
                 return _trainRenderProcessDiagram();
@@ -26531,6 +27371,10 @@
         }
 
         function _trainShowProcessBoard() {
+            if (trainingState.viewportMode === 'process_flow'
+                && !_trainConfirmProcessFlowDiscard()) {
+                return false;
+            }
             const plantMode = _trainIsPlantProcessMode();
             const facilityMode = _trainIsFacilityLayoutMode();
             trainingState.viewportMode = plantMode ? 'plant_process' : (facilityMode ? 'facility_layout' : 'structure');

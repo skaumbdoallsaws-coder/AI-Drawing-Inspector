@@ -21,9 +21,11 @@ from .validate import (
 )
 from .schema_v3 import (
     CANVAS_NODE_KINDS,
+    GROUP_COLOR_KEYS,
     JUNCTION_TYPES,
     PORT_ORIENTATIONS,
     PORT_ORDERS,
+    PROCESS_MAP_LAYOUT_VERSION,
     PROCESS_MAP_PLACEMENT_SCHEMA_VERSION,
     PROCESS_STEP_TYPES,
     PRODUCT_KINDS,
@@ -39,6 +41,7 @@ __all__ = [
     "NODE_TYPES",
     "PROCESS_MAP_SCHEMA_VERSION",
     "PROCESS_MAP_PLACEMENT_SCHEMA_VERSION",
+    "PROCESS_MAP_LAYOUT_VERSION",
     "PRODUCT_STRUCTURE_SCHEMA_VERSION",
     "PRODUCT_KINDS",
     "CANVAS_NODE_KINDS",
@@ -46,6 +49,7 @@ __all__ = [
     "PORT_ORIENTATIONS",
     "PORT_ORDERS",
     "PROCESS_STEP_TYPES",
+    "GROUP_COLOR_KEYS",
     "ProcessMapAssetError",
     "ProcessMapConflictError",
     "ProcessMapNotFoundError",

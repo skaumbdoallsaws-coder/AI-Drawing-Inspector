@@ -719,4 +719,106 @@ check('detaching and deleting the last use prunes reference catalog entries', ()
     assert.strictEqual(Object.prototype.hasOwnProperty.call(processMap, 'referenceCatalog'), false);
 });
 
+check('group creation is immutable and advances the layout contract', () => {
+    const original = runtime.addCanvasNode(placementFixture(), {
+        nodeId: 'node-a',
+        nodeKind: 'process_step',
+        processType: 'operation',
+        name: 'Machine feature',
+        position: { x: 100, y: 120 },
+    });
+    const grouped = runtime.addGroup(original, {
+        groupId: 'group-a',
+        label: 'Machining cell',
+        position: { x: 40, y: 50 },
+        size: { width: 520, height: 320 },
+        colorKey: 'orange',
+        memberNodeIds: ['node-a'],
+        collapsed: false,
+        futureField: { preserved: true },
+    });
+    assert.strictEqual(runtime.mapGroups(original).length, 0);
+    assert.strictEqual(grouped.layoutVersion, 2);
+    assert.deepStrictEqual(runtime.mapGroups(grouped)[0].memberNodeIds, ['node-a']);
+    assert.deepStrictEqual(runtime.mapGroups(grouped)[0].futureField, { preserved: true });
+});
+
+check('group membership is single-owner and smallest-frame deterministic', () => {
+    let processMap = placementFixture();
+    processMap = runtime.addCanvasNode(processMap, {
+        nodeId: 'node-a', nodeKind: 'process_step', processType: 'operation',
+        name: 'Node A', position: { x: 150, y: 150 },
+    });
+    processMap = runtime.addGroup(processMap, {
+        groupId: 'large', label: 'Large', position: { x: 0, y: 0 },
+        size: { width: 900, height: 700 }, colorKey: 'blue', memberNodeIds: [], collapsed: false,
+    });
+    processMap = runtime.addGroup(processMap, {
+        groupId: 'small', label: 'Small', position: { x: 100, y: 100 },
+        size: { width: 400, height: 280 }, colorKey: 'green', memberNodeIds: [], collapsed: false,
+    });
+    assert.strictEqual(runtime.smallestContainingGroup(processMap, { x: 220, y: 220 }).groupId, 'small');
+    processMap = runtime.resolveNodeGroupMembership(processMap, 'node-a', { x: 220, y: 220 });
+    assert.deepStrictEqual(runtime.mapGroups(processMap).find(item => item.groupId === 'large').memberNodeIds, []);
+    assert.deepStrictEqual(runtime.mapGroups(processMap).find(item => item.groupId === 'small').memberNodeIds, ['node-a']);
+});
+
+check('moving a group can move members or frame only', () => {
+    let processMap = placementFixture();
+    processMap = runtime.addCanvasNode(processMap, {
+        nodeId: 'node-a', nodeKind: 'process_step', processType: 'operation',
+        name: 'Node A', position: { x: 100, y: 120 },
+    });
+    processMap = runtime.addGroup(processMap, {
+        groupId: 'group-a', label: 'Cell', position: { x: 40, y: 60 },
+        size: { width: 500, height: 300 }, colorKey: 'teal', memberNodeIds: ['node-a'], collapsed: false,
+    });
+    const movedTogether = runtime.moveGroup(processMap, 'group-a', { x: 90, y: 100 }, true);
+    assert.deepStrictEqual(runtime.mapNodes(movedTogether)[0].position, { x: 150, y: 160 });
+    const movedFrameOnly = runtime.moveGroup(processMap, 'group-a', { x: 90, y: 100 }, false);
+    assert.deepStrictEqual(runtime.mapNodes(movedFrameOnly)[0].position, { x: 100, y: 120 });
+    assert.deepStrictEqual(runtime.mapGroups(movedFrameOnly)[0].position, { x: 90, y: 100 });
+});
+
+check('group edits and deletion never mutate member cards', () => {
+    let processMap = runtime.addCanvasNode(placementFixture(), {
+        nodeId: 'node-a', nodeKind: 'process_step', processType: 'inspection',
+        name: 'Inspect', position: { x: 100, y: 120 },
+    });
+    processMap = runtime.addGroup(processMap, {
+        groupId: 'group-a', label: 'Quality', position: { x: 40, y: 60 },
+        size: { width: 500, height: 300 }, colorKey: 'yellow', memberNodeIds: ['node-a'], collapsed: false,
+    });
+    processMap = runtime.resizeGroup(processMap, 'group-a', {
+        position: { x: 20, y: 30 }, size: { width: 620, height: 360 },
+    });
+    processMap = runtime.renameGroup(processMap, 'group-a', 'Final inspection');
+    processMap = runtime.recolorGroup(processMap, 'group-a', 'purple');
+    const withoutGroup = runtime.deleteGroup(processMap, 'group-a');
+    assert.strictEqual(runtime.mapGroups(withoutGroup).length, 0);
+    assert.deepStrictEqual(runtime.mapNodes(withoutGroup)[0].position, { x: 100, y: 120 });
+    assert.strictEqual(runtime.mapNodes(withoutGroup)[0].name, 'Inspect');
+});
+
+check('node deletion removes stale group membership', () => {
+    let processMap = runtime.addCanvasNode(placementFixture(), {
+        nodeId: 'node-a', nodeKind: 'process_step', processType: 'operation',
+        name: 'Node A', position: { x: 100, y: 120 },
+    });
+    processMap = runtime.addGroup(processMap, {
+        groupId: 'group-a', label: 'Cell', position: { x: 40, y: 60 },
+        size: { width: 500, height: 300 }, colorKey: 'gray', memberNodeIds: ['node-a'], collapsed: false,
+    });
+    const deleted = runtime.deleteNode(processMap, 'node-a');
+    assert.deepStrictEqual(runtime.mapGroups(deleted)[0].memberNodeIds, []);
+});
+
+check('graph bounds include grouping frames', () => {
+    const bounds = runtime.graphBounds(
+        { node: { x: 100, y: 100, width: 100, height: 80 } },
+        [{ position: { x: -50, y: -40 }, size: { width: 600, height: 400 } }]
+    );
+    assert.deepStrictEqual(bounds, { x: -50, y: -68, width: 600, height: 428 });
+});
+
 process.stdout.write(`Process-map editor checks: ${checks}/${checks} passed\n`);

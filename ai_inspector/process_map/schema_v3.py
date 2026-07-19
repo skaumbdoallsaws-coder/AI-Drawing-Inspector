@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 
 PROCESS_MAP_PLACEMENT_SCHEMA_VERSION = 3
+PROCESS_MAP_LAYOUT_VERSION = 2
 PRODUCT_STRUCTURE_SCHEMA_VERSION = 1
 PRODUCT_KINDS = frozenset({"assembly", "subassembly", "part"})
 CANVAS_NODE_KINDS = frozenset({"product_occurrence", "process_step", "junction"})
@@ -27,6 +28,13 @@ MAX_REFERENCE_CLAUSE_LENGTH = 120
 MAX_REFERENCE_DETAILS_LENGTH = 1000
 MAX_REFERENCES_PER_TARGET = 24
 MAX_REFERENCE_CATALOG_ITEMS = 500
+GROUP_COLOR_KEYS = frozenset(
+    {"orange", "blue", "green", "purple", "red", "teal", "gray", "yellow"}
+)
+MAX_GROUP_LABEL_LENGTH = 120
+MAX_GROUP_DESCRIPTION_LENGTH = 2000
+MIN_GROUP_WIDTH = 220
+MIN_GROUP_HEIGHT = 112
 
 
 Finding = Dict[str, Any]
@@ -40,6 +48,7 @@ def _finding(
     node_id: Optional[str] = None,
     edge_id: Optional[str] = None,
     occurrence_id: Optional[str] = None,
+    group_id: Optional[str] = None,
 ) -> Finding:
     result: Finding = {"severity": severity, "code": code, "message": message}
     if node_id is not None:
@@ -48,6 +57,8 @@ def _finding(
         result["edgeId"] = edge_id
     if occurrence_id is not None:
         result["occurrenceId"] = occurrence_id
+    if group_id is not None:
+        result["groupId"] = group_id
     return result
 
 
@@ -63,6 +74,22 @@ def _finite_position(value: Any) -> bool:
             and not isinstance(value.get(axis), bool)
             and math.isfinite(float(value[axis]))
             for axis in ("x", "y")
+        )
+    )
+
+
+def _finite_group_size(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and all(
+            isinstance(value.get(axis), (int, float))
+            and not isinstance(value.get(axis), bool)
+            and math.isfinite(float(value[axis]))
+            and float(value[axis]) >= minimum
+            for axis, minimum in (
+                ("width", MIN_GROUP_WIDTH),
+                ("height", MIN_GROUP_HEIGHT),
+            )
         )
     )
 
@@ -335,9 +362,16 @@ def migrate_to_placement_map(
         migrated.setdefault("mapId", "default")
         migrated.setdefault("productId", product_id)
         migrated.setdefault("sourceStructureRevision", structure_revision)
-        migrated.setdefault("layoutVersion", 1)
+        layout_version = migrated.get("layoutVersion")
+        if (
+            not isinstance(layout_version, int)
+            or isinstance(layout_version, bool)
+            or layout_version < PROCESS_MAP_LAYOUT_VERSION
+        ):
+            migrated["layoutVersion"] = PROCESS_MAP_LAYOUT_VERSION
         migrated.setdefault("canvasNodes", [])
         migrated.setdefault("canvasEdges", [])
+        migrated.setdefault("canvasGroups", [])
         return migrated, []
 
     occurrences = {
@@ -409,9 +443,10 @@ def migrate_to_placement_map(
         "productId": product_id,
         "productName": str(process_map.get("productName") or product_structure.get("productName") or product_id),
         "sourceStructureRevision": structure_revision,
-        "layoutVersion": 1,
+        "layoutVersion": PROCESS_MAP_LAYOUT_VERSION,
         "canvasNodes": canvas_nodes,
         "canvasEdges": canvas_edges,
+        "canvasGroups": [],
         "viewport": {"x": 0, "y": 0, "scale": 1},
     }
     findings = [
@@ -477,12 +512,37 @@ def validate_placement_map(
         )
     nodes = process_map.get("canvasNodes")
     edges = process_map.get("canvasEdges")
+    groups = process_map.get("canvasGroups", [])
     if not isinstance(nodes, list):
         findings.append(_finding("error", "canvas_nodes_not_array", "canvasNodes must be an array."))
         nodes = []
     if not isinstance(edges, list):
         findings.append(_finding("error", "canvas_edges_not_array", "canvasEdges must be an array."))
         edges = []
+    if not isinstance(groups, list):
+        findings.append(_finding("error", "canvas_groups_not_array", "canvasGroups must be an array."))
+        groups = []
+    layout_version = process_map.get("layoutVersion")
+    if layout_version is not None and (
+        not isinstance(layout_version, int)
+        or isinstance(layout_version, bool)
+        or layout_version < 1
+    ):
+        findings.append(
+            _finding(
+                "error",
+                "invalid_layout_version",
+                "layoutVersion must be a positive integer when provided.",
+            )
+        )
+    if groups and layout_version != PROCESS_MAP_LAYOUT_VERSION:
+        findings.append(
+            _finding(
+                "error",
+                "groups_require_layout_version_2",
+                f"canvasGroups require layoutVersion {PROCESS_MAP_LAYOUT_VERSION}.",
+            )
+        )
 
     catalog = process_map.get("referenceCatalog", [])
     if not isinstance(catalog, list):
@@ -656,6 +716,165 @@ def validate_placement_map(
                 findings.append(_finding("error", "invalid_process_step_name", f"Process node '{node_id}' name must contain 1 to {MAX_NODE_LABEL_LENGTH} characters.", node_id=node_id))
         elif node_kind == "junction" and node.get("junctionType") not in JUNCTION_TYPES:
             findings.append(_finding("error", "unknown_junction_type", f"Junction node '{node_id}' has unsupported type '{node.get('junctionType')}'.", node_id=node_id))
+
+    seen_group_ids: Set[str] = set()
+    member_group_ids: Dict[str, str] = {}
+    for index, group in enumerate(groups):
+        if not isinstance(group, dict):
+            findings.append(
+                _finding(
+                    "error",
+                    "group_not_object",
+                    f"Canvas group at index {index} must be an object.",
+                )
+            )
+            continue
+        group_id = _clean_id(group.get("groupId"))
+        if group_id is None:
+            findings.append(
+                _finding(
+                    "error",
+                    "group_id_missing",
+                    f"Canvas group at index {index} has no valid groupId.",
+                )
+            )
+            continue
+        if group_id in seen_group_ids:
+            findings.append(
+                _finding(
+                    "error",
+                    "duplicate_group_id",
+                    f"Canvas group id '{group_id}' is duplicated.",
+                    group_id=group_id,
+                )
+            )
+            continue
+        seen_group_ids.add(group_id)
+
+        label = group.get("label")
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or len(label.strip()) > MAX_GROUP_LABEL_LENGTH
+        ):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_group_label",
+                    f"Canvas group '{group_id}' label must contain 1 to {MAX_GROUP_LABEL_LENGTH} characters.",
+                    group_id=group_id,
+                )
+            )
+        description = group.get("description")
+        if description is not None and (
+            not isinstance(description, str)
+            or len(description.strip()) > MAX_GROUP_DESCRIPTION_LENGTH
+        ):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_group_description",
+                    f"Canvas group '{group_id}' description must contain at most {MAX_GROUP_DESCRIPTION_LENGTH} characters.",
+                    group_id=group_id,
+                )
+            )
+        if not _finite_position(group.get("position")):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_group_position",
+                    f"Canvas group '{group_id}' requires finite x and y coordinates.",
+                    group_id=group_id,
+                )
+            )
+        if not _finite_group_size(group.get("size")):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_group_size",
+                    f"Canvas group '{group_id}' requires width >= {MIN_GROUP_WIDTH} and height >= {MIN_GROUP_HEIGHT}.",
+                    group_id=group_id,
+                )
+            )
+        color_key = group.get("colorKey")
+        if color_key not in GROUP_COLOR_KEYS:
+            findings.append(
+                _finding(
+                    "error",
+                    "unknown_group_color",
+                    f"Canvas group '{group_id}' has unsupported color key '{color_key}'.",
+                    group_id=group_id,
+                )
+            )
+        collapsed = group.get("collapsed", False)
+        if not isinstance(collapsed, bool) or collapsed:
+            findings.append(
+                _finding(
+                    "error",
+                    "group_collapse_not_supported",
+                    f"Canvas group '{group_id}' must set collapsed to false in layout version {PROCESS_MAP_LAYOUT_VERSION}.",
+                    group_id=group_id,
+                )
+            )
+
+        member_node_ids = group.get("memberNodeIds")
+        if not isinstance(member_node_ids, list):
+            findings.append(
+                _finding(
+                    "error",
+                    "group_members_not_array",
+                    f"Canvas group '{group_id}' memberNodeIds must be an array.",
+                    group_id=group_id,
+                )
+            )
+            continue
+        if not member_node_ids:
+            findings.append(
+                _finding(
+                    "warning",
+                    "empty_group",
+                    f"Canvas group '{group_id}' has no members.",
+                    group_id=group_id,
+                )
+            )
+        seen_members: Set[str] = set()
+        for raw_node_id in member_node_ids:
+            member_node_id = _clean_id(raw_node_id)
+            if member_node_id is None or member_node_id in seen_members:
+                findings.append(
+                    _finding(
+                        "error",
+                        "invalid_group_member",
+                        f"Canvas group '{group_id}' contains an invalid or duplicate member id.",
+                        group_id=group_id,
+                    )
+                )
+                continue
+            seen_members.add(member_node_id)
+            if member_node_id not in nodes_by_id:
+                findings.append(
+                    _finding(
+                        "error",
+                        "dangling_group_member",
+                        f"Canvas group '{group_id}' references missing node '{member_node_id}'.",
+                        node_id=member_node_id,
+                        group_id=group_id,
+                    )
+                )
+                continue
+            prior_group_id = member_group_ids.get(member_node_id)
+            if prior_group_id is not None:
+                findings.append(
+                    _finding(
+                        "error",
+                        "node_in_multiple_groups",
+                        f"Canvas node '{member_node_id}' belongs to both '{prior_group_id}' and '{group_id}'.",
+                        node_id=member_node_id,
+                        group_id=group_id,
+                    )
+                )
+                continue
+            member_group_ids[member_node_id] = group_id
 
     seen_edge_ids: Set[str] = set()
     seen_shapes: Set[Tuple[str, str, str]] = set()

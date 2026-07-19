@@ -93,8 +93,10 @@ def test_get_migrates_v1_in_memory_and_returns_stored_revision(process_map_asset
     assert payload["assetName"] == "fixture_process_map_working_draft.json"
     assert len(payload["revision"]) == 64
     assert payload["map"]["schemaVersion"] == 3
+    assert payload["map"]["layoutVersion"] == 2
     assert payload["map"]["canvasNodes"] == []
     assert payload["map"]["canvasEdges"] == []
+    assert payload["map"]["canvasGroups"] == []
     assert payload["map"]["sourceStructureRevision"] == payload["structureRevision"]
     assert [item["kind"] for item in payload["productStructure"]["occurrences"]] == [
         "assembly",
@@ -131,6 +133,18 @@ def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process
             "identifier": "MC-01",
         }
     ]
+    edited["canvasGroups"] = [
+        {
+            "groupId": "fixture-cell",
+            "label": "Fixture cell",
+            "position": {"x": 60, "y": 160},
+            "size": {"width": 520, "height": 340},
+            "colorKey": "orange",
+            "memberNodeIds": ["canvas-module"],
+            "collapsed": False,
+            "futureGroupField": {"preserve": True},
+        }
+    ]
 
     response = client.put(
         "/api/training/process-map/fixture-product",
@@ -151,6 +165,9 @@ def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process
     assert stored["canvasNodes"][0]["labelOverride"] == "Primary fixture module"
     assert stored["canvasNodes"][0]["note"] == "Verify alignment before the inspection step."
     assert stored["canvasNodes"][0]["referenceIds"] == ["machine-1"]
+    assert stored["layoutVersion"] == 2
+    assert stored["canvasGroups"][0]["memberNodeIds"] == ["canvas-module"]
+    assert stored["canvasGroups"][0]["futureGroupField"] == {"preserve": True}
     assert stored["referenceCatalog"][0]["identifier"] == "MC-01"
     structure_asset = process_map_asset["productDir"] / "fixture_product_product_structure.json"
     assert structure_asset.is_file()
@@ -166,6 +183,7 @@ def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process
     assert reloaded["map"]["canvasNodes"][0]["note"] == "Verify alignment before the inspection step."
     assert reloaded["map"]["canvasNodes"][0]["referenceIds"] == ["machine-1"]
     assert reloaded["map"]["referenceCatalog"][0]["identifier"] == "MC-01"
+    assert reloaded["map"]["canvasGroups"] == stored["canvasGroups"]
     assert len(reloaded["productStructure"]["occurrences"]) == 3
 
 

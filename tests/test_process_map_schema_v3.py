@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from ai_inspector.process_map import (
+    PROCESS_MAP_LAYOUT_VERSION,
     migrate_to_placement_map,
     product_structure_from_legacy,
     validate_placement_map,
@@ -83,9 +84,141 @@ def test_legacy_hierarchy_becomes_occurrence_catalog_and_blank_canvas():
     }
     assert [item["itemId"] for item in structure["occurrences"][1:]] == ["P-1", "P-1"]
     assert migrated["schemaVersion"] == 3
+    assert migrated["layoutVersion"] == PROCESS_MAP_LAYOUT_VERSION
+    assert migrated["canvasGroups"] == []
     assert migrated["canvasNodes"] == []
     assert migrated["canvasEdges"] == []
     assert map_findings[0]["code"] == "placement_map_migrated"
+
+
+def test_layout_v1_placement_map_upgrades_without_losing_unknown_fields():
+    source = {
+        "schemaVersion": 3,
+        "mapId": "default",
+        "productId": "fixture",
+        "sourceStructureRevision": "structure-revision",
+        "layoutVersion": 1,
+        "canvasNodes": [],
+        "canvasEdges": [],
+        "futureTopLevelField": {"preserve": True},
+    }
+    migrated, findings = migrate_to_placement_map(
+        source,
+        product_id="fixture",
+        structure_revision="structure-revision",
+        product_structure={"occurrences": []},
+    )
+    assert findings == []
+    assert migrated["layoutVersion"] == PROCESS_MAP_LAYOUT_VERSION
+    assert migrated["canvasGroups"] == []
+    assert migrated["futureTopLevelField"] == {"preserve": True}
+    assert "canvasGroups" not in source
+    assert source["layoutVersion"] == 1
+
+
+def test_layout_v2_group_round_trip_preserves_unknown_group_fields():
+    source = {
+        "schemaVersion": 3,
+        "mapId": "default",
+        "productId": "fixture",
+        "sourceStructureRevision": "structure-revision",
+        "layoutVersion": 2,
+        "canvasNodes": [_placement("node-a", "part-a")],
+        "canvasEdges": [],
+        "canvasGroups": [
+            {
+                "groupId": "group-a",
+                "label": "Machining cell",
+                "position": {"x": 0, "y": 0},
+                "size": {"width": 500, "height": 320},
+                "colorKey": "orange",
+                "memberNodeIds": ["node-a"],
+                "collapsed": False,
+                "futureGroupField": {"preserve": True},
+            }
+        ],
+    }
+    migrated, findings = migrate_to_placement_map(
+        source,
+        product_id="fixture",
+        structure_revision="structure-revision",
+        product_structure={"occurrences": [{"occurrenceId": "part-a"}]},
+    )
+    assert findings == []
+    assert migrated == source
+    assert validate_placement_map(migrated, {"part-a"}) == []
+
+
+def test_group_validator_reports_membership_and_shape_failures():
+    process_map = {
+        "schemaVersion": 3,
+        "layoutVersion": 2,
+        "canvasNodes": [_placement("node-a", "part-a")],
+        "canvasEdges": [],
+        "canvasGroups": [
+            {
+                "groupId": "large",
+                "label": "Large",
+                "position": {"x": 0, "y": 0},
+                "size": {"width": 800, "height": 500},
+                "colorKey": "blue",
+                "memberNodeIds": ["node-a", "missing"],
+                "collapsed": False,
+            },
+            {
+                "groupId": "small",
+                "label": "Small",
+                "position": {"x": 50, "y": 50},
+                "size": {"width": 400, "height": 260},
+                "colorKey": "green",
+                "memberNodeIds": ["node-a"],
+                "collapsed": False,
+            },
+            {
+                "groupId": "empty",
+                "label": "Empty",
+                "position": {"x": 900, "y": 0},
+                "size": {"width": 400, "height": 260},
+                "colorKey": "purple",
+                "memberNodeIds": [],
+                "collapsed": False,
+            },
+        ],
+    }
+    findings = validate_placement_map(process_map, {"part-a"})
+    codes = {finding["code"] for finding in findings}
+    assert {"dangling_group_member", "node_in_multiple_groups", "empty_group"}.issubset(codes)
+    assert next(item for item in findings if item["code"] == "dangling_group_member")["groupId"] == "large"
+
+
+def test_groups_require_layout_v2_and_valid_geometry_palette_and_members():
+    process_map = {
+        "schemaVersion": 3,
+        "layoutVersion": 1,
+        "canvasNodes": [],
+        "canvasEdges": [],
+        "canvasGroups": [
+            {
+                "groupId": "bad",
+                "label": " ",
+                "position": {"x": "left", "y": 0},
+                "size": {"width": 0, "height": 200},
+                "colorKey": "raw-hex",
+                "memberNodeIds": "node-a",
+                "collapsed": True,
+            }
+        ],
+    }
+    codes = {finding["code"] for finding in validate_placement_map(process_map)}
+    assert {
+        "groups_require_layout_version_2",
+        "invalid_group_label",
+        "invalid_group_position",
+        "invalid_group_size",
+        "unknown_group_color",
+        "group_members_not_array",
+        "group_collapse_not_supported",
+    }.issubset(codes)
 
 
 def test_explicit_position_is_preserved_as_authored_placement():

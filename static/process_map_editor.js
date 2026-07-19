@@ -25,6 +25,17 @@
     const MAX_REFERENCE_DETAILS_LENGTH = 1000;
     const MAX_REFERENCES_PER_TARGET = 24;
     const MAX_REFERENCE_CATALOG_ITEMS = 500;
+    const PROCESS_MAP_LAYOUT_VERSION = 2;
+    const GROUP_COLOR_KEYS = [
+        'orange', 'blue', 'green', 'purple', 'red', 'teal', 'gray', 'yellow',
+    ];
+    const MAX_GROUP_LABEL_LENGTH = 120;
+    const MAX_GROUP_DESCRIPTION_LENGTH = 2000;
+    const MIN_GROUP_WIDTH = 220;
+    const MIN_GROUP_HEIGHT = 112;
+    const DEFAULT_GROUP_WIDTH = 660;
+    const DEFAULT_GROUP_HEIGHT = 390;
+    const GROUP_HEADER_OVERHANG = 28;
     const REFERENCE_KINDS = ['machine', 'tool', 'requirement', 'standard'];
     const PORT_ORIENTATIONS = ['horizontal', 'vertical'];
     const PORT_ORDERS = ['input_first', 'output_first'];
@@ -77,6 +88,22 @@
     function setMapEdges(processMap, edges) {
         if (isPlacementMap(processMap)) processMap.canvasEdges = edges;
         else processMap.edges = edges;
+    }
+
+    function mapGroups(processMap) {
+        if (!isPlacementMap(processMap)) return [];
+        return Array.isArray(processMap && processMap.canvasGroups)
+            ? processMap.canvasGroups
+            : [];
+    }
+
+    function setMapGroups(processMap, groups) {
+        if (!isPlacementMap(processMap)) return;
+        processMap.canvasGroups = groups;
+        processMap.layoutVersion = Math.max(
+            PROCESS_MAP_LAYOUT_VERSION,
+            Number.isInteger(processMap.layoutVersion) ? processMap.layoutVersion : 0
+        );
     }
 
     function mapReferenceCatalog(processMap) {
@@ -231,6 +258,18 @@
         return base + '-' + suffix;
     }
 
+    function _removeNodeIdsFromGroups(processMap, nodeIds) {
+        if (!isPlacementMap(processMap) || !nodeIds || !nodeIds.size) return processMap;
+        setMapGroups(processMap, mapGroups(processMap).map(function (group) {
+            const nextGroup = cloneMap(group);
+            nextGroup.memberNodeIds = (Array.isArray(nextGroup.memberNodeIds)
+                ? nextGroup.memberNodeIds
+                : []).filter(function (nodeId) { return !nodeIds.has(nodeId); });
+            return nextGroup;
+        }));
+        return processMap;
+    }
+
     function collapseRedundantJunctions(processMap) {
         const next = cloneMap(processMap);
         let changed = true;
@@ -273,6 +312,7 @@
             remaining.push(merged);
             setMapEdges(next, remaining);
             setMapNodes(next, nodes.filter(function (node) { return node.nodeId !== junction.nodeId; }));
+            _removeNodeIdsFromGroups(next, new Set([junction.nodeId]));
             changed = true;
         }
         return next;
@@ -369,6 +409,7 @@
                 && edge.from.nodeId !== nodeId
                 && edge.to.nodeId !== nodeId;
         }));
+        _removeNodeIdsFromGroups(next, new Set([nodeId]));
         return pruneUnusedProcessReferences(collapseRedundantJunctions(next));
     }
 
@@ -384,6 +425,193 @@
         if (node && position && finiteNumber(position.x) && finiteNumber(position.y)) {
             node.position = { x: position.x, y: position.y };
         }
+        return next;
+    }
+
+    function _finiteGroupSize(size) {
+        return !!size
+            && finiteNumber(size.width)
+            && finiteNumber(size.height)
+            && size.width >= MIN_GROUP_WIDTH
+            && size.height >= MIN_GROUP_HEIGHT;
+    }
+
+    function _validGroupPosition(position) {
+        return !!position && finiteNumber(position.x) && finiteNumber(position.y);
+    }
+
+    function groupContainsPoint(group, point) {
+        return !!group
+            && _validGroupPosition(group.position)
+            && _finiteGroupSize(group.size)
+            && point
+            && finiteNumber(point.x)
+            && finiteNumber(point.y)
+            && point.x >= group.position.x
+            && point.x <= group.position.x + group.size.width
+            && point.y >= group.position.y
+            && point.y <= group.position.y + group.size.height;
+    }
+
+    function smallestContainingGroup(processMap, point) {
+        return mapGroups(processMap).filter(function (group) {
+            return groupContainsPoint(group, point);
+        }).sort(function (left, right) {
+            const leftArea = left.size.width * left.size.height;
+            const rightArea = right.size.width * right.size.height;
+            if (leftArea !== rightArea) return leftArea - rightArea;
+            return String(left.groupId || '').localeCompare(String(right.groupId || ''));
+        })[0] || null;
+    }
+
+    function addGroup(processMap, group) {
+        const next = cloneMap(processMap);
+        if (!isPlacementMap(next) || !group || typeof group !== 'object') return next;
+        const groupId = typeof group.groupId === 'string' ? group.groupId.trim() : '';
+        const label = typeof group.label === 'string' ? group.label.trim() : '';
+        const description = typeof group.description === 'string'
+            ? group.description.trim()
+            : '';
+        if (!groupId || !label || label.length > MAX_GROUP_LABEL_LENGTH
+            || description.length > MAX_GROUP_DESCRIPTION_LENGTH
+            || !_validGroupPosition(group.position)
+            || !_finiteGroupSize(group.size)
+            || GROUP_COLOR_KEYS.indexOf(group.colorKey) < 0
+            || mapGroups(next).some(function (item) {
+                return item && item.groupId === groupId;
+            })) return next;
+        const candidate = cloneMap(group);
+        candidate.groupId = groupId;
+        candidate.label = label;
+        if (description) candidate.description = description;
+        else delete candidate.description;
+        candidate.position = { x: group.position.x, y: group.position.y };
+        candidate.size = { width: group.size.width, height: group.size.height };
+        candidate.colorKey = group.colorKey;
+        candidate.memberNodeIds = [];
+        candidate.collapsed = false;
+        setMapGroups(next, mapGroups(next).concat([candidate]));
+        return setGroupMembers(next, groupId, group.memberNodeIds || []);
+    }
+
+    function moveGroup(processMap, groupId, position, withMembers) {
+        const next = cloneMap(processMap);
+        const group = mapGroups(next).find(function (item) {
+            return item && item.groupId === groupId;
+        });
+        if (!group || !_validGroupPosition(group.position) || !_validGroupPosition(position)) {
+            return next;
+        }
+        const dx = position.x - group.position.x;
+        const dy = position.y - group.position.y;
+        group.position = { x: position.x, y: position.y };
+        if (withMembers !== false && (dx || dy)) {
+            const members = new Set(Array.isArray(group.memberNodeIds) ? group.memberNodeIds : []);
+            mapNodes(next).forEach(function (node) {
+                if (!node || !members.has(node.nodeId) || !_finitePlacementPosition(node.position)) return;
+                node.position = { x: node.position.x + dx, y: node.position.y + dy };
+            });
+        }
+        setMapGroups(next, mapGroups(next));
+        return next;
+    }
+
+    function resizeGroup(processMap, groupId, geometry) {
+        const next = cloneMap(processMap);
+        const group = mapGroups(next).find(function (item) {
+            return item && item.groupId === groupId;
+        });
+        const value = geometry || {};
+        const position = value.position || (group && group.position);
+        const size = value.size || (group && group.size);
+        if (!group || !_validGroupPosition(position) || !_finiteGroupSize(size)) return next;
+        group.position = { x: position.x, y: position.y };
+        group.size = { width: size.width, height: size.height };
+        setMapGroups(next, mapGroups(next));
+        return next;
+    }
+
+    function renameGroup(processMap, groupId, label, description) {
+        const next = cloneMap(processMap);
+        const group = mapGroups(next).find(function (item) {
+            return item && item.groupId === groupId;
+        });
+        const nextLabel = typeof label === 'string' ? label.trim() : '';
+        const nextDescription = typeof description === 'string' ? description.trim() : null;
+        if (!group || !nextLabel || nextLabel.length > MAX_GROUP_LABEL_LENGTH
+            || (nextDescription != null && nextDescription.length > MAX_GROUP_DESCRIPTION_LENGTH)) {
+            return next;
+        }
+        group.label = nextLabel;
+        if (nextDescription) group.description = nextDescription;
+        else if (nextDescription != null) delete group.description;
+        setMapGroups(next, mapGroups(next));
+        return next;
+    }
+
+    function recolorGroup(processMap, groupId, colorKey) {
+        const next = cloneMap(processMap);
+        const group = mapGroups(next).find(function (item) {
+            return item && item.groupId === groupId;
+        });
+        if (!group || GROUP_COLOR_KEYS.indexOf(colorKey) < 0) return next;
+        group.colorKey = colorKey;
+        setMapGroups(next, mapGroups(next));
+        return next;
+    }
+
+    function setGroupMembers(processMap, groupId, memberNodeIds) {
+        const next = cloneMap(processMap);
+        const groups = mapGroups(next);
+        const target = groups.find(function (group) {
+            return group && group.groupId === groupId;
+        });
+        if (!target || !Array.isArray(memberNodeIds)) return next;
+        const knownNodeIds = new Set(mapNodes(next).map(function (node) {
+            return node && node.nodeId;
+        }).filter(Boolean));
+        const desired = [];
+        const desiredSet = new Set();
+        memberNodeIds.forEach(function (nodeId) {
+            if (typeof nodeId !== 'string' || !knownNodeIds.has(nodeId) || desiredSet.has(nodeId)) return;
+            desiredSet.add(nodeId);
+            desired.push(nodeId);
+        });
+        groups.forEach(function (group) {
+            if (!group) return;
+            if (group.groupId === groupId) group.memberNodeIds = desired.slice();
+            else group.memberNodeIds = (Array.isArray(group.memberNodeIds)
+                ? group.memberNodeIds
+                : []).filter(function (nodeId) { return !desiredSet.has(nodeId); });
+        });
+        setMapGroups(next, groups);
+        return next;
+    }
+
+    function resolveNodeGroupMembership(processMap, nodeId, center) {
+        const next = cloneMap(processMap);
+        if (!mapNodes(next).some(function (node) { return node && node.nodeId === nodeId; })) {
+            return next;
+        }
+        const target = smallestContainingGroup(next, center);
+        const groups = mapGroups(next);
+        groups.forEach(function (group) {
+            if (!group) return;
+            const members = (Array.isArray(group.memberNodeIds) ? group.memberNodeIds : [])
+                .filter(function (memberId) { return memberId !== nodeId; });
+            if (target && group.groupId === target.groupId) members.push(nodeId);
+            group.memberNodeIds = members;
+        });
+        setMapGroups(next, groups);
+        return next;
+    }
+
+    function deleteGroup(processMap, groupId) {
+        const next = cloneMap(processMap);
+        if (!isPlacementMap(next)) return next;
+        setMapGroups(next, mapGroups(next).filter(function (group) {
+            return group && group.groupId !== groupId;
+        }));
         return next;
     }
 
@@ -883,8 +1111,17 @@
         return positions;
     }
 
-    function graphBounds(positions) {
+    function graphBounds(positions, groups) {
         const values = Object.keys(positions || {}).map(function (key) { return positions[key]; });
+        (Array.isArray(groups) ? groups : []).forEach(function (group) {
+            if (!group || !_validGroupPosition(group.position) || !_finiteGroupSize(group.size)) return;
+            values.push({
+                x: group.position.x,
+                y: group.position.y - GROUP_HEADER_OVERHANG,
+                width: group.size.width,
+                height: group.size.height + GROUP_HEADER_OVERHANG,
+            });
+        });
         if (!values.length) return { x: 0, y: 0, width: 1, height: 1 };
         const minX = Math.min.apply(null, values.map(function (position) { return position.x; }));
         const minY = Math.min.apply(null, values.map(function (position) { return position.y; }));
@@ -1081,6 +1318,7 @@
         this.focusNodeId = isPlacementMap(this.processMap) ? null : (this.options.focusNodeId || null);
         this.selectedNodeId = this.options.selectedNodeId || null;
         this.selectedEdgeId = null;
+        this.selectedGroupId = null;
         this.transform = { x: 0, y: 0, scale: 1 };
         this.interaction = null;
         this.history = new SnapshotHistory(this.options.historyLimit || 50);
@@ -1091,6 +1329,8 @@
         this.edgeCounter = 0;
         this.nodeCounter = 0;
         this.referenceCounter = 0;
+        this.groupCounter = 0;
+        this.groupMoveFrameOnly = false;
         this._suppressClick = false;
         this.instanceId = 'pm-arrow-' + (++instanceCounter);
         this.destroyed = false;
@@ -1099,6 +1339,7 @@
         this.cardToolbarElement = null;
         this.cardToolbarNodeId = null;
         this.cardToolbarEdgeId = null;
+        this.cardToolbarGroupId = null;
         this.floatingDom = this.options.floatingDom
             || (typeof window !== 'undefined' ? window.FloatingUIDOM : null);
         this._build();
@@ -1144,6 +1385,11 @@
                     '+ Step',
                     'Add an operation to the center of the process map',
                     this.addProcessStep.bind(this, 'operation')
+                );
+                this.addGroupButton = this._button(
+                    '+ Group',
+                    'Add a grouping frame to the center of the process map',
+                    this.addCanvasGroup.bind(this)
                 );
             }
             this.typeSelect = document.createElement('select');
@@ -1194,6 +1440,7 @@
             this.toolbarActions.appendChild(this.undoButton);
             this.toolbarActions.appendChild(this.redoButton);
             if (this.addStepButton) this.toolbarActions.appendChild(this.addStepButton);
+            if (this.addGroupButton) this.toolbarActions.appendChild(this.addGroupButton);
             this.toolbarActions.appendChild(this.deleteButton);
             this.toolbarActions.appendChild(this.previewButton);
             this.toolbarActions.appendChild(this.typeSelect);
@@ -1259,10 +1506,13 @@
         );
         this.world = document.createElement('div');
         this.world.className = 'pm-world';
+        this.groupLayer = document.createElement('div');
+        this.groupLayer.className = 'pm-group-layer';
         this.edgeSvg = svgElement('svg', { class: 'pm-edge-layer' });
         if (!this.editable) this.edgeSvg.setAttribute('aria-hidden', 'true');
         this.nodeLayer = document.createElement('div');
         this.nodeLayer.className = 'pm-node-layer';
+        this.world.appendChild(this.groupLayer);
         this.world.appendChild(this.edgeSvg);
         this.world.appendChild(this.nodeLayer);
         this.viewport.appendChild(this.world);
@@ -1348,6 +1598,7 @@
             this.cardToolbarElement = null;
             this.cardToolbarNodeId = null;
             this.cardToolbarEdgeId = null;
+            this.cardToolbarGroupId = null;
         }
         return closed;
     };
@@ -1589,6 +1840,168 @@
         return toolbar;
     };
 
+    ProcessMapEditor.prototype._buildGroupToolbar = function (group) {
+        const toolbar = document.createElement('div');
+        toolbar.className = 'ip-floating-surface pm-card-toolbar pm-group-toolbar';
+        toolbar.setAttribute('role', 'toolbar');
+        toolbar.setAttribute('aria-orientation', 'horizontal');
+        toolbar.setAttribute('aria-label', 'Group actions for ' + group.label);
+        toolbar.setAttribute('data-group-id', group.groupId);
+
+        const renameButton = this._cardToolbarButton(
+            'Aa',
+            'Rename group',
+            function () {
+                const editor = toolbar.querySelector('.pm-card-toolbar-editor');
+                if (!editor) return;
+                editor.innerHTML = '';
+                editor.hidden = false;
+                toolbar.classList.add('editing');
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'pm-card-toolbar-field';
+                input.maxLength = MAX_GROUP_LABEL_LENGTH;
+                input.value = group.label || '';
+                input.setAttribute('aria-label', 'Group label');
+                const actions = document.createElement('div');
+                actions.className = 'pm-card-toolbar-editor-actions';
+                const cancel = this._button('Cancel', 'Cancel group rename', function () {
+                    editor.hidden = true;
+                    editor.innerHTML = '';
+                    toolbar.classList.remove('editing');
+                    renameButton.focus();
+                    if (this.cardToolbarManager) this.cardToolbarManager.reposition();
+                }.bind(this));
+                const save = this._button('Save', 'Save group label', function () {
+                    if (this.applyGroupLabel(input.value)) {
+                        editor.hidden = true;
+                        editor.innerHTML = '';
+                        toolbar.classList.remove('editing');
+                    }
+                }.bind(this));
+                cancel.classList.add('pm-card-editor-cancel');
+                save.classList.add('pm-card-editor-save');
+                actions.appendChild(cancel);
+                actions.appendChild(save);
+                editor.appendChild(input);
+                editor.appendChild(actions);
+                if (this.cardToolbarManager) this.cardToolbarManager.reposition();
+                input.focus();
+                input.select();
+            }.bind(this),
+            'pm-group-toolbar-rename'
+        );
+        renameButton.setAttribute('data-group-command', 'rename');
+        toolbar.appendChild(renameButton);
+
+        const colorSelect = document.createElement('select');
+        colorSelect.className = 'pm-card-toolbar-select pm-group-color-select';
+        colorSelect.setAttribute('aria-label', 'Group color');
+        colorSelect.title = 'Change group color';
+        GROUP_COLOR_KEYS.forEach(function (colorKey) {
+            const option = document.createElement('option');
+            option.value = colorKey;
+            option.textContent = colorKey.charAt(0).toUpperCase() + colorKey.slice(1);
+            colorSelect.appendChild(option);
+        });
+        colorSelect.value = group.colorKey;
+        colorSelect.addEventListener('change', function () {
+            this.applyGroupColor(colorSelect.value);
+        }.bind(this));
+        toolbar.appendChild(colorSelect);
+
+        const moveOnlyButton = this._cardToolbarButton(
+            'Frame',
+            'Move frame only without moving its members',
+            function () {
+                this.groupMoveFrameOnly = !this.groupMoveFrameOnly;
+                moveOnlyButton.setAttribute('aria-pressed', this.groupMoveFrameOnly ? 'true' : 'false');
+                moveOnlyButton.classList.toggle('active', this.groupMoveFrameOnly);
+                moveOnlyButton.title = this.groupMoveFrameOnly
+                    ? 'Frame-only movement is active'
+                    : 'Move frame only without moving its members';
+            }.bind(this),
+            'pm-group-toolbar-move-only'
+        );
+        moveOnlyButton.setAttribute('aria-pressed', this.groupMoveFrameOnly ? 'true' : 'false');
+        moveOnlyButton.classList.toggle('active', this.groupMoveFrameOnly);
+        toolbar.appendChild(moveOnlyButton);
+
+        const deleteButton = this._cardToolbarButton(
+            '\u00d7',
+            'Delete group frame only',
+            this.deleteSelection.bind(this),
+            'pm-card-toolbar-delete'
+        );
+        deleteButton.setAttribute('data-group-command', 'delete');
+        toolbar.appendChild(deleteButton);
+
+        const editor = document.createElement('div');
+        editor.className = 'pm-card-toolbar-editor';
+        editor.setAttribute('role', 'group');
+        editor.hidden = true;
+        toolbar.appendChild(editor);
+        this.cardToolbarElement = toolbar;
+        return toolbar;
+    };
+
+    ProcessMapEditor.prototype._openGroupToolbar = function (group) {
+        if (!this.cardToolbarManager || !group || this.conflict) return false;
+        const frame = this.groupLayer.querySelector('[data-group-id="' + group.groupId + '"]');
+        const header = frame && frame.querySelector('.pm-group-header');
+        if (!frame || !header) return false;
+        if (this.cardToolbarManager.isOpen() && this.cardToolbarGroupId === group.groupId) {
+            this._syncCardToolbar();
+            return true;
+        }
+        this._closeCardToolbar('selection_changed', false);
+        const toolbar = this._buildGroupToolbar(group);
+        this.cardToolbarNodeId = null;
+        this.cardToolbarEdgeId = null;
+        this.cardToolbarGroupId = group.groupId;
+        const opened = this.cardToolbarManager.open({
+            key: 'group:' + group.groupId,
+            reference: header,
+            floating: toolbar,
+            placement: 'top',
+            strategy: 'fixed',
+            middleware: this._cardToolbarMiddleware({ portOrientation: 'horizontal' }),
+            restoreFocusElement: header,
+            shouldCloseOnEscape: function (event) {
+                const target = event && event.target;
+                return !(target && typeof target.closest === 'function'
+                    && target.closest('.pm-card-toolbar-editor'));
+            },
+            shouldCloseOnOutsidePointerDown: function (event) {
+                const target = event && event.target;
+                return !(target && typeof target.closest === 'function'
+                    && target.closest('.pm-group-header, .pm-group-border, .pm-group-resize'));
+            },
+            onClose: function () {
+                if (this.cardToolbarElement === toolbar) {
+                    this.cardToolbarElement = null;
+                    this.cardToolbarGroupId = null;
+                }
+            }.bind(this),
+        });
+        if (!opened) {
+            toolbar.remove();
+            this.cardToolbarElement = null;
+            this.cardToolbarGroupId = null;
+        }
+        return opened;
+    };
+
+    ProcessMapEditor.prototype.applyGroupLabel = function (value) {
+        if (!this.selectedGroupId || this.conflict || typeof value !== 'string') return false;
+        return this.commitMutation(renameGroup(this.processMap, this.selectedGroupId, value));
+    };
+
+    ProcessMapEditor.prototype.applyGroupColor = function (colorKey) {
+        if (!this.selectedGroupId || this.conflict) return false;
+        return this.commitMutation(recolorGroup(this.processMap, this.selectedGroupId, colorKey));
+    };
+
     ProcessMapEditor.prototype._openEdgeToolbar = function (edge) {
         if (!this.cardToolbarManager || !edge || this.conflict) return false;
         const hit = this._edgePathElement(edge.edgeId, true);
@@ -1602,6 +2015,7 @@
         const reference = this._edgeToolbarReference(edge.edgeId);
         this.cardToolbarNodeId = null;
         this.cardToolbarEdgeId = edge.edgeId;
+        this.cardToolbarGroupId = null;
         const opened = this.cardToolbarManager.open({
             key: 'edge:' + edge.edgeId,
             reference: reference,
@@ -1624,6 +2038,7 @@
                 if (this.cardToolbarElement === toolbar) {
                     this.cardToolbarElement = null;
                     this.cardToolbarEdgeId = null;
+                    this.cardToolbarGroupId = null;
                 }
             }.bind(this),
         });
@@ -1999,6 +2414,7 @@
         const card = wrapper.querySelector('.pm-node-card') || wrapper;
         this.cardToolbarNodeId = node.nodeId;
         this.cardToolbarEdgeId = null;
+        this.cardToolbarGroupId = null;
         const opened = this.cardToolbarManager.open({
             key: node.nodeId,
             reference: wrapper,
@@ -2022,6 +2438,7 @@
                     this.cardToolbarElement = null;
                     this.cardToolbarNodeId = null;
                     this.cardToolbarEdgeId = null;
+                    this.cardToolbarGroupId = null;
                 }
             }.bind(this),
         });
@@ -2029,6 +2446,7 @@
             toolbar.remove();
             this.cardToolbarElement = null;
             this.cardToolbarNodeId = null;
+            this.cardToolbarGroupId = null;
             this.cardToolbarEdgeId = null;
         }
         return opened;
@@ -2036,6 +2454,26 @@
 
     ProcessMapEditor.prototype._syncCardToolbar = function () {
         if (!this.cardToolbarManager || !this.cardToolbarManager.isOpen()) return false;
+        if (this.cardToolbarGroupId) {
+            const group = mapGroups(this.processMap).find(function (item) {
+                return item && item.groupId === this.cardToolbarGroupId;
+            }, this);
+            if (!group || this.selectedGroupId !== this.cardToolbarGroupId) {
+                this._closeCardToolbar('selection_unavailable', false);
+                return false;
+            }
+            const frame = this.groupLayer.querySelector('[data-group-id="' + group.groupId + '"]');
+            const header = frame && frame.querySelector('.pm-group-header');
+            if (!header) {
+                this._closeCardToolbar('anchor_unavailable', false);
+                return false;
+            }
+            return this.cardToolbarManager.reanchor(header, {
+                placement: 'top',
+                middleware: this._cardToolbarMiddleware({ portOrientation: 'horizontal' }),
+                restoreFocusElement: header,
+            });
+        }
         if (this.cardToolbarEdgeId) {
             const edge = mapEdges(this.processMap).find(function (item) {
                 return item && item.edgeId === this.cardToolbarEdgeId;
@@ -2273,7 +2711,12 @@
                 y: world.y - NODE_HEIGHT / 2,
             },
         };
-        const changed = this.commitMutation(addCanvasNode(this.processMap, placement));
+        let nextMap = addCanvasNode(this.processMap, placement);
+        nextMap = resolveNodeGroupMembership(nextMap, nodeId, {
+            x: placement.position.x + NODE_WIDTH / 2,
+            y: placement.position.y + NODE_HEIGHT / 2,
+        });
+        const changed = this.commitMutation(nextMap);
         if (changed) this.select(nodeId);
         return changed;
     };
@@ -2288,7 +2731,7 @@
             nodeId = 'pm-step-' + Date.now().toString(36) + '-' + (++this.nodeCounter);
         } while (mapNodes(this.processMap).some(function (node) { return node.nodeId === nodeId; }));
         const label = processType.charAt(0).toUpperCase() + processType.slice(1);
-        const changed = this.commitMutation(addCanvasNode(this.processMap, {
+        const placement = {
             nodeId: nodeId,
             nodeKind: 'process_step',
             processType: processType,
@@ -2298,8 +2741,37 @@
                 x: world.x - NODE_WIDTH / 2,
                 y: world.y - NODE_HEIGHT / 2,
             },
-        }));
+        };
+        let nextMap = addCanvasNode(this.processMap, placement);
+        nextMap = resolveNodeGroupMembership(nextMap, nodeId, world);
+        const changed = this.commitMutation(nextMap);
         if (changed) this.select(nodeId);
+        return changed;
+    };
+
+    ProcessMapEditor.prototype.addCanvasGroup = function () {
+        if (!this.editable || this.conflict || !isPlacementMap(this.processMap)) return false;
+        const rect = this.viewport.getBoundingClientRect();
+        const center = this.clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        let groupId;
+        do {
+            groupId = 'pm-group-' + Date.now().toString(36) + '-' + (++this.groupCounter);
+        } while (mapGroups(this.processMap).some(function (group) {
+            return group && group.groupId === groupId;
+        }));
+        const changed = this.commitMutation(addGroup(this.processMap, {
+            groupId: groupId,
+            label: 'New group',
+            position: {
+                x: center.x - DEFAULT_GROUP_WIDTH / 2,
+                y: center.y - DEFAULT_GROUP_HEIGHT / 2,
+            },
+            size: { width: DEFAULT_GROUP_WIDTH, height: DEFAULT_GROUP_HEIGHT },
+            colorKey: 'orange',
+            memberNodeIds: [],
+            collapsed: false,
+        }));
+        if (changed) this.selectGroup(groupId);
         return changed;
     };
 
@@ -2369,6 +2841,107 @@
         );
     };
 
+    ProcessMapEditor.prototype._positionGroupElement = function (element, group) {
+        if (!element || !group || !_validGroupPosition(group.position) || !_finiteGroupSize(group.size)) {
+            return;
+        }
+        element.style.left = group.position.x + 'px';
+        element.style.top = group.position.y + 'px';
+        element.style.width = group.size.width + 'px';
+        element.style.height = group.size.height + 'px';
+    };
+
+    ProcessMapEditor.prototype.renderGroups = function () {
+        if (!this.groupLayer) return;
+        this.groupLayer.innerHTML = '';
+        this.groupPositions = {};
+        mapGroups(this.processMap).forEach(function (sourceGroup) {
+            const group = cloneMap(sourceGroup);
+            if (!group || !group.groupId || !_validGroupPosition(group.position)
+                || !_finiteGroupSize(group.size)) return;
+            this.groupPositions[group.groupId] = group;
+            const frame = document.createElement('section');
+            frame.className = 'pm-group-frame pm-group-color-' + group.colorKey;
+            if (group.groupId === this.selectedGroupId) frame.classList.add('selected');
+            frame.setAttribute('data-group-id', group.groupId);
+            frame.setAttribute('aria-label', 'Process group ' + group.label);
+            this._positionGroupElement(frame, group);
+
+            const header = document.createElement('button');
+            header.type = 'button';
+            header.className = 'pm-group-header';
+            header.style.top = -GROUP_HEADER_OVERHANG + 'px';
+            header.setAttribute('data-group-id', group.groupId);
+            header.setAttribute('aria-label', 'Select and move group ' + group.label);
+            const label = document.createElement('span');
+            label.className = 'pm-group-label';
+            label.textContent = group.label;
+            const count = document.createElement('span');
+            count.className = 'pm-group-member-count';
+            const memberCount = Array.isArray(group.memberNodeIds) ? group.memberNodeIds.length : 0;
+            count.textContent = memberCount + (memberCount === 1 ? ' item' : ' items');
+            header.appendChild(label);
+            header.appendChild(count);
+            if (this.editable) {
+                header.addEventListener('pointerdown', this.startGroupDrag.bind(this, group.groupId));
+            }
+            header.addEventListener('click', function (event) {
+                if (this._suppressGroupClick) {
+                    event.preventDefault();
+                    this._suppressGroupClick = false;
+                    return;
+                }
+                event.stopPropagation();
+                this.selectGroup(group.groupId);
+            }.bind(this));
+            frame.appendChild(header);
+
+            ['top', 'right', 'bottom', 'left'].forEach(function (side) {
+                const border = document.createElement('button');
+                border.type = 'button';
+                border.className = 'pm-group-border pm-group-border-' + side;
+                border.setAttribute('aria-label', 'Select group ' + group.label);
+                border.addEventListener('pointerdown', function (event) { event.stopPropagation(); });
+                border.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    this.selectGroup(group.groupId);
+                }.bind(this));
+                frame.appendChild(border);
+            }, this);
+
+            if (this.editable) {
+                ['nw', 'ne', 'se', 'sw'].forEach(function (corner) {
+                    const handle = document.createElement('button');
+                    handle.type = 'button';
+                    handle.className = 'pm-group-resize pm-group-resize-' + corner;
+                    handle.setAttribute('aria-label', 'Resize group from ' + corner + ' corner');
+                    handle.addEventListener(
+                        'pointerdown',
+                        this.startGroupResize.bind(this, group.groupId, corner)
+                    );
+                    frame.appendChild(handle);
+                }, this);
+            }
+
+            const groupFindings = this.findings.filter(function (finding) {
+                return finding && finding.groupId === group.groupId;
+            });
+            if (groupFindings.length) {
+                const badge = document.createElement('span');
+                const hasError = groupFindings.some(function (finding) {
+                    return finding.severity === 'error';
+                });
+                badge.className = 'pm-group-finding ' + (hasError ? 'error' : 'warning');
+                badge.textContent = String(groupFindings.length);
+                badge.title = groupFindings.map(function (finding) {
+                    return finding.message;
+                }).join('\n');
+                frame.appendChild(badge);
+            }
+            this.groupLayer.appendChild(frame);
+        }, this);
+    };
+
     ProcessMapEditor.prototype.renderGraph = function (renderOptions) {
         const opts = renderOptions || {};
         const placements = scopedNodes(this.processMap, this.focusNodeId);
@@ -2377,10 +2950,10 @@
         }, this);
         const edges = visibleEdges(this.processMap, placements);
         this.positions = layeredLayout(nodes, edges);
-        this.bounds = graphBounds(this.positions);
+        this.bounds = graphBounds(this.positions, mapGroups(this.processMap));
         this.nodeLayer.innerHTML = '';
         this.edgeSvg.innerHTML = '';
-        if (this.emptyState) this.emptyState.hidden = nodes.length > 0;
+        if (this.emptyState) this.emptyState.hidden = nodes.length > 0 || mapGroups(this.processMap).length > 0;
 
         const defs = svgElement('defs');
         const marker = svgElement('marker', {
@@ -2403,6 +2976,7 @@
         this.edgeSvg.setAttribute('width', worldWidth);
         this.edgeSvg.setAttribute('height', worldHeight);
         this.edgeSvg.setAttribute('viewBox', '0 0 ' + worldWidth + ' ' + worldHeight);
+        this.renderGroups();
 
         const labeledLogicalConnections = new Set();
         edges.forEach(function (edge) {
@@ -2675,8 +3249,10 @@
             return node && node.nodeId === this.focusNodeId;
         }, this);
         this.title.textContent = focus ? (focus.name || focus.nodeId) : 'Process Flow';
+        const groups = mapGroups(this.processMap).length;
         this.subtitle.textContent = nodes.length + ' nodes / ' + edges.length
-            + ' visible precedence connections / ' + (this.editable ? 'editing' : 'read only');
+            + ' visible precedence connections / ' + groups + (groups === 1 ? ' group' : ' groups')
+            + ' / ' + (this.editable ? 'editing' : 'read only');
         this.backButton.disabled = !this.focusNodeId;
     };
 
@@ -2684,6 +3260,10 @@
         const opts = selectOptions || {};
         this.selectedNodeId = nodeId;
         this.selectedEdgeId = null;
+        this.selectedGroupId = null;
+        Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (group) {
+            group.classList.remove('selected');
+        });
         Array.prototype.forEach.call(this.nodeLayer.querySelectorAll('.pm-node, .pm-junction'), function (node) {
             node.classList.toggle('selected', node.getAttribute('data-node-id') === nodeId);
         });
@@ -2711,11 +3291,15 @@
         this._closeCardToolbar('edge_selected', false);
         this.selectedEdgeId = edgeId;
         this.selectedNodeId = null;
+        this.selectedGroupId = null;
         if (this.viewport && typeof this.viewport.focus === 'function') {
             this.viewport.focus({ preventScroll: true });
         }
         Array.prototype.forEach.call(this.nodeLayer.querySelectorAll('.pm-node, .pm-junction'), function (node) {
             node.classList.remove('selected');
+        });
+        Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (group) {
+            group.classList.remove('selected');
         });
         Array.prototype.forEach.call(this.edgeSvg.querySelectorAll('.pm-edge'), function (edge) {
             edge.classList.toggle('selected', edge.getAttribute('data-edge-id') === edgeId);
@@ -2725,6 +3309,29 @@
             return item && item.edgeId === edgeId;
         });
         this._openEdgeToolbar(edge);
+    };
+
+    ProcessMapEditor.prototype.selectGroup = function (groupId) {
+        const group = mapGroups(this.processMap).find(function (item) {
+            return item && item.groupId === groupId;
+        });
+        if (!group) return false;
+        this._closeCardToolbar('group_selected', false);
+        this.selectedGroupId = groupId;
+        this.selectedNodeId = null;
+        this.selectedEdgeId = null;
+        Array.prototype.forEach.call(this.nodeLayer.querySelectorAll('.pm-node, .pm-junction'), function (node) {
+            node.classList.remove('selected');
+        });
+        Array.prototype.forEach.call(this.edgeSvg.querySelectorAll('.pm-edge'), function (edge) {
+            edge.classList.remove('selected');
+        });
+        Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (frame) {
+            frame.classList.toggle('selected', frame.getAttribute('data-group-id') === groupId);
+        });
+        this.updateEditControls();
+        this._openGroupToolbar(group);
+        return true;
     };
 
     ProcessMapEditor.prototype.focus = function (nodeId) {
@@ -2772,9 +3379,12 @@
     ProcessMapEditor.prototype.updateEditControls = function () {
         if (!this.editable || !this.status) return;
         const commandStates = this.selectedNodeCommandStates();
+        const canDeleteGroup = !!this.selectedGroupId && !this.saving && !this.conflict;
         if (this.undoButton) this.undoButton.disabled = !this.history.undoStack.length || this.saving || this.conflict;
         if (this.redoButton) this.redoButton.disabled = !this.history.redoStack.length || this.saving || this.conflict;
-        if (this.deleteButton) this.deleteButton.disabled = !commandStates.canDelete;
+        if (this.deleteButton) this.deleteButton.disabled = !commandStates.canDelete && !canDeleteGroup;
+        if (this.addStepButton) this.addStepButton.disabled = this.saving || this.conflict;
+        if (this.addGroupButton) this.addGroupButton.disabled = this.saving || this.conflict;
         if (this.previewButton) this.previewButton.disabled = !commandStates.canPreview;
         if (this.saveButton) {
             this.saveButton.disabled = !this.dirty || this.saving || this.conflict || this.hasStructuralErrors();
@@ -2901,12 +3511,22 @@
         } while (mapEdges(this.processMap).some(function (edge) {
             return edge && edge.edgeId === edgeId;
         }));
-        const changed = this.commitMutation(addConnectedProcessStep(this.processMap, {
+        let nextMap = addConnectedProcessStep(this.processMap, {
             sourceNodeId: this.selectedNodeId,
             nodeId: nodeId,
             edgeId: edgeId,
             processType: processType,
-        }));
+        });
+        const addedNode = mapNodes(nextMap).find(function (node) {
+            return node && node.nodeId === nodeId;
+        });
+        if (addedNode && _finitePlacementPosition(addedNode.position)) {
+            nextMap = resolveNodeGroupMembership(nextMap, nodeId, {
+                x: addedNode.position.x + NODE_WIDTH / 2,
+                y: addedNode.position.y + NODE_HEIGHT / 2,
+            });
+        }
+        const changed = this.commitMutation(nextMap);
         if (changed) this.select(nodeId);
         return changed;
     };
@@ -2957,6 +3577,11 @@
 
     ProcessMapEditor.prototype.deleteSelection = function () {
         this._closeCardToolbar('delete_selection', false);
+        if (this.selectedGroupId) {
+            const groupId = this.selectedGroupId;
+            this.selectedGroupId = null;
+            return this.commitMutation(deleteGroup(this.processMap, groupId));
+        }
         if (this.selectedNodeId) {
             const nodeId = this.selectedNodeId;
             this.selectedNodeId = null;
@@ -2979,6 +3604,7 @@
         this.operationError = '';
         this.selectedEdgeId = null;
         this.selectedNodeId = null;
+        this.selectedGroupId = null;
         this._setDirty(mapFingerprint(this.processMap) !== this.savedFingerprint);
         this._notifyMapChange();
         this.renderGraph({ fit: false });
@@ -2994,6 +3620,7 @@
         this.operationError = '';
         this.selectedEdgeId = null;
         this.selectedNodeId = null;
+        this.selectedGroupId = null;
         this._setDirty(mapFingerprint(this.processMap) !== this.savedFingerprint);
         this._notifyMapChange();
         this.renderGraph({ fit: false });
@@ -3163,6 +3790,57 @@
             x: (clientX - rect.left - this.transform.x) / this.transform.scale,
             y: (clientY - rect.top - this.transform.y) / this.transform.scale,
         };
+    };
+
+    ProcessMapEditor.prototype.startGroupDrag = function (groupId, event) {
+        if (!this.editable || this.conflict || event.button !== 0) return;
+        const group = this.groupPositions && this.groupPositions[groupId];
+        if (!group) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.selectGroup(groupId);
+        const members = new Set(Array.isArray(group.memberNodeIds) ? group.memberNodeIds : []);
+        const memberStarts = {};
+        members.forEach(function (nodeId) {
+            const position = this.positions[nodeId];
+            if (position) memberStarts[nodeId] = { x: position.x, y: position.y };
+        }, this);
+        this.interaction = {
+            mode: 'group',
+            pointerId: event.pointerId,
+            groupId: groupId,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            startX: group.position.x,
+            startY: group.position.y,
+            memberStarts: memberStarts,
+            withMembers: !(event.altKey || this.groupMoveFrameOnly),
+            moved: false,
+            captured: false,
+        };
+    };
+
+    ProcessMapEditor.prototype.startGroupResize = function (groupId, corner, event) {
+        if (!this.editable || this.conflict || event.button !== 0) return;
+        const group = this.groupPositions && this.groupPositions[groupId];
+        if (!group) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.selectGroup(groupId);
+        this.interaction = {
+            mode: 'group-resize',
+            pointerId: event.pointerId,
+            groupId: groupId,
+            corner: corner,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            startX: group.position.x,
+            startY: group.position.y,
+            startWidth: group.size.width,
+            startHeight: group.size.height,
+            moved: false,
+        };
+        this.viewport.setPointerCapture(event.pointerId);
     };
 
     ProcessMapEditor.prototype.startNodeDrag = function (nodeId, event) {
@@ -3448,6 +4126,74 @@
             this.applyTransform();
             return;
         }
+        if (action.mode === 'group') {
+            const dx = (event.clientX - action.clientX) / this.transform.scale;
+            const dy = (event.clientY - action.clientY) / this.transform.scale;
+            if (!action.moved && Math.hypot(dx, dy) < 4) return;
+            action.moved = true;
+            if (!action.captured) {
+                this.viewport.setPointerCapture(event.pointerId);
+                action.captured = true;
+            }
+            const group = this.groupPositions && this.groupPositions[action.groupId];
+            const frame = this.groupLayer.querySelector('[data-group-id="' + action.groupId + '"]');
+            if (!group || !frame) return;
+            group.position.x = action.startX + dx;
+            group.position.y = action.startY + dy;
+            this._positionGroupElement(frame, group);
+            frame.classList.add('dragging');
+            if (action.withMembers) {
+                Object.keys(action.memberStarts).forEach(function (nodeId) {
+                    const position = this.positions[nodeId];
+                    const start = action.memberStarts[nodeId];
+                    const wrapper = this.nodeLayer.querySelector('[data-node-id="' + nodeId + '"]');
+                    if (!position || !start || !wrapper) return;
+                    position.x = start.x + dx;
+                    position.y = start.y + dy;
+                    this._positionNodeElement(wrapper, position);
+                }, this);
+                this._updateEdgeGeometry();
+            }
+            if (this.cardToolbarManager && this.cardToolbarManager.isOpen()
+                && this.cardToolbarGroupId === action.groupId) {
+                this.cardToolbarManager.reposition();
+            }
+            return;
+        }
+        if (action.mode === 'group-resize') {
+            const dx = (event.clientX - action.clientX) / this.transform.scale;
+            const dy = (event.clientY - action.clientY) / this.transform.scale;
+            if (!action.moved && Math.hypot(dx, dy) < 3) return;
+            action.moved = true;
+            const right = action.startX + action.startWidth;
+            const bottom = action.startY + action.startHeight;
+            let x = action.startX;
+            let y = action.startY;
+            let width = action.startWidth;
+            let height = action.startHeight;
+            if (action.corner.indexOf('e') >= 0) width = Math.max(MIN_GROUP_WIDTH, action.startWidth + dx);
+            if (action.corner.indexOf('s') >= 0) height = Math.max(MIN_GROUP_HEIGHT, action.startHeight + dy);
+            if (action.corner.indexOf('w') >= 0) {
+                x = Math.min(right - MIN_GROUP_WIDTH, action.startX + dx);
+                width = right - x;
+            }
+            if (action.corner.indexOf('n') >= 0) {
+                y = Math.min(bottom - MIN_GROUP_HEIGHT, action.startY + dy);
+                height = bottom - y;
+            }
+            const group = this.groupPositions && this.groupPositions[action.groupId];
+            const frame = this.groupLayer.querySelector('[data-group-id="' + action.groupId + '"]');
+            if (!group || !frame) return;
+            group.position = { x: x, y: y };
+            group.size = { width: width, height: height };
+            this._positionGroupElement(frame, group);
+            frame.classList.add('resizing');
+            if (this.cardToolbarManager && this.cardToolbarManager.isOpen()
+                && this.cardToolbarGroupId === action.groupId) {
+                this.cardToolbarManager.reposition();
+            }
+            return;
+        }
         if (action.mode === 'node') {
             const dx = (event.clientX - action.clientX) / this.transform.scale;
             const dy = (event.clientY - action.clientY) / this.transform.scale;
@@ -3494,6 +4240,38 @@
         try { this.viewport.releasePointerCapture(event.pointerId); } catch (_) {}
         this.interaction = null;
         this.viewport.classList.remove('panning');
+        if (action.mode === 'group') {
+            const frame = this.groupLayer.querySelector('[data-group-id="' + action.groupId + '"]');
+            if (frame) frame.classList.remove('dragging');
+            if (action.moved && event.type !== 'pointercancel') {
+                const group = this.groupPositions && this.groupPositions[action.groupId];
+                this._suppressGroupClick = true;
+                setTimeout(function () { this._suppressGroupClick = false; }.bind(this), 0);
+                if (group) this.commitMutation(moveGroup(
+                    this.processMap,
+                    action.groupId,
+                    group.position,
+                    action.withMembers
+                ));
+            } else if (event.type === 'pointercancel') {
+                this.renderGraph({ fit: false });
+            }
+            return;
+        }
+        if (action.mode === 'group-resize') {
+            const frame = this.groupLayer.querySelector('[data-group-id="' + action.groupId + '"]');
+            if (frame) frame.classList.remove('resizing');
+            if (action.moved && event.type !== 'pointercancel') {
+                const group = this.groupPositions && this.groupPositions[action.groupId];
+                if (group) this.commitMutation(resizeGroup(this.processMap, action.groupId, {
+                    position: group.position,
+                    size: group.size,
+                }));
+            } else if (event.type === 'pointercancel') {
+                this.renderGraph({ fit: false });
+            }
+            return;
+        }
         if (action.mode === 'node') {
             const wrapper = this.nodeLayer.querySelector('[data-node-id="' + action.nodeId + '"]');
             if (wrapper) wrapper.classList.remove('dragging');
@@ -3501,7 +4279,15 @@
                 const position = this.positions[action.nodeId];
                 this._suppressClick = true;
                 setTimeout(function () { this._suppressClick = false; }.bind(this), 0);
-                this.commitMutation(moveNode(this.processMap, action.nodeId, position));
+                let nextMap = moveNode(this.processMap, action.nodeId, position);
+                const center = position.isJunction
+                    ? { x: position.x, y: position.y }
+                    : {
+                        x: position.x + position.width / 2,
+                        y: position.y + position.height / 2,
+                    };
+                nextMap = resolveNodeGroupMembership(nextMap, action.nodeId, center);
+                this.commitMutation(nextMap);
             } else if (event.type === 'pointercancel') {
                 this.renderGraph({ fit: false });
             }
@@ -3525,7 +4311,7 @@
                 const firstEdgeId = 'pm-e-' + stamp + '-' + (++this.edgeCounter);
                 const secondEdgeId = 'pm-e-' + stamp + '-' + (++this.edgeCounter);
                 const branchEdgeId = 'pm-e-' + stamp + '-' + (++this.edgeCounter);
-                const next = splitEdgeWithJunction(this.processMap, {
+                let next = splitEdgeWithJunction(this.processMap, {
                     sourceNodeId: action.fromId,
                     targetEdgeId: target.edgeId,
                     position: target.point,
@@ -3535,6 +4321,7 @@
                     branchEdgeId: branchEdgeId,
                     kind: 'precedence',
                 });
+                next = resolveNodeGroupMembership(next, junctionId, target.point);
                 if (this.commitMutation(next)) this.select(junctionId);
                 else {
                     this.operationError = 'That branch would create an invalid process connection.';
@@ -3591,6 +4378,7 @@
             this.cardToolbarElement = null;
             this.cardToolbarNodeId = null;
             this.cardToolbarEdgeId = null;
+            this.cardToolbarGroupId = null;
         }
         if (!this.viewport) return;
         this.viewport.removeEventListener('pointerdown', this._onPointerDown);
@@ -3634,26 +4422,34 @@
         MAX_REFERENCE_CATALOG_ITEMS: MAX_REFERENCE_CATALOG_ITEMS,
         MAX_REFERENCES_PER_TARGET: MAX_REFERENCES_PER_TARGET,
         REFERENCE_KINDS: REFERENCE_KINDS,
+        PROCESS_MAP_LAYOUT_VERSION: PROCESS_MAP_LAYOUT_VERSION,
+        GROUP_COLOR_KEYS: GROUP_COLOR_KEYS,
+        MIN_GROUP_WIDTH: MIN_GROUP_WIDTH,
+        MIN_GROUP_HEIGHT: MIN_GROUP_HEIGHT,
         SnapshotHistory: SnapshotHistory,
         addEdge: addEdge,
         addCanvasNode: addCanvasNode,
+        addGroup: addGroup,
         addConnectedProcessStep: addConnectedProcessStep,
         bezierPath: bezierPath,
         cloneMap: cloneMap,
         collapseRedundantJunctions: collapseRedundantJunctions,
         deleteEdge: deleteEdge,
         deleteNode: deleteNode,
+        deleteGroup: deleteGroup,
         graphBounds: graphBounds,
         hasPrecedenceCycle: hasPrecedenceCycle,
         isJunctionNode: isJunctionNode,
         layeredLayout: layeredLayout,
         mapFingerprint: mapFingerprint,
         mapEdges: mapEdges,
+        mapGroups: mapGroups,
         mapNodes: mapNodes,
         mapReferenceCatalog: mapReferenceCatalog,
         pruneUnusedProcessReferences: pruneUnusedProcessReferences,
         mount: mount,
         moveNode: moveNode,
+        moveGroup: moveGroup,
         connectedStepPosition: connectedStepPosition,
         portAnchor: portAnchor,
         portDirection: portDirection,
@@ -3665,6 +4461,13 @@
         setNodePortOrder: setNodePortOrder,
         setNodeLabel: setNodeLabel,
         setNodeNote: setNodeNote,
+        resizeGroup: resizeGroup,
+        renameGroup: renameGroup,
+        recolorGroup: recolorGroup,
+        setGroupMembers: setGroupMembers,
+        resolveNodeGroupMembership: resolveNodeGroupMembership,
+        groupContainsPoint: groupContainsPoint,
+        smallestContainingGroup: smallestContainingGroup,
         setEdgeLabel: setEdgeLabel,
         logicalEdgeLabel: logicalEdgeLabel,
         normalizeProcessReference: normalizeProcessReference,

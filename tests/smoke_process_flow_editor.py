@@ -1258,6 +1258,444 @@ def run() -> int:
                 has_text="Inspection release | Std 1"
             ).count() == 1,
         )
+
+        group_setup = page.evaluate(
+            """nodeId => {
+                const editor = window.__processMapFlow.editor;
+                editor.addCanvasGroup();
+                const runtime = window.InspectorProProcessMap;
+                const group = editor.processMap.canvasGroups.at(-1);
+                const node = editor.processMap.canvasNodes.find(item => item.nodeId === nodeId);
+                let next = runtime.resizeGroup(editor.processMap, group.groupId, {
+                    position: { x: node.position.x - 90, y: node.position.y - 75 },
+                    size: { width: 560, height: 340 },
+                });
+                next = runtime.setGroupMembers(next, group.groupId, [nodeId]);
+                editor.commitMutation(next);
+                editor.selectGroup(group.groupId);
+                return { groupId: group.groupId, nodeId };
+            }""",
+            first_id,
+        )
+        group_id = group_setup["groupId"]
+        page.wait_for_selector(f".pm-group-frame[data-group-id='{group_id}']")
+        page.wait_for_selector(f".pm-group-toolbar[data-group-id='{group_id}']")
+        record(
+            "group_layer_is_below_edges_and_nodes_with_click_through_body",
+            page.evaluate(
+                """groupId => {
+                    const editor = window.__processMapFlow.editor;
+                    const order = Array.from(editor.world.children).map(item => item.className.baseVal || item.className);
+                    const frame = editor.groupLayer.querySelector(`[data-group-id="${groupId}"]`);
+                    const header = frame.querySelector('.pm-group-header');
+                    return order[0] === 'pm-group-layer'
+                        && order[1] === 'pm-edge-layer'
+                        && order[2] === 'pm-node-layer'
+                        && getComputedStyle(frame).pointerEvents === 'none'
+                        && getComputedStyle(header).pointerEvents === 'auto';
+                }""",
+                group_id,
+            ),
+        )
+        record(
+            "group_selection_uses_one_context_toolbar_with_frequent_actions",
+            page.locator(".ip-floating-surface").count() == 1
+            and page.locator(".pm-group-toolbar [data-group-command='rename']").count() == 1
+            and page.locator(".pm-group-toolbar .pm-group-color-select").count() == 1
+            and page.locator(".pm-group-toolbar .pm-group-toolbar-move-only").count() == 1
+            and page.locator(".pm-group-toolbar [data-group-command='delete']").count() == 1,
+        )
+        page.locator(".pm-group-toolbar [data-group-command='rename']").click()
+        page.locator(".pm-group-toolbar .pm-card-toolbar-field").fill("Final inspection cell")
+        page.get_by_role("button", name="Save group label").click()
+        page.locator(".pm-group-toolbar .pm-group-color-select").select_option("teal")
+        record(
+            "group_toolbar_renames_and_recolors_through_undoable_mutations",
+            page.evaluate(
+                """groupId => {
+                    const group = window.__processMapFlow.editor.processMap.canvasGroups
+                        .find(item => item.groupId === groupId);
+                    return group.label === 'Final inspection cell' && group.colorKey === 'teal';
+                }""",
+                group_id,
+            )
+            and page.locator(
+                f".pm-group-frame[data-group-id='{group_id}'].pm-group-color-teal"
+            ).count() == 1,
+        )
+
+        before_group_move = page.evaluate(
+            """({ groupId, nodeId }) => {
+                const map = window.__processMapFlow.editor.processMap;
+                return {
+                    group: structuredClone(map.canvasGroups.find(item => item.groupId === groupId).position),
+                    node: structuredClone(map.canvasNodes.find(item => item.nodeId === nodeId).position),
+                    undoDepth: window.__processMapFlow.editor.history.undoStack.length,
+                };
+            }""",
+            {"groupId": group_id, "nodeId": first_id},
+        )
+        group_header = page.locator(f".pm-group-frame[data-group-id='{group_id}'] .pm-group-header")
+        header_box = group_header.bounding_box()
+        assert header_box is not None
+        page.mouse.move(header_box["x"] + header_box["width"] / 2, header_box["y"] + 12)
+        page.mouse.down()
+        page.mouse.move(header_box["x"] + header_box["width"] / 2 + 80, header_box["y"] + 62, steps=8)
+        page.mouse.up()
+        after_group_move = page.evaluate(
+            """({ groupId, nodeId }) => {
+                const map = window.__processMapFlow.editor.processMap;
+                return {
+                    group: structuredClone(map.canvasGroups.find(item => item.groupId === groupId).position),
+                    node: structuredClone(map.canvasNodes.find(item => item.nodeId === nodeId).position),
+                    undoDepth: window.__processMapFlow.editor.history.undoStack.length,
+                };
+            }""",
+            {"groupId": group_id, "nodeId": first_id},
+        )
+        group_dx = after_group_move["group"]["x"] - before_group_move["group"]["x"]
+        group_dy = after_group_move["group"]["y"] - before_group_move["group"]["y"]
+        record(
+            "group_header_drag_moves_frame_and_members_as_one_history_entry",
+            abs((after_group_move["node"]["x"] - before_group_move["node"]["x"]) - group_dx) < 1
+            and abs((after_group_move["node"]["y"] - before_group_move["node"]["y"]) - group_dy) < 1
+            and after_group_move["undoDepth"] == before_group_move["undoDepth"] + 1,
+            {"before": before_group_move, "after": after_group_move},
+        )
+
+        page.evaluate("groupId => window.__processMapFlow.editor.selectGroup(groupId)", group_id)
+        page.wait_for_selector(".pm-group-toolbar .pm-group-toolbar-move-only")
+        page.locator(".pm-group-toolbar .pm-group-toolbar-move-only").click()
+        frame_only_before = page.evaluate(
+            """({ groupId, nodeId }) => {
+                const map = window.__processMapFlow.editor.processMap;
+                return {
+                    group: structuredClone(map.canvasGroups.find(item => item.groupId === groupId).position),
+                    node: structuredClone(map.canvasNodes.find(item => item.nodeId === nodeId).position),
+                };
+            }""",
+            {"groupId": group_id, "nodeId": first_id},
+        )
+        header_box = group_header.bounding_box()
+        assert header_box is not None
+        page.mouse.move(header_box["x"] + header_box["width"] / 2, header_box["y"] + 12)
+        page.mouse.down()
+        page.mouse.move(header_box["x"] + header_box["width"] / 2 + 55, header_box["y"] + 42, steps=6)
+        page.mouse.up()
+        frame_only_after = page.evaluate(
+            """({ groupId, nodeId }) => {
+                const map = window.__processMapFlow.editor.processMap;
+                return {
+                    group: structuredClone(map.canvasGroups.find(item => item.groupId === groupId).position),
+                    node: structuredClone(map.canvasNodes.find(item => item.nodeId === nodeId).position),
+                };
+            }""",
+            {"groupId": group_id, "nodeId": first_id},
+        )
+        record(
+            "group_toolbar_frame_only_mode_leaves_member_coordinates_unchanged",
+            frame_only_after["group"] != frame_only_before["group"]
+            and frame_only_after["node"] == frame_only_before["node"],
+            {"before": frame_only_before, "after": frame_only_after},
+        )
+
+        page.evaluate("window.__processMapFlow.editor.fit()")
+        page.wait_for_timeout(150)
+        size_before = page.evaluate(
+            "groupId => structuredClone(window.__processMapFlow.editor.processMap.canvasGroups.find(item => item.groupId === groupId).size)",
+            group_id,
+        )
+        resize_handle = page.locator(
+            f".pm-group-frame[data-group-id='{group_id}'] .pm-group-resize-se"
+        )
+        resize_box = resize_handle.bounding_box()
+        assert resize_box is not None
+        resize_hit = page.evaluate(
+            """point => {
+                const target = document.elementFromPoint(point.x, point.y);
+                const viewport = window.__processMapFlow.editor.viewport.getBoundingClientRect();
+                return {
+                    tag: target ? target.tagName : null,
+                    className: target ? target.className : null,
+                    x: point.x,
+                    y: point.y,
+                    viewport: {
+                        x: viewport.x,
+                        y: viewport.y,
+                        right: viewport.right,
+                        bottom: viewport.bottom,
+                    },
+                };
+            }""",
+            {"x": resize_box["x"] + 6, "y": resize_box["y"] + 6},
+        )
+        page.mouse.move(resize_box["x"] + 6, resize_box["y"] + 6)
+        page.mouse.down()
+        resize_interaction = page.evaluate(
+            "window.__processMapFlow.editor.interaction && window.__processMapFlow.editor.interaction.mode"
+        )
+        page.mouse.move(resize_box["x"] + 86, resize_box["y"] + 56, steps=6)
+        page.mouse.up()
+        size_after = page.evaluate(
+            "groupId => structuredClone(window.__processMapFlow.editor.processMap.canvasGroups.find(item => item.groupId === groupId).size)",
+            group_id,
+        )
+        record(
+            "selected_group_resizes_from_canvas_handle",
+            size_after["width"] > size_before["width"]
+            and size_after["height"] > size_before["height"],
+            {
+                "before": size_before,
+                "after": size_after,
+                "hit": resize_hit,
+                "interaction": resize_interaction,
+            },
+        )
+
+        page.evaluate("groupId => window.__processMapFlow.editor.selectGroup(groupId)", group_id)
+        page.wait_for_selector(".pm-group-toolbar .pm-group-toolbar-move-only")
+        move_only_button = page.locator(".pm-group-toolbar .pm-group-toolbar-move-only")
+        if move_only_button.get_attribute("aria-pressed") == "true":
+            move_only_button.click()
+        alt_move_before = page.evaluate(
+            """({ groupId, nodeId }) => {
+                const map = window.__processMapFlow.editor.processMap;
+                return {
+                    group: structuredClone(map.canvasGroups.find(item => item.groupId === groupId).position),
+                    node: structuredClone(map.canvasNodes.find(item => item.nodeId === nodeId).position),
+                };
+            }""",
+            {"groupId": group_id, "nodeId": first_id},
+        )
+        group_header = page.locator(f".pm-group-frame[data-group-id='{group_id}'] .pm-group-header")
+        header_box = group_header.bounding_box()
+        assert header_box is not None
+        page.keyboard.down("Alt")
+        page.mouse.move(header_box["x"] + header_box["width"] / 2, header_box["y"] + 12)
+        page.mouse.down()
+        page.mouse.move(header_box["x"] + header_box["width"] / 2 + 28, header_box["y"] + 30, steps=5)
+        page.mouse.up()
+        page.keyboard.up("Alt")
+        alt_move_after = page.evaluate(
+            """({ groupId, nodeId }) => {
+                const map = window.__processMapFlow.editor.processMap;
+                return {
+                    group: structuredClone(map.canvasGroups.find(item => item.groupId === groupId).position),
+                    node: structuredClone(map.canvasNodes.find(item => item.nodeId === nodeId).position),
+                };
+            }""",
+            {"groupId": group_id, "nodeId": first_id},
+        )
+        record(
+            "alt_drag_moves_group_frame_without_members",
+            alt_move_after["group"] != alt_move_before["group"]
+            and alt_move_after["node"] == alt_move_before["node"],
+            {"before": alt_move_before, "after": alt_move_after},
+        )
+
+        overlap_group_id = page.evaluate(
+            """({ groupId, nodeId }) => {
+                const editor = window.__processMapFlow.editor;
+                const runtime = window.InspectorProProcessMap;
+                const outer = editor.processMap.canvasGroups.find(item => item.groupId === groupId);
+                editor.addCanvasGroup();
+                const inner = editor.processMap.canvasGroups.at(-1);
+                let next = runtime.resizeGroup(editor.processMap, inner.groupId, {
+                    position: { x: outer.position.x + 90, y: outer.position.y + 70 },
+                    size: { width: 420, height: 250 },
+                });
+                next = runtime.moveNode(next, nodeId, {
+                    x: outer.position.x - 500,
+                    y: outer.position.y + 25,
+                });
+                editor.commitMutation(next);
+                return inner.groupId;
+            }""",
+            {"groupId": group_id, "nodeId": process_step_id},
+        )
+        page.evaluate("window.__processMapFlow.editor.fit()")
+        page.wait_for_timeout(150)
+        overlap_frame = page.locator(f".pm-group-frame[data-group-id='{overlap_group_id}']")
+        overlap_box = overlap_frame.bounding_box()
+        step_card = page.locator(f".pm-node[data-node-id='{process_step_id}'] .pm-node-card")
+        step_box = step_card.bounding_box()
+        assert overlap_box is not None and step_box is not None
+        overlap_target = page.evaluate(
+            """groupId => {
+                const frame = document.querySelector(`.pm-group-frame[data-group-id="${groupId}"]`);
+                const rect = frame.getBoundingClientRect();
+                const fractions = [0.2, 0.5, 0.8];
+                for (const y of fractions) {
+                    for (const x of fractions) {
+                        const point = { left: rect.left + rect.width * x, top: rect.top + rect.height * y };
+                        const hit = document.elementFromPoint(point.left, point.top);
+                        if (!hit || !hit.closest('.pm-node, .pm-junction')) {
+                            return { x: point.left, y: point.top };
+                        }
+                    }
+                }
+                return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            }""",
+            overlap_group_id,
+        )
+        join_facts = page.evaluate(
+            """({ nodeId, outerId, innerId, start, target }) => {
+                const editor = window.__processMapFlow.editor;
+                const runtime = window.InspectorProProcessMap;
+                const groups = editor.processMap.canvasGroups;
+                const targetWorld = editor.clientToWorld(target.x, target.y);
+                const startHit = document.elementFromPoint(start.x, start.y);
+                return {
+                    startNodeId: startHit && startHit.closest('.pm-node')
+                        ? startHit.closest('.pm-node').dataset.nodeId
+                        : null,
+                    outerContains: runtime.groupContainsPoint(
+                        groups.find(item => item.groupId === outerId), targetWorld
+                    ),
+                    innerContains: runtime.groupContainsPoint(
+                        groups.find(item => item.groupId === innerId), targetWorld
+                    ),
+                };
+            }""",
+            {
+                "nodeId": process_step_id,
+                "outerId": group_id,
+                "innerId": overlap_group_id,
+                "start": {
+                    "x": step_box["x"] + step_box["width"] / 2,
+                    "y": step_box["y"] + step_box["height"] / 2,
+                },
+                "target": overlap_target,
+            },
+        )
+        page.mouse.move(step_box["x"] + step_box["width"] / 2, step_box["y"] + step_box["height"] / 2)
+        page.mouse.down()
+        join_action = page.evaluate(
+            """() => {
+                const action = window.__processMapFlow.editor.interaction;
+                return action && {
+                    mode: action.mode,
+                    nodeId: action.nodeId,
+                };
+            }"""
+        )
+        page.mouse.move(
+            step_box["x"] + step_box["width"] / 2 + 12,
+            step_box["y"] + step_box["height"] / 2 + 8,
+            steps=2,
+        )
+        page.mouse.move(overlap_target["x"], overlap_target["y"], steps=8)
+        page.mouse.up()
+        overlap_membership = page.evaluate(
+            """({ outerId, innerId, nodeId }) => {
+                const groups = window.__processMapFlow.editor.processMap.canvasGroups;
+                const outer = groups.find(item => item.groupId === outerId);
+                const inner = groups.find(item => item.groupId === innerId);
+                return {
+                    outer: outer.memberNodeIds.includes(nodeId),
+                    inner: inner.memberNodeIds.includes(nodeId),
+                    nodeAfter: structuredClone(
+                        window.__processMapFlow.editor.processMap.canvasNodes
+                            .find(item => item.nodeId === nodeId).position
+                    ),
+                };
+            }""",
+            {"outerId": group_id, "innerId": overlap_group_id, "nodeId": process_step_id},
+        )
+        record(
+            "pointer_up_in_overlap_joins_only_smallest_group",
+            join_facts["startNodeId"] == process_step_id
+            and join_facts["outerContains"] is True
+            and join_facts["innerContains"] is True
+            and join_action == {"mode": "node", "nodeId": process_step_id}
+            and overlap_membership["outer"] is False
+            and overlap_membership["inner"] is True,
+            {"membership": overlap_membership, "facts": join_facts, "action": join_action},
+        )
+
+        outside_point = page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const runtime = window.InspectorProProcessMap;
+                const rect = editor.viewport.getBoundingClientRect();
+                const candidates = [
+                    { x: rect.left + 70, y: rect.top + 70 },
+                    { x: rect.right - 70, y: rect.top + 70 },
+                    { x: rect.left + 70, y: rect.bottom - 70 },
+                    { x: rect.right - 70, y: rect.bottom - 70 },
+                ];
+                return candidates.find(point => {
+                    const world = editor.clientToWorld(point.x, point.y);
+                    const hit = document.elementFromPoint(point.x, point.y);
+                    return !editor.processMap.canvasGroups.some(group => runtime.groupContainsPoint(group, world))
+                        && (!hit || !hit.closest('.pm-node, .pm-junction'));
+                });
+            }"""
+        )
+        assert outside_point is not None
+        step_box = page.locator(f".pm-node[data-node-id='{process_step_id}'] .pm-node-card").bounding_box()
+        assert step_box is not None
+        page.mouse.move(step_box["x"] + step_box["width"] / 2, step_box["y"] + step_box["height"] / 2)
+        page.mouse.down()
+        leave_action = page.evaluate(
+            """() => {
+                const action = window.__processMapFlow.editor.interaction;
+                return action && { mode: action.mode, nodeId: action.nodeId };
+            }"""
+        )
+        page.mouse.move(
+            step_box["x"] + step_box["width"] / 2 + 12,
+            step_box["y"] + step_box["height"] / 2 + 8,
+            steps=2,
+        )
+        page.mouse.move(outside_point["x"], outside_point["y"], steps=8)
+        page.mouse.up()
+        record(
+            "pointer_up_outside_groups_removes_membership",
+            leave_action == {"mode": "node", "nodeId": process_step_id}
+            and page.evaluate(
+                """nodeId => !window.__processMapFlow.editor.processMap.canvasGroups
+                    .some(group => group.memberNodeIds.includes(nodeId))""",
+                process_step_id,
+            ),
+        )
+        page.evaluate(
+            """groupId => {
+                const editor = window.__processMapFlow.editor;
+                editor.commitMutation(window.InspectorProProcessMap.deleteGroup(editor.processMap, groupId));
+                editor.selectGroup(null);
+            }""",
+            overlap_group_id,
+        )
+
+        theme_group_styles = {}
+        for theme in ("light", "dark"):
+            page.evaluate("theme => document.documentElement.setAttribute('data-theme', theme)", theme)
+            theme_group_styles[theme] = page.locator(
+                f".pm-group-frame[data-group-id='{group_id}']"
+            ).evaluate(
+                "el => ({ background: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderColor })"
+            )
+        record(
+            "group_palette_is_visible_in_light_and_dark_themes",
+            all(
+                style["background"] not in ("rgba(0, 0, 0, 0)", "transparent")
+                and style["border"] not in ("rgba(0, 0, 0, 0)", "transparent")
+                for style in theme_group_styles.values()
+            ),
+            theme_group_styles,
+        )
+
+        page.evaluate("groupId => window.__processMapFlow.editor.selectGroup(groupId)", group_id)
+        page.locator(".pm-group-toolbar [data-group-command='delete']").click()
+        record(
+            "deleting_group_keeps_member_cards_and_undo_restores_frame",
+            page.locator(f".pm-node[data-node-id='{first_id}']").count() == 1
+            and page.locator(f".pm-group-frame[data-group-id='{group_id}']").count() == 0,
+        )
+        page.evaluate("window.__processMapFlow.editor.undo()")
+        page.wait_for_selector(f".pm-group-frame[data-group-id='{group_id}']")
+
         page.screenshot(
             path=str(OUT_DIR / "process_flow_wire_references_dark.png"),
             full_page=False,
@@ -1280,6 +1718,10 @@ def run() -> int:
                 for node in store["map"]["canvasNodes"]
             )
             and len(store["map"].get("referenceCatalog", [])) == 2
+            and store["map"].get("layoutVersion") == 2
+            and len(store["map"].get("canvasGroups", [])) == 1
+            and store["map"]["canvasGroups"][0].get("label") == "Final inspection cell"
+            and first_id in store["map"]["canvasGroups"][0].get("memberNodeIds", [])
             and len([
                 edge for edge in store["map"]["canvasEdges"]
                 if edge.get("logicalConnectionId") == trunk_edge_id
@@ -1327,6 +1769,7 @@ def run() -> int:
             and page.evaluate("window.__processMapFlow.editor.processMap.canvasEdges.length") == 5
             and page.locator(".pm-node-ports-vertical").count() == 1
             and page.locator(".pm-node-port-order-output_first").count() == 1
+            and page.locator(f".pm-group-frame[data-group-id='{group_id}']").count() == 1
             and page.locator(f".pm-node[data-node-id='{first_id}'] .pm-node-note-indicator").count() == 1
             and page.locator(
                 f".pm-node[data-node-id='{first_id}'] .pm-reference-badge-machine"

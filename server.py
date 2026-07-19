@@ -110,8 +110,13 @@ from ai_inspector.process_map import (
     ProcessMapSourceConflictError,
     ProcessMapValidationError,
     ProcessMapWriteError,
+    archive_process_map,
+    create_process_map,
+    list_process_maps,
+    load_named_process_map,
     load_process_map,
     load_product_structure,
+    save_named_process_map,
     save_process_map,
 )
 
@@ -10739,6 +10744,16 @@ class ProcessMapPutBody(BaseModel):
     baseRevision: str
 
 
+class ProcessMapCreateBody(BaseModel):
+    displayName: Optional[str] = None
+    duplicateOf: Optional[str] = None
+    association: Optional[Dict[str, Any]] = None
+
+
+class ProcessMapArchiveBody(BaseModel):
+    baseRevision: str
+
+
 def _process_map_edit_enabled() -> bool:
     value = (os.getenv("INSPECTORPRO_PROCESS_MAP_EDIT") or "").strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -10747,6 +10762,47 @@ def _process_map_edit_enabled() -> bool:
 def _require_process_map_edit_enabled() -> None:
     if not _process_map_edit_enabled():
         raise HTTPException(status_code=404, detail="Process-map editor is not enabled")
+
+
+def _process_map_error_response(
+    error: ProcessMapAssetError,
+    *,
+    operation: str,
+    product_id: str,
+):
+    if isinstance(error, ProcessMapNotFoundError):
+        return JSONResponse(status_code=404, content={"detail": "Process map not found"})
+    if isinstance(error, ProcessMapConflictError):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "revision_conflict",
+                "currentRevision": error.current_revision,
+            },
+        )
+    if isinstance(error, ProcessMapSourceConflictError):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "source_structure_conflict",
+                "currentStructureRevision": error.current_revision,
+            },
+        )
+    if isinstance(error, ProcessMapValidationError):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "validation_failed", "findings": error.findings},
+        )
+    logger.error(
+        "training.process_map.%s failed product=%s msg=%s",
+        operation,
+        product_id,
+        error,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Process map operation failed"},
+    )
 
 
 @app.get("/api/training/process-map/{productId}")
@@ -10760,6 +10816,106 @@ def training_process_map_get(productId: str):
     except ProcessMapAssetError as ex:
         logger.error("training.process_map.get failed product=%s msg=%s", productId, ex)
         raise HTTPException(status_code=500, detail="Process map could not be loaded")
+    return {"success": True, **result}
+
+
+@app.get("/api/training/process-maps/{productId}")
+def training_process_maps_list(productId: str, includeArchived: bool = False):
+    """List registered maps without using directory order as authority."""
+    _require_process_map_edit_enabled()
+    try:
+        result = list_process_maps(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            include_archived=includeArchived,
+        )
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="list",
+            product_id=productId,
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/training/process-maps/{productId}")
+def training_process_maps_create(productId: str, body: ProcessMapCreateBody):
+    """Create a blank map or a same-product duplicate with a new identity."""
+    _require_process_map_edit_enabled()
+    try:
+        result = create_process_map(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            display_name=body.displayName,
+            duplicate_of=body.duplicateOf,
+            association=body.association,
+        )
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="create",
+            product_id=productId,
+        )
+    return {"success": True, **result}
+
+
+@app.get("/api/training/process-maps/{productId}/{mapId}")
+def training_process_maps_get(productId: str, mapId: str):
+    """Load one registered map by immutable identity."""
+    _require_process_map_edit_enabled()
+    try:
+        result = load_named_process_map(PROCESS_MAP_TRAINING_ROOT, productId, mapId)
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="get_named",
+            product_id=productId,
+        )
+    return {"success": True, **result}
+
+
+@app.put("/api/training/process-maps/{productId}/{mapId}")
+def training_process_maps_put(productId: str, mapId: str, body: ProcessMapPutBody):
+    """CAS-save one registered map while preserving its server identity."""
+    _require_process_map_edit_enabled()
+    try:
+        result = save_named_process_map(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            mapId,
+            body.map,
+            body.baseRevision,
+        )
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="put_named",
+            product_id=productId,
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/training/process-maps/{productId}/{mapId}/archive")
+def training_process_maps_archive(
+    productId: str,
+    mapId: str,
+    body: ProcessMapArchiveBody,
+):
+    """Archive a non-default map through the same revision gate as a save."""
+    _require_process_map_edit_enabled()
+    try:
+        result = archive_process_map(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            mapId,
+            body.baseRevision,
+        )
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="archive",
+            product_id=productId,
+        )
     return {"success": True, **result}
 
 

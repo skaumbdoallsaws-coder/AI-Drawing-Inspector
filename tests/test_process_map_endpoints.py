@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from copy import deepcopy
 from pathlib import Path
 
@@ -285,8 +286,17 @@ def test_backup_retention_keeps_only_configured_latest_files(
     assert len(backups) == 2
 
 
-def test_real_racing_bike_part_manifest_activates_reference_validation():
-    product_dir = REPO_ROOT / "generated" / "training" / "racing-bike"
+def test_real_racing_bike_part_manifest_activates_reference_validation(tmp_path: Path):
+    source_dir = REPO_ROOT / "generated" / "training" / "racing-bike"
+    product_dir = tmp_path / "training" / "racing-bike"
+    product_dir.mkdir(parents=True)
+    for name in (
+        "racing_bike_process_map_working_draft.json",
+        "racing_bike_product_structure.json",
+        "racing_bike_unique_items.json",
+    ):
+        shutil.copy2(source_dir / name, product_dir / name)
+
     known_parts = repository._known_product_part_ids(product_dir)
     assert known_parts is not None
     assert len(known_parts) == 47

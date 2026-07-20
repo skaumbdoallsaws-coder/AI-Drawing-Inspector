@@ -92,6 +92,15 @@ from .suggest import (
     PROCESS_MAP_SUGGESTION_SCHEMA_VERSION,
     suggest_process_map_connections,
 )
+from .templates import (
+    PROCESS_MAP_TEMPLATE_SCHEMA_VERSION,
+    create_process_map_from_template,
+    instantiate_template_skeleton,
+    list_process_map_templates,
+    load_process_map_template,
+    process_map_template_skeleton,
+    save_process_map_template,
+)
 
 __all__ = [
     "EDGE_KINDS",
@@ -105,6 +114,7 @@ __all__ = [
     "PROCESS_MAP_DIGEST_VERSION",
     "PROCESS_MAP_SUGGESTION_LIMIT",
     "PROCESS_MAP_SUGGESTION_SCHEMA_VERSION",
+    "PROCESS_MAP_TEMPLATE_SCHEMA_VERSION",
     "PRODUCT_STRUCTURE_SCHEMA_VERSION",
     "PRODUCT_KINDS",
     "CANVAS_NODE_KINDS",
@@ -150,6 +160,12 @@ __all__ = [
     "validate_placement_map",
     "validate_product_structure",
     "validate_process_map",
+    "create_process_map_from_template",
+    "instantiate_template_skeleton",
+    "list_process_map_templates",
+    "load_process_map_template",
+    "process_map_template_skeleton",
+    "save_process_map_template",
     "apply_process_map_operations",
     "build_process_map_diff",
     "diff_hash",

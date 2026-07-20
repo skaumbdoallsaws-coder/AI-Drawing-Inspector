@@ -103,12 +103,116 @@ def _synthetic_process_map() -> dict:
         "mapId": "default",
         "productId": "racing-bike",
         "productName": "Synthetic Process Map",
+        "displayName": "Synthetic Process Map",
+        "association": {"productId": "racing-bike"},
+        "status": "active",
+        "createdAt": "2026-07-20T00:00:00Z",
+        "updatedAt": "2026-07-20T00:00:00Z",
         "sourceStructureRevision": "structure-rev-1",
         "layoutVersion": 1,
         "canvasNodes": [],
         "canvasEdges": [],
         "viewport": {"x": 0, "y": 0, "scale": 1},
     }
+
+
+def _synthetic_map_entry(store: dict, map_id: str) -> dict | None:
+    if map_id == "default":
+        return {"map": store["map"], "revision": store["revision"]}
+    return store.setdefault("namedMaps", {}).get(map_id)
+
+
+def _synthetic_loaded_map_payload(store: dict, map_id: str) -> dict | None:
+    entry = _synthetic_map_entry(store, map_id)
+    if entry is None:
+        return None
+    return {
+        "success": True,
+        "map": copy.deepcopy(entry["map"]),
+        "revision": entry["revision"],
+        "findings": copy.deepcopy(store.get("findings", [])),
+        "productStructure": copy.deepcopy(store["structure"]),
+        "structureRevision": "structure-rev-1",
+        "assetName": f"{map_id}.json",
+        "defaultMapId": "default",
+    }
+
+
+def _synthetic_process_map_summaries(store: dict) -> list[dict]:
+    records = [("default", _synthetic_map_entry(store, "default"))]
+    records.extend(sorted(store.setdefault("namedMaps", {}).items()))
+    summaries = []
+    for map_id, entry in records:
+        process_map = entry["map"]
+        if process_map.get("status") == "archived":
+            continue
+        summaries.append({
+            "mapId": map_id,
+            "displayName": process_map.get("displayName") or map_id,
+            "association": copy.deepcopy(process_map.get("association") or {}),
+            "status": process_map.get("status") or "draft",
+            "createdAt": process_map.get("createdAt") or "2026-07-20T00:00:00Z",
+            "updatedAt": process_map.get("updatedAt") or "2026-07-20T00:00:00Z",
+            "revision": entry["revision"],
+            "isDefault": map_id == "default",
+        })
+    return sorted(summaries, key=lambda item: (item["displayName"].lower(), item["mapId"]))
+
+
+def _synthetic_validate_and_save(store: dict, map_id: str, payload: dict) -> tuple[int, dict]:
+    entry = _synthetic_map_entry(store, map_id)
+    if entry is None:
+        return 404, {"detail": "Process map not found"}
+    submitted = copy.deepcopy(payload.get("map") or {})
+    store["putCount"] += 1
+    store.setdefault("events", []).append({
+        "kind": "save",
+        "mapId": map_id,
+        "baseRevision": payload.get("baseRevision"),
+    })
+    if store.pop("conflictNext", False):
+        next_revision = "rev-external"
+        if map_id == "default":
+            store["revision"] = next_revision
+        else:
+            entry["revision"] = next_revision
+        return 409, {"error": "revision_conflict", "currentRevision": next_revision}
+    if payload.get("baseRevision") != entry["revision"]:
+        return 409, {"error": "revision_conflict", "currentRevision": entry["revision"]}
+    pairs = {
+        (edge.get("from", {}).get("nodeId"), edge.get("to", {}).get("nodeId")): edge
+        for edge in submitted.get("canvasEdges", [])
+        if edge.get("kind") == "precedence"
+    }
+    reverse_pair = next(
+        (
+            edge for (source, target), edge in pairs.items()
+            if (target, source) in pairs
+        ),
+        None,
+    )
+    if reverse_pair:
+        return 422, {
+            "error": "validation_failed",
+            "findings": [{
+                "severity": "error",
+                "code": "precedence_cycle",
+                "edgeId": reverse_pair.get("edgeId"),
+                "message": "Precedence edges must not form a cycle.",
+            }],
+        }
+    next_revision = f"rev-{store['putCount'] + 1}"
+    submitted["mapId"] = map_id
+    submitted["productId"] = "racing-bike"
+    submitted["updatedAt"] = f"2026-07-20T00:00:{store['putCount']:02d}Z"
+    if map_id == "default":
+        store["map"] = submitted
+        store["revision"] = next_revision
+    else:
+        entry["map"] = submitted
+        entry["revision"] = next_revision
+    store["findings"] = []
+    return 200, _synthetic_loaded_map_payload(store, map_id)
 
 
 def _install_synthetic_process_map_route(page, store: dict) -> None:
@@ -133,64 +237,228 @@ def _install_synthetic_process_map_route(page, store: dict) -> None:
             )
             return
 
-        payload = request.post_data_json or {}
-        submitted = copy.deepcopy(payload.get("map") or {})
-        store["putCount"] += 1
-        store.setdefault("events", []).append({
-            "kind": "save",
-            "baseRevision": payload.get("baseRevision"),
-        })
-        if store.pop("conflictNext", False):
-            store["revision"] = "rev-external"
-            fulfill(route, 409, {"error": "revision_conflict", "currentRevision": store["revision"]})
-            return
-        pairs = {
-            (edge.get("from", {}).get("nodeId"), edge.get("to", {}).get("nodeId")): edge
-            for edge in submitted.get("canvasEdges", [])
-            if edge.get("kind") == "precedence"
-        }
-        reverse_pair = next(
-            (
-                edge for (source, target), edge in pairs.items()
-                if (target, source) in pairs
-            ),
-            None,
+        status, result = _synthetic_validate_and_save(
+            store,
+            "default",
+            request.post_data_json or {},
         )
-        if reverse_pair:
-            fulfill(
-                route,
-                422,
-                {
-                    "error": "validation_failed",
-                    "findings": [
-                        {
-                            "severity": "error",
-                            "code": "precedence_cycle",
-                            "edgeId": reverse_pair.get("edgeId"),
-                            "message": "Precedence edges must not form a cycle.",
-                        }
-                    ],
-                },
-            )
-            return
-        store["map"] = submitted
-        store["revision"] = f"rev-{store['putCount'] + 1}"
-        store["findings"] = []
-        fulfill(
-            route,
-            200,
-            {
-                "success": True,
-                "map": copy.deepcopy(store["map"]),
-                "revision": store["revision"],
-                "findings": [],
-                "productStructure": copy.deepcopy(store["structure"]),
-                "structureRevision": "structure-rev-1",
-                "assetName": "synthetic_process_map.json",
-            },
-        )
+        fulfill(route, status, result)
 
     page.route("**/api/training/process-map/racing-bike", handler)
+
+
+def _install_synthetic_map_management_routes(page, store: dict) -> None:
+    def fulfill(route, status: int, payload: dict) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def fresh_map_id() -> str:
+        store["mapIdCounter"] = store.get("mapIdCounter", 0) + 1
+        return f"pm-smoke-{store['mapIdCounter']:02d}"
+
+    def create_map(display_name: str, source: dict | None = None) -> dict:
+        map_id = fresh_map_id()
+        process_map = copy.deepcopy(source if source is not None else _synthetic_process_map())
+        process_map.update({
+            "mapId": map_id,
+            "displayName": display_name,
+            "status": "draft",
+            "createdAt": "2026-07-20T01:00:00Z",
+            "updatedAt": "2026-07-20T01:00:00Z",
+        })
+        if source is None:
+            process_map["canvasNodes"] = []
+            process_map["canvasEdges"] = []
+            process_map["canvasGroups"] = []
+            process_map["layoutVersion"] = 2
+        revision = f"rev-created-{store['mapIdCounter']}"
+        store.setdefault("namedMaps", {})[map_id] = {
+            "map": process_map,
+            "revision": revision,
+        }
+        return _synthetic_loaded_map_payload(store, map_id)
+
+    def template_skeleton(process_map: dict) -> dict:
+        nodes = [
+            copy.deepcopy(node) for node in process_map.get("canvasNodes", [])
+            if node.get("nodeKind") in {"process_step", "junction"}
+        ]
+        node_ids = {node.get("nodeId") for node in nodes}
+        edges = [
+            copy.deepcopy(edge) for edge in process_map.get("canvasEdges", [])
+            if edge.get("from", {}).get("nodeId") in node_ids
+            and edge.get("to", {}).get("nodeId") in node_ids
+        ]
+        groups = []
+        for source in process_map.get("canvasGroups", []):
+            group = copy.deepcopy(source)
+            group["memberNodeIds"] = [
+                node_id for node_id in group.get("memberNodeIds", []) if node_id in node_ids
+            ]
+            groups.append(group)
+        return {
+            "schemaVersion": 3,
+            "layoutVersion": 2,
+            "canvasNodes": nodes,
+            "canvasEdges": edges,
+            "canvasGroups": groups,
+            "viewport": copy.deepcopy(process_map.get("viewport") or {"x": 0, "y": 0, "scale": 1}),
+        }
+
+    def instantiate_skeleton(skeleton: dict) -> dict:
+        store["templateCloneCounter"] = store.get("templateCloneCounter", 0) + 1
+        suffix = f"clone-{store['templateCloneCounter']}"
+        nodes = copy.deepcopy(skeleton.get("canvasNodes", []))
+        node_ids = {
+            node["nodeId"]: f"{node['nodeId']}-{suffix}"
+            for node in nodes
+        }
+        for node in nodes:
+            node["nodeId"] = node_ids[node["nodeId"]]
+        logical_ids = {}
+        edges = copy.deepcopy(skeleton.get("canvasEdges", []))
+        for edge in edges:
+            old_edge_id = edge["edgeId"]
+            old_logical = edge.get("logicalConnectionId") or old_edge_id
+            logical_ids.setdefault(old_logical, f"{old_logical}-{suffix}")
+            edge["edgeId"] = f"{old_edge_id}-{suffix}"
+            edge["logicalConnectionId"] = logical_ids[old_logical]
+            edge["from"]["nodeId"] = node_ids[edge["from"]["nodeId"]]
+            edge["to"]["nodeId"] = node_ids[edge["to"]["nodeId"]]
+        groups = copy.deepcopy(skeleton.get("canvasGroups", []))
+        for group in groups:
+            group["groupId"] = f"{group['groupId']}-{suffix}"
+            group["memberNodeIds"] = [node_ids[node_id] for node_id in group.get("memberNodeIds", [])]
+        return {
+            "canvasNodes": nodes,
+            "canvasEdges": edges,
+            "canvasGroups": groups,
+            "viewport": copy.deepcopy(skeleton.get("viewport") or {"x": 0, "y": 0, "scale": 1}),
+        }
+
+    def template_handler(route) -> None:
+        templates = [
+            {
+                "templateId": item["templateId"],
+                "displayName": item["displayName"],
+                "description": item.get("description", ""),
+                "status": "template",
+                "nodeCount": len(item["skeleton"].get("canvasNodes", [])),
+                "edgeCount": len(item["skeleton"].get("canvasEdges", [])),
+                "groupCount": len(item["skeleton"].get("canvasGroups", [])),
+                "revision": item["revision"],
+            }
+            for item in store.setdefault("templates", {}).values()
+        ]
+        fulfill(route, 200, {"success": True, "templates": templates, "findings": []})
+
+    def collection_handler(route) -> None:
+        request = route.request
+        if request.method == "GET":
+            fulfill(route, 200, {
+                "success": True,
+                "registryVersion": 1,
+                "defaultMapId": "default",
+                "maps": _synthetic_process_map_summaries(store),
+                "findings": [],
+            })
+            return
+        payload = request.post_data_json or {}
+        source_id = payload.get("duplicateOf")
+        source_entry = _synthetic_map_entry(store, source_id) if source_id else None
+        if source_id and source_entry is None:
+            fulfill(route, 404, {"detail": "Process map not found"})
+            return
+        result = create_map(
+            str(payload.get("displayName") or "Untitled Process Map"),
+            source_entry["map"] if source_entry else None,
+        )
+        fulfill(route, 200, result)
+
+    def named_handler(route) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        prefix = "/api/training/process-maps/racing-bike/"
+        suffix = path[len(prefix):] if path.startswith(prefix) else ""
+        parts = [part for part in suffix.split("/") if part]
+        if not parts:
+            fulfill(route, 404, {"detail": "Process map not found"})
+            return
+        if parts[0] == "from-template":
+            payload = request.post_data_json or {}
+            template = store.setdefault("templates", {}).get(payload.get("templateId"))
+            if template is None:
+                fulfill(route, 404, {"detail": "Process-map template not found"})
+                return
+            content = instantiate_skeleton(template["skeleton"])
+            base = _synthetic_process_map()
+            base.update(content)
+            result = create_map(str(payload.get("displayName") or template["displayName"]), base)
+            result["templateId"] = template["templateId"]
+            fulfill(route, 200, result)
+            return
+        map_id = parts[0]
+        entry = _synthetic_map_entry(store, map_id)
+        if entry is None:
+            fulfill(route, 404, {"detail": "Process map not found"})
+            return
+        operation = parts[1] if len(parts) > 1 else ""
+        if operation == "suggestions":
+            fulfill(route, 200, {
+                "success": True,
+                "schemaVersion": 1,
+                "engineVersion": "synthetic-1",
+                "productId": "racing-bike",
+                "mapId": map_id,
+                "revision": entry["revision"],
+                "suggestions": [],
+                "summary": {"returned": 0, "edgeSuggestions": 0, "annotations": 0},
+            })
+            return
+        if operation == "archive":
+            payload = request.post_data_json or {}
+            if map_id == "default":
+                fulfill(route, 422, {"error": "default_map_cannot_be_archived"})
+                return
+            if payload.get("baseRevision") != entry["revision"]:
+                fulfill(route, 409, {"error": "revision_conflict", "currentRevision": entry["revision"]})
+                return
+            entry["map"]["status"] = "archived"
+            entry["revision"] = f"rev-archived-{map_id}"
+            fulfill(route, 200, _synthetic_loaded_map_payload(store, map_id))
+            return
+        if operation == "save-as-template":
+            payload = request.post_data_json or {}
+            if payload.get("baseRevision") != entry["revision"]:
+                fulfill(route, 409, {"error": "revision_conflict", "currentRevision": entry["revision"]})
+                return
+            template_id = f"pmt-smoke-{len(store.setdefault('templates', {})) + 1}"
+            skeleton = template_skeleton(entry["map"])
+            template = {
+                "templateSchemaVersion": 1,
+                "templateId": template_id,
+                "displayName": str(payload.get("displayName") or "Process Map Template"),
+                "status": "template",
+                "skeleton": skeleton,
+                "revision": f"template-rev-{len(store['templates']) + 1}",
+            }
+            store["templates"][template_id] = template
+            fulfill(route, 200, {
+                "success": True,
+                "template": copy.deepcopy(template),
+                "revision": template["revision"],
+                "findings": [],
+                "dropped": {},
+            })
+            return
+        if request.method == "GET":
+            fulfill(route, 200, _synthetic_loaded_map_payload(store, map_id))
+            return
+        status, result = _synthetic_validate_and_save(store, map_id, request.post_data_json or {})
+        fulfill(route, status, result)
+
+    page.route("**/api/training/process-map-templates", template_handler)
+    page.route("**/api/training/process-maps/racing-bike", collection_handler)
+    page.route("**/api/training/process-maps/racing-bike/**", named_handler)
 
 
 def _install_synthetic_suggestion_route(page, store: dict) -> None:
@@ -584,6 +852,7 @@ def run() -> int:
         _install_cached_three_route(page)
         page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
         _install_synthetic_process_map_route(page, store)
+        _install_synthetic_map_management_routes(page, store)
         _install_synthetic_suggestion_route(page, store)
         _install_synthetic_agent_route(page, store, analysis_requests)
         page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
@@ -2131,6 +2400,228 @@ def run() -> int:
         page.wait_for_selector(".tab.active[data-tab='training']")
         _ensure_process_flow_editor(page)
         page.screenshot(path=str(OUT_DIR / "process_flow_source_tree_authored.png"), full_page=False)
+
+        map_select = page.get_by_label("Process map", exact=True)
+        map_action = page.get_by_label("Process map action", exact=True)
+        action_values = map_action.locator("option").evaluate_all(
+            "options => options.map(option => option.value)"
+        )
+        record(
+            "map_manager_exposes_frequent_identity_actions",
+            map_select.count() == 1
+            and {"create", "duplicate", "rename", "save-template", "archive"}
+            .issubset(set(action_values)),
+            action_values,
+        )
+        management_layout = page.evaluate(
+            """() => {
+                const rect = selector => {
+                    const value = document.querySelector(selector).getBoundingClientRect();
+                    return { x: value.x, y: value.y, right: value.right,
+                        bottom: value.bottom, width: value.width, height: value.height };
+                };
+                const overlaps = (a, b) => !(a.right <= b.x || b.right <= a.x
+                    || a.bottom <= b.y || b.bottom <= a.y);
+                const toolbar = rect('.pm-toolbar');
+                const copy = rect('.pm-toolbar-copy');
+                const manager = rect('.pm-map-manager');
+                const actions = rect('.pm-toolbar-actions');
+                return {
+                    toolbar, copy, manager, actions,
+                    managerOverlapsActions: overlaps(manager, actions),
+                    contained: copy.x >= toolbar.x && copy.right <= toolbar.right
+                        && actions.x >= toolbar.x && actions.right <= toolbar.right
+                        && copy.y >= toolbar.y && actions.bottom <= toolbar.bottom,
+                };
+            }"""
+        )
+        record(
+            "map_identity_and_editing_controls_use_non_overlapping_rows",
+            management_layout["contained"]
+            and not management_layout["managerOverlapsActions"]
+            and management_layout["manager"]["width"] >= 260,
+            management_layout,
+        )
+
+        default_node_count = page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length"
+        )
+        default_edge_count = page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasEdges.length"
+        )
+        page.once("dialog", lambda dialog: dialog.accept("Manufacturing Demo Copy"))
+        map_action.select_option("duplicate")
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.mapId !== 'default'"
+            " && window.__processMapFlow.editor.processMap.displayName === 'Manufacturing Demo Copy'"
+        )
+        duplicate_id = page.evaluate("window.__processMapFlow.editor.processMap.mapId")
+        duplicate_saved_node_count = page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length"
+        )
+        record(
+            "duplicate_creates_an_independent_named_map",
+            duplicate_saved_node_count == default_node_count
+            and page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasEdges.length"
+            ) == default_edge_count
+            and len(store.get("namedMaps", {})) == 1
+            and store["map"]["mapId"] == "default",
+            {"mapId": duplicate_id, "nodes": duplicate_saved_node_count},
+        )
+
+        page.once("dialog", lambda dialog: dialog.accept("Pilot Review Flow"))
+        map_action.select_option("rename")
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.displayName === 'Pilot Review Flow'"
+        )
+        record(
+            "rename_updates_the_named_map_and_catalog",
+            "Pilot Review Flow" in map_select.locator(
+                f"option[value='{duplicate_id}']"
+            ).inner_text()
+            and store["namedMaps"][duplicate_id]["map"]["displayName"] == "Pilot Review Flow",
+        )
+
+        page.get_by_role(
+            "button", name="Add an operation to the center of the process map"
+        ).click()
+        page.wait_for_function("window.__processMapFlow.editor.dirty === true")
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        map_select.select_option("default")
+        page.wait_for_timeout(200)
+        record(
+            "dirty_map_switch_can_be_cancelled_without_losing_work",
+            page.evaluate("window.__processMapFlow.editor.processMap.mapId") == duplicate_id
+            and page.evaluate("window.__processMapFlow.editor.dirty") is True,
+        )
+        page.once("dialog", lambda dialog: dialog.accept())
+        map_select.select_option("default")
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.mapId === 'default'"
+            " && window.__processMapFlow.editor.dirty === false"
+        )
+        record(
+            "confirmed_map_switch_discards_only_unsaved_local_edits",
+            len(store["namedMaps"][duplicate_id]["map"]["canvasNodes"])
+            == duplicate_saved_node_count
+            and page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == default_node_count,
+        )
+
+        map_select.select_option(duplicate_id)
+        page.wait_for_function(
+            "mapId => window.__processMapFlow.editor.processMap.mapId === mapId",
+            arg=duplicate_id,
+        )
+        page.once("dialog", lambda dialog: dialog.accept("Reusable Inspection Cell"))
+        map_action.select_option("save-template")
+        page.wait_for_function(
+            "document.querySelector('[aria-label=\"Process map action\"]')"
+            ".querySelector('option[value^=\"from-template:\"]') !== null"
+        )
+        template_id = next(iter(store["templates"]))
+        template = store["templates"][template_id]
+        template_node_ids = {
+            node["nodeId"] for node in template["skeleton"].get("canvasNodes", [])
+        }
+        record(
+            "save_as_template_strips_product_occurrences",
+            bool(template_node_ids)
+            and all(
+                node.get("nodeKind") != "product_occurrence"
+                for node in template["skeleton"].get("canvasNodes", [])
+            )
+            and map_action.locator(
+                f"option[value='from-template:{template_id}']"
+            ).count() == 1,
+            {"templateId": template_id, "nodes": len(template_node_ids)},
+        )
+
+        page.once("dialog", lambda dialog: dialog.accept("Inspection Cell Instance"))
+        map_action.select_option(f"from-template:{template_id}")
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.displayName === 'Inspection Cell Instance'"
+        )
+        template_instance_id = page.evaluate("window.__processMapFlow.editor.processMap.mapId")
+        instantiated_node_ids = set(page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.map(node => node.nodeId)"
+        ))
+        record(
+            "template_instance_is_product_neutral_with_fresh_graph_ids",
+            bool(instantiated_node_ids)
+            and template_node_ids.isdisjoint(instantiated_node_ids)
+            and page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes"
+                ".every(node => node.nodeKind !== 'product_occurrence')"
+            ),
+            {"mapId": template_instance_id, "nodes": len(instantiated_node_ids)},
+        )
+
+        map_select.select_option("default")
+        page.wait_for_function("window.__processMapFlow.editor.processMap.mapId === 'default'")
+        map_select.select_option(template_instance_id)
+        page.wait_for_function(
+            "mapId => window.__processMapFlow.editor.processMap.mapId === mapId",
+            arg=template_instance_id,
+        )
+        record(
+            "template_instance_survives_map_switch_round_trip",
+            set(page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.map(node => node.nodeId)"
+            )) == instantiated_node_ids,
+        )
+
+        page.once("dialog", lambda dialog: dialog.accept())
+        map_action.select_option("archive")
+        page.wait_for_function("window.__processMapFlow.editor.processMap.mapId === 'default'")
+        record(
+            "archive_returns_to_default_and_removes_map_from_switcher",
+            store["namedMaps"][template_instance_id]["map"]["status"] == "archived"
+            and map_select.locator(
+                f"option[value='{template_instance_id}']"
+            ).count() == 0,
+        )
+
+        page.once("dialog", lambda dialog: dialog.accept("Blank Pilot Map"))
+        map_action.select_option("create")
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.displayName === 'Blank Pilot Map'"
+            " && window.__processMapFlow.editor.processMap.canvasNodes.length === 0"
+        )
+        blank_map_id = page.evaluate("window.__processMapFlow.editor.processMap.mapId")
+        record(
+            "new_map_starts_blank_and_is_independently_registered",
+            blank_map_id not in {"default", duplicate_id, template_instance_id}
+            and page.locator(".pm-empty-state:visible").count() == 1
+            and map_select.locator(f"option[value='{blank_map_id}']").count() == 1,
+            blank_map_id,
+        )
+        management_theme_styles = {}
+        for theme in ("light", "dark"):
+            page.evaluate(
+                "theme => document.documentElement.setAttribute('data-theme', theme)",
+                theme,
+            )
+            management_theme_styles[theme] = map_select.evaluate(
+                "el => ({ background: getComputedStyle(el).backgroundColor, "
+                "color: getComputedStyle(el).color, border: getComputedStyle(el).borderColor })"
+            )
+            page.screenshot(
+                path=str(OUT_DIR / f"process_flow_map_management_{theme}.png"),
+                full_page=False,
+            )
+        record(
+            "map_management_controls_are_readable_in_both_themes",
+            all(
+                style["background"] not in ("rgba(0, 0, 0, 0)", "transparent")
+                and style["color"] != style["background"]
+                and style["border"] not in ("rgba(0, 0, 0, 0)", "transparent")
+                for style in management_theme_styles.values()
+            ),
+            management_theme_styles,
+        )
         context.close()
 
         record("no_browser_page_errors", not report["page_errors"], report["page_errors"])

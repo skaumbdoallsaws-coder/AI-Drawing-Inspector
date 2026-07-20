@@ -881,4 +881,25 @@ check('annotations and server-blocked suggestions are never accepted as edges', 
     assert.deepStrictEqual(result.map, processMap);
 });
 
+check('map catalog keeps the active map visible and sorts templates', () => {
+    const current = placementFixture();
+    current.mapId = 'pm-current001';
+    current.displayName = 'Current map';
+    const catalog = runtime.normalizeMapCatalog({
+        defaultMapId: 'default',
+        maps: [
+            { mapId: 'default', displayName: 'Main flow', status: 'active', isDefault: true },
+        ],
+        templates: [
+            { templateId: 'pmt-zeta', displayName: 'Zeta' },
+            { templateId: 'pmt-alpha', displayName: 'Alpha' },
+        ],
+    }, current);
+    assert.deepStrictEqual(catalog.maps.map(item => item.mapId), ['pm-current001', 'default']);
+    assert.deepStrictEqual(
+        catalog.templates.map(item => item.templateId),
+        ['pmt-alpha', 'pmt-zeta']
+    );
+});
+
 process.stdout.write(`Process-map editor checks: ${checks}/${checks} passed\n`);

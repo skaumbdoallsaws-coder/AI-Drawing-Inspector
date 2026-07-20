@@ -143,7 +143,9 @@ from ai_inspector.process_map import (
     builder_read_process_map,
     builder_validate_process_map,
     create_process_map,
+    create_process_map_from_template,
     list_process_maps,
+    list_process_map_templates,
     load_named_process_map,
     load_process_map,
     load_product_structure,
@@ -153,6 +155,7 @@ from ai_inspector.process_map import (
     resolve_process_map_digest,
     save_named_process_map,
     save_process_map,
+    save_process_map_template,
     show_process_map_proposal,
     suggest_process_map_connections,
 )
@@ -10793,6 +10796,18 @@ class ProcessMapArchiveBody(BaseModel):
     baseRevision: str
 
 
+class ProcessMapTemplateSaveBody(BaseModel):
+    baseRevision: str
+    displayName: str
+    description: Optional[str] = None
+    templateId: Optional[str] = None
+
+
+class ProcessMapTemplateInstantiateBody(BaseModel):
+    templateId: str
+    displayName: Optional[str] = None
+
+
 class ProcessMapBuilderProposalBody(BaseModel):
     baseRevision: str
     operations: List[Dict[str, Any]]
@@ -10953,6 +10968,21 @@ def training_process_maps_list(productId: str, includeArchived: bool = False):
     return {"success": True, **result}
 
 
+@app.get("/api/training/process-map-templates")
+def training_process_map_templates_list():
+    """List product-neutral process-map skeleton templates."""
+    _require_process_map_edit_enabled()
+    try:
+        result = list_process_map_templates(PROCESS_MAP_TRAINING_ROOT)
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="list_templates",
+            product_id="_templates",
+        )
+    return {"success": True, **result}
+
+
 @app.post("/api/training/process-maps/{productId}")
 def training_process_maps_create(productId: str, body: ProcessMapCreateBody):
     """Create a blank map or a same-product duplicate with a new identity."""
@@ -10969,6 +10999,56 @@ def training_process_maps_create(productId: str, body: ProcessMapCreateBody):
         return _process_map_error_response(
             ex,
             operation="create",
+            product_id=productId,
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/training/process-maps/{productId}/from-template")
+def training_process_maps_create_from_template(
+    productId: str,
+    body: ProcessMapTemplateInstantiateBody,
+):
+    """Instantiate a product-neutral skeleton with fresh graph identifiers."""
+    _require_process_map_edit_enabled()
+    try:
+        result = create_process_map_from_template(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            body.templateId,
+            display_name=body.displayName,
+        )
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="create_from_template",
+            product_id=productId,
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/training/process-maps/{productId}/{mapId}/save-as-template")
+def training_process_map_save_as_template(
+    productId: str,
+    mapId: str,
+    body: ProcessMapTemplateSaveBody,
+):
+    """Create a template after stripping product occurrence placements."""
+    _require_process_map_edit_enabled()
+    try:
+        result = save_process_map_template(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            mapId,
+            body.baseRevision,
+            display_name=body.displayName,
+            description=body.description,
+            template_id=body.templateId,
+        )
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="save_as_template",
             product_id=productId,
         )
     return {"success": True, **result}

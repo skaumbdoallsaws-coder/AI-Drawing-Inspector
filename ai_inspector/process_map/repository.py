@@ -786,6 +786,7 @@ def create_process_map(
     display_name: Optional[str] = None,
     duplicate_of: Optional[str] = None,
     association: Optional[Dict[str, Any]] = None,
+    initial_content: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     with _WRITE_LOCK:
         product_dir, registry = _ensure_registry(training_root, product_id)
@@ -795,7 +796,16 @@ def create_process_map(
             registry["defaultMapId"],
             registry,
         )
-        if duplicate_of:
+        if duplicate_of and initial_content is not None:
+            raise _identity_validation_error(
+                "conflicting_map_creation_sources",
+                "A process map cannot be created from both a duplicate and initial content.",
+            )
+        if initial_content is not None:
+            body = deepcopy(initial_content)
+            fallback_name = str(body.get("displayName") or "Untitled Process Map")
+            source_association = body.get("association")
+        elif duplicate_of:
             source = _load_registered_process_map(
                 product_dir,
                 product_id,

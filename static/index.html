@@ -5574,7 +5574,7 @@
             position: absolute;
             inset: 0;
             display: grid;
-            grid-template-rows: 48px minmax(0, 1fr);
+            grid-template-rows: 82px minmax(0, 1fr);
             overflow: hidden;
             background: var(--bg-main);
             color: var(--text-primary);
@@ -5582,17 +5582,27 @@
         .pm-toolbar {
             position: relative;
             z-index: 4;
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            grid-template-rows: 46px 32px;
             align-items: center;
-            justify-content: space-between;
-            gap: 16px;
+            gap: 0;
             min-width: 0;
-            padding: 0 14px 0 18px;
+            padding: 2px 10px 1px 18px;
             border-bottom: 1px solid var(--border);
             background: var(--bg-toolbar);
         }
         .pm-toolbar-copy {
+            display: grid;
+            grid-template-columns: minmax(120px, 1fr) auto;
+            grid-template-areas:
+                "title maps"
+                "subtitle maps"
+                "status maps";
+            align-items: center;
+            column-gap: 10px;
             min-width: 0;
+            width: 100%;
         }
         .pm-workspace {
             position: relative;
@@ -5749,6 +5759,7 @@
             padding: 14px 10px;
         }
         .pm-toolbar-title {
+            grid-area: title;
             overflow: hidden;
             color: var(--text-primary);
             font-size: 12px;
@@ -5757,6 +5768,7 @@
             white-space: nowrap;
         }
         .pm-toolbar-subtitle {
+            grid-area: subtitle;
             overflow: hidden;
             margin-top: 2px;
             color: var(--text-secondary);
@@ -5768,7 +5780,11 @@
             display: flex;
             align-items: center;
             gap: 4px;
-            flex: 0 0 auto;
+            min-width: 0;
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: thin;
         }
         .pm-structure-actions {
             display: flex;
@@ -5891,7 +5907,9 @@
         .pm-suggestion-actions { justify-content: flex-end; }
         .pm-type-select,
         .pm-port-orientation-select,
-        .pm-port-order-select {
+        .pm-port-order-select,
+        .pm-map-select,
+        .pm-map-action-select {
             height: 28px;
             max-width: 136px;
             border: 1px solid var(--border);
@@ -5904,7 +5922,9 @@
         }
         .pm-type-select:focus-visible,
         .pm-port-orientation-select:focus-visible,
-        .pm-port-order-select:focus-visible {
+        .pm-port-order-select:focus-visible,
+        .pm-map-select:focus-visible,
+        .pm-map-action-select:focus-visible {
             outline: 2px solid var(--accent);
             outline-offset: 1px;
         }
@@ -6186,6 +6206,7 @@
             to { opacity: 1; }
         }
         .pm-editor-status {
+            grid-area: status;
             min-height: 12px;
             margin-top: 2px;
             color: var(--text-secondary);
@@ -6194,6 +6215,15 @@
         .pm-editor-status.dirty { color: #9a6a16; }
         .pm-editor-status.error,
         .pm-editor-status.conflict { color: #b1463c; }
+        .pm-map-manager {
+            grid-area: maps;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+        }
+        .pm-map-select { width: 150px; }
+        .pm-map-action-select { width: 128px; }
         .pm-back-button {
             font-size: 15px;
             padding-bottom: 2px;
@@ -13626,11 +13656,13 @@
             facilityLayoutCapacityLoading: false,
             facilityLayoutCapacityError: null,
             processMap: null,
+            processMapProductId: 'racing-bike',
             processFlowMap: null,
             processFlowProductStructure: null,
             processFlowStructureRevision: null,
             processMapRevision: null,
             processMapFindings: [],
+            processMapCatalog: { defaultMapId: 'default', maps: [], templates: [] },
             processMapFlowAvailable: false,
             processMapFlowFocusNodeId: null,
             processMapFlowDirty: false,
@@ -23517,6 +23549,72 @@
             if (body) _trainRenderSetupBody(body);
         };
 
+        function _trainProcessMapProductId() {
+            return String(
+                trainingState.processFlowMap && trainingState.processFlowMap.productId
+                || trainingState.processMapProductId
+                || 'racing-bike'
+            );
+        }
+
+        function _trainNamedProcessMapUrl(mapId) {
+            return '/api/training/process-maps/'
+                + encodeURIComponent(_trainProcessMapProductId())
+                + '/' + encodeURIComponent(String(mapId || 'default'));
+        }
+
+        async function _trainRefreshProcessMapCatalog() {
+            const productId = _trainProcessMapProductId();
+            const next = {
+                defaultMapId: String(trainingState.processMapCatalog.defaultMapId || 'default'),
+                maps: Array.isArray(trainingState.processMapCatalog.maps)
+                    ? trainingState.processMapCatalog.maps.slice()
+                    : [],
+                templates: Array.isArray(trainingState.processMapCatalog.templates)
+                    ? trainingState.processMapCatalog.templates.slice()
+                    : [],
+            };
+            try {
+                const mapsResponse = await fetch(
+                    '/api/training/process-maps/' + encodeURIComponent(productId),
+                    { cache: 'no-store' }
+                );
+                if (mapsResponse.ok) {
+                    const payload = await mapsResponse.json();
+                    next.defaultMapId = payload.defaultMapId || next.defaultMapId;
+                    next.maps = Array.isArray(payload.maps) ? payload.maps : next.maps;
+                }
+            } catch (_) {
+                // The default-map compatibility endpoint remains sufficient.
+            }
+            try {
+                const templatesResponse = await fetch(
+                    '/api/training/process-map-templates', { cache: 'no-store' }
+                );
+                if (templatesResponse.ok) {
+                    const payload = await templatesResponse.json();
+                    next.templates = Array.isArray(payload.templates) ? payload.templates : [];
+                }
+            } catch (_) {
+                // Templates are optional; map editing remains available.
+            }
+            const currentMap = trainingState.processFlowMap;
+            const currentId = String(currentMap && currentMap.mapId || 'default');
+            if (currentMap && !next.maps.some(item => item && item.mapId === currentId)) {
+                next.maps.push({
+                    mapId: currentId,
+                    displayName: currentMap.displayName || 'Process Flow',
+                    status: currentMap.status || 'draft',
+                    isDefault: currentId === next.defaultMapId,
+                    revision: trainingState.processMapRevision,
+                });
+            }
+            trainingState.processMapCatalog = next;
+            const editor = _trainCurrentProcessFlowEditor();
+            if (editor && typeof editor.setMapCatalog === 'function') editor.setMapCatalog(next);
+            return next;
+        }
+
         async function _trainEnsureProcessMapLoaded() {
             if (trainingState.processMap) return trainingState.processMap;
             if (trainingState.processMapLoadPromise) return trainingState.processMapLoadPromise;
@@ -23533,6 +23631,7 @@
                 trainingState.processFlowStructureRevision = null;
                 trainingState.processMapRevision = null;
                 trainingState.processMapFindings = [];
+                trainingState.processMapCatalog = { defaultMapId: 'default', maps: [], templates: [] };
                 trainingState.processMapFlowDirty = false;
                 try {
                     const apiRes = await fetch(trainingState.processMapApiUrl, { cache: 'no-store' });
@@ -23547,10 +23646,15 @@
                             trainingState.processMapFindings = Array.isArray(payload.findings)
                                 ? payload.findings
                                 : [];
+                            trainingState.processMapProductId = payload.map.productId
+                                || trainingState.processMapProductId;
                         }
                     }
                 } catch (_) {
                     data = null;
+                }
+                if (trainingState.processMapFlowAvailable) {
+                    await _trainRefreshProcessMapCatalog();
                 }
                 const res = await fetch(trainingState.processMapUrl, { cache: 'no-store' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -26209,7 +26313,8 @@
         }
 
         async function _trainSaveProcessFlowMap(processMap, baseRevision) {
-            const response = await fetch(trainingState.processMapApiUrl, {
+            const mapId = String(processMap && processMap.mapId || 'default');
+            const response = await fetch(_trainNamedProcessMapUrl(mapId), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -26239,12 +26344,16 @@
                 ? payload.findings
                 : [];
             trainingState.processMapFlowDirty = false;
+            const mapCatalog = await _trainRefreshProcessMapCatalog();
             _trainRenderProcessStructurePanel();
-            return { ok: true, ...payload };
+            return { ok: true, ...payload, mapCatalog };
         }
 
         async function _trainReloadProcessFlowMap() {
-            const response = await fetch(trainingState.processMapApiUrl, { cache: 'no-store' });
+            const mapId = String(
+                trainingState.processFlowMap && trainingState.processFlowMap.mapId || 'default'
+            );
+            const response = await fetch(_trainNamedProcessMapUrl(mapId), { cache: 'no-store' });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok || !payload.map) {
                 return { ok: false, status: response.status, error: payload.detail || 'reload_failed' };
@@ -26259,8 +26368,159 @@
                 ? payload.findings
                 : [];
             trainingState.processMapFlowDirty = false;
+            const mapCatalog = await _trainRefreshProcessMapCatalog();
             _trainRenderProcessStructurePanel();
-            return { ok: true, ...payload };
+            return { ok: true, ...payload, mapCatalog };
+        }
+
+        function _trainApplyManagedProcessMap(payload) {
+            if (!payload || !payload.map) return false;
+            trainingState.processFlowMap = payload.map;
+            trainingState.processFlowProductStructure = payload.productStructure
+                || trainingState.processFlowProductStructure;
+            trainingState.processFlowStructureRevision = payload.structureRevision
+                || trainingState.processFlowStructureRevision;
+            trainingState.processMapRevision = payload.revision || null;
+            trainingState.processMapFindings = Array.isArray(payload.findings)
+                ? payload.findings
+                : [];
+            trainingState.processMapFlowFocusNodeId = null;
+            trainingState.processMapFlowDirty = false;
+            return true;
+        }
+
+        async function _trainManagedProcessMapResult(response) {
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.map) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: payload.error || payload.detail || 'map_operation_failed',
+                    currentRevision: payload.currentRevision || null,
+                    findings: Array.isArray(payload.findings) ? payload.findings : [],
+                };
+            }
+            _trainApplyManagedProcessMap(payload);
+            const mapCatalog = await _trainRefreshProcessMapCatalog();
+            _trainRenderProcessStructurePanel();
+            return { ok: true, ...payload, mapCatalog };
+        }
+
+        async function _trainSwitchProcessFlowMap(request) {
+            const response = await fetch(
+                _trainNamedProcessMapUrl(request && request.mapId),
+                { cache: 'no-store' }
+            );
+            return _trainManagedProcessMapResult(response);
+        }
+
+        async function _trainCreateProcessFlowMap(request) {
+            const productId = _trainProcessMapProductId();
+            const response = await fetch(
+                '/api/training/process-maps/' + encodeURIComponent(productId),
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ displayName: request.displayName }),
+                }
+            );
+            return _trainManagedProcessMapResult(response);
+        }
+
+        async function _trainDuplicateProcessFlowMap(request) {
+            const productId = _trainProcessMapProductId();
+            const response = await fetch(
+                '/api/training/process-maps/' + encodeURIComponent(productId),
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        displayName: request.displayName,
+                        duplicateOf: request.sourceMapId,
+                    }),
+                }
+            );
+            return _trainManagedProcessMapResult(response);
+        }
+
+        async function _trainRenameProcessFlowMap(request) {
+            const processMap = JSON.parse(JSON.stringify(
+                request.map || trainingState.processFlowMap || {}
+            ));
+            processMap.displayName = request.displayName;
+            const response = await fetch(_trainNamedProcessMapUrl(request.mapId), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    map: processMap,
+                    baseRevision: request.revision || trainingState.processMapRevision || '',
+                }),
+            });
+            return _trainManagedProcessMapResult(response);
+        }
+
+        async function _trainArchiveProcessFlowMap(request) {
+            const response = await fetch(
+                _trainNamedProcessMapUrl(request.mapId) + '/archive',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ baseRevision: request.revision || '' }),
+                }
+            );
+            const archived = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: archived.error || archived.detail || 'archive_failed',
+                    findings: Array.isArray(archived.findings) ? archived.findings : [],
+                };
+            }
+            const mapCatalog = await _trainRefreshProcessMapCatalog();
+            return _trainSwitchProcessFlowMap({ mapId: mapCatalog.defaultMapId || 'default' });
+        }
+
+        async function _trainSaveProcessFlowTemplate(request) {
+            const response = await fetch(
+                _trainNamedProcessMapUrl(request.mapId) + '/save-as-template',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        baseRevision: request.revision || trainingState.processMapRevision || '',
+                        displayName: request.displayName,
+                    }),
+                }
+            );
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: payload.error || payload.detail || 'template_save_failed',
+                    findings: Array.isArray(payload.findings) ? payload.findings : [],
+                };
+            }
+            const mapCatalog = await _trainRefreshProcessMapCatalog();
+            if (window._toast) window._toast('Process-map template saved.', 'success');
+            return { ok: true, ...payload, mapCatalog };
+        }
+
+        async function _trainCreateProcessFlowFromTemplate(request) {
+            const productId = _trainProcessMapProductId();
+            const response = await fetch(
+                '/api/training/process-maps/' + encodeURIComponent(productId) + '/from-template',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        templateId: request.templateId,
+                        displayName: request.displayName,
+                    }),
+                }
+            );
+            return _trainManagedProcessMapResult(response);
         }
 
         function _trainOpenProcessFlowCardPreview(node, sourceEl) {
@@ -26373,6 +26633,7 @@
             trainingState.viewportMode = 'process_flow';
             runtime.mount(host, {
                 map: trainingState.processFlowMap,
+                mapCatalog: trainingState.processMapCatalog,
                 productStructure: trainingState.processFlowProductStructure,
                 findings: trainingState.processMapFindings,
                 revision: trainingState.processMapRevision,
@@ -26398,6 +26659,13 @@
                 },
                 onSave: _trainSaveProcessFlowMap,
                 onReload: _trainReloadProcessFlowMap,
+                onSwitchMap: _trainSwitchProcessFlowMap,
+                onCreateMap: _trainCreateProcessFlowMap,
+                onDuplicateMap: _trainDuplicateProcessFlowMap,
+                onRenameMap: _trainRenameProcessFlowMap,
+                onArchiveMap: _trainArchiveProcessFlowMap,
+                onSaveAsTemplate: _trainSaveProcessFlowTemplate,
+                onCreateFromTemplate: _trainCreateProcessFlowFromTemplate,
                 onAnalyze: _trainAnalyzeProcessFlow,
                 onLoadSuggestions: _trainLoadProcessFlowSuggestions,
                 onExit: () => {

@@ -1279,6 +1279,41 @@
         };
     }
 
+    function normalizeMapCatalog(value, currentMap) {
+        const source = value && typeof value === 'object' ? value : {};
+        const maps = Array.isArray(source.maps) ? source.maps.filter(function (item) {
+            return item && typeof item.mapId === 'string' && item.mapId;
+        }).map(cloneMap) : [];
+        const currentId = String(currentMap && currentMap.mapId || 'default');
+        if (!maps.some(function (item) { return item.mapId === currentId; })) {
+            maps.push({
+                mapId: currentId,
+                displayName: String(currentMap && currentMap.displayName || 'Process Flow'),
+                status: String(currentMap && currentMap.status || 'draft'),
+                isDefault: currentId === String(source.defaultMapId || 'default'),
+            });
+        }
+        maps.sort(function (left, right) {
+            const byName = String(left.displayName || left.mapId).localeCompare(
+                String(right.displayName || right.mapId), undefined, { sensitivity: 'base' }
+            );
+            return byName || String(left.mapId).localeCompare(String(right.mapId));
+        });
+        const templates = Array.isArray(source.templates) ? source.templates.filter(function (item) {
+            return item && typeof item.templateId === 'string' && item.templateId;
+        }).map(cloneMap) : [];
+        templates.sort(function (left, right) {
+            return String(left.displayName || left.templateId).localeCompare(
+                String(right.displayName || right.templateId), undefined, { sensitivity: 'base' }
+            );
+        });
+        return {
+            defaultMapId: String(source.defaultMapId || 'default'),
+            maps: maps,
+            templates: templates,
+        };
+    }
+
     function occurrenceIndex(structure) {
         const byId = new Map();
         const children = new Map();
@@ -1354,6 +1389,7 @@
         this.options = options || {};
         this.editable = !!this.options.editable;
         this.processMap = cloneMap(this.options.map || { nodes: [], edges: [] });
+        this.mapCatalog = normalizeMapCatalog(this.options.mapCatalog, this.processMap);
         this.productStructure = normalizeProductStructure(this.options.productStructure);
         const catalog = occurrenceIndex(this.productStructure);
         this.occurrenceById = catalog.byId;
@@ -1376,6 +1412,7 @@
         this.history = new SnapshotHistory(this.options.historyLimit || 50);
         this.dirty = false;
         this.saving = false;
+        this.managementBusy = false;
         this.conflict = false;
         this.operationError = '';
         this.suggestions = [];
@@ -1424,6 +1461,24 @@
         this.subtitle.className = 'pm-toolbar-subtitle';
         this.toolbarLeft.appendChild(this.title);
         this.toolbarLeft.appendChild(this.subtitle);
+        if (typeof this.options.onSwitchMap === 'function') {
+            this.mapManager = document.createElement('div');
+            this.mapManager.className = 'pm-map-manager';
+            this.mapSelect = document.createElement('select');
+            this.mapSelect.className = 'pm-map-select';
+            this.mapSelect.setAttribute('aria-label', 'Process map');
+            this.mapSelect.title = 'Switch process map';
+            this.mapSelect.addEventListener('change', this.changeMapSelection.bind(this));
+            this.mapActionSelect = document.createElement('select');
+            this.mapActionSelect.className = 'pm-map-action-select';
+            this.mapActionSelect.setAttribute('aria-label', 'Process map action');
+            this.mapActionSelect.title = 'Create, duplicate, rename, archive, or use a template';
+            this.mapActionSelect.addEventListener('change', this.changeMapAction.bind(this));
+            this.mapManager.appendChild(this.mapSelect);
+            this.mapManager.appendChild(this.mapActionSelect);
+            this.toolbarLeft.appendChild(this.mapManager);
+            this._renderMapCatalogControls();
+        }
 
         this.toolbarActions = document.createElement('div');
         this.toolbarActions.className = 'pm-toolbar-actions';
@@ -1627,6 +1682,243 @@
         this.root.addEventListener('keydown', this._onKeyDown);
         this.renderStructureTree();
         this.updateEditControls();
+    };
+
+    ProcessMapEditor.prototype._appendSelectOption = function (select, value, label, disabled) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        option.disabled = !!disabled;
+        select.appendChild(option);
+        return option;
+    };
+
+    ProcessMapEditor.prototype._renderMapCatalogControls = function () {
+        if (!this.mapSelect || !this.mapActionSelect) return;
+        const currentId = String(this.processMap && this.processMap.mapId || 'default');
+        this.mapSelect.textContent = '';
+        this.mapCatalog.maps.forEach(function (item) {
+            const status = item.status && item.status !== 'active' ? ' [' + item.status + ']' : '';
+            const marker = item.isDefault ? ' (default)' : '';
+            this._appendSelectOption(
+                this.mapSelect,
+                item.mapId,
+                String(item.displayName || item.mapId) + marker + status,
+                item.status === 'archived'
+            );
+        }, this);
+        this.mapSelect.value = currentId;
+
+        this.mapActionSelect.textContent = '';
+        this._appendSelectOption(this.mapActionSelect, '', 'Map actions', false);
+        if (typeof this.options.onCreateMap === 'function') {
+            this._appendSelectOption(this.mapActionSelect, 'create', 'New blank map', false);
+        }
+        if (typeof this.options.onDuplicateMap === 'function') {
+            this._appendSelectOption(this.mapActionSelect, 'duplicate', 'Duplicate current map', false);
+        }
+        if (typeof this.options.onRenameMap === 'function') {
+            this._appendSelectOption(this.mapActionSelect, 'rename', 'Rename current map', false);
+        }
+        if (typeof this.options.onSaveAsTemplate === 'function') {
+            this._appendSelectOption(this.mapActionSelect, 'save-template', 'Save as template', false);
+        }
+        if (typeof this.options.onArchiveMap === 'function') {
+            this._appendSelectOption(
+                this.mapActionSelect,
+                'archive',
+                'Archive current map',
+                currentId === this.mapCatalog.defaultMapId
+            );
+        }
+        if (typeof this.options.onCreateFromTemplate === 'function') {
+            this.mapCatalog.templates.forEach(function (template) {
+                this._appendSelectOption(
+                    this.mapActionSelect,
+                    'from-template:' + template.templateId,
+                    'New from template: ' + String(template.displayName || template.templateId),
+                    false
+                );
+            }, this);
+        }
+        this.mapActionSelect.value = '';
+    };
+
+    ProcessMapEditor.prototype.setMapCatalog = function (catalog) {
+        this.mapCatalog = normalizeMapCatalog(catalog, this.processMap);
+        this._renderMapCatalogControls();
+    };
+
+    ProcessMapEditor.prototype._promptValue = function (message, defaultValue) {
+        const promptValue = typeof this.options.prompt === 'function'
+            ? this.options.prompt(message, defaultValue)
+            : (typeof window !== 'undefined' && typeof window.prompt === 'function'
+                ? window.prompt(message, defaultValue)
+                : null);
+        if (promptValue == null) return null;
+        const cleaned = String(promptValue).trim();
+        return cleaned || null;
+    };
+
+    ProcessMapEditor.prototype._confirmManagementAction = function (message) {
+        if (typeof this.options.confirmAction === 'function') {
+            return this.options.confirmAction(message) !== false;
+        }
+        return typeof window !== 'undefined' && typeof window.confirm === 'function'
+            ? window.confirm(message)
+            : false;
+    };
+
+    ProcessMapEditor.prototype._activateMapResult = function (result, fit) {
+        if (!result || result.ok === false || !result.map) return false;
+        this._closeCardToolbar('map_changed', false);
+        this.processMap = cloneMap(result.map);
+        this.revision = result.revision || null;
+        if (result.productStructure) this.setProductStructure(result.productStructure);
+        this.findings = Array.isArray(result.findings) ? result.findings : [];
+        this.savedMap = cloneMap(this.processMap);
+        this.savedFingerprint = mapFingerprint(this.savedMap);
+        this.history.clear();
+        this._clearSuggestions();
+        this.selectedNodeId = null;
+        this.selectedEdgeId = null;
+        this.selectedGroupId = null;
+        this.conflict = false;
+        this.operationError = '';
+        this._setDirty(false);
+        if (result.mapCatalog) this.setMapCatalog(result.mapCatalog);
+        else this.setMapCatalog(this.mapCatalog);
+        this._notifyMapChange();
+        this.renderGraph({ fit: fit !== false });
+        this._scheduleSuggestionLoad();
+        return true;
+    };
+
+    ProcessMapEditor.prototype._runMapManagement = async function (callback, request, options) {
+        const opts = options || {};
+        if (this.managementBusy || typeof callback !== 'function') return false;
+        if (opts.discardGuard && !this.confirmDiscard()) return false;
+        if (opts.saveFirst && this.dirty) {
+            const saved = await this.save();
+            if (!saved) return false;
+            request = Object.assign({}, request || {}, {
+                mapId: String(this.processMap.mapId || 'default'),
+                revision: this.revision,
+            });
+            if (Object.prototype.hasOwnProperty.call(request, 'map')) {
+                request.map = cloneMap(this.processMap);
+            }
+        }
+        this.managementBusy = true;
+        this.updateEditControls();
+        try {
+            const result = await callback(request || {});
+            if (!result || result.ok === false) {
+                this.operationError = String(result && (result.error || result.detail) || 'Map operation failed.');
+                return false;
+            }
+            if (result.mapCatalog) this.setMapCatalog(result.mapCatalog);
+            if (result.map) return this._activateMapResult(result, opts.fit);
+            this.operationError = '';
+            this.updateEditControls();
+            return true;
+        } catch (error) {
+            this.operationError = 'Map operation failed: '
+                + (error && error.message ? error.message : String(error));
+            return false;
+        } finally {
+            this.managementBusy = false;
+            this._renderMapCatalogControls();
+            this.updateEditControls();
+        }
+    };
+
+    ProcessMapEditor.prototype.changeMapSelection = async function () {
+        if (!this.mapSelect) return false;
+        const currentId = String(this.processMap && this.processMap.mapId || 'default');
+        const nextId = String(this.mapSelect.value || '');
+        if (!nextId || nextId === currentId) return false;
+        const changed = await this._runMapManagement(
+            this.options.onSwitchMap,
+            { mapId: nextId },
+            { discardGuard: true, fit: true }
+        );
+        if (!changed) this.mapSelect.value = currentId;
+        return changed;
+    };
+
+    ProcessMapEditor.prototype.changeMapAction = async function () {
+        if (!this.mapActionSelect) return false;
+        const action = String(this.mapActionSelect.value || '');
+        this.mapActionSelect.value = '';
+        if (!action) return false;
+        const currentName = String(this.processMap.displayName || 'Process Map');
+        if (action === 'create') {
+            const displayName = this._promptValue('New process-map name', 'Untitled Process Map');
+            return displayName && this._runMapManagement(
+                this.options.onCreateMap,
+                { displayName: displayName },
+                { discardGuard: true, fit: true }
+            );
+        }
+        if (action === 'duplicate') {
+            const duplicateName = this._promptValue('Duplicate map name', currentName + ' Copy');
+            return duplicateName && this._runMapManagement(
+                this.options.onDuplicateMap,
+                { sourceMapId: String(this.processMap.mapId || 'default'), displayName: duplicateName },
+                { discardGuard: true, fit: true }
+            );
+        }
+        if (action === 'rename') {
+            const renamed = this._promptValue('Process-map name', currentName);
+            return renamed && this._runMapManagement(
+                this.options.onRenameMap,
+                {
+                    mapId: String(this.processMap.mapId || 'default'),
+                    displayName: renamed,
+                    map: cloneMap(this.processMap),
+                    revision: this.revision,
+                },
+                { saveFirst: true, fit: false }
+            );
+        }
+        if (action === 'save-template') {
+            const templateName = this._promptValue('Template name', currentName + ' Template');
+            return templateName && this._runMapManagement(
+                this.options.onSaveAsTemplate,
+                {
+                    mapId: String(this.processMap.mapId || 'default'),
+                    revision: this.revision,
+                    displayName: templateName,
+                },
+                { saveFirst: true, fit: false }
+            );
+        }
+        if (action === 'archive') {
+            if (String(this.processMap.mapId || 'default') === this.mapCatalog.defaultMapId) return false;
+            if (!this._confirmManagementAction('Archive this process map?')) return false;
+            return this._runMapManagement(
+                this.options.onArchiveMap,
+                { mapId: String(this.processMap.mapId), revision: this.revision },
+                { saveFirst: true, fit: true }
+            );
+        }
+        if (action.indexOf('from-template:') === 0) {
+            const templateId = action.slice('from-template:'.length);
+            const template = this.mapCatalog.templates.find(function (item) {
+                return item.templateId === templateId;
+            });
+            const templateMapName = this._promptValue(
+                'New process-map name',
+                String(template && template.displayName || 'Template') + ' Copy'
+            );
+            return templateMapName && this._runMapManagement(
+                this.options.onCreateFromTemplate,
+                { templateId: templateId, displayName: templateMapName },
+                { discardGuard: true, fit: true }
+            );
+        }
+        return false;
     };
 
     ProcessMapEditor.prototype._button = function (label, title, handler) {
@@ -3386,7 +3678,9 @@
         const focus = this.focusNodeId && mapNodes(this.processMap).find(function (node) {
             return node && node.nodeId === this.focusNodeId;
         }, this);
-        this.title.textContent = focus ? (focus.name || focus.nodeId) : 'Process Flow';
+        this.title.textContent = focus
+            ? (focus.name || focus.nodeId)
+            : String(this.processMap.displayName || 'Process Flow');
         const groups = mapGroups(this.processMap).length;
         this.subtitle.textContent = nodes.length + ' nodes / ' + edges.length
             + ' visible precedence connections / ' + groups + (groups === 1 ? ' group' : ' groups')
@@ -3541,6 +3835,8 @@
             this.saveButton.textContent = this.saving ? 'Saving...' : 'Save';
         }
         if (this.reloadButton) this.reloadButton.hidden = !this.conflict;
+        if (this.mapSelect) this.mapSelect.disabled = this.saving || this.managementBusy;
+        if (this.mapActionSelect) this.mapActionSelect.disabled = this.saving || this.managementBusy || this.conflict;
         if (this.typeSelect) {
             this.typeSelect.disabled = !commandStates.canRetype;
             this.typeSelect.value = commandStates.typeOptions.indexOf(commandStates.selectedType) >= 0
@@ -3565,6 +3861,9 @@
             this._closeCardToolbar('revision_conflict', false);
             this.status.textContent = 'A newer saved revision is available. Reload before editing further.';
             this.status.className = 'pm-editor-status conflict';
+        } else if (this.managementBusy) {
+            this.status.textContent = 'Updating process maps...';
+            this.status.className = 'pm-editor-status';
         } else if (this.saving) {
             this.status.textContent = 'Saving process map...';
             this.status.className = 'pm-editor-status';
@@ -3789,6 +4088,8 @@
         if (payload.map) this.processMap = cloneMap(payload.map);
         if (payload.revision) this.revision = payload.revision;
         if (payload.productStructure) this.setProductStructure(payload.productStructure);
+        if (payload.mapCatalog) this.setMapCatalog(payload.mapCatalog);
+        else this.setMapCatalog(this.mapCatalog);
         this.findings = Array.isArray(payload.findings) ? payload.findings : [];
         this.savedMap = cloneMap(this.processMap);
         this.savedFingerprint = mapFingerprint(this.savedMap);
@@ -4111,6 +4412,8 @@
             this.processMap = cloneMap(result.map);
             this.revision = result.revision || null;
             if (result.productStructure) this.setProductStructure(result.productStructure);
+            if (result.mapCatalog) this.setMapCatalog(result.mapCatalog);
+            else this.setMapCatalog(this.mapCatalog);
             this.findings = Array.isArray(result.findings) ? result.findings : [];
             this.savedMap = cloneMap(this.processMap);
             this.savedFingerprint = mapFingerprint(this.savedMap);
@@ -4893,6 +5196,7 @@
         mount: mount,
         moveNode: moveNode,
         moveGroup: moveGroup,
+        normalizeMapCatalog: normalizeMapCatalog,
         connectedStepPosition: connectedStepPosition,
         portAnchor: portAnchor,
         portDirection: portDirection,

@@ -5770,12 +5770,17 @@
             width: 100%;
         }
         .pm-workspace {
+            --pm-structure-width: 300px;
             position: relative;
             display: grid;
-            grid-template-columns: 300px minmax(0, 1fr);
+            grid-template-columns: var(--pm-structure-width) minmax(0, 1fr);
             min-width: 0;
             min-height: 0;
             overflow: hidden;
+            transition: grid-template-columns 160ms ease;
+        }
+        .pm-editor.structure-collapsed .pm-workspace {
+            --pm-structure-width: 28px;
         }
         .pm-structure-sidebar {
             --cad-ui-stroke: #31586b;
@@ -5800,6 +5805,54 @@
             overflow: hidden;
             border-right: 1px solid var(--border);
             background: var(--bg-panel);
+        }
+        .pm-structure-header,
+        .pm-structure-tree {
+            transition: opacity 120ms ease;
+        }
+        .pm-editor.structure-collapsed .pm-structure-header,
+        .pm-editor.structure-collapsed .pm-structure-tree {
+            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .pm-structure-toggle {
+            position: absolute;
+            z-index: 8;
+            top: 8px;
+            left: calc(var(--pm-structure-width) - 12px);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 30px;
+            padding: 0;
+            border: 1px solid var(--border-strong);
+            border-radius: 3px;
+            background: var(--bg-toolbar);
+            color: var(--text-secondary);
+            box-shadow: 0 1px 3px rgba(28, 46, 61, 0.16);
+            cursor: pointer;
+            transition: left 160ms ease, color 120ms ease, background 120ms ease;
+        }
+        .pm-structure-toggle:hover {
+            background: var(--bg-hover);
+            color: var(--accent);
+        }
+        .pm-structure-toggle:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+        .pm-structure-toggle-icon {
+            width: 15px;
+            height: 15px;
+            transition: transform 160ms ease;
+        }
+        .pm-editor.structure-collapsed .pm-structure-toggle {
+            left: 2px;
+        }
+        .pm-editor.structure-collapsed .pm-structure-toggle-icon {
+            transform: rotate(180deg);
         }
         .pm-structure-header {
             padding: 12px 12px 10px;
@@ -7004,9 +7057,17 @@
             .pm-toolbar-subtitle { display: none; }
             .pm-toolbar-button { padding: 0 6px; }
             .pm-toolbar-actions { gap: 1px; }
-            .pm-workspace { grid-template-columns: 240px minmax(0, 1fr); }
+            .pm-workspace { --pm-structure-width: 240px; }
+            .pm-editor.structure-collapsed .pm-workspace { --pm-structure-width: 28px; }
         }
         @media (prefers-reduced-motion: reduce) {
+            .pm-workspace,
+            .pm-structure-header,
+            .pm-structure-tree,
+            .pm-structure-toggle,
+            .pm-structure-toggle-icon {
+                transition: none !important;
+            }
             .pm-node.duplicate-pulse,
             .pm-card-toolbar { animation: none; }
         }
@@ -13831,6 +13892,7 @@
             processMapFlowAvailable: false,
             processMapFlowFocusNodeId: null,
             processMapFlowDirty: false,
+            processMapStructureCollapsed: false,
             uniqueItems: null,
             subassemblyVisuals: null,
             guidedBuildPlan: null,
@@ -26849,6 +26911,7 @@
                 editable: true,
                 selectedNodeId: trainingState.selectedProcessNodeId,
                 focusNodeId: trainingState.processMapFlowFocusNodeId,
+                structureCollapsed: trainingState.processMapStructureCollapsed,
                 createNodeCard: _trainCreateProcessFlowCard,
                 cardToolbar: PM_CARD_TOOLBAR,
                 onOpenPreview: _trainOpenProcessFlowCardPreview,
@@ -26865,6 +26928,9 @@
                 },
                 onDirtyChange: (dirty) => {
                     trainingState.processMapFlowDirty = !!dirty;
+                },
+                onStructureCollapsedChange: (collapsed) => {
+                    trainingState.processMapStructureCollapsed = !!collapsed;
                 },
                 onSave: _trainSaveProcessFlowMap,
                 onReload: _trainReloadProcessFlowMap,

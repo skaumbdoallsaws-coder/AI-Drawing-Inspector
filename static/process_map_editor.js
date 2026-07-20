@@ -1408,6 +1408,7 @@
         this.selectedEdgeId = null;
         this.selectedGroupId = null;
         this.transform = { x: 0, y: 0, scale: 1 };
+        this.structureCollapsed = !!this.options.structureCollapsed;
         this.interaction = null;
         this.history = new SnapshotHistory(this.options.historyLimit || 50);
         this.dirty = false;
@@ -1598,6 +1599,7 @@
         this.workspace.className = 'pm-workspace';
         this.structureSidebar = document.createElement('aside');
         this.structureSidebar.className = 'pm-structure-sidebar';
+        this.structureSidebar.id = 'pm-structure-sidebar-' + this.instanceId;
         this.structureSidebar.setAttribute('aria-label', 'Product structure source catalog');
         const structureHeader = document.createElement('div');
         structureHeader.className = 'pm-structure-header';
@@ -1624,6 +1626,27 @@
         this.structureTree.setAttribute('role', 'tree');
         this.structureSidebar.appendChild(structureHeader);
         this.structureSidebar.appendChild(this.structureTree);
+        this.structureToggle = document.createElement('button');
+        this.structureToggle.type = 'button';
+        this.structureToggle.className = 'pm-structure-toggle';
+        this.structureToggle.setAttribute('aria-controls', this.structureSidebar.id);
+        const structureToggleIcon = svgElement('svg', {
+            class: 'pm-structure-toggle-icon',
+            viewBox: '0 0 24 24',
+            'aria-hidden': 'true',
+        });
+        structureToggleIcon.appendChild(svgElement('path', {
+            d: 'M15 6l-6 6 6 6',
+            fill: 'none',
+            stroke: 'currentColor',
+            'stroke-width': '2',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+        }));
+        this.structureToggle.appendChild(structureToggleIcon);
+        this.structureToggle.addEventListener('click', function () {
+            this.setStructureCollapsed(!this.structureCollapsed);
+        }.bind(this));
 
         this.viewport = document.createElement('div');
         this.viewport.className = 'pm-viewport';
@@ -1650,6 +1673,7 @@
         this.viewport.appendChild(this.emptyState);
         this.root.appendChild(this.toolbar);
         this.workspace.appendChild(this.structureSidebar);
+        this.workspace.appendChild(this.structureToggle);
         this.workspace.appendChild(this.viewport);
         if (this.suggestionButton) {
             this.suggestionPanel = document.createElement('aside');
@@ -1678,8 +1702,37 @@
         this.viewport.addEventListener('dragleave', this._onDragLeave);
         this.viewport.addEventListener('drop', this._onDrop);
         this.root.addEventListener('keydown', this._onKeyDown);
+        this._syncStructureCollapsedState();
         this.renderStructureTree();
         this.updateEditControls();
+    };
+
+    ProcessMapEditor.prototype._syncStructureCollapsedState = function () {
+        if (!this.root || !this.structureSidebar || !this.structureToggle) return;
+        const collapsed = !!this.structureCollapsed;
+        this.root.classList.toggle('structure-collapsed', collapsed);
+        this.structureSidebar.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+        this.structureToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        const label = collapsed ? 'Expand assembly tree' : 'Collapse assembly tree';
+        this.structureToggle.setAttribute('aria-label', label);
+        this.structureToggle.title = label;
+    };
+
+    ProcessMapEditor.prototype.setStructureCollapsed = function (collapsed) {
+        const next = !!collapsed;
+        if (this.structureCollapsed === next) return false;
+        if (next && this.structureSidebar.contains(document.activeElement)) {
+            this.structureToggle.focus();
+        }
+        this.structureCollapsed = next;
+        this._syncStructureCollapsedState();
+        if (typeof this.options.onStructureCollapsedChange === 'function') {
+            this.options.onStructureCollapsedChange(next);
+        }
+        if (this.cardToolbarManager && this.cardToolbarManager.isOpen()) {
+            this.cardToolbarManager.reposition();
+        }
+        return true;
     };
 
     ProcessMapEditor.prototype._appendSelectOption = function (select, value, label, disabled) {

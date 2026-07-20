@@ -862,6 +862,43 @@ def run() -> int:
             "loading_and_expanding_tree_creates_no_canvas_nodes",
             page.locator(".pm-node").count() == 0,
         )
+        expanded_viewport = page.locator(".pm-viewport").bounding_box()
+        page.get_by_role("button", name="Collapse assembly tree").click()
+        page.wait_for_selector(".pm-editor.structure-collapsed")
+        page.wait_for_timeout(220)
+        collapsed_viewport = page.locator(".pm-viewport").bounding_box()
+        record(
+            "assembly_tree_collapses_to_a_stable_rail_without_changing_graph_state",
+            expanded_viewport is not None
+            and collapsed_viewport is not None
+            and collapsed_viewport["x"] < expanded_viewport["x"] - 200
+            and page.locator(".pm-structure-sidebar").get_attribute("aria-hidden") == "true"
+            and page.get_by_role("button", name="Expand assembly tree").get_attribute("aria-expanded") == "false"
+            and page.locator(".pm-node").count() == 0,
+            {"expanded": expanded_viewport, "collapsed": collapsed_viewport},
+        )
+        page.locator(".tab[data-tab='drawing']").click()
+        page.locator(".tab[data-tab='training']").click()
+        page.wait_for_selector("[data-process-flow-editor='true'].structure-collapsed")
+        record(
+            "assembly_tree_collapse_state_survives_training_tab_remount",
+            page.get_by_role("button", name="Expand assembly tree").count() == 1
+            and page.locator(".pm-node").count() == 0,
+        )
+        page.get_by_role("button", name="Expand assembly tree").click()
+        page.wait_for_function(
+            "!document.querySelector('[data-process-flow-editor=true]').classList.contains('structure-collapsed')"
+        )
+        page.wait_for_timeout(220)
+        restored_viewport = page.locator(".pm-viewport").bounding_box()
+        record(
+            "assembly_tree_expands_without_relaying_out_the_process_map",
+            expanded_viewport is not None
+            and restored_viewport is not None
+            and abs(restored_viewport["x"] - expanded_viewport["x"]) < 2
+            and page.locator(".pm-node").count() == 0,
+            {"expanded": expanded_viewport, "restored": restored_viewport},
+        )
         _expand(page, "module-a")
         record(
             "assemblies_and_subassemblies_expand_independently",

@@ -1586,12 +1586,6 @@
         this.backButton.classList.add('pm-back-button');
         if (isPlacementMap(this.processMap)) this.backButton.hidden = true;
         this.toolbarActions.appendChild(this.backButton);
-        this.structureButton = this._button(
-            'Structure',
-            'Return to product structure',
-            this.exit.bind(this)
-        );
-        this.toolbarActions.appendChild(this.structureButton);
         this.toolbar.appendChild(this.toolbarLeft);
         this.toolbar.appendChild(this.toolbarActions);
 
@@ -2055,7 +2049,6 @@
         this._decorateRibbonButton(this.fitButton, 'processFit', 'Fit', icons);
         this._decorateRibbonButton(this.previewButton, '3dmodel', '3D', icons);
         this._decorateRibbonButton(this.backButton, 'processBack', 'Back', icons);
-        this._decorateRibbonButton(this.structureButton, 'processStructure', 'Structure', icons);
         const zoomStack = document.createElement('div');
         zoomStack.className = 'pm-ribbon-zoom-stack';
         this.zoomOutButton.classList.add('pm-ribbon-compact-command');
@@ -2066,7 +2059,6 @@
         visualization.appendChild(this.fitButton);
         if (this.previewButton) visualization.appendChild(this.previewButton);
         visualization.appendChild(this.backButton);
-        visualization.appendChild(this.structureButton);
         host.appendChild(this._ribbonSeparator());
         host.appendChild(visualization);
 

@@ -559,23 +559,19 @@ def _wait_for_process_flow_entry(page) -> None:
     page.locator("#profileCount").inner_text(timeout=120_000)
     page.locator(".tab[data-tab='training']").click()
     page.wait_for_selector(".tab.active[data-tab='training']", timeout=10_000)
-    page.wait_for_selector("[data-training-open-process-flow='true']", timeout=30_000)
+    page.wait_for_selector("#trainingTypeRibbonSelect", timeout=30_000)
+    page.locator("#trainingTypeRibbonSelect").select_option("assembly")
+    page.wait_for_selector("[data-process-flow-editor='true']", timeout=30_000)
 
 
 def _open_process_flow(page) -> None:
     _wait_for_process_flow_entry(page)
-    page.click("[data-training-open-process-flow='true']")
-    page.wait_for_selector("[data-process-flow-editor='true']", timeout=15_000)
 
 
 def _ensure_process_flow_editor(page) -> None:
-    page.wait_for_function(
-        "document.querySelector('[data-process-flow-editor=true]')"
-        " || document.querySelector('[data-training-open-process-flow=true]')",
-        timeout=15_000,
-    )
     if page.locator("[data-process-flow-editor='true']").count() == 0:
-        page.click("[data-training-open-process-flow='true']")
+        page.wait_for_selector("#trainingTypeRibbonSelect", timeout=15_000)
+        page.locator("#trainingTypeRibbonSelect").select_option("assembly")
     page.wait_for_selector("[data-process-flow-editor='true']", timeout=15_000)
 
 
@@ -831,10 +827,14 @@ def run() -> int:
         )
         fallback_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
         fallback_page.locator(".tab[data-tab='training']").click()
-        fallback_page.wait_for_selector("[data-training-product-structure-diagram='racing-bike']")
+        fallback_page.wait_for_selector("#trainingTypeRibbonSelect")
+        fallback_page.locator("#trainingTypeRibbonSelect").select_option("assembly")
+        fallback_page.wait_for_selector("[data-training-process-map-state='unavailable']")
         record(
-            "flag_off_preserves_legacy_training_structure",
-            fallback_page.locator("[data-training-open-process-flow='true']").count() == 0,
+            "unavailable_flow_does_not_restore_legacy_structure",
+            fallback_page.locator("[data-training-product-structure-diagram]").count() == 0
+            and fallback_page.locator("[data-training-open-process-flow]").count() == 0
+            and fallback_page.locator("[data-training-process-map-state='unavailable']").count() == 1,
         )
         fallback_context.close()
 
@@ -2446,16 +2446,15 @@ def run() -> int:
             page.locator("#trainingProcessMapRibbonHost").count() == 0
             and page.locator("[data-process-map-command]").count() == 0
             and page.locator("[data-training-ribbon-command='start']").count() == 1
-            and page.locator("[data-training-ribbon-command='explode']").count() == 0,
+            and page.locator("[data-training-ribbon-command='explode']").count() == 0
+            and page.locator("[data-training-product-structure-diagram]").count() == 0,
         )
         page.locator("#trainingTypeRibbonSelect").select_option("assembly")
-        page.wait_for_selector("[data-training-ribbon-command='explode']")
-        _ensure_process_flow_editor(page)
         page.wait_for_selector("#trainingProcessMapRibbonHost [data-process-map-command='processSave']")
         expected_process_commands = {
             "processUndo", "processRedo", "processDelete", "processStep",
             "processGroup", "processSuggestions", "processAnalyze", "processZoomOut",
-            "processZoomIn", "processFit", "3dmodel", "processStructure", "processSave",
+            "processZoomIn", "processFit", "3dmodel", "processSave",
         }
         actual_process_commands = set(
             page.locator("#trainingProcessMapRibbonHost [data-process-map-command]")
@@ -2465,6 +2464,9 @@ def run() -> int:
             "process_map_ribbon_replaces_generic_training_commands",
             page.locator("[data-training-ribbon-command]").count() == 0
             and expected_process_commands.issubset(actual_process_commands)
+            and "processStructure" not in actual_process_commands
+            and page.locator("#trainingTypeRibbonSelect option:checked").inner_text() == "Process Map"
+            and page.locator("[data-training-product-structure-diagram]").count() == 0
             and page.locator("[data-process-map-command='processBack']:visible").count() == 0
             and page.locator("[data-process-map-command='processReload']:visible").count() == 0,
             sorted(actual_process_commands),

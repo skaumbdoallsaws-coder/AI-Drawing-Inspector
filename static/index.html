@@ -13645,7 +13645,7 @@
         // preserved. See _renderTrainingTab and the 'training' branch
         // in playNarrationSequence for the wiring points.
         const TRAINING_TYPES = [
-            { value: 'assembly',       label: 'Assembly Training' },
+            { value: 'assembly',       label: 'Process Map' },
             { value: 'plant_process',  label: 'Plant / Process Explanation' },
             { value: 'facility_layout',label: 'Facility Layout' },
             { value: 'service',        label: 'Service Training' },
@@ -13660,7 +13660,7 @@
             { value: 'maintenance_lead',       label: 'Maintenance Lead' },
         ];
         const TRAINING_PROMPT_CHIPS = {
-            assembly:        ['First-time install', 'Subassembly buildup', 'Final torque sequence'],
+            assembly:        ['Assembly sequence', 'Inspection flow', 'Production handoff'],
             plant_process:   ['Process overview', 'Operator walkdown', 'Flow path explanation'],
             facility_layout: ['Storage capacity', 'Aisle review', 'Rack row lookup'],
             service:         ['Routine service interval', 'Replace wear part', 'Clean and reset'],
@@ -13840,7 +13840,7 @@
             selectedProcessNodeId: null,
             expandedModuleNodeIds: [],
             expandedSubassemblyNodeIds: [],
-            viewportMode: 'structure',
+            viewportMode: 'assembly3d',
             assemblyContextLoadPromise: null,
             pendingStepVisualState: null,
             pendingStepVisualTimer: null,
@@ -19324,7 +19324,6 @@
             processZoomIn: '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="8" fill="#e9f3f8" stroke="#31586b" stroke-width="1.7"/><path d="M10 14h8M14 10v8M20 20l7 7" stroke="#4b91ba" stroke-width="2" stroke-linecap="round"/></svg>',
             processFit: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 12V5h7M20 5h7v7M27 20v7h-7M12 27H5v-7" fill="none" stroke="#4b91ba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="10" y="10" width="12" height="12" rx="2" fill="#d9edf8" stroke="#31586b" stroke-width="1.4"/></svg>',
             processBack: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="m14 7-9 9 9 9" fill="none" stroke="#4b91ba" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 16h20" stroke="#31586b" stroke-width="2" stroke-linecap="round"/></svg>',
-            processStructure: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="12" y="3" width="8" height="6" rx="1" fill="#f0c35c" stroke="#765016"/><rect x="3" y="23" width="8" height="6" rx="1" fill="#8bc5e7" stroke="#31586b"/><rect x="21" y="23" width="8" height="6" rx="1" fill="#8bc5e7" stroke="#31586b"/><path d="M16 9v7M7 23v-7h18v7" fill="none" stroke="#4b91ba" stroke-width="1.7" stroke-linejoin="round"/></svg>',
             processReload: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M25 11a10 10 0 1 0 1 9" fill="none" stroke="#4b91ba" stroke-width="2" stroke-linecap="round"/><path d="M20 6h6v6" fill="none" stroke="#31586b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
             trainingStart:     '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-start.png"     alt="" draggable="false">',
             trainingProcedure: '<img class="ribbon-training-icon" src="/static/assets/training-ribbon-icons/training-procedure.png" alt="" draggable="false">',
@@ -19592,36 +19591,36 @@
                 { label: 'Session', commands: ['start', 'procedure'] },
                 { label: 'Playback', commands: ['narrate', 'pause'] },
                 { label: 'Steps', commands: ['previous', 'next'] },
-                { label: 'Viewport', commands: ['board', 'highlight', 'isolate', 'explode', 'reset'] },
+                { label: 'Viewport', commands: ['highlight', 'isolate', 'explode', 'reset'] },
             ],
             plant_process: [
                 { label: 'Session', commands: ['start', 'procedure'] },
                 { label: 'Playback', commands: ['narrate', 'pause'] },
                 { label: 'Steps', commands: ['previous', 'next'] },
-                { label: 'Process View', commands: ['board', 'highlight', 'isolate', 'reset'] },
+                { label: 'Process View', commands: ['highlight', 'isolate', 'reset'] },
             ],
             facility_layout: [
-                { label: 'Facility View', commands: ['board', 'highlight', 'isolate', 'reset'] },
+                { label: 'Facility View', commands: ['highlight', 'isolate', 'reset'] },
             ],
             service: [
                 { label: 'Procedure', commands: ['start', 'procedure'] },
                 { label: 'Playback', commands: ['narrate', 'pause', 'previous', 'next'] },
-                { label: 'Viewport', commands: ['board', 'highlight', 'isolate', 'explode', 'reset'] },
+                { label: 'Viewport', commands: ['highlight', 'isolate', 'explode', 'reset'] },
             ],
             maintenance: [
                 { label: 'Procedure', commands: ['start', 'procedure'] },
                 { label: 'Playback', commands: ['narrate', 'pause', 'previous', 'next'] },
-                { label: 'Viewport', commands: ['board', 'highlight', 'isolate', 'explode', 'reset'] },
+                { label: 'Viewport', commands: ['highlight', 'isolate', 'explode', 'reset'] },
             ],
             troubleshooting: [
                 { label: 'Diagnostic', commands: ['start', 'procedure'] },
                 { label: 'Playback', commands: ['narrate', 'pause', 'previous', 'next'] },
-                { label: 'Viewport', commands: ['board', 'highlight', 'isolate', 'reset'] },
+                { label: 'Viewport', commands: ['highlight', 'isolate', 'reset'] },
             ],
             operator: [
                 { label: 'Procedure', commands: ['start', 'procedure'] },
                 { label: 'Playback', commands: ['narrate', 'pause', 'previous', 'next'] },
-                { label: 'Viewport', commands: ['board', 'highlight', 'isolate', 'explode', 'reset'] },
+                { label: 'Viewport', commands: ['highlight', 'isolate', 'explode', 'reset'] },
             ],
         });
 
@@ -19659,7 +19658,6 @@
                 pause: ['trainingPause', 'Pause', 'Pause or stop playback', () => { if (typeof stopNarration === 'function') stopNarration(); }],
                 previous: ['trainingPrevious', 'Previous', 'Previous step', () => window._trainingStepPrev?.()],
                 next: ['trainingNext', 'Next', 'Next step', () => window._trainingStepNext?.()],
-                board: ['trainingProcedure', 'Board', 'Show the product structure board', () => window._trainingShowProcessBoard?.()],
                 highlight: ['trainingHighlight', 'Highlight', 'Re-apply current step highlights', () => window._trainingApplyStepView?.()],
                 isolate: ['trainingIsolate', 'Isolate', 'Isolate the current selection', () => window._trainingIsolateCurrent?.()],
                 explode: ['trainingExplode', 'Explode', 'Apply current step explode level', () => window._trainingExplodeCurrent?.()],
@@ -19718,7 +19716,10 @@
             const pending = _ribbonGroup('Process Map');
             const label = document.createElement('span');
             label.className = 'ribbon-chip';
-            label.textContent = 'Opening process map...';
+            label.textContent = (!trainingState.processMapLoading
+                && !trainingState.processMapFlowAvailable)
+                ? 'Process map unavailable'
+                : 'Opening process map...';
             pending.appendChild(label);
             host.appendChild(pending);
         }
@@ -23526,8 +23527,8 @@
                 return false;
             }
             if (leavingProcessFlow) {
-                trainingState.viewportMode = 'structure';
                 trainingState.processMapFlowFocusNodeId = null;
+                _trainDisposeProcessFlowEditor();
             }
             const wasSpecial = prevType === 'plant_process' || prevType === 'facility_layout';
             const isSpecial = trainingState.type === 'plant_process' || trainingState.type === 'facility_layout';
@@ -23559,15 +23560,15 @@
                 try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
                 try { _trainEnsureFacilityLayoutLoaded(); } catch (_) {}
                 try { _trainRenderFacilityLayoutViewer(); } catch (_) {}
-            } else if (prevType === 'plant_process') {
-                trainingState.viewportMode = 'structure';
+            } else if (trainingState.type === 'assembly') {
+                trainingState.viewportMode = 'process_flow';
                 trainingState.plantProcessActiveZone = 'overview';
-                try { _trainRenderProcessDiagram(); } catch (_) {}
-            } else if (prevType === 'facility_layout') {
-                trainingState.viewportMode = 'structure';
-                try { _trainRenderProcessDiagram(); } catch (_) {}
-            } else if (leavingProcessFlow) {
-                try { _trainRenderProcessDiagram(); } catch (_) {}
+                try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
+                try { _trainRenderProcessMap(); } catch (_) {}
+            } else {
+                trainingState.viewportMode = 'assembly3d';
+                trainingState.plantProcessActiveZone = 'overview';
+                try { _trainMountViewer(); } catch (_) {}
             }
             return true;
         }
@@ -23828,7 +23829,7 @@
             trainingState.processMapError = null;
             _trainRenderProcessStructurePanel();
             if (_trainIsPlantProcessMode()) _trainRenderPlantProcessDiagram();
-            else _trainRenderProcessDiagram();
+            else if (trainingState.type === 'assembly') _trainRenderProcessMap();
             trainingState.processMapLoadPromise = (async () => {
                 let data = null;
                 trainingState.processMapFlowAvailable = false;
@@ -23900,7 +23901,7 @@
                 trainingState.processMapLoadPromise = null;
                 _trainRenderProcessStructurePanel();
                 if (_trainIsPlantProcessMode()) _trainRenderPlantProcessDiagram();
-                else _trainRenderProcessDiagram();
+                else if (trainingState.type === 'assembly') _trainRenderProcessMap();
                 const partExplorerPanel = document.querySelector('.part-explorer-panel');
                 const partExplorerContainer = partExplorerPanel && partExplorerPanel.parentElement;
                 if (state.activeTab === 'assembly' && partExplorerContainer) {
@@ -24792,7 +24793,7 @@
             const body = document.getElementById('trainSetupBody');
             if (body) _trainRenderSetupBody(body);
             _trainRenderProcessStructurePanel();
-            _trainRenderProcessDiagram();
+            _trainRenderProcessMap();
             _trainSyncAssemblyPreviewToSelection();
             renderRibbon();
         }
@@ -24839,7 +24840,7 @@
             const body = document.getElementById('trainSetupBody');
             if (body) _trainRenderSetupBody(body);
             _trainRenderProcessStructurePanel();
-            if (opts.rerenderDiagram !== false) _trainRenderProcessDiagram();
+            if (opts.rerenderDiagram !== false) _trainRenderProcessMap();
             _trainSyncAssemblyPreviewToSelection();
             renderRibbon();
         }
@@ -25488,7 +25489,7 @@
             const back = document.createElement('button');
             back.type = 'button';
             back.className = 'train-unique-preview-back';
-            back.textContent = 'Back to board';
+            back.textContent = 'Back to Process Map';
             back.addEventListener('click', () => _trainCloseAssemblyPreview());
 
             copy.appendChild(topline);
@@ -25590,7 +25591,7 @@
             const back = document.createElement('button');
             back.type = 'button';
             back.className = 'train-unique-preview-back';
-            back.textContent = 'Back to board';
+            back.textContent = 'Back to Process Map';
             back.addEventListener('click', () => _trainCloseUniqueItemPreview());
 
             copy.appendChild(topline);
@@ -25740,7 +25741,7 @@
                         _trainRenderProcessFlow();
                     }
                 } else {
-                    _trainRenderProcessDiagram();
+                    _trainRenderProcessMap();
                 }
             };
 
@@ -25787,7 +25788,7 @@
                         _trainRenderProcessFlow();
                     }
                 } else {
-                    _trainRenderProcessDiagram();
+                    _trainRenderProcessMap();
                 }
             };
 
@@ -25851,7 +25852,7 @@
                     if (isModule) _trainSetModuleExpanded(node.nodeId, !moduleExpanded);
                     else _trainSetSubassemblyExpanded(node.nodeId, !subassemblyExpanded);
                     _trainRenderProcessStructurePanel();
-                    _trainRenderProcessDiagram();
+                    _trainRenderProcessMap();
                 });
                 row.appendChild(toggle);
             } else if (node.level > 0) {
@@ -26787,6 +26788,7 @@
 
         function _trainOpenProcessFlow() {
             if (!trainingState.processMapFlowAvailable) return false;
+            trainingState.type = 'assembly';
             trainingState.viewportMode = 'process_flow';
             _trainDisposeLiveAssemblyViewer();
             renderRibbon();
@@ -26875,12 +26877,6 @@
                 onCreateFromTemplate: _trainCreateProcessFlowFromTemplate,
                 onAnalyze: _trainAnalyzeProcessFlow,
                 onLoadSuggestions: _trainLoadProcessFlowSuggestions,
-                onExit: () => {
-                    trainingState.viewportMode = 'structure';
-                    trainingState.processMapFlowFocusNodeId = null;
-                    renderRibbon();
-                    _trainRenderProcessDiagram();
-                },
             });
             renderRibbon();
             return true;
@@ -26890,11 +26886,12 @@
             open: _trainOpenProcessFlow,
             close: () => {
                 const editor = _trainCurrentProcessFlowEditor();
-                if (editor && typeof editor.exit === 'function') return editor.exit();
-                trainingState.viewportMode = 'structure';
+                if (editor && !editor.confirmDiscard()) return false;
+                _trainDisposeProcessFlowEditor();
                 trainingState.processMapFlowFocusNodeId = null;
+                trainingState.viewportMode = 'assembly3d';
                 renderRibbon();
-                return _trainRenderProcessDiagram();
+                return _trainMountViewer();
             },
             get editor() {
                 const host = document.getElementById('trainViewportHost');
@@ -26903,182 +26900,42 @@
             get available() { return !!trainingState.processMapFlowAvailable; },
         };
 
-        function _trainRenderProcessDiagram() {
+        function _trainRenderProcessMap() {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
-            if (trainingState.viewportMode === 'assembly3d') return false;
-            if (trainingState.viewportMode === 'process_flow') return _trainRenderProcessFlow();
             if (_trainIsFacilityLayoutMode()) return _trainRenderFacilityLayoutViewer();
-            if (!trainingState.processMap && !trainingState.processMapLoading && !trainingState.processMapError) return false;
+            if (_trainIsPlantProcessMode()) {
+                return _trainRenderPlantProcessDiagram(trainingState.plantProcessActiveZone || 'overview');
+            }
+            if (trainingState.type !== 'assembly'
+                && trainingState.viewportMode !== 'process_flow') {
+                return false;
+            }
+
+            trainingState.viewportMode = 'process_flow';
+            if (trainingState.processMapFlowAvailable && trainingState.processFlowMap) {
+                const mountedEditor = _trainCurrentProcessFlowEditor();
+                if (mountedEditor && !mountedEditor.destroyed) {
+                    renderRibbon();
+                    return true;
+                }
+                return _trainRenderProcessFlow();
+            }
 
             _trainDisposeProcessFlowEditor(host);
             host.innerHTML = '';
-            const diagram = document.createElement('div');
-            diagram.className = 'train-process-diagram';
-            diagram.id = 'trainProcessDiagram';
-            diagram.setAttribute('data-training-product-structure-diagram', 'racing-bike');
-            host.appendChild(diagram);
-
-            const board = document.createElement('div');
-            board.className = 'train-process-board';
-            diagram.appendChild(board);
-
-            const head = document.createElement('div');
-            head.className = 'train-process-board-head';
-            const headCopy = document.createElement('div');
-            const title = document.createElement('div');
-            title.className = 'train-process-board-title';
-            title.textContent = 'Racing Bike Product Structure';
-            const sub = document.createElement('div');
-            sub.className = 'train-process-board-subtitle';
-            sub.textContent = 'Level 0 = complete bike, Level 1 = build modules, Level 2 = subassemblies, Level 3 = components. Open a module first, then unfold a subassembly to see its components.';
-            headCopy.appendChild(title);
-            headCopy.appendChild(sub);
-            const stamp = document.createElement('div');
-            stamp.className = 'train-process-board-stamp';
-            stamp.textContent = 'Working Draft';
-            head.appendChild(headCopy);
-            const headActions = document.createElement('div');
-            headActions.className = 'pm-structure-actions';
-            if (trainingState.processMapFlowAvailable) {
-                const flowButton = document.createElement('button');
-                flowButton.type = 'button';
-                flowButton.className = 'train-secondary-btn';
-                flowButton.setAttribute('data-training-open-process-flow', 'true');
-                flowButton.textContent = 'Flow view';
-                flowButton.title = 'Open the read-only process flow canvas';
-                flowButton.addEventListener('click', _trainOpenProcessFlow);
-                headActions.appendChild(flowButton);
-            }
-            headActions.appendChild(stamp);
-            head.appendChild(headActions);
-            board.appendChild(head);
-
-            if (trainingState.processMapLoading) {
-                const empty = document.createElement('div');
-                empty.className = 'train-viewport-empty';
-                empty.textContent = 'Loading product structure diagram...';
-                board.appendChild(empty);
-                return true;
-            }
-            if (trainingState.processMapError) {
-                const empty = document.createElement('div');
-                empty.className = 'train-viewport-empty';
-                empty.textContent = `Product structure unavailable: ${trainingState.processMapError}`;
-                board.appendChild(empty);
-                return true;
-            }
-
-            const root = _trainDiagramRootNode();
-            const modules = _trainProcessNodes(1);
-            const selectedNode = _trainSelectedProcessNode();
-            const selectedPathIds = _trainSelectedProcessPathIds();
-            const selectedModule = _trainSelectedModuleNode();
-            const selectedSubassembly = _trainSelectedSubassemblyNode();
-
-            if (root) {
-                const rootRow = document.createElement('div');
-                rootRow.className = 'train-diagram-root-row';
-                rootRow.appendChild(_trainDiagramCard(root, {
-                    root: true,
-                    selected: selectedPathIds.has(root.nodeId),
-                }));
-                board.appendChild(rootRow);
-            }
-
-            const moduleLanes = document.createElement('div');
-            moduleLanes.className = 'train-diagram-module-lanes';
-            moduleLanes.classList.add(`module-count-${modules.length}`);
-            moduleLanes.setAttribute('data-training-process-tree', 'collapsed');
-            modules.forEach(moduleNode => {
-                const moduleExpanded = _trainIsModuleExpanded(moduleNode.nodeId)
-                    || (selectedNode && selectedNode.level >= 2 && selectedPathIds.has(moduleNode.nodeId));
-                const branch = document.createElement('section');
-                const isolateBySubassembly = !!selectedSubassembly;
-                const moduleDimmed = isolateBySubassembly && selectedModule && moduleNode.nodeId !== selectedModule.nodeId;
-                branch.className = 'train-diagram-module-branch' + (moduleDimmed ? ' dimmed' : '');
-                branch.setAttribute('data-training-module-branch', moduleNode.module || moduleNode.nodeId);
-                branch.setAttribute('data-training-module-expanded', moduleExpanded ? 'true' : 'false');
-                const subassemblies = _trainChildProcessNodes(moduleNode.nodeId);
-                branch.appendChild(_trainDiagramCard(moduleNode, {
-                    className: 'train-diagram-module-card',
-                    selected: selectedPathIds.has(moduleNode.nodeId),
-                    thumbCount: 3,
-                    countLabel: `${subassemblies.length} subassembl${subassemblies.length === 1 ? 'y' : 'ies'}`,
-                    togglePill: moduleExpanded ? 'Hide subassemblies' : 'Show subassemblies',
-                    toggleState: moduleExpanded ? 'expanded' : 'collapsed',
-                    onClick: () => {
-                        _trainSetModuleExpanded(moduleNode.nodeId, !moduleExpanded);
-                        _trainSelectProcessNode(moduleNode.nodeId);
-                    },
-                    onToggle: () => {
-                        _trainSetModuleExpanded(moduleNode.nodeId, !moduleExpanded);
-                        _trainRenderProcessStructurePanel();
-                        _trainRenderProcessDiagram();
-                    },
-                }));
-
-                if (moduleExpanded && subassemblies.length) {
-                    const subStack = document.createElement('div');
-                    subStack.className = 'train-diagram-subassembly-stack';
-                    subStack.setAttribute('data-training-subassembly-stack', moduleNode.module || moduleNode.nodeId);
-                    subassemblies.forEach(subassemblyNode => {
-                        const components = _trainChildProcessNodes(subassemblyNode.nodeId);
-                        const subassemblyExpanded = _trainIsSubassemblyExpanded(subassemblyNode.nodeId)
-                            || (selectedNode && selectedNode.level >= 3 && selectedPathIds.has(subassemblyNode.nodeId));
-                        const subassemblyDimmed = !!selectedSubassembly
-                            && selectedModule
-                            && selectedModule.nodeId === moduleNode.nodeId
-                            && subassemblyNode.nodeId !== selectedSubassembly.nodeId;
-                        const group = document.createElement('article');
-                        group.className = 'train-diagram-subassembly-group' + (subassemblyDimmed ? ' dimmed' : '');
-                        group.setAttribute('data-training-subassembly-expanded', subassemblyExpanded ? 'true' : 'false');
-                        group.setAttribute(
-                            'data-training-subassembly-group',
-                            subassemblyNode.subassembly || subassemblyNode.nodeId
-                        );
-                        group.appendChild(_trainDiagramCard(subassemblyNode, {
-                            className: 'train-diagram-subassembly-card',
-                            selected: selectedPathIds.has(subassemblyNode.nodeId),
-                            thumbCount: 2,
-                            compactThumbs: true,
-                            countLabel: `${components.length} component${components.length === 1 ? '' : 's'}`,
-                            togglePill: subassemblyExpanded ? 'Hide components' : 'Show components',
-                            toggleState: subassemblyExpanded ? 'expanded' : 'collapsed',
-                            onClick: () => {
-                                _trainSetSubassemblyExpanded(subassemblyNode.nodeId, !subassemblyExpanded);
-                                _trainSelectProcessNode(subassemblyNode.nodeId);
-                            },
-                            onToggle: () => {
-                                _trainSetSubassemblyExpanded(subassemblyNode.nodeId, !subassemblyExpanded);
-                                _trainRenderProcessStructurePanel();
-                                _trainRenderProcessDiagram();
-                            },
-                        }));
-
-                        if (components.length) {
-                            if (subassemblyExpanded) {
-                                const componentList = document.createElement('div');
-                                componentList.className = 'train-diagram-component-list';
-                                components.forEach(componentNode => {
-                                    componentList.appendChild(_trainDiagramComponentCard(componentNode, selectedPathIds));
-                                });
-                                group.appendChild(componentList);
-                            }
-                        }
-                        subStack.appendChild(group);
-                    });
-                    branch.appendChild(subStack);
-                }
-
-                moduleLanes.appendChild(branch);
-            });
-            board.appendChild(moduleLanes);
-
-            _trainRenderUniqueItemsSection(board);
-
+            const empty = document.createElement('div');
+            empty.className = 'train-viewport-empty';
+            empty.setAttribute('data-training-process-map-state',
+                trainingState.processMapLoading ? 'loading' : 'unavailable');
+            empty.textContent = trainingState.processMapLoading
+                ? 'Loading process map...'
+                : 'Process Map is unavailable for this product.';
+            host.appendChild(empty);
+            renderRibbon();
             return true;
         }
+
 
         function _trainRenderPlantProcessDiagram(activeZoneId) {
             const host = document.getElementById('trainViewportHost');
@@ -28592,32 +28449,16 @@
             trainingState.activeViewerNodeId = null;
         }
 
-        function _trainShowProcessBoard() {
-            if (trainingState.viewportMode === 'process_flow'
-                && !_trainConfirmProcessFlowDiscard()) {
-                return false;
-            }
-            const plantMode = _trainIsPlantProcessMode();
-            const facilityMode = _trainIsFacilityLayoutMode();
-            trainingState.viewportMode = plantMode ? 'plant_process' : (facilityMode ? 'facility_layout' : 'structure');
-            trainingState.pendingStepVisualState = null;
-            if (trainingState.pendingStepVisualTimer) {
-                clearTimeout(trainingState.pendingStepVisualTimer);
-                trainingState.pendingStepVisualTimer = null;
-            }
-            if (trainingState.pendingCameraFrameTimer) {
-                clearTimeout(trainingState.pendingCameraFrameTimer);
-                trainingState.pendingCameraFrameTimer = null;
-            }
-            _trainDisposeLiveAssemblyViewer();
-            const infoCard = document.getElementById('trainViewportInfoCard');
-            if (infoCard) infoCard.style.display = 'none';
-            if (plantMode) _trainRenderPlantProcessDiagram();
-            else if (facilityMode) _trainRenderFacilityLayoutViewer();
-            else _trainRenderProcessDiagram();
+        function _trainShowProcessMap() {
+            const previousType = trainingState.type;
+            trainingState.type = 'assembly';
+            const applied = _trainApplyTrainingTypeDefaults(previousType);
+            if (applied === false) return false;
+            if (window._refreshTrainingSetupPanel) window._refreshTrainingSetupPanel();
             renderRibbon();
+            return true;
         }
-        window._trainingShowProcessBoard = () => _trainShowProcessBoard();
+        window._trainingShowProcessMap = () => _trainShowProcessMap();
 
         function _trainEnsureTrainingAssemblyContext() {
             if (assemblyContextAvailable && assemblyContext) return Promise.resolve(assemblyContext);
@@ -28964,11 +28805,10 @@
                 return false;
             }
 
-            if (trainingState.viewportMode !== 'assembly3d') {
-                if (_trainRenderProcessDiagram()) {
-                    return false;
-                }
+            if (trainingState.viewportMode === 'process_flow' || trainingState.type === 'assembly') {
+                if (_trainRenderProcessMap()) return false;
             }
+            trainingState.viewportMode = 'assembly3d';
 
             if (!assemblyContextAvailable || !assemblyContext) {
                 host.innerHTML = '';

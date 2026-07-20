@@ -1,9 +1,4 @@
-"""Static guards for the Training-tab product-structure MVP.
-
-The racing-bike process map is a working draft, but the frontend should
-keep loading it and rendering the Product Structure selector while the
-data is being curated.
-"""
+"""Static guards for Training data, previews, and the primary Process Map flow."""
 
 from __future__ import annotations
 
@@ -33,20 +28,13 @@ def test_training_tab_process_map_markers_present():
         "train-process-tree",
         "train-process-children",
         "train-process-node-toggle",
-        "trainProcessDiagram",
-        "data-training-product-structure-diagram",
-        "data-training-process-tree",
-        "data-training-module-branch",
-        "data-training-module-expanded",
-        "data-training-subassembly-group",
         "data-training-component-card",
-        "Racing Bike Product Structure",
         "Unique Items Needed",
         "trainUniqueItemsSection",
         "data-training-unique-items",
         "_trainEnsureProcessMapLoaded",
         "_trainBuildProcessMapProcedure",
-        "_trainRenderProcessDiagram",
+        "_trainRenderProcessMap",
         "_trainRenderUniqueItemsSection",
         "_trainSelectUniqueItem",
         "_trainFindProcessNodeForPartId",
@@ -77,7 +65,7 @@ def test_training_tab_process_map_markers_present():
         "_trainCreateUniqueItemPreviewControls",
         "trainUniquePreviewBackdrop",
         "trainAssemblyPreviewBackdrop",
-        "Back to board",
+        "Back to Process Map",
         "Interactive 3D preview",
         "Interactive 3D assembly preview",
         "Drag to orbit",
@@ -95,10 +83,7 @@ def test_training_tab_process_map_markers_present():
         "train-diagram-subassembly-card",
         "train-diagram-subassembly-stack",
         "train-diagram-component-list",
-        "data-training-subassembly-expanded",
         "train-diagram-card-toggle",
-        "Show components",
-        "Hide components",
         "train-unique-preview-path",
         "train-unique-preview-path-chip",
         "train-connector-flow-vertical",
@@ -125,17 +110,17 @@ def test_training_tab_process_map_markers_present():
         "_trainBuildGuidedPlanProcedure",
         "_trainEnsureTrainingAssemblyContext",
         "_trainEnsureLiveAssemblyViewer",
-        "_trainShowProcessBoard",
+        "_trainShowProcessMap",
         "_trainFrameStepInViewport",
         "_assyCameraDistanceForBounds",
-        "_trainingShowProcessBoard",
+        "_trainingShowProcessMap",
         "_trainingEnsureLiveAssemblyViewer",
         "_trainDimAllAssemblyParts",
         "_computeGuidedAssemblyTargetPositions",
         "_animateGuidedAssemblyState",
         "_trainingApplyNarrationSegmentView",
         "Loading racing-bike assembly context",
-        "Show the product structure board",
+        "Process Map is unavailable for this product.",
         "data-training-subassembly-visual",
         "Visual pending",
         "_buildProductStructureConfigsFromProcessMap",
@@ -175,6 +160,14 @@ def test_training_tab_process_map_markers_present():
         "Reset",
     ]:
         assert marker in html
+
+
+def test_process_map_is_the_primary_surface_for_the_legacy_assembly_type():
+    html = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    assert "{ value: 'assembly',       label: 'Process Map' }" in html
+    assert "_trainRenderProcessDiagram" not in html
+    assert "_trainShowProcessBoard" not in html
+    assert "_trainingShowProcessBoard" not in html
 
 
 def test_racing_bike_process_map_working_draft_shape():

@@ -2524,6 +2524,15 @@ def test_direct_semantic_highlight_request_bypasses_model(
     depend on the LLM emitting a marker. The server can resolve the
     region deterministically and return a highlight_features tool call
     with the real cad_feature_id."""
+    monkeypatch.setenv("INSPECTORPRO_SKILLS_ENABLED", "1")
+    monkeypatch.setenv("INSPECTORPRO_SKILLS_SHADOW", "0")
+    route_calls = []
+
+    def _unexpected_route(*args, **kwargs):
+        route_calls.append((args, kwargs))
+        return None
+
+    monkeypatch.setattr(server, "_run_skill_route_production", _unexpected_route)
     msgs = _stub_anthropic_response(monkeypatch, "SHOULD NOT BE CALLED")
     client = TestClient(server.app)
     r = client.post("/api/agent/chat", json={
@@ -2533,6 +2542,7 @@ def test_direct_semantic_highlight_request_bypasses_model(
     })
     assert r.status_code == 200, r.text
     body = r.json()
+    assert route_calls == [], "trusted semantic fast path should bypass skill routing"
     assert msgs.last_kwargs is None, "direct semantic highlight should not call Anthropic"
     assert body["tool_source"] == "semantic_region_direct"
     assert body["response"] == "Highlighted Top wing."

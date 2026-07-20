@@ -19105,6 +19105,86 @@ def classify_viewport_intent(message: str, ctx: Optional[Dict], api_key: Optiona
 _VIEWPORT_INTENT_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="viewport-intent")
 
 
+async def _deterministic_semantic_chat_result(
+    request: AgentChatRequest,
+    ctx: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Resolve trusted semantic-region requests before any model routing."""
+    if request.agent_type != "deviation-analyst":
+        return None
+
+    edit_compare_result = _semantic_edit_session_compare_chat_result(
+        ctx, request.message, request.agent_type,
+    )
+    if edit_compare_result:
+        return edit_compare_result
+
+    explicit_compare_result = _part_feature_compare_chat_result(
+        ctx, request.message, request.agent_type,
+    )
+    if explicit_compare_result:
+        return explicit_compare_result
+
+    # Check the demo batch before the single-handoff path because the
+    # canonical demo wording also satisfies the general handoff detector.
+    if _is_demo_batch_handoff_request(request.message):
+        return await _semantic_region_demo_batch_chat_result(
+            request.agent_type, request.message,
+        )
+
+    if _is_semantic_prepare_handoff_request(request.message):
+        edit_handoff_payload = _semantic_region_edit_handoff_payload_from_context(
+            ctx, request.message,
+        )
+        if edit_handoff_payload:
+            return _semantic_region_cad_edit_handoff_chat_result(
+                edit_handoff_payload,
+                request.agent_type,
+            )
+
+    if _is_semantic_cad_target_request(request.message):
+        handoff_payload = _semantic_region_handoff_payload_from_context(
+            ctx, request.message,
+        )
+        if handoff_payload:
+            return _semantic_region_cad_handoff_chat_result(
+                handoff_payload,
+                request.message,
+                request.agent_type,
+            )
+
+    if _is_direct_semantic_highlight_request(request.message):
+        phrases = _semantic_region_phrases_in_text(ctx, request.message)
+        feature_ids, region_payloads = _semantic_region_highlight_targets(ctx, phrases)
+        if feature_ids:
+            raw_calls = [{"name": "highlight_features", "args": {"feature_ids": feature_ids}}]
+            guarded, warnings = apply_tool_guardrails(
+                raw_calls, request.agent_type, "semantic_region_direct",
+            )
+            labels = [
+                str(region.get("label") or region.get("regionId"))
+                for region in region_payloads
+                if region.get("label") or region.get("regionId")
+            ]
+            if any(_semantic_scan_norm(phrase) == "tail" for phrase in phrases):
+                label_text = "Tail"
+            else:
+                label_text = ", ".join(labels) if labels else "the selected region"
+            result = {
+                "response": f"Highlighted {label_text}.",
+                "highlight_features": feature_ids,
+                "highlight_regions": region_payloads,
+                "tool_calls": guarded,
+                "tool_source": "semantic_region_direct",
+                "tool_call_count": len(guarded),
+            }
+            if warnings:
+                result["tool_guardrail_warnings"] = warnings
+            return result
+
+    return None
+
+
 @app.post("/api/agent/chat")
 async def agent_chat(request: AgentChatRequest):
     """Chat with the InspectorPro Agent (ASME expert powered by Claude)."""
@@ -19203,6 +19283,9 @@ async def agent_chat(request: AgentChatRequest):
         raw_ctx = request.inspection_context or request.context or {}
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
+        semantic_fast_path = await _deterministic_semantic_chat_result(request, ctx)
+        if semantic_fast_path is not None:
+            return semantic_fast_path
         ctx["_user_message"] = request.message
         _workflow_session_id = ""
         _workflow_asset_fp = ""
@@ -19340,79 +19423,6 @@ async def agent_chat(request: AgentChatRequest):
             )
             if profile_feature_result:
                 return profile_feature_result
-
-        # Deterministic fast path for semantic-region CAD target questions
-        # and edit-intent handoff questions. These are not open-ended LLM
-        # reasoning tasks: the authoritative answer is the curated
-        # semantic-region map for the currently visible revision.
-        if request.agent_type == "deviation-analyst":
-            edit_compare_result = _semantic_edit_session_compare_chat_result(
-                ctx, request.message, request.agent_type,
-            )
-            if edit_compare_result:
-                return edit_compare_result
-
-            explicit_compare_result = _part_feature_compare_chat_result(
-                ctx, request.message, request.agent_type,
-            )
-            if explicit_compare_result:
-                return explicit_compare_result
-
-        # Demo batch path FIRST so the canonical caster-demo phrasing
-        # ("queue the caster demo handoffs", "prepare the three caster
-        # demo changes", "prepare demo handoffs for 1030035") doesn't
-        # accidentally route to the single-handoff path -- the demo
-        # request would otherwise build only the first handoff.
-        if request.agent_type == "deviation-analyst" and _is_demo_batch_handoff_request(request.message):
-            return await _semantic_region_demo_batch_chat_result(request.agent_type, request.message)
-
-        if request.agent_type == "deviation-analyst" and _is_semantic_prepare_handoff_request(request.message):
-            edit_handoff_payload = _semantic_region_edit_handoff_payload_from_context(ctx, request.message)
-            if edit_handoff_payload:
-                return _semantic_region_cad_edit_handoff_chat_result(
-                    edit_handoff_payload,
-                    request.agent_type,
-                )
-
-        if request.agent_type == "deviation-analyst" and _is_semantic_cad_target_request(request.message):
-            handoff_payload = _semantic_region_handoff_payload_from_context(ctx, request.message)
-            if handoff_payload:
-                return _semantic_region_cad_handoff_chat_result(
-                    handoff_payload,
-                    request.message,
-                    request.agent_type,
-                )
-
-        # Deterministic fast path for simple region-highlight commands.
-        # This avoids relying on the model to obey marker syntax for
-        # requests like "highlight the top wing" and prevents unsupported
-        # explanatory prose from being fabricated for a pure UI action.
-        if request.agent_type == "deviation-analyst" and _is_direct_semantic_highlight_request(request.message):
-            phrases = _semantic_region_phrases_in_text(ctx, request.message)
-            feature_ids, region_payloads = _semantic_region_highlight_targets(ctx, phrases)
-            if feature_ids:
-                raw_calls = [{"name": "highlight_features", "args": {"feature_ids": feature_ids}}]
-                guarded, warnings = apply_tool_guardrails(raw_calls, request.agent_type, "semantic_region_direct")
-                labels = [
-                    str(r.get("label") or r.get("regionId"))
-                    for r in region_payloads
-                    if r.get("label") or r.get("regionId")
-                ]
-                if any(_semantic_scan_norm(p) == "tail" for p in phrases):
-                    label_text = "Tail"
-                else:
-                    label_text = ", ".join(labels) if labels else "the selected region"
-                result = {
-                    "response":           f"Highlighted {label_text}.",
-                    "highlight_features": feature_ids,
-                    "highlight_regions":  region_payloads,
-                    "tool_calls":         guarded,
-                    "tool_source":        "semantic_region_direct",
-                    "tool_call_count":    len(guarded),
-                }
-                if warnings:
-                    result["tool_guardrail_warnings"] = warnings
-                return result
 
         # Enrich with proximity -- Sage only, first 2 selected parts
         if request.agent_type == 'deviation-analyst':

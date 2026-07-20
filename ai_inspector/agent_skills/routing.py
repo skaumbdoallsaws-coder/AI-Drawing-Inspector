@@ -35,11 +35,22 @@ ROUTE_INTENT_KINDS = frozenset(
         "explain_motion",
         "visualize_affected_context",
         "recommend_disposition",
+        "analyze_process_map",
         "other",
     }
 )
 ROUTE_TARGET_KINDS = frozenset(
-    {"fai_characteristic", "part", "feature", "motion_group", "assembly", "viewport", "unknown"}
+    {
+        "fai_characteristic",
+        "part",
+        "feature",
+        "motion_group",
+        "assembly",
+        "process_map",
+        "process_node",
+        "viewport",
+        "unknown",
+    }
 )
 ROUTE_EFFECTS = frozenset(
     {
@@ -78,6 +89,14 @@ VIEWPORT_EFFECTS = frozenset(
 ASSET_EFFECTS = frozenset({"fill_fai", "set_fai_tolerance"})
 READ_ONLY_SPEECH_ACTS = frozenset({"question", "explain", "analyze", "clarify"})
 _TOKEN_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
+_PRIMARY_SKILL_BY_INTENT = (
+    ("analyze_process_map", "analyze-process-map"),
+    ("recommend_disposition", "recommend-fai-disposition"),
+    ("explain_motion", "reason-about-motion"),
+    ("explain_assembly_impact", "trace-assembly-impact"),
+    ("assess_fai_characteristic", "assess-fai-characteristic"),
+    ("visualize_affected_context", "control-cad-viewport"),
+)
 
 
 SKILL_ROUTE_SYSTEM = """You are the semantic workflow and skill router for InspectorPro.
@@ -95,8 +114,8 @@ Required schema:
   "workflow_confidence": 0.0,
   "intents": [
     {
-      "kind": "assess_fai_characteristic|explain_assembly_impact|explain_motion|visualize_affected_context|recommend_disposition|other",
-      "targets": [{"kind": "fai_characteristic|part|feature|motion_group|assembly|viewport|unknown", "id": null}],
+      "kind": "assess_fai_characteristic|explain_assembly_impact|explain_motion|visualize_affected_context|recommend_disposition|analyze_process_map|other",
+      "targets": [{"kind": "fai_characteristic|part|feature|motion_group|assembly|process_map|process_node|viewport|unknown", "id": null}],
       "requested_effects": []
     }
   ],
@@ -162,9 +181,13 @@ Routing rules:
   control-cad-viewport after the primary skill. Never select it for a read-only
   question or explanation.
 - For a requested semantic feature explanation, use reason-about-part-features.
-- Skills in this catalog belong only to supplier-fai-disposition. When
-  primary_workflow is null, skill_candidates MUST be empty even if a viewport
-  command resembles one of their descriptions.
+- For a request to analyze the saved process map, select process-map-analysis
+  with analyze-process-map as primary. Use only process-map skill candidates;
+  do not mix supplier FAI skills into that workflow. A missing or ambiguous map
+  reference requires clarification rather than a guessed target.
+- Every skill row declares its workflows. Select a skill only when the selected
+  primary_workflow appears in that row. When primary_workflow is null,
+  skill_candidates MUST be empty even if the request resembles a skill description.
 - Never select more than three explicit skills; deterministic dependency expansion
   may add one more. Prefer the smallest sufficient composition.
 - The server derives requested side-effect categories from requested_effects;
@@ -685,6 +708,18 @@ def validate_route_response(data: Any, catalog: CandidateCatalog) -> dict[str, A
         )
         for index, item in enumerate(skill_candidates):
             item["role"] = "primary" if index == primary_index else "support"
+        intent_kinds = {intent["kind"] for intent in intents}
+        preferred_skill = next(
+            (
+                skill_id
+                for intent_kind, skill_id in _PRIMARY_SKILL_BY_INTENT
+                if intent_kind in intent_kinds and skill_id in skill_ids
+            ),
+            None,
+        )
+        if preferred_skill is not None:
+            for item in skill_candidates:
+                item["role"] = "primary" if item["id"] == preferred_skill else "support"
 
     # Dependencies are registry declarations, not model choices. Add eligible
     # dependencies deterministically, then reject conflicts and over-budget

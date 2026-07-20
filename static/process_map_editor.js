@@ -1371,6 +1371,14 @@
         this.toolbarActions.appendChild(this._button('-', 'Zoom out', this.zoomBy.bind(this, 0.86)));
         this.toolbarActions.appendChild(this._button('+', 'Zoom in', this.zoomBy.bind(this, 1.16)));
         this.toolbarActions.appendChild(this._button('Fit', 'Fit flow to viewport', this.fit.bind(this)));
+        if (typeof this.options.onAnalyze === 'function') {
+            this.analyzeButton = this._button(
+                'Analyze',
+                'Ask Sage to analyze the saved process flow',
+                this.analyze.bind(this)
+            );
+            this.toolbarActions.appendChild(this.analyzeButton);
+        }
         if (this.editable) {
             this.undoButton = this._button('Undo', 'Undo process-map edit', this.undo.bind(this));
             this.redoButton = this._button('Redo', 'Redo process-map edit', this.redo.bind(this));
@@ -3386,6 +3394,9 @@
         if (this.addStepButton) this.addStepButton.disabled = this.saving || this.conflict;
         if (this.addGroupButton) this.addGroupButton.disabled = this.saving || this.conflict;
         if (this.previewButton) this.previewButton.disabled = !commandStates.canPreview;
+        if (this.analyzeButton) {
+            this.analyzeButton.disabled = this.saving || this.conflict || this.hasStructuralErrors();
+        }
         if (this.saveButton) {
             this.saveButton.disabled = !this.dirty || this.saving || this.conflict || this.hasStructuralErrors();
             this.saveButton.textContent = this.saving ? 'Saving...' : 'Save';
@@ -3667,6 +3678,20 @@
             this.saving = false;
             this.updateEditControls();
         }
+    };
+
+    ProcessMapEditor.prototype.analyze = async function () {
+        if (this.saving || this.conflict || this.hasStructuralErrors()) return false;
+        if (this.dirty) {
+            const saved = await this.save();
+            if (!saved) return false;
+        }
+        if (typeof this.options.onAnalyze !== 'function' || !this.revision) return false;
+        return this.options.onAnalyze({
+            productId: String(this.processMap.productId || ''),
+            mapId: String(this.processMap.mapId || 'default'),
+            revision: String(this.revision),
+        }) !== false;
     };
 
     ProcessMapEditor.prototype.reload = async function () {

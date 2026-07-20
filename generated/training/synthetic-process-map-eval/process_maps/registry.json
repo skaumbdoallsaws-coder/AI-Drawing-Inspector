@@ -1,0 +1,16 @@
+{
+  "defaultMapId": "default",
+  "maps": [
+    {
+      "association": {
+        "productId": "synthetic-process-map-eval"
+      },
+      "createdAt": "2026-07-19T00:00:00.000000Z",
+      "displayName": "Synthetic Routing Evaluation Flow",
+      "mapId": "default",
+      "status": "active",
+      "updatedAt": "2026-07-19T00:00:00.000000Z"
+    }
+  ],
+  "registryVersion": 1
+}

@@ -1,0 +1,26 @@
+schema_version: 1
+skill_id: analyze-process-map
+version: 1.0.0
+intents:
+  - analyze_process_map
+  - explain_process_flow
+required_evidence:
+  - process_map_graph
+forbidden_context:
+  - browser.process_map_digest
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: concise_process_map_analysis
+  maximum_sentences: 5
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: process-map-analysis-v1
+context_budget:
+  maximum_tokens: 3500
+  priorities:
+    - process_map.graph

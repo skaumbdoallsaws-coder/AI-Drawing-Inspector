@@ -134,6 +134,8 @@ from ai_inspector.process_map import (
     load_named_process_map,
     load_process_map,
     load_product_structure,
+    normalize_process_map_reference,
+    resolve_process_map_digest,
     save_named_process_map,
     save_process_map,
 )
@@ -16580,7 +16582,12 @@ def normalize_agent_context(ctx: dict) -> dict:
     attachments = ctx.get("attachments", {})
 
     # Start with any non-attachments flat keys already present (legacy compat).
+    # Process-map graph data is never accepted from the browser; only the
+    # revision-bound identity attachment may be resolved by the server.
     flat = {k: v for k, v in ctx.items() if k != "attachments"}
+    flat.pop("process_map_graph", None)
+    flat.pop("process_map_digest", None)
+    flat.pop("process_map_ref", None)
 
     # Reconstruct ALL flat keys from structured attachments
     if attachments:
@@ -16590,6 +16597,7 @@ def normalize_agent_context(ctx: dict) -> dict:
         sel = attachments.get("selection", {})
         compare = attachments.get("compare", {})
         assembly = attachments.get("assembly", {})
+        process_map = attachments.get("process_map", {})
         session = attachments.get("session", {})
         user = attachments.get("user", {}) or {}
 
@@ -16700,6 +16708,10 @@ def normalize_agent_context(ctx: dict) -> dict:
             if assembly.get(key) not in (None, "", [], {}):
                 flat.setdefault(key, assembly[key])
 
+        process_map_ref = normalize_process_map_reference(process_map)
+        if process_map_ref:
+            flat["process_map_ref"] = process_map_ref
+
         # Session
         if session.get("paused_walkthrough"):
             flat.setdefault("paused_walkthrough", session["paused_walkthrough"])
@@ -16792,6 +16804,35 @@ def normalize_agent_context(ctx: dict) -> dict:
 
     _enrich_agent_functional_context(flat, attachments)
     return {"attachments": attachments, "flat": flat}
+
+
+def _resolve_trusted_process_map_context(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Replace a browser map reference with a server-compiled saved digest."""
+    ctx.pop("process_map_graph", None)
+    reference = ctx.get("process_map_ref")
+    if not isinstance(reference, dict):
+        return None
+    _require_process_map_edit_enabled()
+    try:
+        resolved = resolve_process_map_digest(PROCESS_MAP_TRAINING_ROOT, reference)
+    except ProcessMapConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "revision_conflict",
+                "currentRevision": exc.current_revision,
+            },
+        ) from exc
+    except ProcessMapNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Process map not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProcessMapAssetError as exc:
+        logger.error("agent process-map resolution failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Process map could not be loaded") from exc
+    ctx["process_map_ref"] = resolved["reference"]
+    ctx["process_map_graph"] = resolved["graph"]
+    return resolved
 
 
 # -- Mode-aware Sage (mode contract) ----------------------------------------
@@ -16924,6 +16965,23 @@ MODE_CONTRACTS = {
             "Do NOT use generic Assembly-tab mate/revision framing unless the training context provides those details.",
             "If the visible product is unclear, say what the training state says is loaded instead of guessing.",
             "Do NOT use facility-layout or plant-process framing here.",
+        ],
+    },
+    "training": {
+        "label": "Process Map",
+        "reasoning_focus": [
+            "the saved process sequence, connectivity, parallel branches, and validation findings",
+            "entry and terminal nodes, disconnected regions, and evidence-backed sequence conflicts",
+            "fan-in locations that may be bottleneck candidates but are not proven bottlenecks without timing or capacity data",
+        ],
+        "tools": [
+            "the [PROCESS MAP GRAPH] block is compiled by the server from the named saved map revision",
+            "derived graph facts are deterministic; cite node IDs and names when explaining them",
+        ],
+        "avoid": [
+            "Do NOT invent takt time, cycle time, cost, capacity, staffing, utilization, or throughput.",
+            "Do NOT call a node a bottleneck without saying bottleneck candidate unless measured operating evidence proves it.",
+            "Do NOT claim the browser supplied the graph; the server-resolved saved revision is authoritative.",
         ],
     },
     "report": {
@@ -17192,6 +17250,18 @@ def _build_context_message(inspection_context: Optional[Dict]) -> str:
     pname = inspection_context.get("part_name")
     if pn:
         parts.append(f"[PART]\nCurrent part: {pn} ({pname or 'unknown'})")
+
+    process_map_graph = inspection_context.get("process_map_graph")
+    if isinstance(process_map_graph, dict):
+        parts.append(
+            "[PROCESS MAP GRAPH - TRUSTED SAVED REVISION]\n"
+            + json.dumps(
+                process_map_graph,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+        )
 
     # -- DRAWING MODE (Phase 2) --
     # Render the classification near the top so the agent sees the workflow
@@ -19932,7 +20002,9 @@ Rules:
 """
 _SKILL_PRODUCTION_MIN_WORKFLOW_CONFIDENCE = 0.75
 _SKILL_PRODUCTION_MIN_SKILL_CONFIDENCE = 0.70
-_SKILL_PRODUCTION_WORKFLOWS = frozenset({"supplier-fai-disposition"})
+_SKILL_PRODUCTION_WORKFLOWS = frozenset(
+    {"supplier-fai-disposition", "process-map-analysis"}
+)
 _AGENT_SKILL_RUNTIME_LOCK = threading.Lock()
 _AGENT_SKILL_RUNTIME_CACHE: Optional[Tuple[WorkflowRegistry, SkillRegistry]] = None
 _PROMPT_MODULE_REGISTRY_LOCK = threading.Lock()
@@ -20241,6 +20313,41 @@ def _safe_fai_compiler_route(mode: str) -> Dict[str, Any]:
     }
 
 
+def _is_process_map_analysis_request(message: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
+    return bool(re.search(
+        r"\b(analy[sz]e|review|flow|sequence|bottleneck|parallel|disconnect(?:ed|ion)?|"
+        r"entry|terminal|process map)\b",
+        normalized,
+    ))
+
+
+def _safe_process_map_compiler_route() -> Dict[str, Any]:
+    """Read-only fallback for an explicit analysis of a trusted saved map."""
+    return {
+        "route_version": 2,
+        "speech_act": "analyze",
+        "primary_workflow": "process-map-analysis",
+        "continue_existing_workflow": False,
+        "workflow_confidence": 1.0,
+        "intents": [{
+            "kind": "analyze_process_map",
+            "targets": [],
+            "requested_effects": [],
+        }],
+        "skill_candidates": [
+            {"id": "analyze-process-map", "role": "primary", "confidence": 1.0},
+        ],
+        "requested_side_effects": {
+            "viewport_write": False,
+            "asset_write": False,
+            "system_write": False,
+        },
+        "needs_clarification": False,
+        "_compiler_fallback": {"reason": "semantic_route_unavailable", "mode": "training"},
+    }
+
+
 def _reset_agent_skill_runtime_cache_for_tests() -> None:
     global _AGENT_SKILL_RUNTIME_CACHE, _PROMPT_MODULE_REGISTRY_CACHE
     with _AGENT_SKILL_RUNTIME_LOCK:
@@ -20429,6 +20536,37 @@ _SKILL_WORKFLOW_STATE_SHADOW_STORE = WorkflowStateStore(
 def _workflow_asset_fingerprint(ctx: Optional[Dict[str, Any]]) -> str:
     """Compute continuity identity from asset IDs only, never from viewport state."""
     ctx = ctx if isinstance(ctx, dict) else {}
+    process_map_graph = (
+        ctx.get("process_map_graph")
+        if isinstance(ctx.get("process_map_graph"), dict)
+        else {}
+    )
+    process_map_identity = (
+        process_map_graph.get("identity")
+        if isinstance(process_map_graph.get("identity"), dict)
+        else {}
+    )
+    if process_map_identity.get("mapId") and process_map_identity.get("revision"):
+        canonical = json.dumps(
+            {
+                "process_map": {
+                    "product_id": _skill_route_text(
+                        process_map_identity.get("productId"), 96
+                    ),
+                    "map_id": _skill_route_text(process_map_identity.get("mapId"), 63),
+                    "revision": _skill_route_text(
+                        process_map_identity.get("revision"), 128
+                    ),
+                    "structure_revision": _skill_route_text(
+                        process_map_identity.get("structureRevision"), 128
+                    ),
+                }
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        return "asset-v1:" + hashlib.sha256(canonical.encode("ascii")).hexdigest()[:32]
     supplied = ctx.get("asset_identity") if isinstance(ctx.get("asset_identity"), dict) else {}
     viewport = ctx.get("viewport_context") if isinstance(ctx.get("viewport_context"), dict) else {}
     motion = viewport.get("motion") if isinstance(viewport.get("motion"), dict) else {}
@@ -20602,6 +20740,8 @@ def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[
             "feature": [],
             "motion_group": [],
             "assembly": [],
+            "process_map": [],
+            "process_node": [],
             "viewport": ["current"],
         },
     }
@@ -20813,6 +20953,61 @@ def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[
             }
             for receipt in execution_receipts[-8:]
         ]
+
+    process_map_graph = (
+        ctx.get("process_map_graph")
+        if isinstance(ctx.get("process_map_graph"), dict)
+        else {}
+    )
+    process_map_identity = (
+        process_map_graph.get("identity")
+        if isinstance(process_map_graph.get("identity"), dict)
+        else {}
+    )
+    process_map_id = _skill_route_text(process_map_identity.get("mapId"), 63)
+    if process_map_id:
+        assets.add("process_map")
+        contexts.add("process_map.graph")
+        facts["target_index"]["process_map"].append(process_map_id)
+        compact_nodes = []
+        for node in (process_map_graph.get("nodes") or [])[:120]:
+            if not isinstance(node, dict) or not node.get("id"):
+                continue
+            node_id = _skill_route_text(node.get("id"), 120)
+            facts["target_index"]["process_node"].append(node_id)
+            compact_nodes.append(
+                {
+                    "id": node_id,
+                    "name": _skill_route_text(node.get("name"), 120),
+                    "kind": _skill_route_text(node.get("kind"), 40),
+                    "process_type": _skill_route_text(node.get("processType"), 40),
+                }
+            )
+        derived = (
+            process_map_graph.get("derived")
+            if isinstance(process_map_graph.get("derived"), dict)
+            else {}
+        )
+        facts["process_map"] = {
+            "product_id": _skill_route_text(process_map_identity.get("productId"), 96),
+            "map_id": process_map_id,
+            "display_name": _skill_route_text(
+                process_map_identity.get("displayName"), 160
+            ),
+            "revision": _skill_route_text(process_map_identity.get("revision"), 128),
+            "node_count": len(process_map_graph.get("nodes") or []),
+            "nodes": compact_nodes,
+            "entry_nodes": list(derived.get("entry_nodes") or [])[:20],
+            "terminal_nodes": list(derived.get("terminal_nodes") or [])[:20],
+            "bottleneck_candidate_count": len(
+                derived.get("bottleneck_candidates") or []
+            ),
+            "validation_codes": [
+                _skill_route_text(item.get("code"), 80)
+                for item in (process_map_graph.get("validator_findings") or [])[:30]
+                if isinstance(item, dict) and item.get("code")
+            ],
+        }
 
     for kind, values in facts["target_index"].items():
         facts["target_index"][kind] = list(dict.fromkeys(str(value) for value in values if str(value)))
@@ -21059,6 +21254,7 @@ async def agent_skill_test_route(request: AgentSkillTestRouteRequest):
         raise HTTPException(status_code=422, detail="Phase 2 shadow routing is Sage-only")
     normalized = normalize_agent_context(request.inspection_context or {})
     ctx = normalized["flat"]
+    _resolve_trusted_process_map_context(ctx)
     catalog, facts = _build_skill_route_catalog(ctx, "sage")
     route_cache = (
         ExactRouteCache(max_entries=1, ttl_seconds=1.0)
@@ -21687,6 +21883,7 @@ async def agent_chat(request: AgentChatRequest):
         raw_ctx = request.inspection_context or request.context or {}
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
+        _resolve_trusted_process_map_context(ctx)
         ctx["_user_message"] = request.message
         _fai_request = _apply_fai_request_targeting(ctx, request.message)
         _approved_disposition = _approved_fai_disposition_result(
@@ -21809,7 +22006,38 @@ async def agent_chat(request: AgentChatRequest):
                 _skill_fallback_reason = type(exc).__name__
             if (
                 not _skill_prompt_plan
+                and ctx.get("process_map_graph")
+                and str(ctx.get("active_mode") or _active_mode or "").strip() == "training"
+                and _is_process_map_analysis_request(request.message)
+            ):
+                _safe_plan, _safe_reason = _compose_production_skill_prompt(
+                    _safe_process_map_compiler_route(),
+                    mode="training",
+                    workflow_state=_skill_workflow_state,
+                )
+                if _safe_plan:
+                    _safe_plan["classification_fallback"] = {
+                        "used": True,
+                        "reason": _skill_fallback_reason or "semantic_route_unavailable",
+                    }
+                    _skill_prompt_plan = _safe_plan
+                    _skill_executor_plan = None
+                    logger.warning(
+                        "[SkillRuntime] semantic route unavailable (%s); using read-only compiled process-map fallback",
+                        _skill_fallback_reason or "unknown",
+                    )
+                elif _safe_reason:
+                    logger.warning(
+                        "[SkillRuntime] read-only compiled process-map fallback rejected: %s",
+                        _safe_reason,
+                    )
+            if (
+                not _skill_prompt_plan
                 and ctx.get("fai_characteristics")
+                and not (
+                    ctx.get("process_map_graph")
+                    and str(ctx.get("active_mode") or _active_mode or "").strip() == "training"
+                )
             ):
                 _safe_route = _safe_fai_compiler_route(
                     str(ctx.get("active_mode") or _active_mode or "report_fai")

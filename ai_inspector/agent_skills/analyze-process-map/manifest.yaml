@@ -1,0 +1,19 @@
+schema_version: 1
+id: analyze-process-map
+version: 1.0.0
+description: Analyze a trusted saved process-map graph for sequence gaps, disconnected regions, parallel branches, and bottleneck candidates.
+agents:
+  - sage
+workflows:
+  - process-map-analysis
+modes:
+  - training
+requires_context:
+  - process_map.graph
+optional_context: []
+allowed_tools: []
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: computed_fields_only

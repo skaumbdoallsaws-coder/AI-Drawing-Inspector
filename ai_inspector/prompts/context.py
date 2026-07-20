@@ -53,6 +53,7 @@ _CONTEXT_FIELDS = {
     },
     "motion.groups": {"mode_state", "viewport_context"},
     "viewport.state": {"mode_state", "viewport_context", "selected_parts"},
+    "process_map.graph": {"process_map_graph"},
 }
 
 

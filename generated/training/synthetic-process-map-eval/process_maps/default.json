@@ -1,0 +1,117 @@
+{
+  "association": {
+    "productId": "synthetic-process-map-eval"
+  },
+  "canvasEdges": [
+    {
+      "edgeId": "eval-edge-1",
+      "from": {
+        "nodeId": "eval-intake",
+        "port": "out"
+      },
+      "kind": "precedence",
+      "logicalConnectionId": "eval-edge-1",
+      "to": {
+        "nodeId": "eval-machine",
+        "port": "in"
+      }
+    },
+    {
+      "edgeId": "eval-edge-2",
+      "from": {
+        "nodeId": "eval-intake",
+        "port": "out"
+      },
+      "kind": "precedence",
+      "logicalConnectionId": "eval-edge-2",
+      "to": {
+        "nodeId": "eval-document",
+        "port": "in"
+      }
+    },
+    {
+      "edgeId": "eval-edge-3",
+      "from": {
+        "nodeId": "eval-machine",
+        "port": "out"
+      },
+      "kind": "precedence",
+      "logicalConnectionId": "eval-edge-3",
+      "to": {
+        "nodeId": "eval-release",
+        "port": "in"
+      }
+    },
+    {
+      "edgeId": "eval-edge-4",
+      "from": {
+        "nodeId": "eval-document",
+        "port": "out"
+      },
+      "kind": "precedence",
+      "logicalConnectionId": "eval-edge-4",
+      "to": {
+        "nodeId": "eval-release",
+        "port": "in"
+      }
+    }
+  ],
+  "canvasGroups": [],
+  "canvasNodes": [
+    {
+      "name": "Receive work order",
+      "nodeId": "eval-intake",
+      "nodeKind": "process_step",
+      "position": {
+        "x": 0,
+        "y": 160
+      },
+      "processType": "input"
+    },
+    {
+      "name": "Machine component",
+      "nodeId": "eval-machine",
+      "nodeKind": "process_step",
+      "position": {
+        "x": 320,
+        "y": 0
+      },
+      "processType": "operation"
+    },
+    {
+      "name": "Prepare inspection record",
+      "nodeId": "eval-document",
+      "nodeKind": "process_step",
+      "position": {
+        "x": 320,
+        "y": 320
+      },
+      "processType": "operation"
+    },
+    {
+      "name": "Release product",
+      "nodeId": "eval-release",
+      "nodeKind": "process_step",
+      "position": {
+        "x": 680,
+        "y": 160
+      },
+      "processType": "output"
+    }
+  ],
+  "createdAt": "2026-07-19T00:00:00.000000Z",
+  "displayName": "Synthetic Routing Evaluation Flow",
+  "layoutVersion": 2,
+  "mapId": "default",
+  "productId": "synthetic-process-map-eval",
+  "productName": "Synthetic Evaluation Product",
+  "schemaVersion": 3,
+  "sourceStructureRevision": "71dfc12553ee314c0aae9d5601b422e583a2509dd9aea3486f6b9b02758f633a",
+  "status": "active",
+  "updatedAt": "2026-07-19T00:00:00.000000Z",
+  "viewport": {
+    "scale": 1,
+    "x": 0,
+    "y": 0
+  }
+}

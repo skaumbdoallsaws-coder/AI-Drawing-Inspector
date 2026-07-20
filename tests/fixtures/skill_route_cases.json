@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Synthetic Phase 2 semantic-route cases. No customer or demo-specific identifiers.",
+  "description": "Synthetic semantic-route cases for FAI and process-map workflows. No customer or demo-specific identifiers.",
   "thresholds": {
     "valid_route_rate": 0.90,
     "workflow_accuracy": 0.90,
@@ -8,10 +8,31 @@
     "viewport_effect_accuracy": 1.0,
     "asset_effect_accuracy": 1.0,
     "skill_accuracy": 0.85,
+    "skill_recall_accuracy": 0.85,
     "skill_precision_accuracy": 1.0,
+    "skill_selection_valid_accuracy": 1.0,
+    "primary_skill_accuracy": 1.0,
     "continuation_accuracy": 0.90
   },
   "cases": [
+    {
+      "id": "process-map-analysis",
+      "context": "process_map",
+      "message": "Analyze this process map for disconnected regions, parallel branches, and bottleneck candidates.",
+      "expected": {"workflow": "process-map-analysis", "speech_acts": ["analyze", "explain"], "skills": ["analyze-process-map"], "primary_skill": "analyze-process-map", "viewport_write": false, "asset_write": false}
+    },
+    {
+      "id": "process-map-unavailable",
+      "context": "process_map_missing",
+      "message": "Analyze the saved process map.",
+      "expected": {"workflow": "process-map-analysis", "speech_acts": ["analyze", "clarify"], "skills": [], "viewport_write": false, "asset_write": false, "needs_clarification": true}
+    },
+    {
+      "id": "fai-analysis-not-process-map",
+      "context": "fai_motion",
+      "message": "Is characteristic 5 within tolerance?",
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["analyze", "question"], "skills": ["assess-fai-characteristic"], "primary_skill": "assess-fai-characteristic", "viewport_write": false, "asset_write": false}
+    },
     {
       "id": "fai-characteristic-question",
       "context": "fai_motion",
@@ -40,25 +61,25 @@
       "id": "fai-disposition",
       "context": "fai_motion",
       "message": "Should this inspected part be accepted, reworked, or rejected?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "analyze"], "skills": ["assess-fai-characteristic", "recommend-fai-disposition"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "analyze"], "skills": ["assess-fai-characteristic", "recommend-fai-disposition"], "allowed_skills": ["assess-fai-characteristic", "recommend-fai-disposition", "trace-assembly-impact"], "primary_skill": "recommend-fai-disposition", "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-assembly-impact",
       "context": "fai_motion",
       "message": "What is the impact on the assembly of the failed dimension?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain", "analyze"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-assembly-context"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain", "analyze"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-assembly-context"], "primary_skill": "trace-assembly-impact", "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-affected-motion-question",
       "context": "fai_motion",
       "message": "What is the affected motion?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion"], "primary_skill": "reason-about-motion", "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-motion-will-be-affected",
       "context": "fai_motion",
       "message": "What motion will be affected by this failure?",
-      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion"], "viewport_write": false, "asset_write": false}
+      "expected": {"workflow": "supplier-fai-disposition", "speech_acts": ["question", "explain"], "skills": ["assess-fai-characteristic", "trace-assembly-impact", "reason-about-motion"], "primary_skill": "reason-about-motion", "viewport_write": false, "asset_write": false}
     },
     {
       "id": "fai-show-affected-motion",

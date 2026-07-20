@@ -40,7 +40,7 @@ def _registries():
         [SKILL_ROOT],
         workflow_ids=set(workflows.ids),
         known_agents={"sage", "iris", "scout"},
-        known_modes={"report_fai", "report", "drawing", "assembly"},
+        known_modes={"report_fai", "report", "drawing", "assembly", "training"},
         known_tools_by_agent={
             "sage": {"ui_actions", "highlight_features"},
             "iris": set(),
@@ -334,7 +334,7 @@ def test_route_validator_normalizes_multiple_primary_skill_roles_by_confidence()
         known_target_ids=base.known_target_ids,
         context_fingerprint="multiple-primary",
     )
-    route = _route()
+    route = _route(intent_kind="other")
     route["skill_candidates"] = [
         {"id": "assess-fai-characteristic", "role": "primary", "confidence": 0.8},
         {"id": "evidence-helper", "role": "primary", "confidence": 0.9},
@@ -696,13 +696,48 @@ def test_compact_v2_route_derives_server_owned_fields():
     assert cleaned["requested_side_effects"]["viewport_write"] is False
 
 
+def test_typed_intent_deterministically_selects_primary_skill():
+    workflows, skills = _registries()
+    catalog = build_candidate_catalog(
+        workflows,
+        skills,
+        agent="sage",
+        mode="report_fai",
+        available_assets={"fai_table", "drawing", "part_model", "parent_assembly"},
+        available_context={
+            "fai.characteristics",
+            "drawing.dimensions",
+            "part.feature_map",
+            "assembly.parts",
+        },
+        context_facts=_facts(),
+    )
+    raw = _route()
+    raw["intents"][0]["kind"] = "explain_assembly_impact"
+    raw["skill_candidates"] = [
+        {"id": "assess-fai-characteristic", "role": "primary", "confidence": 0.98},
+        {"id": "trace-assembly-impact", "role": "support", "confidence": 0.94},
+    ]
+    raw["context_requirements"] = ["fai.characteristics", "assembly.parts"]
+    cleaned = validate_route_response(raw, catalog)
+    assert cleaned is not None
+    primary = [
+        item["id"] for item in cleaned["skill_candidates"]
+        if item["role"] == "primary"
+    ]
+    assert primary == ["trace-assembly-impact"]
+
+
 def test_labeled_route_fixture_is_ascii_unique_and_has_fixed_effect_expectations():
     fixture_path = REPO_ROOT / "tests" / "fixtures" / "skill_route_cases.json"
     raw = fixture_path.read_bytes()
     assert all(byte < 128 for byte in raw)
     fixture = json.loads(raw.decode("ascii"))
     assert fixture["schema_version"] == 1
+    assert fixture["thresholds"]["skill_recall_accuracy"] == 0.85
     assert fixture["thresholds"]["skill_precision_accuracy"] == 1.0
+    assert fixture["thresholds"]["skill_selection_valid_accuracy"] == 1.0
+    assert fixture["thresholds"]["primary_skill_accuracy"] == 1.0
     cases = fixture["cases"]
     ids = [case["id"] for case in cases]
     assert len(cases) >= 20
@@ -713,6 +748,8 @@ def test_labeled_route_fixture_is_ascii_unique_and_has_fixed_effect_expectations
         assert type(expected["asset_write"]) is bool
         assert isinstance(expected["speech_acts"], list) and expected["speech_acts"]
         assert isinstance(expected["skills"], list)
+        if "primary_skill" in expected:
+            assert expected["primary_skill"] in expected["skills"]
 
 
 def _run_without_pytest() -> int:

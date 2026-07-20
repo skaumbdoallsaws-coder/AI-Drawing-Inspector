@@ -1,5 +1,14 @@
 """Process-map schema, validation, and revision-safe persistence."""
 
+from .digest import (
+    PROCESS_MAP_DIGEST_MAX_TOKENS,
+    PROCESS_MAP_DIGEST_VERSION,
+    build_process_map_digest,
+    estimate_digest_tokens,
+    normalize_process_map_reference,
+    resolve_process_map_digest,
+)
+
 from .repository import (
     PROCESS_MAP_REGISTRY_VERSION,
     PROCESS_MAP_STATUSES,
@@ -51,6 +60,8 @@ __all__ = [
     "PROCESS_MAP_LAYOUT_VERSION",
     "PROCESS_MAP_REGISTRY_VERSION",
     "PROCESS_MAP_STATUSES",
+    "PROCESS_MAP_DIGEST_MAX_TOKENS",
+    "PROCESS_MAP_DIGEST_VERSION",
     "PRODUCT_STRUCTURE_SCHEMA_VERSION",
     "PRODUCT_KINDS",
     "CANVAS_NODE_KINDS",
@@ -66,13 +77,17 @@ __all__ = [
     "ProcessMapValidationError",
     "ProcessMapWriteError",
     "archive_process_map",
+    "build_process_map_digest",
     "create_process_map",
     "has_structural_errors",
+    "estimate_digest_tokens",
     "list_process_maps",
     "load_process_map",
     "load_named_process_map",
     "load_product_structure",
     "migrate_process_map",
+    "normalize_process_map_reference",
+    "resolve_process_map_digest",
     "save_named_process_map",
     "save_process_map",
     "migrate_to_placement_map",

@@ -89,7 +89,7 @@ def test_production_catalog_loads_and_schema_documents_match():
         [SKILL_ROOT],
         workflow_ids=set(workflows.ids),
         known_agents={"sage", "iris", "scout"},
-        known_modes={"report_fai", "report", "drawing", "assembly"},
+        known_modes={"report_fai", "report", "drawing", "assembly", "training"},
         known_tools_by_agent={
             "sage": {"ui_actions", "highlight_features"},
             "iris": set(),
@@ -106,6 +106,7 @@ def test_production_catalog_loads_and_schema_documents_match():
     assert skill.body_sha256 == "7281a9966de5255d675becca0a43c3248857b0f80313909af3a490a84847c6a3"
     assert "100006" not in skill.body
     assert skills.ids == {
+        "analyze-process-map",
         "assess-fai-characteristic",
         "recommend-fai-disposition",
         "reason-about-part-features",
@@ -375,8 +376,9 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
         assert status["phase"] == 5
         assert status["production_chat_integration"] is True
         assert status["runtime_loaded"] is True
-        assert len(status["skills"]) == 7
+        assert len(status["skills"]) == 8
         assert "assess-fai-characteristic" in {item["id"] for item in status["skills"]}
+        assert "analyze-process-map" in {item["id"] for item in status["skills"]}
         result = asyncio.run(server.agent_skill_test_compose(request))
         assert result["production_chat_integration"] is True
         assert result["workflow"] == {"id": "supplier-fai-disposition", "version": "1.0.0"}

@@ -1,0 +1,20 @@
+schema_version: 1
+id: process-map-analysis
+version: 1.0.0
+description: Analyze a saved manufacturing process map for sequence, connectivity, parallel work, and evidence-backed flow concerns.
+agents:
+  - sage
+entry_signals:
+  - process-map analysis or flow review request
+  - sequence, disconnected region, parallel branch, or bottleneck question
+required_assets:
+  - process_map
+optional_assets: []
+stages:
+  - identify_map
+  - validate_graph
+  - analyze_flow
+  - report_findings
+completion:
+  - findings cite saved process-map node ids and names
+  - timing or capacity conclusions are not invented

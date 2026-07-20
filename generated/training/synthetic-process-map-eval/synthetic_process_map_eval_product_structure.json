@@ -1,0 +1,16 @@
+{
+  "occurrences": [
+    {
+      "itemId": null,
+      "kind": "assembly",
+      "level": 0,
+      "name": "Synthetic Evaluation Product",
+      "occurrenceId": "eval-root",
+      "parentOccurrenceId": null,
+      "partIds": []
+    }
+  ],
+  "productId": "synthetic-process-map-eval",
+  "productName": "Synthetic Evaluation Product",
+  "schemaVersion": 1
+}

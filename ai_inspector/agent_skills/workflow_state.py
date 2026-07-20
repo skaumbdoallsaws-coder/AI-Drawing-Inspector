@@ -36,6 +36,11 @@ _STAGE_BY_INTENT = {
     "explain_motion": "trace_assembly_impact",
     "visualize_affected_context": "visualize_affected_context",
     "recommend_disposition": "recommend_disposition",
+    "analyze_process_map": "analyze_flow",
+}
+_OBJECTIVE_BY_WORKFLOW = {
+    "supplier-fai-disposition": "Evaluate supplier FAI disposition",
+    "process-map-analysis": "Analyze the saved process map",
 }
 
 
@@ -186,6 +191,8 @@ def _clean_referents(value: Any) -> dict[str, Any]:
         "last_part_numbers",
         "last_feature_ids",
         "last_motion_group_ids",
+        "last_process_map_ids",
+        "last_process_node_ids",
         "last_intent_kinds",
         "last_requested_effects",
     ):
@@ -405,7 +412,7 @@ def advance_workflow_state(
         "version": workflow_version,
         "status": "active",
         "stage": workflow_stages[0] if workflow_stages else "identify_characteristic",
-        "objective": "Evaluate supplier FAI disposition",
+        "objective": _OBJECTIVE_BY_WORKFLOW.get(workflow_id, "Complete the selected workflow"),
         "entities": {},
         "evidence_refs": [],
         "referents": {},
@@ -449,12 +456,22 @@ def advance_workflow_state(
     assembly_number = _clean_text(context_facts.get("assembly_number"), 120)
     if assembly_number:
         entities["assembly_number"] = assembly_number
+    process_map = (
+        context_facts.get("process_map")
+        if isinstance(context_facts.get("process_map"), Mapping)
+        else {}
+    )
+    process_map_id = _clean_text(process_map.get("map_id"), 120)
+    if process_map_id:
+        entities["process_map_id"] = process_map_id
     kind_to_entity = {
         "fai_characteristic": "characteristic_numbers",
         "part": "part_numbers",
         "feature": "feature_ids",
         "motion_group": "motion_group_ids",
         "assembly": "assembly_ids",
+        "process_map": "process_map_ids",
+        "process_node": "process_node_ids",
     }
     for kind, entity_key in kind_to_entity.items():
         additions = [str(item["id"]) for item in targets if item.get("kind") == kind and item.get("id")]
@@ -480,6 +497,8 @@ def advance_workflow_state(
         evidence.append(f"feature:{part_number or 'current'}:{feature_id}")
     for group_id in entities.get("motion_group_ids", []):
         evidence.append(f"motion-group:{group_id}")
+    if process_map_id:
+        evidence.append(f"process-map:{process_map_id}")
     state["evidence_refs"] = _merge_unique([], evidence, limit=30)
 
     referents = _clean_referents(state.get("referents"))
@@ -490,6 +509,8 @@ def advance_workflow_state(
         ("part_numbers", "last_part_numbers"),
         ("feature_ids", "last_feature_ids"),
         ("motion_group_ids", "last_motion_group_ids"),
+        ("process_map_ids", "last_process_map_ids"),
+        ("process_node_ids", "last_process_node_ids"),
     ):
         values = entities.get(entity_key)
         if isinstance(values, list) and values:

@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -118,6 +119,10 @@ def _install_synthetic_process_map_route(page, store: dict) -> None:
         payload = request.post_data_json or {}
         submitted = copy.deepcopy(payload.get("map") or {})
         store["putCount"] += 1
+        store.setdefault("events", []).append({
+            "kind": "save",
+            "baseRevision": payload.get("baseRevision"),
+        })
         if store.pop("conflictNext", False):
             store["revision"] = "rev-external"
             fulfill(route, 409, {"error": "revision_conflict", "currentRevision": store["revision"]})
@@ -169,6 +174,37 @@ def _install_synthetic_process_map_route(page, store: dict) -> None:
         )
 
     page.route("**/api/training/process-map/racing-bike", handler)
+
+
+def _install_synthetic_agent_route(page, store: dict, captured: list[dict]) -> None:
+    page.route(
+        "**/api/agent/chat/streaming-status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"enabled": False, "agents": []}),
+        ),
+    )
+
+    def handler(route) -> None:
+        request = route.request
+        if request.method != "POST":
+            route.fallback()
+            return
+        payload = copy.deepcopy(request.post_data_json or {})
+        captured.append(payload)
+        store.setdefault("events", []).append({"kind": "agent"})
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "response": "The saved process map has one linear flow.",
+                "tool_calls": [],
+                "workflow_state": None,
+            }),
+        )
+
+    page.route("**/api/agent/chat", handler)
 
 
 def _wait_for_process_flow_entry(page) -> None:
@@ -459,11 +495,14 @@ def run() -> int:
             "revision": "rev-1",
             "findings": [],
             "putCount": 0,
+            "events": [],
         }
+        analysis_requests: list[dict] = []
         context = browser.new_context(viewport={"width": 1600, "height": 1000})
         page = context.new_page()
         page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
         _install_synthetic_process_map_route(page, store)
+        _install_synthetic_agent_route(page, store, analysis_requests)
         page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
         _open_process_flow(page)
 
@@ -496,6 +535,49 @@ def run() -> int:
             "placed_tree_occurrence_is_marked",
             page.locator(".pm-tree-row[data-occurrence-id='part-a-1'] .pm-tree-placed").count() == 1,
         )
+
+        page.get_by_role(
+            "button", name="Ask Sage to analyze the saved process flow"
+        ).click()
+        deadline = time.time() + 15
+        while not analysis_requests and time.time() < deadline:
+            page.wait_for_timeout(50)
+        analysis_payload = analysis_requests[-1] if analysis_requests else {}
+        analysis_attachments = (
+            analysis_payload.get("inspection_context", {}).get("attachments", {})
+        )
+        process_map_reference = analysis_attachments.get("process_map", {})
+        record(
+            "analyze_saves_dirty_map_before_one_sage_turn",
+            len(analysis_requests) == 1
+            and store["putCount"] == 1
+            and [event.get("kind") for event in store["events"][-2:]]
+            == ["save", "agent"]
+            and page.evaluate("window.__processMapFlow.editor.dirty") is False,
+            {"events": store["events"], "requests": len(analysis_requests)},
+        )
+        record(
+            "analyze_sends_only_saved_identity_not_browser_graph",
+            process_map_reference
+            == {
+                "productId": "racing-bike",
+                "mapId": "default",
+                "revision": "rev-2",
+            }
+            and analysis_attachments.get("session", {}).get("active_mode") == "training"
+            and "process_map_graph" not in json.dumps(analysis_payload)
+            and "process_map_digest" not in json.dumps(analysis_payload),
+            process_map_reference,
+        )
+        page.evaluate(
+            """() => {
+                if (window._agentPanel && window._agentPanel.classList.contains('open')
+                    && window._toggleAgentPanel) {
+                    window._toggleAgentPanel();
+                }
+            }"""
+        )
+        page.wait_for_timeout(400)
 
         page.evaluate("window.__processMapEditorBeforePreview = window.__processMapFlow.editor")
         first_card = page.locator(f".pm-node[data-node-id='{first_id}'] .pm-node-card")
@@ -1704,7 +1786,7 @@ def run() -> int:
         page.wait_for_function("window.__processMapFlow.editor.dirty === false")
         record(
             "save_persists_only_placed_nodes_and_canvas_edges",
-            store["putCount"] == 1
+            store["putCount"] == 2
             and len(store["map"]["canvasNodes"]) == 6
             and len(store["map"]["canvasEdges"]) == 5
             and len([node for node in store["map"]["canvasNodes"] if node.get("nodeKind") == "junction"]) == 1

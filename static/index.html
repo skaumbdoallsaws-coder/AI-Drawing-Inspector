@@ -26221,6 +26221,22 @@
             return _trainRenderProcessFlow();
         }
 
+        function _trainAnalyzeProcessFlow() {
+            if (!trainingState.processFlowMap || !trainingState.processMapRevision) {
+                if (window._toast) window._toast('Save the process map before analysis.', 'info');
+                return false;
+            }
+            if (window._selectAgent) window._selectAgent('deviation-analyst');
+            const prompt = 'Analyze this saved process map for sequence gaps, disconnected regions, '
+                + 'parallel branches, and bottleneck candidates. Cite the relevant node IDs and names.';
+            window.setTimeout(() => {
+                if (window._agentContextSendPrompt) {
+                    window._agentContextSendPrompt(prompt);
+                }
+            }, 0);
+            return true;
+        }
+
         function _trainRenderProcessFlow() {
             const host = document.getElementById('trainViewportHost');
             const runtime = window.InspectorProProcessMap;
@@ -26254,6 +26270,7 @@
                 },
                 onSave: _trainSaveProcessFlowMap,
                 onReload: _trainReloadProcessFlowMap,
+                onAnalyze: _trainAnalyzeProcessFlow,
                 onExit: () => {
                     trainingState.viewportMode = 'structure';
                     trainingState.processMapFlowFocusNodeId = null;
@@ -46936,8 +46953,12 @@
                 const st = {};
                 try {
                     if (tab === 'training') {
-                        mode = trainingState.type || 'training';
-                        if (mode === 'assembly') {
+                        mode = trainingState.viewportMode === 'process_flow'
+                            ? 'training'
+                            : (trainingState.type || 'training');
+                        if (mode === 'training' && trainingState.viewportMode === 'process_flow') {
+                            st.viewport_mode = 'process_flow';
+                        } else if (mode === 'assembly') {
                             mode = 'assembly_training';
                             const selectedNode = (typeof _trainSelectedProcessNode === 'function') ? _trainSelectedProcessNode() : null;
                             const visualNodeId = (typeof _trainVisualNodeForProcedure === 'function') ? _trainVisualNodeForProcedure() : null;
@@ -47373,6 +47394,19 @@
                         att.assembly.explode_steps = assemblyContext.explode_steps;
                         att.assembly.part_color_legend = assemblyContext.part_color_legend;
                     }
+                }
+
+                if (
+                    state.activeTab === 'training'
+                    && trainingState.viewportMode === 'process_flow'
+                    && trainingState.processFlowMap
+                    && trainingState.processMapRevision
+                ) {
+                    att.process_map = {
+                        productId: trainingState.processMapProductId,
+                        mapId: trainingState.processFlowMap.mapId || 'default',
+                        revision: trainingState.processMapRevision,
+                    };
                 }
 
                 return att;

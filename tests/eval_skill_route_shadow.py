@@ -20,13 +20,41 @@ if str(REPO_ROOT) not in sys.path:
 
 import server  # noqa: E402
 from ai_inspector.agent_skills import ExactRouteCache, SkillRuntimeSettings, classify_shadow_route  # noqa: E402
+from ai_inspector.process_map import load_named_process_map, resolve_process_map_digest  # noqa: E402
 
 
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "skill_route_cases.json"
-OUTPUT = REPO_ROOT / "runtime_logs" / "skill_route_shadow_eval.json"
+_OUTPUT_SETTING = (os.getenv("SKILL_ROUTE_EVAL_OUTPUT") or "").strip()
+OUTPUT = Path(_OUTPUT_SETTING) if _OUTPUT_SETTING else (
+    REPO_ROOT / "runtime_logs" / "skill_route_shadow_eval.json"
+)
+if not OUTPUT.is_absolute():
+    OUTPUT = REPO_ROOT / OUTPUT
 
 
 def _synthetic_context(variant: str) -> dict:
+    if variant == "process_map":
+        loaded = load_named_process_map(
+            server.PROCESS_MAP_TRAINING_ROOT,
+            "synthetic-process-map-eval",
+            "default",
+        )
+        return {
+            "attachments": {
+                "session": {
+                    "active_mode": "training",
+                    "active_tab": "training",
+                },
+                "process_map": {
+                    "productId": "synthetic-process-map-eval",
+                    "mapId": "default",
+                    "revision": loaded["revision"],
+                },
+            }
+        }
+    if variant == "process_map_missing":
+        return {"active_mode": "training", "active_tab": "training"}
+
     base = {
         "active_mode": "report_fai",
         "active_tab": "report",
@@ -98,7 +126,7 @@ def _authorize(message, requested):
     return server._authorize_skill_shadow_effects(message, requested)
 
 
-def _skill_selection_is_precise(route: dict | None, catalog) -> bool:
+def _skill_selection_is_valid(route: dict | None, catalog) -> bool:
     if not route:
         return False
     selected = route.get("skill_candidates") or []
@@ -141,11 +169,23 @@ def _route_via_http(endpoint: str, case: dict, context: dict) -> tuple[dict | No
 
 
 def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None) -> dict:
-    context = _synthetic_context(case["context"])
+    request_context = _synthetic_context(case["context"])
+    context = request_context
+    process_map_attachment = (
+        request_context.get("attachments", {}).get("process_map")
+        if isinstance(request_context.get("attachments"), dict)
+        else None
+    )
+    if isinstance(process_map_attachment, dict):
+        context = server.normalize_agent_context(request_context)["flat"]
+        context["process_map_graph"] = resolve_process_map_digest(
+            server.PROCESS_MAP_TRAINING_ROOT,
+            process_map_attachment,
+        )["graph"]
     catalog, facts = server._build_skill_route_catalog(context, "sage")
     failure_info: dict = {}
     if endpoint:
-        route, http_failure = _route_via_http(endpoint, case, context)
+        route, http_failure = _route_via_http(endpoint, case, request_context)
         if isinstance(http_failure, dict):
             failure_info.update(http_failure)
     else:
@@ -165,6 +205,11 @@ def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None)
             failure=failure_info,
         )
     expected = case["expected"]
+    expected_skills = set(expected["skills"])
+    allowed_skills = set(expected.get("allowed_skills") or expected["skills"])
+    selected_skills = {
+        item["id"] for item in (route.get("skill_candidates") or [])
+    } if route else set()
     checks = {
         "valid_route": route is not None,
         "workflow": bool(route) and route.get("primary_workflow") == expected["workflow"],
@@ -173,12 +218,18 @@ def _run_case(case: dict, model: str, api_key: str | None, endpoint: str | None)
         and route.get("requested_side_effects", {}).get("viewport_write") is expected["viewport_write"],
         "asset_effect": bool(route)
         and route.get("requested_side_effects", {}).get("asset_write") is expected["asset_write"],
-        "skills": bool(route)
-        and set(expected["skills"]).issubset(
-            {item["id"] for item in route.get("skill_candidates") or []}
-        ),
-        "skill_precision": _skill_selection_is_precise(route, catalog),
+        "skills": bool(route) and expected_skills.issubset(selected_skills),
+        "skill_recall": bool(route) and expected_skills.issubset(selected_skills),
+        "skill_precision": bool(route) and selected_skills.issubset(allowed_skills),
+        "skill_selection_valid": _skill_selection_is_valid(route, catalog),
     }
+    if "primary_skill" in expected:
+        primary_skills = [
+            item["id"]
+            for item in (route.get("skill_candidates") or [])
+            if item.get("role") == "primary"
+        ] if route else []
+        checks["primary_skill"] = primary_skills == [expected["primary_skill"]]
     if "needs_clarification" in expected:
         checks["needs_clarification"] = bool(route) and route.get("needs_clarification") is expected["needs_clarification"]
     if "continue_existing_workflow" in expected:
@@ -262,7 +313,10 @@ def run() -> int:
         "viewport_effect_accuracy": _rate(results, "viewport_effect"),
         "asset_effect_accuracy": _rate(results, "asset_effect"),
         "skill_accuracy": _rate(results, "skills"),
+        "skill_recall_accuracy": _rate(results, "skill_recall"),
         "skill_precision_accuracy": _rate(results, "skill_precision"),
+        "skill_selection_valid_accuracy": _rate(results, "skill_selection_valid"),
+        "primary_skill_accuracy": _rate(results, "primary_skill"),
         "clarification_accuracy": _rate(results, "needs_clarification"),
         "continuation_accuracy": _rate(results, "continue_existing_workflow"),
     }

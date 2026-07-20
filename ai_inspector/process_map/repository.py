@@ -593,6 +593,87 @@ def load_named_process_map(
     return _load_registered_process_map(product_dir, product_id, map_id, registry)
 
 
+def list_named_process_map_revisions(
+    training_root: Path,
+    product_id: str,
+    map_id: str,
+) -> List[Dict[str, Any]]:
+    """List current and retained backup revisions for a registered map.
+
+    Revisions are content hashes, so backup filenames never become authority.
+    Duplicate content is returned once, newest first.
+    """
+    product_dir, registry = _ensure_registry(training_root, product_id)
+    safe_map_id = _validate_map_id(map_id)
+    _registered_map_summary(registry, safe_map_id)
+    asset = _named_process_map_asset(product_dir, safe_map_id)
+    if not asset.is_file():
+        raise ProcessMapNotFoundError("process map not found")
+    candidates = [asset] + sorted(
+        asset.parent.glob(f"{asset.stem}.backup-*{asset.suffix}"),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    revisions: List[Dict[str, Any]] = []
+    seen = set()
+    for candidate in candidates:
+        try:
+            stored = _read_json_object(candidate)
+        except ProcessMapAssetError:
+            continue
+        revision = process_map_revision(stored)
+        if revision in seen:
+            continue
+        seen.add(revision)
+        revisions.append(
+            {
+                "revision": revision,
+                "current": candidate == asset,
+                "recordedAt": (
+                    str(stored.get("updatedAt") or stored.get("createdAt") or "")
+                ),
+                "assetName": candidate.name,
+            }
+        )
+    return revisions
+
+
+def load_named_process_map_revision(
+    training_root: Path,
+    product_id: str,
+    map_id: str,
+    target_revision: str,
+) -> Dict[str, Any]:
+    """Resolve one named retained revision without making it current."""
+    requested = target_revision.strip() if isinstance(target_revision, str) else ""
+    if not re.fullmatch(r"[0-9a-f]{64}", requested):
+        raise ProcessMapNotFoundError("process map revision not found")
+    product_dir, registry = _ensure_registry(training_root, product_id)
+    safe_map_id = _validate_map_id(map_id)
+    _registered_map_summary(registry, safe_map_id)
+    asset = _named_process_map_asset(product_dir, safe_map_id)
+    candidates = [asset] + sorted(
+        asset.parent.glob(f"{asset.stem}.backup-*{asset.suffix}"),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            stored = _read_json_object(candidate)
+        except ProcessMapAssetError:
+            continue
+        if process_map_revision(stored) == requested:
+            return {
+                "map": stored,
+                "revision": requested,
+                "current": candidate == asset,
+                "assetName": candidate.name,
+            }
+    raise ProcessMapNotFoundError("process map revision not found")
+
+
 def load_process_map(training_root: Path, product_id: str) -> Dict[str, Any]:
     product_dir, registry = _ensure_registry(training_root, product_id)
     result = _load_registered_process_map(

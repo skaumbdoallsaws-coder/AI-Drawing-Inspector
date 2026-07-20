@@ -122,22 +122,38 @@ from ai_inspector.product_intelligence import (
     evaluate_disposition_policy,
 )
 from ai_inspector.process_map import (
+    ProcessMapApprovalReplayError,
     ProcessMapAssetError,
+    ProcessMapAuthorizationError,
+    ProcessMapBuilderError,
     ProcessMapConflictError,
     ProcessMapNotFoundError,
+    ProcessMapOperationError,
+    ProcessMapProposalNotFoundError,
     ProcessMapSourceConflictError,
     ProcessMapValidationError,
     ProcessMapWriteError,
+    apply_approved_process_map_operations,
+    approve_process_map_proposal,
     archive_process_map,
+    asset_write_policy_metadata,
+    builder_find_process_map_records,
+    builder_list_process_map_revisions,
+    builder_list_process_maps,
+    builder_read_process_map,
+    builder_validate_process_map,
     create_process_map,
     list_process_maps,
     load_named_process_map,
     load_process_map,
     load_product_structure,
     normalize_process_map_reference,
+    propose_process_map_operations,
+    propose_process_map_revert,
     resolve_process_map_digest,
     save_named_process_map,
     save_process_map,
+    show_process_map_proposal,
     suggest_process_map_connections,
 )
 
@@ -10777,6 +10793,38 @@ class ProcessMapArchiveBody(BaseModel):
     baseRevision: str
 
 
+class ProcessMapBuilderProposalBody(BaseModel):
+    baseRevision: str
+    operations: List[Dict[str, Any]]
+
+
+class ProcessMapBuilderRevertProposalBody(BaseModel):
+    baseRevision: str
+    targetRevision: str
+
+
+class ProcessMapBuilderApprovalBody(BaseModel):
+    productId: str
+    mapId: str
+    baseRevision: str
+    diffHash: str
+    userId: str
+    sessionId: str
+    idempotencyKey: str
+    explicitApproval: bool = False
+
+
+class ProcessMapBuilderApplyBody(BaseModel):
+    approvalToken: str
+    productId: str
+    mapId: str
+    baseRevision: str
+    diffHash: str
+    userId: str
+    sessionId: str
+    idempotencyKey: str
+
+
 def _process_map_edit_enabled() -> bool:
     value = (os.getenv("INSPECTORPRO_PROCESS_MAP_EDIT") or "").strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -10785,6 +10833,16 @@ def _process_map_edit_enabled() -> bool:
 def _require_process_map_edit_enabled() -> None:
     if not _process_map_edit_enabled():
         raise HTTPException(status_code=404, detail="Process-map editor is not enabled")
+
+
+def _process_map_builder_write_enabled() -> bool:
+    value = (os.getenv("INSPECTORPRO_BUILDER_WRITE") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _require_process_map_builder_write_enabled() -> None:
+    if not _process_map_builder_write_enabled():
+        raise HTTPException(status_code=404, detail="Process-map Builder writes are not enabled")
 
 
 def _process_map_error_response(
@@ -10826,6 +10884,40 @@ def _process_map_error_response(
         status_code=500,
         content={"detail": "Process map operation failed"},
     )
+
+
+def _process_map_builder_error_response(
+    error: Exception,
+    *,
+    operation: str,
+    product_id: str,
+):
+    if isinstance(error, ProcessMapOperationError):
+        return JSONResponse(
+            status_code=422,
+            content={"error": error.code, "findings": [error.finding()]},
+        )
+    if isinstance(error, ProcessMapProposalNotFoundError):
+        return JSONResponse(status_code=404, content={"error": error.code, "detail": str(error)})
+    if isinstance(error, ProcessMapAuthorizationError):
+        return JSONResponse(status_code=403, content={"error": error.code, "detail": str(error)})
+    if isinstance(error, ProcessMapApprovalReplayError):
+        return JSONResponse(status_code=409, content={"error": error.code, "detail": str(error)})
+    if isinstance(error, ProcessMapBuilderError):
+        return JSONResponse(status_code=422, content={"error": error.code, "detail": str(error)})
+    if isinstance(error, ProcessMapAssetError):
+        return _process_map_error_response(
+            error,
+            operation=operation,
+            product_id=product_id,
+        )
+    logger.error(
+        "builder.process_map.%s failed product=%s msg=%s",
+        operation,
+        product_id,
+        error,
+    )
+    return JSONResponse(status_code=500, content={"detail": "Builder operation failed"})
 
 
 @app.get("/api/training/process-map/{productId}")
@@ -11066,6 +11158,202 @@ def training_process_map_put(productId: str, body: ProcessMapPutBody):
     except ProcessMapAssetError as ex:
         logger.error("training.process_map.put failed product=%s msg=%s", productId, ex)
         raise HTTPException(status_code=500, detail="Process map could not be loaded")
+    return {"success": True, **result}
+
+
+@app.get("/api/builder/process-maps/policy")
+def builder_process_map_policy():
+    """Expose non-secret policy metadata for an approval UI."""
+    _require_process_map_edit_enabled()
+    return {
+        "success": True,
+        "writeEnabled": _process_map_builder_write_enabled(),
+        **asset_write_policy_metadata(),
+    }
+
+
+@app.get("/api/builder/process-maps/{productId}")
+def builder_process_maps_list(productId: str):
+    _require_process_map_edit_enabled()
+    try:
+        result = builder_list_process_maps(PROCESS_MAP_TRAINING_ROOT, productId)
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="list", product_id=productId
+        )
+    return {"success": True, **result}
+
+
+@app.get("/api/builder/process-maps/{productId}/{mapId}")
+def builder_process_map_read(productId: str, mapId: str):
+    _require_process_map_edit_enabled()
+    try:
+        result = builder_read_process_map(
+            PROCESS_MAP_TRAINING_ROOT, productId, mapId
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="read", product_id=productId
+        )
+    return {"success": True, **result}
+
+
+@app.get("/api/builder/process-maps/{productId}/{mapId}/find")
+def builder_process_map_find(
+    productId: str,
+    mapId: str,
+    query: str = Query(..., min_length=1, max_length=240),
+    limit: int = Query(50, ge=1, le=200),
+):
+    _require_process_map_edit_enabled()
+    try:
+        result = builder_find_process_map_records(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            mapId,
+            query,
+            limit=limit,
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="find", product_id=productId
+        )
+    return {"success": True, **result}
+
+
+@app.get("/api/builder/process-maps/{productId}/{mapId}/validate")
+def builder_process_map_validate(productId: str, mapId: str):
+    _require_process_map_edit_enabled()
+    try:
+        result = builder_validate_process_map(
+            PROCESS_MAP_TRAINING_ROOT, productId, mapId
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="validate", product_id=productId
+        )
+    return {"success": True, **result}
+
+
+@app.get("/api/builder/process-maps/{productId}/{mapId}/revisions")
+def builder_process_map_revisions(productId: str, mapId: str):
+    _require_process_map_edit_enabled()
+    try:
+        result = builder_list_process_map_revisions(
+            PROCESS_MAP_TRAINING_ROOT, productId, mapId
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="revisions", product_id=productId
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/builder/process-maps/{productId}/{mapId}/proposals")
+def builder_process_map_propose(
+    productId: str,
+    mapId: str,
+    body: ProcessMapBuilderProposalBody,
+):
+    """Dry-run a Builder operation batch without writing any asset."""
+    _require_process_map_edit_enabled()
+    try:
+        result = propose_process_map_operations(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            mapId,
+            body.baseRevision,
+            body.operations,
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="propose", product_id=productId
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/builder/process-maps/{productId}/{mapId}/revert-proposals")
+def builder_process_map_revert_propose(
+    productId: str,
+    mapId: str,
+    body: ProcessMapBuilderRevertProposalBody,
+):
+    """Propose a forward revision from one retained named revision."""
+    _require_process_map_edit_enabled()
+    try:
+        result = propose_process_map_revert(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            mapId,
+            body.baseRevision,
+            body.targetRevision,
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="propose_revert", product_id=productId
+        )
+    return {"success": True, **result}
+
+
+@app.get("/api/builder/process-map-proposals/{proposalId}")
+def builder_process_map_show_diff(proposalId: str):
+    _require_process_map_edit_enabled()
+    try:
+        result = show_process_map_proposal(proposalId)
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="show_diff", product_id="proposal"
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/builder/process-map-proposals/{proposalId}/approve")
+def builder_process_map_approve(
+    proposalId: str,
+    body: ProcessMapBuilderApprovalBody,
+):
+    _require_process_map_edit_enabled()
+    _require_process_map_builder_write_enabled()
+    try:
+        result = approve_process_map_proposal(
+            PROCESS_MAP_TRAINING_ROOT,
+            proposalId,
+            product_id=body.productId,
+            map_id=body.mapId,
+            base_revision=body.baseRevision,
+            diff_hash_value=body.diffHash,
+            user_id=body.userId,
+            session_id=body.sessionId,
+            idempotency_key=body.idempotencyKey,
+            explicit_approval=body.explicitApproval,
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="approve", product_id=body.productId
+        )
+    return {"success": True, **result}
+
+
+@app.post("/api/builder/process-map-apply")
+def builder_process_map_apply(body: ProcessMapBuilderApplyBody):
+    _require_process_map_edit_enabled()
+    _require_process_map_builder_write_enabled()
+    try:
+        result = apply_approved_process_map_operations(
+            PROCESS_MAP_TRAINING_ROOT,
+            body.approvalToken,
+            product_id=body.productId,
+            map_id=body.mapId,
+            base_revision=body.baseRevision,
+            diff_hash_value=body.diffHash,
+            user_id=body.userId,
+            session_id=body.sessionId,
+            idempotency_key=body.idempotencyKey,
+        )
+    except Exception as ex:
+        return _process_map_builder_error_response(
+            ex, operation="apply", product_id=body.productId
+        )
     return {"success": True, **result}
 
 
@@ -24941,4 +25229,3 @@ app.mount("/generated", StaticFiles(directory="generated"), name="generated")
 
 # Mount static files directory (must be after specific routes)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-

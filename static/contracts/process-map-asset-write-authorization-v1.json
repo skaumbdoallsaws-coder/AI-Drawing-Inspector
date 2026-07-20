@@ -1,0 +1,111 @@
+{
+  "contractVersion": 1,
+  "allowedActions": [
+    "apply_operations",
+    "revert_to_revision"
+  ],
+  "constraints": {
+    "diffHashPattern": "^[0-9a-f]{64}$",
+    "idempotencyKeyPattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$",
+    "identityMaxLength": 128,
+    "requireExplicitApproval": true
+  },
+  "cases": [
+    {
+      "id": "explicit-apply-is-authorized",
+      "request": {
+        "action": "apply_operations",
+        "explicitApproval": true,
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": "fixture-apply-0001"
+      },
+      "authorized": true,
+      "reason": "authorized"
+    },
+    {
+      "id": "revert-uses-the-same-explicit-gate",
+      "request": {
+        "action": "revert_to_revision",
+        "explicitApproval": true,
+        "productId": "fixture-product",
+        "mapId": "pm-deadbeef",
+        "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": "fixture-revert-001"
+      },
+      "authorized": true,
+      "reason": "authorized"
+    },
+    {
+      "id": "implicit-approval-is-denied",
+      "request": {
+        "action": "apply_operations",
+        "explicitApproval": false,
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": "fixture-apply-0002"
+      },
+      "authorized": false,
+      "reason": "explicit_approval_required"
+    },
+    {
+      "id": "unknown-action-is-denied",
+      "request": {
+        "action": "write_asset",
+        "explicitApproval": true,
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": "fixture-apply-0003"
+      },
+      "authorized": false,
+      "reason": "action_not_allowed"
+    },
+    {
+      "id": "malformed-diff-hash-is-denied",
+      "request": {
+        "action": "apply_operations",
+        "explicitApproval": true,
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "not-a-hash",
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": "fixture-apply-0004"
+      },
+      "authorized": false,
+      "reason": "invalid_diff_hash"
+    },
+    {
+      "id": "weak-idempotency-key-is-denied",
+      "request": {
+        "action": "apply_operations",
+        "explicitApproval": true,
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": "short"
+      },
+      "authorized": false,
+      "reason": "invalid_idempotency_key"
+    }
+  ]
+}

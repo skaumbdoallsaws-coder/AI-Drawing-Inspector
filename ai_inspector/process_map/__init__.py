@@ -39,6 +39,8 @@ from .schema_v3 import (
     CANVAS_NODE_KINDS,
     GROUP_COLOR_KEYS,
     JUNCTION_TYPES,
+    MAX_DISMISSED_SUGGESTIONS,
+    MAX_SUGGESTION_ID_LENGTH,
     PORT_ORIENTATIONS,
     PORT_ORDERS,
     PROCESS_MAP_LAYOUT_VERSION,
@@ -51,6 +53,11 @@ from .schema_v3 import (
     validate_placement_map,
     validate_product_structure,
 )
+from .suggest import (
+    PROCESS_MAP_SUGGESTION_LIMIT,
+    PROCESS_MAP_SUGGESTION_SCHEMA_VERSION,
+    suggest_process_map_connections,
+)
 
 __all__ = [
     "EDGE_KINDS",
@@ -62,10 +69,14 @@ __all__ = [
     "PROCESS_MAP_STATUSES",
     "PROCESS_MAP_DIGEST_MAX_TOKENS",
     "PROCESS_MAP_DIGEST_VERSION",
+    "PROCESS_MAP_SUGGESTION_LIMIT",
+    "PROCESS_MAP_SUGGESTION_SCHEMA_VERSION",
     "PRODUCT_STRUCTURE_SCHEMA_VERSION",
     "PRODUCT_KINDS",
     "CANVAS_NODE_KINDS",
     "JUNCTION_TYPES",
+    "MAX_DISMISSED_SUGGESTIONS",
+    "MAX_SUGGESTION_ID_LENGTH",
     "PORT_ORIENTATIONS",
     "PORT_ORDERS",
     "PROCESS_STEP_TYPES",
@@ -90,6 +101,7 @@ __all__ = [
     "resolve_process_map_digest",
     "save_named_process_map",
     "save_process_map",
+    "suggest_process_map_connections",
     "migrate_to_placement_map",
     "product_structure_from_legacy",
     "validate_placement_map",

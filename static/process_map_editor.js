@@ -25,6 +25,8 @@
     const MAX_REFERENCE_DETAILS_LENGTH = 1000;
     const MAX_REFERENCES_PER_TARGET = 24;
     const MAX_REFERENCE_CATALOG_ITEMS = 500;
+    const MAX_DISMISSED_SUGGESTIONS = 500;
+    const MAX_SUGGESTION_ID_LENGTH = 128;
     const PROCESS_MAP_LAYOUT_VERSION = 2;
     const GROUP_COLOR_KEYS = [
         'orange', 'blue', 'green', 'purple', 'red', 'teal', 'gray', 'yellow',
@@ -234,6 +236,56 @@
         edges.push(candidate);
         setMapEdges(next, edges);
         return next;
+    }
+
+    function mapDismissedSuggestions(processMap) {
+        return Array.isArray(processMap && processMap.dismissedSuggestions)
+            ? processMap.dismissedSuggestions
+            : [];
+    }
+
+    function dismissSuggestion(processMap, suggestionId) {
+        const next = cloneMap(processMap);
+        const cleanId = typeof suggestionId === 'string' ? suggestionId.trim() : '';
+        if (!cleanId || cleanId.length > MAX_SUGGESTION_ID_LENGTH) return next;
+        const dismissed = mapDismissedSuggestions(next).slice();
+        if (dismissed.indexOf(cleanId) >= 0 || dismissed.length >= MAX_DISMISSED_SUGGESTIONS) {
+            return next;
+        }
+        dismissed.push(cleanId);
+        next.dismissedSuggestions = dismissed;
+        return next;
+    }
+
+    function acceptSuggestions(processMap, suggestions) {
+        let next = cloneMap(processMap);
+        const accepted = [];
+        const skipped = [];
+        (Array.isArray(suggestions) ? suggestions : []).forEach(function (suggestion) {
+            const suggestionId = String(suggestion && suggestion.suggestionId || '');
+            const edge = suggestion && suggestion.edge;
+            if (!edge) {
+                skipped.push({ suggestionId: suggestionId, reason: 'not_an_edge' });
+                return;
+            }
+            if (suggestion.validation && suggestion.validation.wouldCreateCycle) {
+                skipped.push({ suggestionId: suggestionId, reason: 'would_create_cycle' });
+                return;
+            }
+            const candidate = addEdge(next, edge);
+            if (mapFingerprint(candidate) === mapFingerprint(next)) {
+                skipped.push({ suggestionId: suggestionId, reason: 'duplicate_or_invalid' });
+                return;
+            }
+            if (String(edge.kind || 'precedence') === 'precedence'
+                && hasPrecedenceCycle(candidate)) {
+                skipped.push({ suggestionId: suggestionId, reason: 'would_create_cycle' });
+                return;
+            }
+            next = candidate;
+            accepted.push(suggestionId);
+        });
+        return { map: next, accepted: accepted, skipped: skipped };
     }
 
     function _junctionHasUserMetadata(node) {
@@ -1326,6 +1378,12 @@
         this.saving = false;
         this.conflict = false;
         this.operationError = '';
+        this.suggestions = [];
+        this.suggestionsRevision = null;
+        this.suggestionsLoading = false;
+        this.suggestionsError = '';
+        this.suggestionPanelOpen = false;
+        this.suggestionRequestToken = 0;
         this.edgeCounter = 0;
         this.nodeCounter = 0;
         this.referenceCounter = 0;
@@ -1345,6 +1403,7 @@
         this._build();
         this._initializeCardToolbar();
         this.renderGraph({ fit: true });
+        this._scheduleSuggestionLoad();
     }
 
     ProcessMapEditor.prototype._build = function () {
@@ -1378,6 +1437,14 @@
                 this.analyze.bind(this)
             );
             this.toolbarActions.appendChild(this.analyzeButton);
+        }
+        if (typeof this.options.onLoadSuggestions === 'function') {
+            this.suggestionButton = this._button(
+                'Suggestions',
+                'Review evidence-backed process-flow suggestions',
+                this.toggleSuggestionPanel.bind(this)
+            );
+            this.toolbarActions.appendChild(this.suggestionButton);
         }
         if (this.editable) {
             this.undoButton = this._button('Undo', 'Undo process-map edit', this.undo.bind(this));
@@ -1531,6 +1598,13 @@
         this.root.appendChild(this.toolbar);
         this.workspace.appendChild(this.structureSidebar);
         this.workspace.appendChild(this.viewport);
+        if (this.suggestionButton) {
+            this.suggestionPanel = document.createElement('aside');
+            this.suggestionPanel.className = 'pm-suggestion-panel';
+            this.suggestionPanel.setAttribute('aria-label', 'Process-flow suggestions');
+            this.suggestionPanel.hidden = true;
+            this.workspace.appendChild(this.suggestionPanel);
+        }
         this.root.appendChild(this.workspace);
         this.host.appendChild(this.root);
 
@@ -2950,6 +3024,61 @@
         }, this);
     };
 
+    ProcessMapEditor.prototype._renderGhostEdges = function () {
+        if (this.suggestionsRevision !== String(this.revision || '')) return;
+        this.suggestions.forEach(function (suggestion) {
+            const edge = suggestion && suggestion.edge;
+            if (!edge || !edge.from || !edge.to) return;
+            const fromPosition = this.positions[edge.from.nodeId];
+            const toPosition = this.positions[edge.to.nodeId];
+            if (!fromPosition || !toPosition) return;
+            const pathValue = bezierPath(
+                portAnchor(fromPosition, 'out'),
+                portAnchor(toPosition, 'in'),
+                fromPosition.portOrientation,
+                toPosition.portOrientation,
+                fromPosition.portOrder,
+                toPosition.portOrder
+            );
+            const invalid = !!(
+                suggestion.validation && suggestion.validation.wouldCreateCycle
+            );
+            const suggestionId = String(suggestion.suggestionId || '');
+            const hit = svgElement('path', {
+                d: pathValue,
+                class: 'pm-ghost-edge-hit',
+                'data-suggestion-id': suggestionId,
+                tabindex: '0',
+                role: 'button',
+                'aria-label': invalid
+                    ? 'Review blocked connection suggestion'
+                    : 'Review connection suggestion',
+            });
+            hit.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.focusSuggestion(suggestionId);
+            }.bind(this));
+            hit.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    this.focusSuggestion(suggestionId);
+                }
+            }.bind(this));
+            this.edgeSvg.appendChild(hit);
+            const path = svgElement('path', {
+                d: pathValue,
+                class: 'pm-edge pm-edge-ghost' + (invalid ? ' invalid' : ''),
+                'marker-end': 'url(#' + this.instanceId + ')',
+                'data-suggestion-id': suggestionId,
+            });
+            const title = svgElement('title');
+            title.textContent = String(suggestion.explanation || 'Proposed connection');
+            path.appendChild(title);
+            this.edgeSvg.appendChild(path);
+        }, this);
+    };
+
     ProcessMapEditor.prototype.renderGraph = function (renderOptions) {
         const opts = renderOptions || {};
         const placements = scopedNodes(this.processMap, this.focusNodeId);
@@ -2985,6 +3114,7 @@
         this.edgeSvg.setAttribute('height', worldHeight);
         this.edgeSvg.setAttribute('viewBox', '0 0 ' + worldWidth + ' ' + worldHeight);
         this.renderGroups();
+        this._renderGhostEdges();
 
         const labeledLogicalConnections = new Set();
         edges.forEach(function (edge) {
@@ -3397,6 +3527,15 @@
         if (this.analyzeButton) {
             this.analyzeButton.disabled = this.saving || this.conflict || this.hasStructuralErrors();
         }
+        if (this.suggestionButton) {
+            const suggestionCount = this.suggestions.length;
+            this.suggestionButton.textContent = this.suggestionsLoading
+                ? 'Suggestions...'
+                : ('Suggestions' + (suggestionCount ? ' ' + suggestionCount : ''));
+            this.suggestionButton.disabled = this.saving || this.conflict || !this.revision
+                || (this.dirty && !suggestionCount);
+            this.suggestionButton.classList.toggle('active', this.suggestionPanelOpen);
+        }
         if (this.saveButton) {
             this.saveButton.disabled = !this.dirty || this.saving || this.conflict || this.hasStructuralErrors();
             this.saveButton.textContent = this.saving ? 'Saving...' : 'Save';
@@ -3443,6 +3582,7 @@
             this.status.className = 'pm-editor-status';
         }
         this._refreshCardToolbar();
+        this._renderSuggestionPanel();
     };
 
     ProcessMapEditor.prototype._setDirty = function (dirty) {
@@ -3460,11 +3600,13 @@
         }
     };
 
-    ProcessMapEditor.prototype.commitMutation = function (nextMap) {
+    ProcessMapEditor.prototype.commitMutation = function (nextMap, mutationOptions) {
+        const opts = mutationOptions || {};
         if (!this.editable || this.conflict
             || mapFingerprint(nextMap) === mapFingerprint(this.processMap)) return false;
         this.history.record(this.processMap);
         this.processMap = cloneMap(nextMap);
+        if (!opts.preserveSuggestions) this._clearSuggestions();
         this.findings = [];
         this.conflict = false;
         this.operationError = '';
@@ -3616,9 +3758,11 @@
         this.selectedEdgeId = null;
         this.selectedNodeId = null;
         this.selectedGroupId = null;
+        this._clearSuggestions();
         this._setDirty(mapFingerprint(this.processMap) !== this.savedFingerprint);
         this._notifyMapChange();
         this.renderGraph({ fit: false });
+        if (!this.dirty) this._scheduleSuggestionLoad();
         return true;
     };
 
@@ -3632,9 +3776,11 @@
         this.selectedEdgeId = null;
         this.selectedNodeId = null;
         this.selectedGroupId = null;
+        this._clearSuggestions();
         this._setDirty(mapFingerprint(this.processMap) !== this.savedFingerprint);
         this._notifyMapChange();
         this.renderGraph({ fit: false });
+        if (!this.dirty) this._scheduleSuggestionLoad();
         return true;
     };
 
@@ -3647,11 +3793,13 @@
         this.savedMap = cloneMap(this.processMap);
         this.savedFingerprint = mapFingerprint(this.savedMap);
         this.history.clear();
+        this._clearSuggestions();
         this.conflict = false;
         this.operationError = '';
         this._setDirty(false);
         this._notifyMapChange();
         this.renderGraph({ fit: false });
+        this._scheduleSuggestionLoad();
     };
 
     ProcessMapEditor.prototype.save = async function () {
@@ -3677,7 +3825,266 @@
         } finally {
             this.saving = false;
             this.updateEditControls();
+            if (!this.dirty) this._scheduleSuggestionLoad();
         }
+    };
+
+    ProcessMapEditor.prototype._clearSuggestions = function () {
+        this.suggestionRequestToken += 1;
+        this.suggestions = [];
+        this.suggestionsRevision = null;
+        this.suggestionsLoading = false;
+        this.suggestionsError = '';
+        this.focusedSuggestionId = null;
+    };
+
+    ProcessMapEditor.prototype._scheduleSuggestionLoad = function () {
+        if (this.destroyed || this.dirty || this.saving || this.conflict
+            || !this.revision || typeof this.options.onLoadSuggestions !== 'function') return;
+        const schedule = typeof setTimeout === 'function'
+            ? setTimeout
+            : function (callback) { callback(); };
+        schedule(function () {
+            if (!this.destroyed) this.loadSuggestions();
+        }.bind(this), 0);
+    };
+
+    ProcessMapEditor.prototype.loadSuggestions = async function () {
+        if (this.destroyed || this.dirty || this.saving || this.conflict
+            || !this.revision || typeof this.options.onLoadSuggestions !== 'function') {
+            return false;
+        }
+        const revision = String(this.revision);
+        const requestToken = ++this.suggestionRequestToken;
+        this.suggestionsLoading = true;
+        this.suggestionsError = '';
+        this.updateEditControls();
+        try {
+            const payload = await this.options.onLoadSuggestions({
+                productId: String(this.processMap.productId || ''),
+                mapId: String(this.processMap.mapId || 'default'),
+                revision: revision,
+            });
+            if (this.destroyed || requestToken !== this.suggestionRequestToken
+                || this.dirty || String(this.revision || '') !== revision) return false;
+            if (!payload || payload.ok === false) {
+                this.suggestions = [];
+                this.suggestionsRevision = null;
+                if (payload && payload.status === 409) {
+                    this.conflict = true;
+                    this.suggestionsError = 'The saved map changed. Reload before reviewing suggestions.';
+                } else {
+                    this.suggestionsError = 'Suggestions are temporarily unavailable.';
+                }
+                return false;
+            }
+            if (String(payload.revision || '') !== revision) {
+                this.suggestions = [];
+                this.suggestionsRevision = null;
+                this.suggestionsError = 'Suggestions were returned for a different map revision.';
+                return false;
+            }
+            this.suggestions = Array.isArray(payload.suggestions)
+                ? cloneMap(payload.suggestions)
+                : [];
+            this.suggestionsRevision = revision;
+            this.suggestionsError = '';
+            this.renderGraph({ fit: false });
+            return true;
+        } catch (error) {
+            if (requestToken === this.suggestionRequestToken) {
+                this.suggestions = [];
+                this.suggestionsRevision = null;
+                this.suggestionsError = 'Suggestions are temporarily unavailable.';
+            }
+            return false;
+        } finally {
+            if (requestToken === this.suggestionRequestToken) {
+                this.suggestionsLoading = false;
+                this.updateEditControls();
+            }
+        }
+    };
+
+    ProcessMapEditor.prototype.toggleSuggestionPanel = function () {
+        if (!this.suggestionPanel) return false;
+        this.suggestionPanelOpen = !this.suggestionPanelOpen;
+        this._renderSuggestionPanel();
+        if (this.suggestionPanelOpen && !this.suggestions.length
+            && !this.suggestionsLoading && !this.dirty) {
+            this.loadSuggestions();
+        }
+        return true;
+    };
+
+    ProcessMapEditor.prototype.focusSuggestion = function (suggestionId) {
+        if (!this.suggestionPanel) return false;
+        this.focusedSuggestionId = suggestionId;
+        this.suggestionPanelOpen = true;
+        this._renderSuggestionPanel();
+        const item = this.suggestionPanel.querySelector(
+            '[data-suggestion-id="' + suggestionId + '"]'
+        );
+        if (item && typeof item.scrollIntoView === 'function') {
+            item.scrollIntoView({ block: 'nearest' });
+        }
+        return true;
+    };
+
+    ProcessMapEditor.prototype._renderSuggestionPanel = function () {
+        if (!this.suggestionPanel) return;
+        this.suggestionPanel.hidden = !this.suggestionPanelOpen;
+        this.suggestionPanel.innerHTML = '';
+        if (!this.suggestionPanelOpen) return;
+
+        const header = document.createElement('div');
+        header.className = 'pm-suggestion-panel-header';
+        const heading = document.createElement('div');
+        heading.className = 'pm-suggestion-panel-title';
+        heading.textContent = 'Flow suggestions';
+        const close = this._button('x', 'Close suggestions', function () {
+            this.suggestionPanelOpen = false;
+            this._renderSuggestionPanel();
+        }.bind(this));
+        header.appendChild(heading);
+        header.appendChild(close);
+        this.suggestionPanel.appendChild(header);
+
+        if (this.suggestionsLoading) {
+            const loading = document.createElement('div');
+            loading.className = 'pm-suggestion-empty';
+            loading.textContent = 'Reviewing saved flow evidence...';
+            this.suggestionPanel.appendChild(loading);
+            return;
+        }
+        if (this.suggestionsError) {
+            const error = document.createElement('div');
+            error.className = 'pm-suggestion-empty error';
+            error.textContent = this.suggestionsError;
+            this.suggestionPanel.appendChild(error);
+            return;
+        }
+        if (!this.suggestions.length) {
+            const empty = document.createElement('div');
+            empty.className = 'pm-suggestion-empty';
+            empty.textContent = 'No evidence-backed suggestions for this saved revision.';
+            this.suggestionPanel.appendChild(empty);
+            return;
+        }
+
+        const edgeSuggestions = this.suggestions.filter(function (suggestion) {
+            return suggestion && suggestion.edge
+                && !(suggestion.validation && suggestion.validation.wouldCreateCycle);
+        });
+        if (edgeSuggestions.length > 1 && this.editable && !this.dirty) {
+            const acceptAll = this._button(
+                'Accept all safe',
+                'Accept every currently valid connection suggestion',
+                this.acceptAllSuggestions.bind(this)
+            );
+            acceptAll.classList.add('pm-suggestion-accept-all');
+            this.suggestionPanel.appendChild(acceptAll);
+        }
+
+        const list = document.createElement('div');
+        list.className = 'pm-suggestion-list';
+        this.suggestions.forEach(function (suggestion) {
+            const item = document.createElement('section');
+            item.className = 'pm-suggestion-item';
+            if (suggestion.suggestionId === this.focusedSuggestionId) {
+                item.classList.add('focused');
+            }
+            item.setAttribute('data-suggestion-id', suggestion.suggestionId || '');
+            const meta = document.createElement('div');
+            meta.className = 'pm-suggestion-meta';
+            const kind = suggestion.edge ? 'Connection' : 'Resource review';
+            meta.textContent = kind + ' / ' + String(suggestion.confidence || 'review') + ' confidence';
+            const explanation = document.createElement('div');
+            explanation.className = 'pm-suggestion-explanation';
+            explanation.textContent = String(suggestion.explanation || 'Review this suggestion.');
+            item.appendChild(meta);
+            item.appendChild(explanation);
+            if (suggestion.validation && suggestion.validation.wouldCreateCycle) {
+                const warning = document.createElement('div');
+                warning.className = 'pm-suggestion-warning';
+                warning.textContent = 'Not applicable: this connection would create a precedence cycle.';
+                item.appendChild(warning);
+            }
+            const provenance = document.createElement('div');
+            provenance.className = 'pm-suggestion-provenance';
+            (Array.isArray(suggestion.provenance) ? suggestion.provenance : []).forEach(
+                function (evidence) {
+                    const tag = document.createElement('span');
+                    tag.textContent = String(evidence.source || 'evidence').replaceAll('_', ' ');
+                    provenance.appendChild(tag);
+                }
+            );
+            item.appendChild(provenance);
+            const actions = document.createElement('div');
+            actions.className = 'pm-suggestion-actions';
+            if (suggestion.edge) {
+                const accept = this._button(
+                    'Accept',
+                    'Add this proposed connection',
+                    this.acceptSuggestion.bind(this, suggestion.suggestionId)
+                );
+                accept.disabled = !this.editable || !!(
+                    suggestion.validation && suggestion.validation.wouldCreateCycle
+                );
+                actions.appendChild(accept);
+            }
+            const dismiss = this._button(
+                'Dismiss',
+                'Hide this exact evidence-backed suggestion',
+                this.dismissProcessSuggestion.bind(this, suggestion.suggestionId)
+            );
+            dismiss.disabled = !this.editable;
+            actions.appendChild(dismiss);
+            item.appendChild(actions);
+            list.appendChild(item);
+        }, this);
+        this.suggestionPanel.appendChild(list);
+    };
+
+    ProcessMapEditor.prototype.acceptSuggestion = function (suggestionId) {
+        const suggestion = this.suggestions.find(function (item) {
+            return item && item.suggestionId === suggestionId;
+        });
+        if (!suggestion) return false;
+        const result = acceptSuggestions(this.processMap, [suggestion]);
+        if (!result.accepted.length) {
+            this.operationError = result.skipped.length
+                ? 'This suggestion is no longer valid for the current map.'
+                : 'No connection was added.';
+            this.updateEditControls();
+            return false;
+        }
+        return this.commitMutation(result.map);
+    };
+
+    ProcessMapEditor.prototype.acceptAllSuggestions = function () {
+        const result = acceptSuggestions(this.processMap, this.suggestions);
+        if (!result.accepted.length) {
+            this.operationError = 'No valid connection suggestions are available.';
+            this.updateEditControls();
+            return false;
+        }
+        const changed = this.commitMutation(result.map);
+        if (changed && result.skipped.length) {
+            this.operationError = result.skipped.length + ' suggestion(s) were skipped by validation.';
+            this.updateEditControls();
+        }
+        return changed;
+    };
+
+    ProcessMapEditor.prototype.dismissProcessSuggestion = function (suggestionId) {
+        const nextMap = dismissSuggestion(this.processMap, suggestionId);
+        if (mapFingerprint(nextMap) === mapFingerprint(this.processMap)) return false;
+        this.suggestions = this.suggestions.filter(function (item) {
+            return item && item.suggestionId !== suggestionId;
+        });
+        this.focusedSuggestionId = null;
+        return this.commitMutation(nextMap, { preserveSuggestions: true });
     };
 
     ProcessMapEditor.prototype.analyze = async function () {
@@ -3708,6 +4115,7 @@
             this.savedMap = cloneMap(this.processMap);
             this.savedFingerprint = mapFingerprint(this.savedMap);
             this.history.clear();
+            this._clearSuggestions();
             this.conflict = false;
             this.operationError = '';
             this._setDirty(false);
@@ -3717,6 +4125,7 @@
         } finally {
             this.saving = false;
             this.updateEditControls();
+            if (!this.dirty) this._scheduleSuggestionLoad();
         }
     };
 
@@ -3724,12 +4133,14 @@
         if (!this.dirty) return;
         this.processMap = cloneMap(this.savedMap);
         this.history.clear();
+        this._clearSuggestions();
         this.findings = [];
         this.conflict = false;
         this.operationError = '';
         this._setDirty(false);
         this._notifyMapChange();
         this.renderGraph({ fit: false });
+        this._scheduleSuggestionLoad();
     };
 
     ProcessMapEditor.prototype.setProductStructure = function (structure) {
@@ -4129,7 +4540,9 @@
     };
 
     ProcessMapEditor.prototype.pointerDown = function (event) {
-        if (event.button !== 0 || event.target.closest('.pm-node, .pm-junction, button, .pm-edge-hit')) return;
+        if (event.button !== 0 || event.target.closest(
+            '.pm-node, .pm-junction, button, .pm-edge-hit, .pm-ghost-edge-hit'
+        )) return;
         this.interaction = {
             mode: 'pan',
             pointerId: event.pointerId,
@@ -4397,6 +4810,8 @@
 
     ProcessMapEditor.prototype.destroy = function () {
         this.destroyed = true;
+        this._clearSuggestions();
+        this.suggestionPanelOpen = false;
         if (this.cardToolbarManager) {
             this.cardToolbarManager.destroy();
             this.cardToolbarManager = null;
@@ -4446,6 +4861,7 @@
         MAX_NODE_NOTE_LENGTH: MAX_NODE_NOTE_LENGTH,
         MAX_REFERENCE_CATALOG_ITEMS: MAX_REFERENCE_CATALOG_ITEMS,
         MAX_REFERENCES_PER_TARGET: MAX_REFERENCES_PER_TARGET,
+        MAX_DISMISSED_SUGGESTIONS: MAX_DISMISSED_SUGGESTIONS,
         REFERENCE_KINDS: REFERENCE_KINDS,
         PROCESS_MAP_LAYOUT_VERSION: PROCESS_MAP_LAYOUT_VERSION,
         GROUP_COLOR_KEYS: GROUP_COLOR_KEYS,
@@ -4453,6 +4869,7 @@
         MIN_GROUP_HEIGHT: MIN_GROUP_HEIGHT,
         SnapshotHistory: SnapshotHistory,
         addEdge: addEdge,
+        acceptSuggestions: acceptSuggestions,
         addCanvasNode: addCanvasNode,
         addGroup: addGroup,
         addConnectedProcessStep: addConnectedProcessStep,
@@ -4468,6 +4885,7 @@
         layeredLayout: layeredLayout,
         mapFingerprint: mapFingerprint,
         mapEdges: mapEdges,
+        mapDismissedSuggestions: mapDismissedSuggestions,
         mapGroups: mapGroups,
         mapNodes: mapNodes,
         mapReferenceCatalog: mapReferenceCatalog,
@@ -4499,6 +4917,7 @@
         referenceItemsForTarget: referenceItemsForTarget,
         attachProcessReference: attachProcessReference,
         detachProcessReference: detachProcessReference,
+        dismissSuggestion: dismissSuggestion,
         referenceSummary: referenceSummary,
         scopedNodes: scopedNodes,
         splitEdgeWithJunction: splitEdgeWithJunction,

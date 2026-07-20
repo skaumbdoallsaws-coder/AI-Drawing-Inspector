@@ -5595,6 +5595,7 @@
             min-width: 0;
         }
         .pm-workspace {
+            position: relative;
             display: grid;
             grid-template-columns: 300px minmax(0, 1fr);
             min-width: 0;
@@ -5799,6 +5800,95 @@
             cursor: default;
             opacity: 0.35;
         }
+        .pm-toolbar-button.active {
+            border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+            background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+            color: var(--accent);
+        }
+        .pm-suggestion-panel {
+            position: absolute;
+            z-index: 3;
+            top: 12px;
+            right: 12px;
+            bottom: 12px;
+            width: min(340px, calc(100% - 24px));
+            overflow: hidden;
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            background: var(--bg-panel);
+            box-shadow: 0 12px 30px var(--shadow-color);
+            color: var(--text-primary);
+        }
+        .pm-suggestion-panel[hidden] { display: none; }
+        .pm-suggestion-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 42px;
+            padding: 0 8px 0 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .pm-suggestion-panel-title {
+            font-size: 11px;
+            font-weight: 800;
+        }
+        .pm-suggestion-empty {
+            color: var(--text-secondary);
+            font-size: 10px;
+            line-height: 1.5;
+            padding: 18px 14px;
+        }
+        .pm-suggestion-empty.error,
+        .pm-suggestion-warning { color: #b1463c; }
+        .pm-suggestion-accept-all {
+            margin: 8px 12px 4px;
+            border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+        }
+        .pm-suggestion-list {
+            max-height: calc(100% - 48px);
+            overflow-y: auto;
+            padding: 4px 0 12px;
+        }
+        .pm-suggestion-item {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .pm-suggestion-item.focused {
+            background: color-mix(in srgb, var(--accent) 8%, transparent);
+            box-shadow: inset 3px 0 0 var(--accent);
+        }
+        .pm-suggestion-meta {
+            color: var(--text-secondary);
+            font-size: 8px;
+            font-weight: 750;
+            text-transform: uppercase;
+        }
+        .pm-suggestion-explanation {
+            margin-top: 5px;
+            font-size: 10px;
+            font-weight: 650;
+            line-height: 1.4;
+        }
+        .pm-suggestion-warning {
+            margin-top: 6px;
+            font-size: 9px;
+            line-height: 1.35;
+        }
+        .pm-suggestion-provenance,
+        .pm-suggestion-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 8px;
+        }
+        .pm-suggestion-provenance span {
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--text-secondary);
+            font-size: 8px;
+            padding: 2px 5px;
+        }
+        .pm-suggestion-actions { justify-content: flex-end; }
         .pm-type-select,
         .pm-port-orientation-select,
         .pm-port-order-select {
@@ -6362,6 +6452,21 @@
         .pm-edge.invalid {
             stroke: #d34f45;
             stroke-dasharray: 5 4;
+        }
+        .pm-edge-ghost {
+            stroke: #b7741b;
+            stroke-dasharray: 7 5;
+            stroke-width: 2.5;
+            opacity: 0.92;
+        }
+        html[data-theme="dark"] .pm-edge-ghost { stroke: #e0a244; }
+        .pm-ghost-edge-hit {
+            fill: none;
+            stroke: transparent;
+            stroke-width: 18;
+            vector-effect: non-scaling-stroke;
+            pointer-events: stroke;
+            cursor: pointer;
         }
         .pm-edge-pending {
             stroke: var(--accent);
@@ -26237,6 +26342,29 @@
             return true;
         }
 
+        async function _trainLoadProcessFlowSuggestions(reference) {
+            const productId = String(reference && reference.productId || '');
+            const mapId = String(reference && reference.mapId || 'default');
+            const revision = String(reference && reference.revision || '');
+            if (!productId || !mapId || !revision) {
+                return { ok: false, status: 400, error: 'missing_map_identity' };
+            }
+            const url = '/api/training/process-maps/'
+                + encodeURIComponent(productId) + '/' + encodeURIComponent(mapId)
+                + '/suggestions?revision=' + encodeURIComponent(revision);
+            const response = await fetch(url, { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    status: response.status,
+                    error: payload.error || payload.detail || 'suggestions_failed',
+                    currentRevision: payload.currentRevision || null,
+                };
+            }
+            return { ok: true, ...payload };
+        }
+
         function _trainRenderProcessFlow() {
             const host = document.getElementById('trainViewportHost');
             const runtime = window.InspectorProProcessMap;
@@ -26271,6 +26399,7 @@
                 onSave: _trainSaveProcessFlowMap,
                 onReload: _trainReloadProcessFlowMap,
                 onAnalyze: _trainAnalyzeProcessFlow,
+                onLoadSuggestions: _trainLoadProcessFlowSuggestions,
                 onExit: () => {
                     trainingState.viewportMode = 'structure';
                     trainingState.processMapFlowFocusNodeId = null;

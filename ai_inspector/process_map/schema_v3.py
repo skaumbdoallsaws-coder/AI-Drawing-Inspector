@@ -28,6 +28,8 @@ MAX_REFERENCE_CLAUSE_LENGTH = 120
 MAX_REFERENCE_DETAILS_LENGTH = 1000
 MAX_REFERENCES_PER_TARGET = 24
 MAX_REFERENCE_CATALOG_ITEMS = 500
+MAX_DISMISSED_SUGGESTIONS = 500
+MAX_SUGGESTION_ID_LENGTH = 128
 GROUP_COLOR_KEYS = frozenset(
     {"orange", "blue", "green", "purple", "red", "teal", "gray", "yellow"}
 )
@@ -543,6 +545,53 @@ def validate_placement_map(
                 f"canvasGroups require layoutVersion {PROCESS_MAP_LAYOUT_VERSION}.",
             )
         )
+
+    dismissed_suggestions = process_map.get("dismissedSuggestions", [])
+    if not isinstance(dismissed_suggestions, list):
+        findings.append(
+            _finding(
+                "error",
+                "dismissed_suggestions_not_array",
+                "dismissedSuggestions must be an array.",
+            )
+        )
+        dismissed_suggestions = []
+    if len(dismissed_suggestions) > MAX_DISMISSED_SUGGESTIONS:
+        findings.append(
+            _finding(
+                "error",
+                "dismissed_suggestions_too_large",
+                (
+                    "dismissedSuggestions can contain at most "
+                    f"{MAX_DISMISSED_SUGGESTIONS} items."
+                ),
+            )
+        )
+    seen_dismissed_suggestions: Set[str] = set()
+    for index, value in enumerate(dismissed_suggestions):
+        suggestion_id = _clean_id(value)
+        if suggestion_id is None or len(suggestion_id) > MAX_SUGGESTION_ID_LENGTH:
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_dismissed_suggestion",
+                    (
+                        f"Dismissed suggestion at index {index} must contain 1 to "
+                        f"{MAX_SUGGESTION_ID_LENGTH} characters."
+                    ),
+                )
+            )
+            continue
+        if suggestion_id in seen_dismissed_suggestions:
+            findings.append(
+                _finding(
+                    "error",
+                    "duplicate_dismissed_suggestion",
+                    f"Dismissed suggestion id '{suggestion_id}' is duplicated.",
+                )
+            )
+            continue
+        seen_dismissed_suggestions.add(suggestion_id)
 
     catalog = process_map.get("referenceCatalog", [])
     if not isinstance(catalog, list):

@@ -821,4 +821,64 @@ check('graph bounds include grouping frames', () => {
     assert.deepStrictEqual(bounds, { x: -50, y: -68, width: 600, height: 428 });
 });
 
+check('suggestion dismissal is immutable, unique, and persisted on the map', () => {
+    const original = placementFixture();
+    const dismissed = runtime.dismissSuggestion(original, 'pms-evidence-1');
+    const duplicate = runtime.dismissSuggestion(dismissed, 'pms-evidence-1');
+    assert.deepStrictEqual(runtime.mapDismissedSuggestions(original), []);
+    assert.deepStrictEqual(
+        runtime.mapDismissedSuggestions(dismissed),
+        ['pms-evidence-1']
+    );
+    assert.deepStrictEqual(duplicate, dismissed);
+});
+
+check('batch suggestion acceptance is one map result with cumulative cycle checks', () => {
+    let processMap = placementFixture();
+    ['a', 'b', 'c'].forEach((nodeId, index) => {
+        processMap = runtime.addCanvasNode(processMap, {
+            nodeId,
+            nodeKind: 'process_step',
+            processType: 'operation',
+            name: nodeId.toUpperCase(),
+            position: { x: index * 300, y: 0 },
+        });
+    });
+    const suggestion = (id, from, to) => ({
+        suggestionId: id,
+        edge: edge('edge-' + id, from, to),
+        validation: { wouldCreateCycle: false },
+    });
+    const result = runtime.acceptSuggestions(processMap, [
+        suggestion('a-b', 'a', 'b'),
+        suggestion('b-c', 'b', 'c'),
+        suggestion('c-a', 'c', 'a'),
+    ]);
+    assert.deepStrictEqual(result.accepted, ['a-b', 'b-c']);
+    assert.deepStrictEqual(result.skipped, [
+        { suggestionId: 'c-a', reason: 'would_create_cycle' },
+    ]);
+    assert.strictEqual(runtime.mapEdges(processMap).length, 0);
+    assert.strictEqual(runtime.mapEdges(result.map).length, 2);
+    assert.strictEqual(runtime.hasPrecedenceCycle(result.map), false);
+});
+
+check('annotations and server-blocked suggestions are never accepted as edges', () => {
+    const processMap = placementFixture();
+    const result = runtime.acceptSuggestions(processMap, [
+        { suggestionId: 'annotation', annotation: { kind: 'resource_contention' } },
+        {
+            suggestionId: 'blocked',
+            edge: edge('blocked-edge', 'a', 'b'),
+            validation: { wouldCreateCycle: true },
+        },
+    ]);
+    assert.deepStrictEqual(result.accepted, []);
+    assert.deepStrictEqual(result.skipped.map(item => item.reason), [
+        'not_an_edge',
+        'would_create_cycle',
+    ]);
+    assert.deepStrictEqual(result.map, processMap);
+});
+
 process.stdout.write(`Process-map editor checks: ${checks}/${checks} passed\n`);

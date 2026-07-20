@@ -138,6 +138,7 @@ from ai_inspector.process_map import (
     resolve_process_map_digest,
     save_named_process_map,
     save_process_map,
+    suggest_process_map_connections,
 )
 
 # Configure logging
@@ -10894,6 +10895,76 @@ def training_process_maps_get(productId: str, mapId: str):
             product_id=productId,
         )
     return {"success": True, **result}
+
+
+def _optional_process_map_functional_graph(
+    process_map: Dict[str, Any],
+    product_id: str,
+) -> Optional[Dict[str, Any]]:
+    association = process_map.get("association")
+    candidates = []
+    if isinstance(association, dict):
+        candidates.append(association.get("assemblyId"))
+    candidates.append(product_id)
+    seen = set()
+    for candidate in candidates:
+        assembly_number = str(candidate or "").strip()
+        if not assembly_number or assembly_number in seen:
+            continue
+        seen.add(assembly_number)
+        try:
+            graph, report = functional_relationship_registry.load(
+                assembly_number,
+                assembly_data=assembly_profiles.get(assembly_number) or None,
+                strict=False,
+            )
+        except FunctionalRelationshipError:
+            continue
+        if report.ok:
+            return graph
+    return None
+
+
+@app.get("/api/training/process-maps/{productId}/{mapId}/suggestions")
+def training_process_map_suggestions(
+    productId: str,
+    mapId: str,
+    revision: str = Query(...),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Return deterministic suggestions for one exact saved map revision."""
+    _require_process_map_edit_enabled()
+    try:
+        loaded = load_named_process_map(
+            PROCESS_MAP_TRAINING_ROOT,
+            productId,
+            mapId,
+        )
+        supplied_revision = revision.strip() if isinstance(revision, str) else ""
+        if supplied_revision != loaded["revision"]:
+            raise ProcessMapConflictError(loaded["revision"])
+        suggestions = suggest_process_map_connections(
+            loaded["map"],
+            loaded["productStructure"],
+            functional_graph=_optional_process_map_functional_graph(
+                loaded["map"],
+                productId,
+            ),
+            limit=limit,
+        )
+    except ProcessMapAssetError as ex:
+        return _process_map_error_response(
+            ex,
+            operation="suggestions",
+            product_id=productId,
+        )
+    return {
+        "success": True,
+        "productId": productId,
+        "mapId": mapId,
+        "revision": loaded["revision"],
+        **suggestions,
+    }
 
 
 @app.put("/api/training/process-maps/{productId}/{mapId}")

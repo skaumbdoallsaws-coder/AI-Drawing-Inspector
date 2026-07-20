@@ -8,12 +8,29 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "runtime_logs"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 APP_URL = os.environ.get("SMOKE_APP_URL", "http://127.0.0.1:8023/")
+THREE_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+THREE_CACHE = OUT_DIR / "three.r128.min.js"
+
+
+def _install_cached_three_route(page) -> None:
+    if not THREE_CACHE.exists() or THREE_CACHE.stat().st_size <= 100_000:
+        return
+    three_js = THREE_CACHE.read_text(encoding="utf-8")
+    page.route(
+        THREE_CDN_URL,
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/javascript",
+            body=three_js,
+        ),
+    )
 
 
 def _synthetic_structure() -> dict:
@@ -174,6 +191,68 @@ def _install_synthetic_process_map_route(page, store: dict) -> None:
         )
 
     page.route("**/api/training/process-map/racing-bike", handler)
+
+
+def _install_synthetic_suggestion_route(page, store: dict) -> None:
+    def handler(route) -> None:
+        requested_revision = parse_qs(urlparse(route.request.url).query).get(
+            "revision", [""]
+        )[0]
+        store["suggestionCalls"] = store.get("suggestionCalls", 0) + 1
+        if requested_revision != store["revision"]:
+            route.fulfill(
+                status=409,
+                content_type="application/json",
+                body=json.dumps({
+                    "error": "revision_conflict",
+                    "currentRevision": store["revision"],
+                }),
+            )
+            return
+        dismissed = set(store["map"].get("dismissedSuggestions", []))
+        existing = {
+            (
+                edge.get("from", {}).get("nodeId"),
+                edge.get("to", {}).get("nodeId"),
+                edge.get("kind", "precedence"),
+            )
+            for edge in store["map"].get("canvasEdges", [])
+        }
+        suggestions = []
+        for suggestion in store.get("suggestions", []):
+            if suggestion.get("suggestionId") in dismissed:
+                continue
+            edge = suggestion.get("edge")
+            if edge and (
+                edge.get("from", {}).get("nodeId"),
+                edge.get("to", {}).get("nodeId"),
+                edge.get("kind", "precedence"),
+            ) in existing:
+                continue
+            suggestions.append(copy.deepcopy(suggestion))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "success": True,
+                "schemaVersion": 1,
+                "engineVersion": "synthetic-1",
+                "productId": "racing-bike",
+                "mapId": "default",
+                "revision": store["revision"],
+                "suggestions": suggestions,
+                "summary": {
+                    "returned": len(suggestions),
+                    "edgeSuggestions": sum(1 for item in suggestions if item.get("edge")),
+                    "annotations": sum(1 for item in suggestions if item.get("annotation")),
+                },
+            }),
+        )
+
+    page.route(
+        "**/api/training/process-maps/racing-bike/default/suggestions?*",
+        handler,
+    )
 
 
 def _install_synthetic_agent_route(page, store: dict, captured: list[dict]) -> None:
@@ -418,6 +497,7 @@ def run() -> int:
 
         live_context = browser.new_context(viewport={"width": 1600, "height": 1000})
         live_page = live_context.new_page()
+        _install_cached_three_route(live_page)
         live_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
         live_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
         _open_process_flow(live_page)
@@ -476,6 +556,7 @@ def run() -> int:
 
         fallback_context = browser.new_context(viewport={"width": 1400, "height": 900})
         fallback_page = fallback_context.new_page()
+        _install_cached_three_route(fallback_page)
         fallback_page.route(
             "**/api/training/process-map/racing-bike",
             lambda route: route.fulfill(status=404, content_type="application/json", body='{"detail":"disabled"}'),
@@ -500,8 +581,10 @@ def run() -> int:
         analysis_requests: list[dict] = []
         context = browser.new_context(viewport={"width": 1600, "height": 1000})
         page = context.new_page()
+        _install_cached_three_route(page)
         page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
         _install_synthetic_process_map_route(page, store)
+        _install_synthetic_suggestion_route(page, store)
         _install_synthetic_agent_route(page, store, analysis_requests)
         page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
         _open_process_flow(page)
@@ -1778,6 +1861,51 @@ def run() -> int:
         page.evaluate("window.__processMapFlow.editor.undo()")
         page.wait_for_selector(f".pm-group-frame[data-group-id='{group_id}']")
 
+        def suggestion_edge(suggestion_id: str, edge_id: str, source: str, target: str) -> dict:
+            return {
+                "suggestionId": suggestion_id,
+                "ruleId": "synthetic_sequence",
+                "ruleVersion": "1.0.0",
+                "confidence": "high",
+                "edge": {
+                    "edgeId": edge_id,
+                    "logicalConnectionId": edge_id,
+                    "from": {"nodeId": source, "port": "out"},
+                    "to": {"nodeId": target, "port": "in"},
+                    "kind": "precedence",
+                },
+                "provenance": [{"source": "authored_precedence_pattern"}],
+                "explanation": f"Connect {source} to {target} from reviewed sequence evidence.",
+                "validation": {"wouldCreateCycle": False, "duplicateOfExisting": False},
+                "affectedIds": [source, target],
+            }
+
+        store["suggestions"] = [
+            suggestion_edge(
+                "pms-smoke-b-output",
+                "pm-e-suggest-b-output",
+                canvas_ids[1],
+                second_step_id,
+            ),
+            suggestion_edge(
+                "pms-smoke-a-inspection",
+                "pm-e-suggest-a-inspection",
+                canvas_ids[0],
+                process_step_id,
+            ),
+            {
+                "suggestionId": "pms-smoke-resource",
+                "ruleId": "resource_contention",
+                "ruleVersion": "1.0.0",
+                "confidence": "medium",
+                "annotation": {"kind": "resource_contention", "referenceId": "machine-1"},
+                "provenance": [{"source": "process_reference"}],
+                "explanation": "Two steps share the same machining resource.",
+                "validation": {"wouldCreateCycle": False, "duplicateOfExisting": False},
+                "affectedIds": [canvas_ids[0], process_step_id],
+            },
+        ]
+
         page.screenshot(
             path=str(OUT_DIR / "process_flow_wire_references_dark.png"),
             full_page=False,
@@ -1810,6 +1938,97 @@ def run() -> int:
                 and len(edge.get("referenceIds", [])) == 1
             ]) == 2
             and "occurrences" not in store["map"],
+        )
+
+        page.wait_for_function(
+            "window.__processMapFlow.editor.suggestions.length === 3"
+            " && window.__processMapFlow.editor.suggestionsRevision === 'rev-3'"
+        )
+        record(
+            "saved_revision_renders_only_connection_suggestions_as_dashed_ghosts",
+            page.locator(".pm-edge-ghost").count() == 2
+            and page.locator(".pm-ghost-edge-hit").count() == 2
+            and "3" in page.get_by_role(
+                "button", name="Review evidence-backed process-flow suggestions"
+            ).inner_text(),
+        )
+        page.screenshot(
+            path=str(OUT_DIR / "process_flow_suggestions_dark.png"),
+            full_page=False,
+        )
+        ghost_midpoint = page.locator(".pm-ghost-edge-hit").first.evaluate(
+            """path => {
+                const local = path.getPointAtLength(path.getTotalLength() / 2);
+                const matrix = path.getScreenCTM();
+                const screen = new DOMPoint(local.x, local.y).matrixTransform(matrix);
+                return { x: screen.x, y: screen.y };
+            }"""
+        )
+        page.mouse.click(ghost_midpoint["x"], ghost_midpoint["y"])
+        page.wait_for_selector(".pm-suggestion-panel:not([hidden])")
+        record(
+            "ghost_connection_opens_its_evidence_review_surface",
+            page.locator(".pm-suggestion-item.focused").count() == 1
+            and page.locator(".pm-suggestion-provenance").filter(
+                has_text="authored precedence pattern"
+            ).count() >= 1,
+        )
+
+        page.locator(
+            ".pm-suggestion-item[data-suggestion-id='pms-smoke-resource']"
+        ).get_by_role("button", name="Hide this exact evidence-backed suggestion").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.dismissedSuggestions"
+            ".includes('pms-smoke-resource')"
+        )
+        record(
+            "dismissal_removes_only_exact_suggestion_and_is_undoable_map_state",
+            page.locator(".pm-edge-ghost").count() == 2
+            and page.evaluate("window.__processMapFlow.editor.dirty") is True
+            and page.evaluate("window.__processMapFlow.editor.history.undoStack.length") == 1,
+        )
+        page.get_by_role("button", name="Save process map").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.dirty === false"
+            " && window.__processMapFlow.editor.suggestions.length === 2"
+        )
+        record(
+            "dismissal_persists_and_server_does_not_return_it_for_new_revision",
+            store["map"].get("dismissedSuggestions") == ["pms-smoke-resource"]
+            and all(
+                item.get("suggestionId") != "pms-smoke-resource"
+                for item in page.evaluate("window.__processMapFlow.editor.suggestions")
+            ),
+        )
+
+        page.get_by_role("button", name="Accept every currently valid connection suggestion").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasEdges.length === 7"
+        )
+        record(
+            "batch_accept_is_one_atomic_validated_mutation_and_clears_stale_ghosts",
+            page.locator(".pm-edge-ghost").count() == 0
+            and page.evaluate("window.__processMapFlow.editor.history.undoStack.length") == 1
+            and page.evaluate("window.__processMapFlow.editor.dirty") is True,
+        )
+        page.get_by_role("button", name="Undo process-map edit").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasEdges.length === 5"
+            " && window.__processMapFlow.editor.dirty === false"
+            " && window.__processMapFlow.editor.suggestions.length === 2"
+        )
+        page.get_by_role("button", name="Redo process-map edit").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasEdges.length === 7"
+        )
+        record(
+            "one_undo_and_redo_restore_complete_batch_topology",
+            page.evaluate("window.__processMapFlow.editor.processMap.canvasEdges.length") == 7,
+        )
+        page.get_by_role("button", name="Undo process-map edit").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasEdges.length === 5"
+            " && window.__processMapFlow.editor.dirty === false"
         )
 
         page.evaluate("nodeId => window.__processMapFlow.editor.select(nodeId)", first_id)

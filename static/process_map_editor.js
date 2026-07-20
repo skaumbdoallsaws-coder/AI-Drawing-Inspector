@@ -1482,9 +1482,12 @@
 
         this.toolbarActions = document.createElement('div');
         this.toolbarActions.className = 'pm-toolbar-actions';
-        this.toolbarActions.appendChild(this._button('-', 'Zoom out', this.zoomBy.bind(this, 0.86)));
-        this.toolbarActions.appendChild(this._button('+', 'Zoom in', this.zoomBy.bind(this, 1.16)));
-        this.toolbarActions.appendChild(this._button('Fit', 'Fit flow to viewport', this.fit.bind(this)));
+        this.zoomOutButton = this._button('-', 'Zoom out', this.zoomBy.bind(this, 0.86));
+        this.zoomInButton = this._button('+', 'Zoom in', this.zoomBy.bind(this, 1.16));
+        this.fitButton = this._button('Fit', 'Fit flow to viewport', this.fit.bind(this));
+        this.toolbarActions.appendChild(this.zoomOutButton);
+        this.toolbarActions.appendChild(this.zoomInButton);
+        this.toolbarActions.appendChild(this.fitButton);
         if (typeof this.options.onAnalyze === 'function') {
             this.analyzeButton = this._button(
                 'Analyze',
@@ -1583,11 +1586,12 @@
         this.backButton.classList.add('pm-back-button');
         if (isPlacementMap(this.processMap)) this.backButton.hidden = true;
         this.toolbarActions.appendChild(this.backButton);
-        this.toolbarActions.appendChild(this._button(
+        this.structureButton = this._button(
             'Structure',
             'Return to product structure',
             this.exit.bind(this)
-        ));
+        );
+        this.toolbarActions.appendChild(this.structureButton);
         this.toolbar.appendChild(this.toolbarLeft);
         this.toolbar.appendChild(this.toolbarActions);
 
@@ -1930,6 +1934,153 @@
         button.setAttribute('aria-label', title);
         button.addEventListener('click', handler);
         return button;
+    };
+
+    ProcessMapEditor.prototype._setCommandButtonLabel = function (button, label) {
+        if (!button) return;
+        const labelElement = button.querySelector('.ribbon-btn-label');
+        if (labelElement) labelElement.textContent = label;
+        else button.textContent = label;
+    };
+
+    ProcessMapEditor.prototype._decorateRibbonButton = function (button, iconKey, label, icons) {
+        if (!button) return button;
+        button.className = 'ribbon-btn ribbon-btn-iconic pm-ribbon-command';
+        button.setAttribute('data-process-map-command', iconKey);
+        button.textContent = '';
+        const icon = document.createElement('span');
+        icon.className = 'ribbon-btn-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = icons && icons[iconKey] ? icons[iconKey] : '';
+        const copy = document.createElement('span');
+        copy.className = 'ribbon-btn-label';
+        copy.textContent = label;
+        button.appendChild(icon);
+        button.appendChild(copy);
+        return button;
+    };
+
+    ProcessMapEditor.prototype._ribbonGroup = function (label) {
+        const group = document.createElement('div');
+        group.className = 'ribbon-group pm-ribbon-group';
+        group.setAttribute(
+            'data-process-map-ribbon-group',
+            String(label || '').toLowerCase().replace(/\s+/g, '-')
+        );
+        const groupLabel = document.createElement('div');
+        groupLabel.className = 'ribbon-group-label';
+        groupLabel.textContent = label;
+        group.appendChild(groupLabel);
+        return group;
+    };
+
+    ProcessMapEditor.prototype._ribbonSeparator = function () {
+        const separator = document.createElement('div');
+        separator.className = 'ribbon-sep';
+        return separator;
+    };
+
+    ProcessMapEditor.prototype.attachRibbon = function (host, ribbonOptions) {
+        if (!host || typeof document === 'undefined') return false;
+        const options = ribbonOptions || {};
+        const icons = options.icons || {};
+        host.textContent = '';
+        host.className = 'pm-ribbon-surface';
+        this.ribbonHost = host;
+        this.root.classList.add('pm-external-command-surface');
+        if (this.toolbar && this.toolbar.parentNode) this.toolbar.parentNode.removeChild(this.toolbar);
+
+        const mapGroup = this._ribbonGroup('Map');
+        mapGroup.classList.add('pm-ribbon-map-group');
+        const mapCopy = document.createElement('div');
+        mapCopy.className = 'pm-ribbon-map-copy';
+        mapCopy.appendChild(this.title);
+        mapCopy.appendChild(this.subtitle);
+        if (this.mapManager) {
+            this.mapManager.appendChild(this.status);
+            mapGroup.appendChild(this.mapManager);
+        } else {
+            mapCopy.appendChild(this.status);
+            mapGroup.appendChild(mapCopy);
+        }
+        host.appendChild(mapGroup);
+
+        const editing = this._ribbonGroup('Editing');
+        this._decorateRibbonButton(this.undoButton, 'processUndo', 'Undo', icons);
+        this._decorateRibbonButton(this.redoButton, 'processRedo', 'Redo', icons);
+        this._decorateRibbonButton(this.deleteButton, 'processDelete', 'Delete', icons);
+        if (this.undoButton) editing.appendChild(this.undoButton);
+        if (this.redoButton) editing.appendChild(this.redoButton);
+        if (this.deleteButton) editing.appendChild(this.deleteButton);
+        host.appendChild(this._ribbonSeparator());
+        host.appendChild(editing);
+
+        const elements = this._ribbonGroup('Map Elements');
+        this._decorateRibbonButton(this.addStepButton, 'processStep', 'Add Step', icons);
+        this._decorateRibbonButton(this.addGroupButton, 'processGroup', 'Add Group', icons);
+        this._decorateRibbonButton(this.suggestionButton, 'processSuggestions', 'Suggestions', icons);
+        this._decorateRibbonButton(this.analyzeButton, 'processAnalyze', 'Analyze', icons);
+        if (this.addStepButton) elements.appendChild(this.addStepButton);
+        if (this.addGroupButton) elements.appendChild(this.addGroupButton);
+        if (this.suggestionButton) elements.appendChild(this.suggestionButton);
+        if (this.analyzeButton) elements.appendChild(this.analyzeButton);
+        host.appendChild(this._ribbonSeparator());
+        host.appendChild(elements);
+
+        if (this.editable) {
+            const configuration = this._ribbonGroup('Node Configuration');
+            configuration.classList.add('pm-ribbon-config-group');
+            [
+                { control: this.typeSelect, label: 'Node Type' },
+                { control: this.portOrientationSelect, label: 'Ports' },
+                { control: this.portOrderSelect, label: 'Input' },
+            ].forEach(function (definition) {
+                if (!definition.control) return;
+                const field = document.createElement('label');
+                field.className = 'pm-ribbon-field';
+                const fieldLabel = document.createElement('span');
+                fieldLabel.className = 'pm-ribbon-field-label';
+                fieldLabel.textContent = definition.label;
+                field.appendChild(fieldLabel);
+                field.appendChild(definition.control);
+                configuration.appendChild(field);
+            });
+            host.appendChild(this._ribbonSeparator());
+            host.appendChild(configuration);
+        }
+
+        const visualization = this._ribbonGroup('Visualization');
+        this._decorateRibbonButton(this.zoomOutButton, 'processZoomOut', 'Zoom Out', icons);
+        this._decorateRibbonButton(this.zoomInButton, 'processZoomIn', 'Zoom In', icons);
+        this._decorateRibbonButton(this.fitButton, 'processFit', 'Fit', icons);
+        this._decorateRibbonButton(this.previewButton, '3dmodel', '3D', icons);
+        this._decorateRibbonButton(this.backButton, 'processBack', 'Back', icons);
+        this._decorateRibbonButton(this.structureButton, 'processStructure', 'Structure', icons);
+        const zoomStack = document.createElement('div');
+        zoomStack.className = 'pm-ribbon-zoom-stack';
+        this.zoomOutButton.classList.add('pm-ribbon-compact-command');
+        this.zoomInButton.classList.add('pm-ribbon-compact-command');
+        zoomStack.appendChild(this.zoomInButton);
+        zoomStack.appendChild(this.zoomOutButton);
+        visualization.appendChild(zoomStack);
+        visualization.appendChild(this.fitButton);
+        if (this.previewButton) visualization.appendChild(this.previewButton);
+        visualization.appendChild(this.backButton);
+        visualization.appendChild(this.structureButton);
+        host.appendChild(this._ribbonSeparator());
+        host.appendChild(visualization);
+
+        if (this.editable) {
+            const file = this._ribbonGroup('File');
+            this._decorateRibbonButton(this.saveButton, 'processSave', 'Save', icons);
+            this._decorateRibbonButton(this.reloadButton, 'processReload', 'Reload', icons);
+            file.appendChild(this.saveButton);
+            file.appendChild(this.reloadButton);
+            host.appendChild(this._ribbonSeparator());
+            host.appendChild(file);
+        }
+        this.updateEditControls();
+        return true;
     };
 
     ProcessMapEditor.prototype._initializeCardToolbar = function () {
@@ -3685,6 +3836,9 @@
         this.subtitle.textContent = nodes.length + ' nodes / ' + edges.length
             + ' visible precedence connections / ' + groups + (groups === 1 ? ' group' : ' groups')
             + ' / ' + (this.editable ? 'editing' : 'read only');
+        const showBack = !isPlacementMap(this.processMap);
+        this.backButton.hidden = !showBack;
+        this.backButton.style.display = showBack ? '' : 'none';
         this.backButton.disabled = !this.focusNodeId;
     };
 
@@ -3823,18 +3977,21 @@
         }
         if (this.suggestionButton) {
             const suggestionCount = this.suggestions.length;
-            this.suggestionButton.textContent = this.suggestionsLoading
+            this._setCommandButtonLabel(this.suggestionButton, this.suggestionsLoading
                 ? 'Suggestions...'
-                : ('Suggestions' + (suggestionCount ? ' ' + suggestionCount : ''));
+                : ('Suggestions' + (suggestionCount ? ' ' + suggestionCount : '')));
             this.suggestionButton.disabled = this.saving || this.conflict || !this.revision
                 || (this.dirty && !suggestionCount);
             this.suggestionButton.classList.toggle('active', this.suggestionPanelOpen);
         }
         if (this.saveButton) {
             this.saveButton.disabled = !this.dirty || this.saving || this.conflict || this.hasStructuralErrors();
-            this.saveButton.textContent = this.saving ? 'Saving...' : 'Save';
+            this._setCommandButtonLabel(this.saveButton, this.saving ? 'Saving...' : 'Save');
         }
-        if (this.reloadButton) this.reloadButton.hidden = !this.conflict;
+        if (this.reloadButton) {
+            this.reloadButton.hidden = !this.conflict;
+            this.reloadButton.style.display = this.conflict ? '' : 'none';
+        }
         if (this.mapSelect) this.mapSelect.disabled = this.saving || this.managementBusy;
         if (this.mapActionSelect) this.mapActionSelect.disabled = this.saving || this.managementBusy || this.conflict;
         if (this.typeSelect) {
@@ -5122,6 +5279,10 @@
             this.cardToolbarNodeId = null;
             this.cardToolbarEdgeId = null;
             this.cardToolbarGroupId = null;
+        }
+        if (this.ribbonHost) {
+            this.ribbonHost.textContent = '';
+            this.ribbonHost = null;
         }
         if (!this.viewport) return;
         this.viewport.removeEventListener('pointerdown', this._onPointerDown);

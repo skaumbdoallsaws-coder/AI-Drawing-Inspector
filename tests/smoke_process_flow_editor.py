@@ -1904,10 +1904,43 @@ def run() -> int:
         group_header = page.locator(f".pm-group-frame[data-group-id='{group_id}'] .pm-group-header")
         header_box = group_header.bounding_box()
         assert header_box is not None
+        alt_drag_point = group_header.evaluate(
+            """header => {
+                const rect = header.getBoundingClientRect();
+                const y = rect.top + Math.min(12, rect.height / 2);
+                for (let x = rect.left + 8; x <= rect.right - 8; x += 8) {
+                    const target = document.elementFromPoint(x, y);
+                    if (target && target.closest('.pm-group-header') === header) return { x, y };
+                }
+                return { x: rect.left + 8, y };
+            }"""
+        )
+        alt_drag_hit = page.evaluate(
+            """point => {
+                const target = document.elementFromPoint(point.x, point.y);
+                return {
+                    tag: target && target.tagName,
+                    className: target && target.className,
+                    groupId: target && target.closest('[data-group-id]')
+                        ? target.closest('[data-group-id]').getAttribute('data-group-id') : null,
+                };
+            }""",
+            alt_drag_point,
+        )
         page.keyboard.down("Alt")
-        page.mouse.move(header_box["x"] + header_box["width"] / 2, header_box["y"] + 12)
+        page.mouse.move(alt_drag_point["x"], alt_drag_point["y"])
         page.mouse.down()
-        page.mouse.move(header_box["x"] + header_box["width"] / 2 + 28, header_box["y"] + 30, steps=5)
+        alt_drag_interaction = page.evaluate(
+            """() => {
+                const interaction = window.__processMapFlow.editor.interaction;
+                return interaction && {
+                    mode: interaction.mode,
+                    groupId: interaction.groupId,
+                    withMembers: interaction.withMembers,
+                };
+            }"""
+        )
+        page.mouse.move(alt_drag_point["x"] + 28, alt_drag_point["y"] + 18, steps=5)
         page.mouse.up()
         page.keyboard.up("Alt")
         alt_move_after = page.evaluate(
@@ -1924,7 +1957,12 @@ def run() -> int:
             "alt_drag_moves_group_frame_without_members",
             alt_move_after["group"] != alt_move_before["group"]
             and alt_move_after["node"] == alt_move_before["node"],
-            {"before": alt_move_before, "after": alt_move_after},
+            {
+                "before": alt_move_before,
+                "after": alt_move_after,
+                "hit": alt_drag_hit,
+                "interaction": alt_drag_interaction,
+            },
         )
 
         overlap_group_id = page.evaluate(
@@ -2399,6 +2437,38 @@ def run() -> int:
         page.locator(".tab[data-tab='training']").click()
         page.wait_for_selector(".tab.active[data-tab='training']")
         _ensure_process_flow_editor(page)
+
+        type_select = page.locator("#trainingTypeRibbonSelect")
+        type_select.select_option("troubleshooting")
+        page.wait_for_selector("[data-training-ribbon-command='start']")
+        record(
+            "training_workflow_switch_replaces_process_map_ribbon_immediately",
+            page.locator("#trainingProcessMapRibbonHost").count() == 0
+            and page.locator("[data-process-map-command]").count() == 0
+            and page.locator("[data-training-ribbon-command='start']").count() == 1
+            and page.locator("[data-training-ribbon-command='explode']").count() == 0,
+        )
+        page.locator("#trainingTypeRibbonSelect").select_option("assembly")
+        page.wait_for_selector("[data-training-ribbon-command='explode']")
+        _ensure_process_flow_editor(page)
+        page.wait_for_selector("#trainingProcessMapRibbonHost [data-process-map-command='processSave']")
+        expected_process_commands = {
+            "processUndo", "processRedo", "processDelete", "processStep",
+            "processGroup", "processSuggestions", "processAnalyze", "processZoomOut",
+            "processZoomIn", "processFit", "3dmodel", "processStructure", "processSave",
+        }
+        actual_process_commands = set(
+            page.locator("#trainingProcessMapRibbonHost [data-process-map-command]")
+            .evaluate_all("buttons => buttons.map(button => button.dataset.processMapCommand)")
+        )
+        record(
+            "process_map_ribbon_replaces_generic_training_commands",
+            page.locator("[data-training-ribbon-command]").count() == 0
+            and expected_process_commands.issubset(actual_process_commands)
+            and page.locator("[data-process-map-command='processBack']:visible").count() == 0
+            and page.locator("[data-process-map-command='processReload']:visible").count() == 0,
+            sorted(actual_process_commands),
+        )
         page.screenshot(path=str(OUT_DIR / "process_flow_source_tree_authored.png"), full_page=False)
 
         map_select = page.get_by_label("Process map", exact=True)
@@ -2416,30 +2486,42 @@ def run() -> int:
         management_layout = page.evaluate(
             """() => {
                 const rect = selector => {
-                    const value = document.querySelector(selector).getBoundingClientRect();
+                    const element = document.querySelector(selector);
+                    if (!element) return null;
+                    const value = element.getBoundingClientRect();
                     return { x: value.x, y: value.y, right: value.right,
                         bottom: value.bottom, width: value.width, height: value.height };
                 };
                 const overlaps = (a, b) => !(a.right <= b.x || b.right <= a.x
                     || a.bottom <= b.y || b.bottom <= a.y);
-                const toolbar = rect('.pm-toolbar');
-                const copy = rect('.pm-toolbar-copy');
+                const ribbon = rect('#contextRibbon');
+                const host = rect('#trainingProcessMapRibbonHost');
                 const manager = rect('.pm-map-manager');
-                const actions = rect('.pm-toolbar-actions');
+                const editing = rect('[data-process-map-ribbon-group="editing"]');
+                const editor = rect('.pm-editor');
+                const workspace = rect('.pm-workspace');
+                const ribbonElement = document.querySelector('#contextRibbon');
                 return {
-                    toolbar, copy, manager, actions,
-                    managerOverlapsActions: overlaps(manager, actions),
-                    contained: copy.x >= toolbar.x && copy.right <= toolbar.right
-                        && actions.x >= toolbar.x && actions.right <= toolbar.right
-                        && copy.y >= toolbar.y && actions.bottom <= toolbar.bottom,
+                    ribbon, host, manager, editing, editor, workspace,
+                    managerOverlapsEditing: overlaps(manager, editing),
+                    contained: host.x >= ribbon.x && host.right <= ribbon.right
+                        && host.y >= ribbon.y && host.bottom <= ribbon.bottom,
+                    fitsWithoutHorizontalScroll:
+                        ribbonElement.scrollWidth <= ribbonElement.clientWidth + 2,
+                    internalToolbarCount:
+                        document.querySelectorAll('.pm-editor > .pm-toolbar').length,
+                    reclaimedHeight: Math.abs(workspace.y - editor.y) <= 1,
                 };
             }"""
         )
         record(
-            "map_identity_and_editing_controls_use_non_overlapping_rows",
+            "process_map_commands_use_main_ribbon_and_reclaim_viewport_height",
             management_layout["contained"]
-            and not management_layout["managerOverlapsActions"]
-            and management_layout["manager"]["width"] >= 260,
+            and not management_layout["managerOverlapsEditing"]
+            and management_layout["fitsWithoutHorizontalScroll"]
+            and management_layout["internalToolbarCount"] == 0
+            and management_layout["reclaimedHeight"]
+            and management_layout["manager"]["width"] >= 120,
             management_layout,
         )
 

@@ -22,6 +22,7 @@ _SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _TOKEN_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
 _MAX_MANIFEST_BYTES = 128 * 1024
 _MAX_SKILL_BYTES = 256 * 1024
+_MAX_CONTRACT_BYTES = 128 * 1024
 _SIDE_EFFECTS = frozenset({"viewport_write", "asset_write", "system_write"})
 
 
@@ -205,6 +206,30 @@ class SkillManifest:
 
 
 @dataclass(frozen=True)
+class SkillContract:
+    schema_version: int
+    skill_id: str
+    version: str
+    intents: tuple[str, ...]
+    required_evidence: tuple[str, ...]
+    forbidden_context: tuple[str, ...]
+    side_effect_default: str
+    explicit_request_tools: tuple[str, ...]
+    output_format: str
+    maximum_sentences: int
+    missing_required_context: str
+    contradictory_context: str
+    compatible_models: tuple[str, ...]
+    evaluation_suite: str
+    maximum_context_tokens: int
+    context_priorities: tuple[str, ...]
+
+    @property
+    def version_key(self) -> tuple[int, int, int]:
+        return parse_semver(self.version)
+
+
+@dataclass(frozen=True)
 class WorkflowManifest:
     schema_version: int
     id: str
@@ -228,6 +253,8 @@ class SkillPackage:
     body: str
     path: Path
     body_sha256: str
+    contract: SkillContract | None = None
+    contract_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -331,6 +358,63 @@ def compose_prompt_sections(
     return PromptBuild(prompt=prompt, accounting=accounting)
 
 
+def resolve_skill_contract_policy(
+    packages: Sequence[SkillPackage],
+    *,
+    primary_id: str,
+) -> dict[str, Any]:
+    contracts = {
+        package.manifest.id: package.contract
+        for package in packages
+        if package.contract is not None
+    }
+    if len(contracts) != len(packages):
+        missing = sorted(
+            package.manifest.id for package in packages if package.contract is None
+        )
+        raise SkillRuntimeError(
+            "selected skills lack executable contracts: " + ", ".join(missing)
+        )
+    primary = contracts.get(primary_id)
+    if primary is None:
+        raise SkillRuntimeError(f"primary skill contract is missing: {primary_id}")
+    contradiction_rank = {
+        "refuse_side_effect": 4,
+        "abstain_and_report_conflict": 3,
+        "request_clarification": 2,
+        "explain_available_context_only": 1,
+    }
+    contradiction_behavior = max(
+        (contract.contradictory_context for contract in contracts.values()),
+        key=lambda value: contradiction_rank.get(value, 0),
+    )
+    return {
+        "schema_version": 1,
+        "primary_skill": primary_id,
+        "output": {
+            "format": primary.output_format,
+            "maximum_sentences": primary.maximum_sentences,
+        },
+        "side_effect_default": "prohibited"
+        if any(contract.side_effect_default == "prohibited" for contract in contracts.values())
+        else "allowed",
+        "explicit_request_tools": sorted({
+            tool for contract in contracts.values() for tool in contract.explicit_request_tools
+        }),
+        "missing_required_context": primary.missing_required_context,
+        "contradictory_context": contradiction_behavior,
+        "required_evidence": sorted({
+            item for contract in contracts.values() for item in contract.required_evidence
+        }),
+        "forbidden_context": sorted({
+            item for contract in contracts.values() for item in contract.forbidden_context
+        }),
+        "evaluation_suites": sorted({
+            contract.evaluation_suite for contract in contracts.values()
+        }),
+    }
+
+
 _SKILL_REQUIRED_KEYS = {
     "schema_version",
     "id",
@@ -360,6 +444,21 @@ _WORKFLOW_REQUIRED_KEYS = {
     "optional_assets",
     "stages",
     "completion",
+}
+
+_SKILL_CONTRACT_REQUIRED_KEYS = {
+    "schema_version",
+    "skill_id",
+    "version",
+    "intents",
+    "required_evidence",
+    "forbidden_context",
+    "side_effect_policy",
+    "output_contract",
+    "failure_behavior",
+    "compatible_models",
+    "evaluation_suite",
+    "context_budget",
 }
 
 
@@ -411,6 +510,151 @@ def _load_skill_manifest(path: Path) -> SkillManifest:
         conflicts_with=conflicts_with,
         composable_with=composable_with,
         evidence_policy=evidence_policy,
+    )
+
+
+def _contract_mapping(
+    data: Mapping[str, Any],
+    key: str,
+    required_keys: set[str],
+    issues: list[str],
+) -> Mapping[str, Any]:
+    value = data.get(key)
+    if not isinstance(value, dict):
+        issues.append(f"{key} must be a mapping")
+        return {}
+    nested_issues: list[str] = []
+    _validate_keys(value, required_keys, set(), nested_issues)
+    issues.extend(f"{key}.{issue}" for issue in nested_issues)
+    return value
+
+
+def _load_skill_contract(path: Path, manifest: SkillManifest) -> tuple[SkillContract, str]:
+    data = _load_yaml_text(_read_ascii(path, _MAX_CONTRACT_BYTES), path)
+    issues: list[str] = []
+    _validate_keys(data, _SKILL_CONTRACT_REQUIRED_KEYS, set(), issues)
+    schema_version = data.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        issues.append("schema_version must be integer 1")
+    skill_id = _string_value(data, "skill_id", issues, pattern=_ID_RE, max_length=63)
+    if skill_id and skill_id != manifest.id:
+        issues.append(f"skill_id {skill_id!r} does not match manifest id {manifest.id!r}")
+    version = _string_value(data, "version", issues, max_length=32)
+    try:
+        parse_semver(version)
+    except ValueError:
+        issues.append("version must use MAJOR.MINOR.PATCH numeric SemVer")
+    intents = _string_list(data, "intents", issues, required=True)
+    required_evidence = _string_list(data, "required_evidence", issues)
+    forbidden_context = _string_list(data, "forbidden_context", issues)
+    compatible_models = _string_list(data, "compatible_models", issues, required=True)
+    evaluation_suite = _string_value(
+        data, "evaluation_suite", issues, pattern=_TOKEN_RE, max_length=80
+    )
+
+    side_effect_policy = _contract_mapping(
+        data,
+        "side_effect_policy",
+        {"default", "require_explicit_user_request"},
+        issues,
+    )
+    side_effect_default = str(side_effect_policy.get("default") or "").strip()
+    if side_effect_default not in {"prohibited", "allowed"}:
+        issues.append("side_effect_policy.default must be prohibited or allowed")
+    explicit_request_tools = _string_list(
+        side_effect_policy,
+        "require_explicit_user_request",
+        issues,
+    ) if side_effect_policy else ()
+    invalid_explicit_tools = sorted(set(explicit_request_tools) - set(manifest.allowed_tools))
+    if invalid_explicit_tools:
+        issues.append(
+            "side_effect_policy.require_explicit_user_request contains tools not allowed by manifest: "
+            + ", ".join(invalid_explicit_tools)
+        )
+    if manifest.side_effects and side_effect_default != "prohibited":
+        issues.append("skills with side effects must default to prohibited")
+    if manifest.side_effects and set(explicit_request_tools) != set(manifest.allowed_tools):
+        issues.append(
+            "side-effecting skills must require an explicit request for every allowed tool"
+        )
+
+    output_contract = _contract_mapping(
+        data, "output_contract", {"format", "maximum_sentences"}, issues
+    )
+    output_format = _string_value(
+        output_contract, "format", issues, pattern=_TOKEN_RE, max_length=80
+    ) if output_contract else ""
+    maximum_sentences = output_contract.get("maximum_sentences")
+    if type(maximum_sentences) is not int or not 1 <= maximum_sentences <= 12:
+        issues.append("output_contract.maximum_sentences must be an integer from 1 to 12")
+        maximum_sentences = 3
+
+    failure_behavior = _contract_mapping(
+        data,
+        "failure_behavior",
+        {"missing_required_context", "contradictory_context"},
+        issues,
+    )
+    missing_required_context = _string_value(
+        failure_behavior,
+        "missing_required_context",
+        issues,
+        pattern=_TOKEN_RE,
+        max_length=80,
+    ) if failure_behavior else ""
+    contradictory_context = _string_value(
+        failure_behavior,
+        "contradictory_context",
+        issues,
+        pattern=_TOKEN_RE,
+        max_length=80,
+    ) if failure_behavior else ""
+
+    context_budget = _contract_mapping(
+        data, "context_budget", {"maximum_tokens", "priorities"}, issues
+    )
+    maximum_context_tokens = context_budget.get("maximum_tokens")
+    if (
+        type(maximum_context_tokens) is not int
+        or not 256 <= maximum_context_tokens <= 50000
+    ):
+        issues.append("context_budget.maximum_tokens must be an integer from 256 to 50000")
+        maximum_context_tokens = 6000
+    context_priorities = _string_list(
+        context_budget, "priorities", issues
+    ) if context_budget else ()
+    declared_context = set(manifest.requires_context) | set(manifest.optional_context)
+    if set(context_priorities) != declared_context:
+        issues.append(
+            "context_budget.priorities must list every required and optional context key exactly once"
+        )
+    overlap = sorted(set(forbidden_context) & declared_context)
+    if overlap:
+        issues.append("forbidden_context conflicts with declared context: " + ", ".join(overlap))
+    if issues:
+        raise ManifestValidationError(path, issues)
+    raw = _read_ascii(path, _MAX_CONTRACT_BYTES)
+    return (
+        SkillContract(
+            schema_version=1,
+            skill_id=skill_id,
+            version=version,
+            intents=intents,
+            required_evidence=required_evidence,
+            forbidden_context=forbidden_context,
+            side_effect_default=side_effect_default,
+            explicit_request_tools=explicit_request_tools,
+            output_format=output_format,
+            maximum_sentences=maximum_sentences,
+            missing_required_context=missing_required_context,
+            contradictory_context=contradictory_context,
+            compatible_models=compatible_models,
+            evaluation_suite=evaluation_suite,
+            maximum_context_tokens=maximum_context_tokens,
+            context_priorities=context_priorities,
+        ),
+        hashlib.sha256(raw.encode("ascii")).hexdigest(),
     )
 
 
@@ -594,6 +838,11 @@ class SkillRegistry:
         for package_dir in _package_dirs(roots):
             manifest = _load_skill_manifest(package_dir / "manifest.yaml")
             body, digest = _load_skill_body(package_dir / "SKILL.md", manifest.id)
+            contract_path = package_dir / "contract.yaml"
+            contract = None
+            contract_digest = None
+            if contract_path.is_file():
+                contract, contract_digest = _load_skill_contract(contract_path, manifest)
             if package_dir.name != manifest.id:
                 issues.append(f"skill directory {package_dir.name!r} does not match manifest id {manifest.id!r}")
             unknown_workflows = sorted(set(manifest.workflows) - workflow_ids)
@@ -628,6 +877,8 @@ class SkillRegistry:
                     body=body,
                     path=package_dir,
                     body_sha256=digest,
+                    contract=contract,
+                    contract_sha256=contract_digest,
                 )
             )
         if issues:
@@ -741,7 +992,48 @@ class SkillRegistry:
         sections = []
         for package in packages:
             manifest = package.manifest
-            content = f"[SKILL {manifest.id}@{manifest.version}]\n{package.body}\n[/SKILL]"
+            contract = package.contract
+            contract_lines = []
+            if contract is not None:
+                contract_lines = [
+                    f"Contract: {contract.skill_id}@{contract.version}",
+                    "Intents: " + ", ".join(contract.intents),
+                    "Required evidence: " + (
+                        ", ".join(contract.required_evidence) or "none"
+                    ),
+                    "Forbidden context: " + (
+                        ", ".join(contract.forbidden_context) or "none"
+                    ),
+                    (
+                        "Side effects: prohibited unless the current user explicitly requests "
+                        + ", ".join(contract.explicit_request_tools)
+                        if contract.explicit_request_tools
+                        else "Side effects: prohibited"
+                    ),
+                    (
+                        f"Output: {contract.output_format}; maximum "
+                        f"{contract.maximum_sentences} sentences"
+                    ),
+                    (
+                        "Missing context behavior: "
+                        + contract.missing_required_context
+                    ),
+                    (
+                        "Contradictory context behavior: "
+                        + contract.contradictory_context
+                    ),
+                ]
+            contract_text = (
+                "\n[EXECUTABLE CONTRACT]\n"
+                + "\n".join(contract_lines)
+                + "\n[/EXECUTABLE CONTRACT]"
+                if contract_lines
+                else ""
+            )
+            content = (
+                f"[SKILL {manifest.id}@{manifest.version}]\n"
+                f"{package.body}{contract_text}\n[/SKILL]"
+            )
             sections.append(
                 PromptSection(
                     id=f"skill.{manifest.id}",
@@ -771,6 +1063,19 @@ class SkillRegistry:
                     "allowed_tools": list(manifest.allowed_tools),
                     "side_effects": list(manifest.side_effects),
                     "body_sha256": package.body_sha256,
+                    "contract": (
+                        {
+                            "version": package.contract.version,
+                            "intents": list(package.contract.intents),
+                            "output_format": package.contract.output_format,
+                            "maximum_sentences": package.contract.maximum_sentences,
+                            "evaluation_suite": package.contract.evaluation_suite,
+                            "maximum_context_tokens": package.contract.maximum_context_tokens,
+                            "sha256": package.contract_sha256,
+                        }
+                        if package.contract is not None
+                        else None
+                    ),
                 }
             )
         return rows

@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "policy_id": "fai-disposition:100001",
+  "version": "1.0.0",
+  "assembly_number": "100001",
+  "authority": {
+    "status": "approved",
+    "owner_role": "design_engineering",
+    "delegated_agent": "sage",
+    "decision_scope": "final_material_disposition",
+    "approval_ref": "ENGINE-100001-DISPOSITION-001"
+  },
+  "rules": [
+    {
+      "rule_id": "piston-pin-bore-oversize-no-repair",
+      "priority": 100,
+      "part_number": "100006",
+      "characteristic_label": "wrist-pin bore",
+      "characteristic_aliases": [
+        "wrist-pin hole diameter",
+        "wrist pin hole diameter",
+        "wrist-pin bore",
+        "pin bore"
+      ],
+      "interface_pattern_ids": [
+        "piston-pin-bearing"
+      ],
+      "condition": {
+        "status": "FAIL",
+        "direction": "above_upper",
+        "minimum_out_of_tolerance": 1.0,
+        "unit": "mm"
+      },
+      "decision": {
+        "disposition": "scrap_replace",
+        "subject": "piston",
+        "use_as_is_allowed": false,
+        "rework_allowed": false,
+        "rationale": "this gross oversize condition is not eligible for use-as-is or rework"
+      }
+    }
+  ]
+}

@@ -9886,8 +9886,107 @@
             font-size: 10px;
             line-height: 1.2;
         }
+        .agent-working-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            align-self: flex-start;
+            max-width: 92%;
+            min-height: 42px;
+            opacity: 1;
+            transform: translateY(0);
+            transition: opacity 160ms ease, transform 160ms ease, max-height 160ms ease, margin 160ms ease;
+            animation: agentWorkingIn 140ms ease-out both;
+        }
+        .agent-working-row.is-leaving {
+            opacity: 0;
+            transform: translateY(-3px);
+            max-height: 0;
+            min-height: 0;
+            margin: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .agent-working-content {
+            display: flex;
+            min-width: 0;
+            flex-direction: column;
+            gap: 3px;
+            padding: 1px 2px 4px 0;
+        }
+        .agent-working-activity {
+            display: flex;
+            min-height: 24px;
+            align-items: center;
+            gap: 7px;
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        .agent-working-compass {
+            display: block;
+            width: 22px;
+            height: 22px;
+            flex: 0 0 22px;
+            animation: agentWorkingCompassRotate 1.4s linear infinite;
+            transform-origin: center;
+        }
+        .agent-working-history {
+            display: grid;
+            gap: 2px;
+            margin: 1px 0 0 29px;
+        }
+        .agent-working-history-item {
+            position: relative;
+            padding-left: 10px;
+            color: var(--text-secondary);
+            font-size: 10px;
+            line-height: 1.3;
+        }
+        .agent-working-history-item::before {
+            position: absolute;
+            top: 4px;
+            left: 0;
+            width: 4px;
+            height: 4px;
+            content: '';
+            border-radius: 50%;
+            background: var(--accent, #4fc3f7);
+            opacity: 0.72;
+        }
+        .agent-stream-pending.agent-stream-enter .agent-msg {
+            animation: agentStreamBubbleIn 160ms ease-out both;
+        }
+        @keyframes agentWorkingCompassRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes agentWorkingIn {
+            from { opacity: 0; transform: translateY(2px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes agentStreamBubbleIn {
+            from { opacity: 0; transform: translateY(2px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
         .agent-stream-pending .agent-msg {
             min-height: 18px;
+        }
+        .agent-stream-provisional-text {
+            white-space: pre-wrap;
+        }
+        .agent-stream-pending .typing-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 13px;
+            margin-left: 2px;
+            vertical-align: middle;
+            background: var(--accent, #4fc3f7);
+            animation: typingBlink 0.6s step-end infinite;
+        }
+        .agent-stream-failed .agent-stream-status {
+            color: var(--missing, #ef5350);
         }
         .agent-stream-retry {
             margin-top: 6px;
@@ -9898,6 +9997,23 @@
             font-size: 11px;
             padding: 3px 8px;
             cursor: pointer;
+        }
+        :root[data-theme="light"] .agent-working-activity {
+            color: var(--text-primary);
+        }
+        :root[data-theme="light"] .agent-working-history-item {
+            color: var(--text-secondary);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .agent-working-row,
+            .agent-working-row.is-leaving,
+            .agent-stream-pending.agent-stream-enter .agent-msg {
+                transition: none;
+                animation: none;
+            }
+            .agent-working-compass {
+                animation: none;
+            }
         }
         .agent-beta-disclaimer {
             padding: 4px 12px 8px;
@@ -13075,6 +13191,11 @@
             faiMeasurements: {},          // key -> measured value string
             faiVerdicts: {},              // key -> {disposition, reasoning}
             faiTolOverrides: {},          // key -> {plus, minus} tolerance overrides
+            faiTableRevision: 0,          // increments for every committed table edit
+            faiRowRevisions: {},          // key -> revision/change metadata
+            faiLastSageRevision: 0,       // latest immutable snapshot consumed by Sage
+            faiLastSageRows: {},          // key -> row state at faiLastSageRevision
+            faiLastTargetCharacteristicIds: [],
 
             faiHighlightedRow: null,       // key of row to flash
             faiPreviousOverlayMode: null,  // restore overlay mode when leaving FAI sub-tab
@@ -13128,6 +13249,7 @@
             _assyIsolatedParts: null,  // Array of part numbers currently isolated, or null
             _assyClipPlanes: null,     // [THREE.Plane] for section clipping (X + Z corner cut)
             _assyClipActive: false,    // Whether section clip is currently applied
+            assyClipTargetPartNumbers: [], // Semantic clip targets; planes are rebuilt per scene mount
             assy3DLabels: {},          // partNumber -> CSS2DObject for 3D floating labels
             _noteDotsData: [],         // Note dots data for right-click context menu
             assyLabelRenderer: null,   // CSS2DRenderer instance
@@ -13200,9 +13322,22 @@
             motionPkgMode: false,     // package playback active (vs legacy chain)
             motionPkgAngle: 0,        // current crank angle in degrees [0, 360)
             motionPkgLoop: true,
+            // Root Assembly viewer lifecycle state. The semantic state above
+            // survives a tab change; this captures only transient live-scene
+            // state that must be rebound after Three.js is remounted.
+            _assyViewportSuspended: false,
+            _assyViewportSnapshot: null,
+            _assyMotionResume: null,
+            _assyMotionResumeError: null,
+            _assyLastMotionRestore: null,
+            _assyRehydratePromise: null,
             pendingExecutionReceipts: [], // browser receipts sent with the next agent turn
             executionReceiptHistory: [], // compact in-memory audit for the current page session
         };
+
+        // Root Assembly scenes are remounted between workspaces. Preserve
+        // their semantic state while invalidating live Three.js references.
+        const ASSEMBLY_VIEWPORT_STATE_PERSISTENCE = true;
 
         // Training tab state — SolidWorks-style command surface for
         // CAD-grounded training procedures. Independent of the chat /
@@ -13628,6 +13763,7 @@
                 state.results = null;
                 state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
                 state.faiCharacteristics = []; state.faiCharacteristicsSourceKey = ''; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
+                _resetFaiRevisionTracking();
                 resultsState.classList.remove('active');
                 rightPanelEmpty.style.display = 'flex';
                 exportBtn.style.display = 'none';
@@ -14003,7 +14139,7 @@
                     assemblyContextAvailable = true;
                     showAssemblyIndicator(assemblyContext);
                     // Clear motion state FIRST (before assyLiveScene is nulled — _stopMotion needs it)
-                    if (state.motionPlaying) _stopMotion();
+                    if (state.motionPlaying || state.motionSetupDone) _stopMotion();
                     state.motionPlaying = false;
                     state.motionSetupDone = false;
                     state.motionChain = null;
@@ -14021,6 +14157,12 @@
                     state.motionPkgJointClosures = null;
                     state.motionPkgMode = false;
                     state.motionPkgAngle = 0;
+                    state._assyMotionResume = null;
+                    state._assyMotionResumeError = null;
+                    state._assyLastMotionRestore = null;
+                    state._assyViewportSnapshot = null;
+                    state._assyViewportSuspended = false;
+                    state._assyRehydratePromise = null;
                     state.assyInstanceMeshMap = null;
                     // Clear cached data so they reload for the new assembly
                     state.assemblyViews = null;
@@ -14060,6 +14202,7 @@
                     state._assyIsolatedParts = null;
                     state._assyClipPlanes = null;
                     state._assyClipActive = false;
+                    state.assyClipTargetPartNumbers = [];
                     _clearAll3DLabels();
                     state.narrationState = 'idle';
                     state._bargeInContext = null;
@@ -14172,6 +14315,7 @@
             state.faiCharacteristics = [];
             state.faiCharacteristicsSourceKey = '';
             state.faiHighlightedRow = null;
+            _resetFaiRevisionTracking();
             if (clearMeasurements) {
                 state.faiMeasurements = {};
                 state.faiVerdicts = {};
@@ -17088,6 +17232,220 @@
             return evaluateCharacteristic(c.nominalMm, t.p, t.m, state.faiMeasurements[c.key] ?? '');
         }
 
+        function _resetFaiRevisionTracking() {
+            state.faiTableRevision = 0;
+            state.faiRowRevisions = {};
+            state.faiLastSageRevision = 0;
+            state.faiLastSageRows = {};
+            state.faiLastTargetCharacteristicIds = [];
+        }
+
+        function _faiRowState(c) {
+            const tolerance = _getFaiEffectiveTolerance(c);
+            const measuredRaw = state.faiMeasurements[c.key];
+            const measured = measuredRaw === null || measuredRaw === undefined
+                ? '' : String(measuredRaw);
+            return {
+                measured,
+                tol_plus: Number(tolerance.p),
+                tol_minus: Number(tolerance.m),
+                status: evaluateCharacteristic(c.nominalMm, tolerance.p, tolerance.m, measured),
+            };
+        }
+
+        function _recordFaiRowMutation(c, before) {
+            if (!c) return false;
+            const after = _faiRowState(c);
+            const unchanged = before
+                && before.measured === after.measured
+                && Number(before.tol_plus) === Number(after.tol_plus)
+                && Number(before.tol_minus) === Number(after.tol_minus);
+            if (unchanged) return false;
+            const revision = ++state.faiTableRevision;
+            const previous = state.faiRowRevisions[c.key] || {};
+            const statusChanged = !before || before.status !== after.status;
+            state.faiRowRevisions[c.key] = {
+                revision,
+                row_revision: Number(previous.row_revision || 0) + 1,
+                updated_at: new Date().toISOString(),
+                status_changed_at: statusChanged
+                    ? new Date().toISOString()
+                    : (previous.status_changed_at || null),
+                previous_measured: before ? before.measured : null,
+                current_measured: after.measured,
+                previous_status: before ? before.status : null,
+                current_status: after.status,
+            };
+            return true;
+        }
+
+        function _commitFaiInputValue(c, field, value) {
+            if (!c) return false;
+            const before = _faiRowState(c);
+            const text = value === null || value === undefined ? '' : String(value);
+            if (field === 'measured') {
+                state.faiMeasurements[c.key] = text;
+            } else if (field === 'tol_plus' || field === 'tol_minus') {
+                if (!state.faiTolOverrides[c.key]) {
+                    state.faiTolOverrides[c.key] = {
+                        plus: String(c.tolPlusMm),
+                        minus: String(c.tolMinusMm),
+                    };
+                }
+                state.faiTolOverrides[c.key][field === 'tol_plus' ? 'plus' : 'minus'] = text;
+            } else {
+                return false;
+            }
+            return _recordFaiRowMutation(c, before);
+        }
+
+        function _flushPendingFaiEdits() {
+            if (!Array.isArray(state.faiCharacteristics) || !state.faiCharacteristics.length) return;
+            const byKey = new Map(state.faiCharacteristics.map(c => [String(c.key), c]));
+            document.querySelectorAll('input.fai-measured-input[data-fai-key][data-fai-field]').forEach(input => {
+                const c = byKey.get(String(input.dataset.faiKey || ''));
+                if (c) _commitFaiInputValue(c, input.dataset.faiField, input.value);
+            });
+        }
+
+        function _buildFaiSnapshotRow(c) {
+            const tolOv = state.faiTolOverrides[c.key];
+            const measuredRaw = state.faiMeasurements[c.key];
+            const measured = measuredRaw !== null && measuredRaw !== undefined
+                && String(measuredRaw).trim() !== '' ? String(measuredRaw).trim() : null;
+            const effPlus = tolOv ? parseFloat(tolOv.plus) || 0 : c.tolPlusMm;
+            const effMinus = tolOv ? parseFloat(tolOv.minus) || 0 : c.tolMinusMm;
+            const nominalNum = Number(c.nominalMm);
+            const measuredNum = measured !== null ? Number(measured) : NaN;
+            const tolPlusNum = Number(effPlus);
+            const tolMinusNum = Number(effMinus);
+            const hasLimitMath = Number.isFinite(nominalNum)
+                && Number.isFinite(measuredNum)
+                && Number.isFinite(tolPlusNum)
+                && Number.isFinite(tolMinusNum);
+            const lowerLimit = hasLimitMath ? nominalNum - Math.abs(tolMinusNum) : null;
+            const upperLimit = hasLimitMath ? nominalNum + Math.abs(tolPlusNum) : null;
+            const deviation = hasLimitMath ? measuredNum - nominalNum : null;
+            const outOfToleranceBy = hasLimitMath
+                ? (measuredNum > upperLimit
+                    ? measuredNum - upperLimit
+                    : (measuredNum < lowerLimit ? lowerLimit - measuredNum : 0))
+                : null;
+            const direction = hasLimitMath
+                ? (measuredNum > upperLimit
+                    ? 'above_upper'
+                    : (measuredNum < lowerLimit ? 'below_lower' : 'within_tolerance'))
+                : null;
+            const descText = String(c.description || '').toLowerCase();
+            const featureFitKind = /\b(hole|bore|inside|internal|i\.?d\.?|id)\b/.test(descText)
+                ? 'internal_diameter'
+                : (/\b(outside|outer|external|o\.?d\.?|od)\b/.test(descText)
+                    ? 'external_diameter'
+                    : null);
+            let fitEffectHint = null;
+            if (featureFitKind && direction && direction !== 'within_tolerance') {
+                if (featureFitKind === 'internal_diameter') {
+                    fitEffectHint = direction === 'above_upper'
+                        ? 'internal diameter above upper limit: likely increased clearance/looser fit with mating shaft or pin'
+                        : 'internal diameter below lower limit: likely reduced clearance/tighter fit with mating shaft or pin';
+                } else {
+                    fitEffectHint = direction === 'above_upper'
+                        ? 'external diameter above upper limit: likely reduced clearance/tighter fit with mating bore'
+                        : 'external diameter below lower limit: likely increased clearance/looser fit with mating bore';
+                }
+            }
+            const meta = state.faiRowRevisions[c.key] || {};
+            return {
+                char_number: c.charNumber,
+                key: c.key,
+                description: c.description || '',
+                nominal: c.nominalMm,
+                tol_plus: effPlus,
+                tol_minus: effMinus,
+                measured,
+                lower_limit: lowerLimit,
+                upper_limit: upperLimit,
+                deviation_from_nominal: deviation,
+                out_of_tolerance_by: outOfToleranceBy,
+                deviation_direction: direction,
+                fit_feature_kind: featureFitKind,
+                fit_effect_hint: fitEffectHint,
+                status: measured !== null
+                    ? evaluateCharacteristic(c.nominalMm, effPlus, effMinus, measured)
+                    : 'PENDING',
+                is_reference: !!c.isReference,
+                row_revision: Number(meta.row_revision || 0),
+                last_changed_revision: Number(meta.revision || 0),
+                updated_at: meta.updated_at || null,
+                status_changed_at: meta.status_changed_at || null,
+            };
+        }
+
+        function _createFaiSnapshot() {
+            const rows = (state.faiCharacteristics || []).map(_buildFaiSnapshotRow);
+            const selected = state.faiCharacteristics.find(c => c.key === state.faiHighlightedRow);
+            const changed = [];
+            const newlyFailed = [];
+            rows.forEach(row => {
+                const key = String(row.key || '');
+                const baseline = state.faiLastSageRows[key];
+                const isChanged = !baseline
+                    ? Number(row.row_revision || 0) > 0
+                    : (String(baseline.measured ?? '') !== String(row.measured ?? '')
+                        || Number(baseline.tol_plus) !== Number(row.tol_plus)
+                        || Number(baseline.tol_minus) !== Number(row.tol_minus)
+                        || String(baseline.status || '') !== String(row.status || ''));
+                if (!isChanged) return;
+                changed.push({
+                    id: String(row.char_number),
+                    row_revision: row.row_revision,
+                    revision: row.last_changed_revision,
+                    previous_status: baseline ? baseline.status : 'PENDING',
+                    current_status: row.status,
+                    previous_measured: baseline ? baseline.measured : null,
+                    current_measured: row.measured,
+                });
+                if (row.status === 'FAIL' && (!baseline || baseline.status !== 'FAIL')) {
+                    newlyFailed.push(String(row.char_number));
+                }
+            });
+            return {
+                schema_version: 1,
+                table_revision: Number(state.faiTableRevision || 0),
+                previous_sage_revision: Number(state.faiLastSageRevision || 0),
+                selected_characteristic_id: selected ? String(selected.charNumber) : null,
+                newly_failed_characteristic_ids: newlyFailed,
+                changed_since_last_response: changed,
+                previous_target_characteristic_ids: (
+                    state.faiLastTargetCharacteristicIds || []
+                ).map(String),
+                rows,
+            };
+        }
+
+        function _acknowledgeFaiSnapshot(snapshot, data) {
+            if (!snapshot || !Array.isArray(snapshot.rows)) return;
+            const revision = Number(snapshot.table_revision || 0);
+            if (revision < Number(state.faiLastSageRevision || 0)) return;
+            state.faiLastSageRevision = revision;
+            state.faiLastSageRows = Object.fromEntries(snapshot.rows.map(row => [String(row.key || ''), {
+                measured: row.measured,
+                tol_plus: row.tol_plus,
+                tol_minus: row.tol_minus,
+                status: row.status,
+            }]));
+            const targetIds = data && data.fai_request
+                && Array.isArray(data.fai_request.target_characteristic_ids)
+                ? data.fai_request.target_characteristic_ids : [];
+            state.faiLastTargetCharacteristicIds = targetIds.map(String);
+        }
+
+        window.__faiSnapshotDbg = {
+            flush: _flushPendingFaiEdits,
+            create: _createFaiSnapshot,
+            acknowledge: _acknowledgeFaiSnapshot,
+        };
+
         function _computeFaiSummary(chars = state.faiCharacteristics) {
             const controlled = chars.filter(c => !c.isReference);
             const reference = chars.filter(c => c.isReference);
@@ -17377,12 +17735,17 @@
             tolBar.querySelector('#faiApplyTolAll').addEventListener('click', () => {
                 const val = parseFloat(tolBar.querySelector('#faiGlobalTol').value) || 0;
                 chars.forEach(c => {
-                    state.faiTolOverrides[c.key] = { plus: String(val), minus: String(val) };
+                    _commitFaiInputValue(c, 'tol_plus', String(val));
+                    _commitFaiInputValue(c, 'tol_minus', String(val));
                 });
                 renderViewport();
             });
             tolBar.querySelector('#faiClearTol').addEventListener('click', () => {
-                state.faiTolOverrides = {};
+                chars.forEach(c => {
+                    const before = _faiRowState(c);
+                    delete state.faiTolOverrides[c.key];
+                    _recordFaiRowMutation(c, before);
+                });
                 renderViewport();
             });
 
@@ -17473,9 +17836,14 @@
                 tolPlusInput.className = 'fai-measured-input';
                 tolPlusInput.style.width = '56px';
                 tolPlusInput.value = fmtNum(effectiveTolPlus);
+                tolPlusInput.dataset.faiKey = c.key;
+                tolPlusInput.dataset.faiField = 'tol_plus';
+                tolPlusInput.addEventListener('focus', () => _faiSelectCharacteristic(c.key));
+                tolPlusInput.addEventListener('input', (e) => {
+                    _commitFaiInputValue(c, 'tol_plus', e.target.value);
+                });
                 tolPlusInput.addEventListener('change', (e) => {
-                    if (!state.faiTolOverrides[c.key]) state.faiTolOverrides[c.key] = { plus: String(c.tolPlusMm), minus: String(c.tolMinusMm) };
-                    state.faiTolOverrides[c.key].plus = e.target.value;
+                    _commitFaiInputValue(c, 'tol_plus', e.target.value);
                     renderViewport();
                 });
                 tolPlusCell.appendChild(tolPlusInput);
@@ -17487,9 +17855,14 @@
                 tolMinusInput.className = 'fai-measured-input';
                 tolMinusInput.style.width = '56px';
                 tolMinusInput.value = fmtNum(effectiveTolMinus);
+                tolMinusInput.dataset.faiKey = c.key;
+                tolMinusInput.dataset.faiField = 'tol_minus';
+                tolMinusInput.addEventListener('focus', () => _faiSelectCharacteristic(c.key));
+                tolMinusInput.addEventListener('input', (e) => {
+                    _commitFaiInputValue(c, 'tol_minus', e.target.value);
+                });
                 tolMinusInput.addEventListener('change', (e) => {
-                    if (!state.faiTolOverrides[c.key]) state.faiTolOverrides[c.key] = { plus: String(c.tolPlusMm), minus: String(c.tolMinusMm) };
-                    state.faiTolOverrides[c.key].minus = e.target.value;
+                    _commitFaiInputValue(c, 'tol_minus', e.target.value);
                     renderViewport();
                 });
                 tolMinusCell.appendChild(tolMinusInput);
@@ -17502,13 +17875,18 @@
                 input.value = measured;
                 input.placeholder = '—';
                 input.dataset.faiKey = c.key;
+                input.dataset.faiField = 'measured';
+                input.addEventListener('focus', () => _faiSelectCharacteristic(c.key));
+                input.addEventListener('input', (e) => {
+                    _commitFaiInputValue(c, 'measured', e.target.value);
+                });
                 input.addEventListener('change', (e) => {
-                    state.faiMeasurements[c.key] = e.target.value;
+                    _commitFaiInputValue(c, 'measured', e.target.value);
                     renderViewport();
                 });
                 input.addEventListener('keydown', (e) => {
                     if (e.key === 'Tab') {
-                        state.faiMeasurements[c.key] = e.target.value;
+                        _commitFaiInputValue(c, 'measured', e.target.value);
                     }
                 });
                 measuredCell.appendChild(input);
@@ -18155,13 +18533,13 @@
 
         function _applyFaiFillValues(fills) {
             if (!fills || !Object.keys(fills).length) return 0;
-            const charNumToKey = {};
-            state.faiCharacteristics.forEach(c => { charNumToKey[Number(c.charNumber)] = c.key; });
+            const charNumToRow = {};
+            state.faiCharacteristics.forEach(c => { charNumToRow[Number(c.charNumber)] = c; });
             let fillCount = 0;
             Object.entries(fills).forEach(([num, value]) => {
-                const key = charNumToKey[parseInt(num, 10)];
-                if (key && value !== null && value !== undefined) {
-                    state.faiMeasurements[key] = String(value);
+                const row = charNumToRow[parseInt(num, 10)];
+                if (row && value !== null && value !== undefined) {
+                    _commitFaiInputValue(row, 'measured', String(value));
                     fillCount++;
                 }
             });
@@ -20027,7 +20405,17 @@
         function renderViewport() {
             // Feature #120: Save 3D camera state before clearing viewport
             _save3DCameraState();
-            _saveAssemblyCameraState();
+            if (ASSEMBLY_VIEWPORT_STATE_PERSISTENCE && state.assyLiveScene && !state._assyViewerIsGuided) {
+                _checkpointAssemblyViewportForRemount();
+            } else if (!state._assyViewportSuspended) {
+                _saveAssemblyCameraState();
+            }
+            // A root Assembly GLB may still be loading when the user leaves
+            // its tab. Invalidate that mount so a late callback cannot attach
+            // stale nodes after the renderer has been disposed.
+            if (state.activeTab !== 'assembly' && !state._assyViewerIsGuided) {
+                state._assyMountToken = (state._assyMountToken || 0) + 1;
+            }
             // Stop any existing 3D animation loop
             if (state.threeAnimationId) {
                 cancelAnimationFrame(state.threeAnimationId);
@@ -29809,6 +30197,231 @@
             }
         }
 
+        function _assemblyViewportAssemblyNumber() {
+            return String((assemblyContext && assemblyContext.assembly_number) || state.assyLoadedNumber || '');
+        }
+
+        function _captureAssemblyMotionResume() {
+            const assemblyNumber = _assemblyViewportAssemblyNumber();
+            if (!assemblyNumber || !state.motionSetupDone) return null;
+
+            if (state.motionPkgMode && state.motionPkg) {
+                return {
+                    kind: 'package',
+                    assemblyNumber,
+                    motionId: String(state.motionPkg.motionId || ''),
+                    angleDeg: Number.isFinite(Number(state.motionPkgAngle)) ? Number(state.motionPkgAngle) : 0,
+                    rpm: Number.isFinite(Number(state.motionRpm)) ? Number(state.motionRpm) : null,
+                    loop: state.motionPkgLoop !== false,
+                    wasPlaying: !!state.motionPlaying,
+                };
+            }
+
+            if (state.motionChain) {
+                return {
+                    kind: 'legacy',
+                    assemblyNumber,
+                    angleRad: Number.isFinite(Number(state.motionAngle)) ? Number(state.motionAngle) : 0,
+                    rpm: Number.isFinite(Number(state.motionRpm)) ? Number(state.motionRpm) : null,
+                    wasPlaying: !!state.motionPlaying,
+                };
+            }
+            return null;
+        }
+
+        function _suspendAssemblyMotionForRemount() {
+            const resume = _captureAssemblyMotionResume();
+            if (resume) {
+                state._assyMotionResume = resume;
+                state._assyMotionResumeError = null;
+            }
+
+            // Do not call _stopMotion here. It deliberately returns the model
+            // to rest pose and clears its angle, which is correct for an
+            // explicit Stop but wrong for a viewer remount.
+            state.motionPlaying = false;
+            state._lastMotionTime = null;
+            if (state.motionPkgMode) _restoreMotionPkgReviewMaterials();
+            state.motionSetupDone = false;
+            state.motionPkgMode = false;
+            state.motionPkgBound = null;
+            state.motionPkgPivots = null;
+            state.motionPkgRig = null;
+            state.motionPkgJointClosures = null;
+            state._mpkgJointChecked = false;
+            state.motionChain = null;
+            state.motionCylData = null;
+            state.motionCrankPivot = null;
+        }
+
+        function _checkpointAssemblyViewportForRemount() {
+            if (!ASSEMBLY_VIEWPORT_STATE_PERSISTENCE || state._assyViewerIsGuided) {
+                _saveAssemblyCameraState();
+                return;
+            }
+            if (state._assyViewportSuspended) return;
+
+            _saveAssemblyCameraState();
+            state._assyViewportSnapshot = {
+                assemblyNumber: _assemblyViewportAssemblyNumber(),
+                labelPartNumbers: Object.keys(state.assy3DLabels || {}).map(String),
+            };
+
+            // Feature overlays and CSS labels retain mesh / scene references.
+            // Dispose only their live objects; the semantic selections remain
+            // in state and are rebuilt after the next scene mount.
+            _clearAssemblySemanticFeatureHighlight(true);
+            _clearAll3DLabels();
+            if (state.assyMeasureState && state.assyMeasureState.active
+                && typeof _clearViewerMeasure === 'function') {
+                _clearViewerMeasure('assembly');
+            }
+
+            _suspendAssemblyMotionForRemount();
+            // Planes are Three.js objects tied to the old renderer. Preserve
+            // their semantic targets and reconstruct the planes on rehydrate.
+            state._assyClipPlanes = null;
+            state._assyViewportSuspended = true;
+        }
+
+        function _restoreAssemblyMotionAfterRemount(resume, mountToken) {
+            if (!resume || mountToken !== state._assyMountToken || !state.assyLiveScene) {
+                return { ok: false, error: 'stale or missing assembly scene' };
+            }
+            if (String(resume.assemblyNumber || '') !== _assemblyViewportAssemblyNumber()) {
+                return { ok: false, error: 'assembly changed before motion resume' };
+            }
+
+            if (resume.kind === 'package') {
+                if (!_motionPkgAvailable() || !state.motionPkg
+                    || String(state.motionPkg.motionId || '') !== String(resume.motionId || '')) {
+                    return { ok: false, error: 'saved motion package is unavailable' };
+                }
+                if (!_setupMotionPkg()) {
+                    return { ok: false, error: 'saved motion package could not bind to this scene' };
+                }
+                if (Number.isFinite(Number(resume.rpm))) setMotionRpm(resume.rpm);
+                state.motionPkgLoop = resume.loop !== false;
+                _applyMotionPkgPose(Number(resume.angleDeg) || 0);
+                state._assyLastMotionRestore = {
+                    kind: 'package',
+                    savedAngleDeg: Number(resume.angleDeg) || 0,
+                    appliedAngleDeg: Number(state.motionPkgAngle) || 0,
+                };
+                state.motionPlaying = !!resume.wasPlaying;
+                state._lastMotionTime = null;
+                _updateMotionButton();
+                _updateMotionPkgHud();
+                return { ok: true };
+            }
+
+            if (resume.kind === 'legacy') {
+                // A package may have loaded since the old viewer was mounted.
+                // Preserve the existing legacy solver when that was the state
+                // the user left, rather than changing playback implementation.
+                if (!_setupMotion({ preferLegacy: true })) {
+                    return { ok: false, error: 'saved legacy motion could not bind to this scene' };
+                }
+                state.motionAngle = Number(resume.angleRad) || 0;
+                _updateMotion(0);
+                state._assyLastMotionRestore = {
+                    kind: 'legacy',
+                    savedAngleRad: Number(resume.angleRad) || 0,
+                    appliedAngleRad: Number(state.motionAngle) || 0,
+                };
+                if (Number.isFinite(Number(resume.rpm))) state.motionRpm = Number(resume.rpm);
+                state.motionPlaying = !!resume.wasPlaying;
+                state._lastMotionTime = null;
+                _updateMotionButton();
+                return { ok: true };
+            }
+
+            return { ok: false, error: 'unknown saved motion type' };
+        }
+
+        function _rehydrateAssemblyViewport(liveScene, mountToken, opts = {}) {
+            if (!ASSEMBLY_VIEWPORT_STATE_PERSISTENCE || opts.cacheKey
+                || !liveScene || state.assyLiveScene !== liveScene
+                || mountToken !== state._assyMountToken) {
+                return Promise.resolve({ ok: false, skipped: true });
+            }
+
+            const snapshot = state._assyViewportSnapshot || {};
+            const resume = state._assyMotionResume;
+            let motionRestored = false;
+
+            // Display style, visibility overrides, selections, and semantic
+            // overlays all use the current mesh map. Reapply them to this new
+            // clone rather than carrying stale object references across tabs.
+            _setViewerDisplayStyle('assembly', state.assyDisplayStyle || 'shaded_edges');
+            if (resume) {
+                const result = _restoreAssemblyMotionAfterRemount(resume, mountToken);
+                if (result.ok) {
+                    motionRestored = true;
+                    state._assyMotionResume = null;
+                    state._assyMotionResumeError = null;
+                } else {
+                    state._assyMotionResumeError = result.error;
+                    console.warn('[AssemblyState] motion resume paused:', result.error);
+                }
+            } else if (Array.isArray(state._assyIsolatedParts) && state._assyIsolatedParts.length > 0) {
+                _isolateParts(state._assyIsolatedParts);
+            } else if (state.assyExplodeLevel > 0) {
+                _applyExplodeLevel(state.assyExplodeLevel);
+            }
+
+            if (state._assyClipActive) {
+                _applySectionClip(state.assyClipTargetPartNumbers || []);
+            }
+            applyPartHighlight3D();
+            _updatePartExplorerUI();
+            _updatePresetPillsUI();
+
+            const labels = Array.isArray(snapshot.labelPartNumbers) ? snapshot.labelPartNumbers : [];
+            if (labels.length) {
+                _showLabelsForParts(labels);
+                if (motionRestored || state.motionSetupDone) {
+                    Object.values(state.assy3DLabels).forEach(label => { label.visible = false; });
+                }
+            }
+
+            state._assyViewportSuspended = false;
+            state._assyViewportSnapshot = null;
+            const rebuild = _rebuildAssemblyFeatureSelections(mountToken, liveScene)
+                .catch(err => {
+                    console.warn('[AssemblyState] feature overlay rehydrate failed:', err);
+                    return { ok: false, error: String(err && err.message || err) };
+                });
+            state._assyRehydratePromise = rebuild;
+            return rebuild;
+        }
+
+        function _applyDeferredAssemblyViewportIntents() {
+            // A fresh explicit agent intent wins over restored viewer state.
+            if (state._pendingFlyTarget) {
+                const pending = state._pendingFlyTarget;
+                const pendingView = state._pendingFlyView;
+                state._pendingFlyTarget = null;
+                state._pendingFlyView = null;
+                pending.forEach(pn => {
+                    if (state.assyPartMeshMap[pn]) {
+                        state.partExplorerSelectedParts.add(pn);
+                        state.partExplorerAgentParts.add(pn);
+                    }
+                });
+                applyPartHighlight3D();
+                _updatePartExplorerUI();
+                _updatePresetPillsUI();
+                if (pendingView) _flyToPartView(pending, pendingView);
+                else _flyToPartGroup(pending);
+            }
+            if (state._pendingExplodeLevel !== null) {
+                const level = state._pendingExplodeLevel;
+                state._pendingExplodeLevel = null;
+                _animateExplode(level);
+            }
+        }
+
         // ---- Revision Diff Functions ----
 
         async function _fetchAssemblyRevisions(assemblyNumber) {
@@ -34045,9 +34658,6 @@
             renderer.setSize(width, height);
             renderer.setPixelRatio(window.devicePixelRatio);
             _registerThemedRenderer(renderer);
-            renderer.toneMapping = THREE.LinearToneMapping;
-            renderer.toneMappingExposure = 1.0;
-            renderer.outputEncoding = THREE.sRGBEncoding;
             renderer.localClippingEnabled = true;
             container.appendChild(renderer.domElement);
 
@@ -34057,17 +34667,18 @@
             labelRenderer.setSize(width, height);
             container.appendChild(labelRenderer.domElement);
 
-            // Lighting defaults match the darker Display panel preset.
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.0);
+            // Match the 3D Model viewport lighting exactly so switching
+            // between part and assembly context does not change the studio.
+            const ambientLight = new THREE.AmbientLight(0x404060, 0.0);
             scene.add(ambientLight);
             const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.5);
-            dirLight1.position.set(1, 2, 1.5);
+            dirLight1.position.set(1, 1, 1);
             scene.add(dirLight1);
-            const dirLight2 = new THREE.DirectionalLight(0xbbccff, 0.16);
+            const dirLight2 = new THREE.DirectionalLight(0xbbccff, 0.5);
             dirLight2.position.set(-1, -0.5, -1);
             scene.add(dirLight2);
-            const dirLight3 = new THREE.DirectionalLight(0xffffff, 0.10);
-            dirLight3.position.set(0, -1, 0.5);
+            const dirLight3 = new THREE.DirectionalLight(0xffffff, 0.5);
+            dirLight3.position.set(0, 1, 0);
             scene.add(dirLight3);
 
             // Orbit controls (reuse existing helper)
@@ -34162,6 +34773,8 @@
                     controls.target.copy(state.assyCameraState.target);
                     _syncOrbitFromCamera(controls, camera);
                 }
+                _rehydrateAssemblyViewport(cloned, _mountToken, { cacheKey: _cacheKey });
+                _applyDeferredAssemblyViewportIntents();
             } else {
                 // Branded loading overlay (download -> build -> ready), reused by
                 // the root assembly viewer and the per-subassembly guided viewer.
@@ -34189,6 +34802,8 @@
                             controls.target.copy(state.assyCameraState.target);
                             _syncOrbitFromCamera(controls, camera);
                         }
+                        _rehydrateAssemblyViewport(liveScene, _mountToken, { cacheKey: _cacheKey });
+                        _applyDeferredAssemblyViewportIntents();
                         // Scene is built and framed — finish the loader to 100% and fade out.
                         _assyHideLoadingOverlay(container);
                         // Delayed refit: ensures container has valid dimensions after layout
@@ -34206,32 +34821,6 @@
                             }
                         }, 100);
                         // Execute deferred fly-to AFTER fit/restore so it overrides camera position
-                        if (state._pendingFlyTarget) {
-                            const pending = state._pendingFlyTarget;
-                            const pendingView = state._pendingFlyView;
-                            state._pendingFlyTarget = null;
-                            state._pendingFlyView = null;
-                            pending.forEach(pn => {
-                                if (state.assyPartMeshMap[pn]) {
-                                    state.partExplorerSelectedParts.add(pn);
-                                    state.partExplorerAgentParts.add(pn);
-                                }
-                            });
-                            applyPartHighlight3D();
-                            _updatePartExplorerUI();
-                            _updatePresetPillsUI();
-                            if (pendingView) {
-                                _flyToPartView(pending, pendingView);
-                            } else {
-                                _flyToPartGroup(pending);
-                            }
-                        }
-                        // Execute deferred explode level
-                        if (state._pendingExplodeLevel !== null) {
-                            const lvl = state._pendingExplodeLevel;
-                            state._pendingExplodeLevel = null;
-                            _animateExplode(lvl);
-                        }
                     },
                     function onProgress(xhr) {
                         _assyUpdateLoadingOverlay(container, {
@@ -34461,8 +35050,8 @@
             // --- Directional Intensity ---
             body.appendChild(_assySlider('Directional', 0, 5, 0.1, state.assyLights?.dir1?.intensity ?? 0.5, val => {
                 if (state.assyLights?.dir1) state.assyLights.dir1.intensity = val;
-                if (state.assyLights?.dir2) state.assyLights.dir2.intensity = val * 0.32;
-                if (state.assyLights?.dir3) state.assyLights.dir3.intensity = val * 0.2;
+                if (state.assyLights?.dir2) state.assyLights.dir2.intensity = val;
+                if (state.assyLights?.dir3) state.assyLights.dir3.intensity = val;
             }));
 
             // --- Exposure ---
@@ -34496,6 +35085,7 @@
             const assyRotateCb = document.createElement('input');
             assyRotateCb.type = 'checkbox';
             assyRotateCb.id = 'assy-autorotate';
+            assyRotateCb.checked = !!state._assyAutoRotate;
             const assyRotateLbl = document.createElement('label');
             assyRotateLbl.htmlFor = 'assy-autorotate';
             assyRotateLbl.textContent = 'Auto Rotate';
@@ -35620,9 +36210,9 @@
             return { ok: true };
         }
 
-        function _setupMotion() {
+        function _setupMotion(opts = {}) {
             // Package playback takes precedence over the legacy chain solver.
-            if (_motionPkgAvailable()) return _setupMotionPkg();
+            if (!opts.preferLegacy && _motionPkgAvailable()) return _setupMotionPkg();
             if (!assemblyContext?.kinematic_chain || !state.assyPartMeshMap || !state.assyInstanceMeshMap) return false;
             const chain = assemblyContext.kinematic_chain;
             state.motionChain = chain;
@@ -35927,6 +36517,11 @@
 
             state.motionSetupDone = false;
             state.motionCylData = null;
+            // Explicit Stop is a semantic reset. It must not be resurrected
+            // automatically after a later Assembly viewer remount.
+            state._assyMotionResume = null;
+            state._assyMotionResumeError = null;
+            state._assyLastMotionRestore = null;
             _updateMotionButton();
         }
 
@@ -36253,11 +36848,14 @@
 
         // ===== Section Clipping Functions =====
         function _applySectionClip(targetPartNumbers) {
+            state.assyClipTargetPartNumbers = Array.from(new Set((targetPartNumbers || [])
+                .map(partNumber => String(partNumber || '').trim())
+                .filter(Boolean)));
             if (!state.assyRenderer || !state.assyPartMeshMap || !state.assyLiveScene) return;
 
             // Collect meshes of target (internal) parts — these stay unclipped
             const targetMeshes = new Set();
-            (targetPartNumbers || []).forEach(pn => {
+            state.assyClipTargetPartNumbers.forEach(pn => {
                 (state.assyPartMeshMap[pn] || []).forEach(m => targetMeshes.add(m));
             });
 
@@ -36307,7 +36905,10 @@
         }
 
         function _clearSectionClip() {
-            if (!state._assyClipActive) return;
+            if (!state._assyClipActive) {
+                state.assyClipTargetPartNumbers = [];
+                return;
+            }
             if (state.assyLiveScene) {
                 state.assyLiveScene.traverse(child => {
                     if (!child.isMesh) return;
@@ -36317,6 +36918,7 @@
             }
             state._assyClipPlanes = null;
             state._assyClipActive = false;
+            state.assyClipTargetPartNumbers = [];
         }
 
         // Auto-clip housing when explode is active: identify which parts are "internal"
@@ -37243,13 +37845,17 @@
             return added;
         }
 
-        async function _appendAssemblySemanticFeatureSelection(root, feature, partNumber, requestId) {
-            if (!root || !feature || !state.assyLiveScene || !state.assyPartMeshMap || !window.THREE) return { ok: false, matched: 0 };
+        async function _appendAssemblySemanticFeatureSelection(root, feature, partNumber, requestId, mountToken = state._assyMountToken, liveScene = state.assyLiveScene) {
+            if (!root || !feature || !liveScene || state.assyLiveScene !== liveScene
+                || !state.assyPartMeshMap || !window.THREE) return { ok: false, matched: 0 };
             const meshes = _assemblyMeshesForPartNumber(partNumber);
             if (!meshes.length) return { ok: false, matched: 0 };
             const regions = Array.isArray(feature.highlight_regions) ? feature.highlight_regions : [];
             const exactSource = regions.length ? null : await _loadAssemblyExactFeatureSource(partNumber);
-            if (state.assySemanticFeatureOverlayRequestId !== requestId) return { ok: false, stale: true, matched: 0 };
+            if (state.assySemanticFeatureOverlayRequestId !== requestId
+                || mountToken !== state._assyMountToken || state.assyLiveScene !== liveScene) {
+                return { ok: false, stale: true, matched: 0 };
+            }
 
             const baseName = String(feature.name || 'feature').toLowerCase().replace(/[^a-z0-9]+/g, '_');
             const baseColor = _assemblySemanticFeatureColor(feature);
@@ -37279,14 +37885,18 @@
             return { ok: added > 0, matched: added };
         }
 
-        async function _rebuildAssemblyFeatureSelections() {
+        async function _rebuildAssemblyFeatureSelections(expectedMountToken = state._assyMountToken, expectedScene = state.assyLiveScene) {
+            if (expectedMountToken !== state._assyMountToken || state.assyLiveScene !== expectedScene) {
+                return { ok: false, stale: true, matched: 0 };
+            }
             const selections = state.assemblyFeatureSelections instanceof Map
                 ? Array.from(state.assemblyFeatureSelections.values())
                 : [];
             const requestId = (state.assySemanticFeatureOverlayRequestId || 0) + 1;
             state.assySemanticFeatureOverlayRequestId = requestId;
             _clearAssemblySemanticFeatureHighlight(false);
-            if (!selections.length || !state.assyLiveScene || !state.assyPartMeshMap || !window.THREE) {
+            if (!selections.length || !expectedScene || state.assyLiveScene !== expectedScene
+                || !state.assyPartMeshMap || !window.THREE) {
                 if (!selections.length) state.assemblyFeatureSelectionIsolate = false;
                 applyPartHighlight3D();
                 return { ok: selections.length === 0, matched: 0 };
@@ -37300,8 +37910,13 @@
 
             let matched = 0;
             for (const item of selections) {
-                const result = await _appendAssemblySemanticFeatureSelection(root, item.feature, item.partNumber, requestId);
-                if (result.stale || state.assySemanticFeatureOverlayRequestId !== requestId) return { ok: false, stale: true, matched };
+                const result = await _appendAssemblySemanticFeatureSelection(
+                    root, item.feature, item.partNumber, requestId, expectedMountToken, expectedScene
+                );
+                if (result.stale || state.assySemanticFeatureOverlayRequestId !== requestId
+                    || expectedMountToken !== state._assyMountToken || state.assyLiveScene !== expectedScene) {
+                    return { ok: false, stale: true, matched };
+                }
                 matched += result.matched || 0;
             }
 
@@ -37314,10 +37929,12 @@
         }
 
         async function _applyAssemblySemanticFeatureHighlight(feature, partNumber = state.partNumber) {
+            const mountToken = state._assyMountToken;
+            const liveScene = state.assyLiveScene;
             const requestId = (state.assySemanticFeatureOverlayRequestId || 0) + 1;
             state.assySemanticFeatureOverlayRequestId = requestId;
             _clearAssemblySemanticFeatureHighlight(false);
-            if (!feature || !state.assyLiveScene || !state.assyPartMeshMap || !window.THREE) return { ok: false, matched: 0 };
+            if (!feature || !liveScene || state.assyLiveScene !== liveScene || !state.assyPartMeshMap || !window.THREE) return { ok: false, matched: 0 };
             const meshes = _assemblyMeshesForPartNumber(partNumber);
             if (!meshes.length) {
                 if (window._toast) window._toast('No assembly mesh found for this part feature', 'warning');
@@ -37325,7 +37942,10 @@
             }
             const regions = Array.isArray(feature.highlight_regions) ? feature.highlight_regions : [];
             const exactSource = regions.length ? null : await _loadAssemblyExactFeatureSource(partNumber);
-            if (state.assySemanticFeatureOverlayRequestId !== requestId) return { ok: false, matched: 0 };
+            if (state.assySemanticFeatureOverlayRequestId !== requestId
+                || mountToken !== state._assyMountToken || state.assyLiveScene !== liveScene) {
+                return { ok: false, stale: true, matched: 0 };
+            }
 
             const root = new THREE.Group();
             root.name = `assembly_semantic_feature_${String(feature.name || 'feature').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
@@ -41439,6 +42059,32 @@
             focusCompareOnFeatures:    (fidsA, fidsB) => _focusCompareCamerasOnFeatures(fidsA, fidsB),
             autoOpenPartCompareAndHighlight: (markers, revA, revB) =>
                 _autoOpenPartCompareAndHighlight(markers, revA, revB),
+            assemblyViewportSnapshot: () => ({
+                suspended: !!state._assyViewportSuspended,
+                motion_resume: state._assyMotionResume ? Object.assign({}, state._assyMotionResume) : null,
+                motion_resume_error: state._assyMotionResumeError || null,
+                last_motion_restore: state._assyLastMotionRestore
+                    ? Object.assign({}, state._assyLastMotionRestore) : null,
+                motion_playing: !!state.motionPlaying,
+                motion_package_mode: !!state.motionPkgMode,
+                motion_angle_deg: Number(state.motionPkgAngle || 0),
+                motion_rpm: Number(state.motionRpm || 0),
+                auto_rotate: !!state._assyAutoRotate,
+                camera_position: state.assyCamera ? state.assyCamera.position.toArray() : null,
+                camera_target: state.assyControls ? state.assyControls.target.toArray() : null,
+                selected_parts: Array.from(state.partExplorerSelectedParts || []).map(String).sort(),
+                agent_parts: Array.from(state.partExplorerAgentParts || []).map(String).sort(),
+                display_overrides: Object.assign({}, state.assemblyPartDisplayOverrides || {}),
+                feature_selection_count: state.assemblyFeatureSelections instanceof Map
+                    ? state.assemblyFeatureSelections.size : 0,
+            }),
+            setAssemblyDisplayOverride: (pn, patch) => _setAssemblyPartDisplayOverride(pn, patch),
+            highlightAssemblyParts: (parts, options) => applyAgentPartHighlights(parts, null, options || {}),
+            setAssemblyFeatureSelection: (pn, feature, featureKey, checked) =>
+                _toggleAssemblyFeatureSelection(pn, feature, featureKey, checked),
+            playAssemblyMotion: (options) => playMotion(options || {}),
+            pauseAssemblyMotion: () => pauseMotion(),
+            stopAssemblyMotion: () => stopMotion(),
             mountCompareSubtab:        () => {
                 state.activeTab = '3dmodel';
                 partDiffState.activeSubtab = 'compare';
@@ -43212,6 +43858,7 @@
             state.dimExplorerSelectedKeys = new Set(); state.dimExplorerAgentKeys = new Set();
             renderDimExplorerHighlight();
             state.faiCharacteristics = []; state.faiCharacteristicsSourceKey = ''; state.faiMeasurements = {}; state.faiVerdicts = {}; state.faiTolOverrides = {};
+            _resetFaiRevisionTracking();
             runBtn.disabled = true;
             runBtn.textContent = 'Analyzing...';
 
@@ -43273,6 +43920,7 @@
                 state.faiMeasurements = {};
                 state.faiVerdicts = {};
                 state.faiTolOverrides = {};
+                _resetFaiRevisionTracking();
                 if (state.results?.drawing_map) buildFaiCharacteristics();
                 showResults();
                 // Toast notification — always fires regardless of agent state
@@ -43386,7 +44034,7 @@
 
             // Feature #144: Clear assembly context on reset
             // Clear motion state FIRST (before assyLiveScene is nulled — _stopMotion needs it)
-            if (state.motionPlaying) _stopMotion();
+            if (state.motionPlaying || state.motionSetupDone) _stopMotion();
             state.motionPlaying = false;
             state.motionSetupDone = false;
             state.motionChain = null;
@@ -43430,6 +44078,13 @@
             state._assyIsolatedParts = null;
             state._assyClipPlanes = null;
             state._assyClipActive = false;
+            state.assyClipTargetPartNumbers = [];
+            state._assyMotionResume = null;
+            state._assyMotionResumeError = null;
+            state._assyLastMotionRestore = null;
+            state._assyViewportSnapshot = null;
+            state._assyViewportSuspended = false;
+            state._assyRehydratePromise = null;
             state.assyInstanceMeshMap = null;
             state.narrationState = 'idle';
             state._bargeInContext = null;
@@ -43513,6 +44168,7 @@
                 state.faiMeasurements = {};
                 state.faiVerdicts = {};
                 state.faiTolOverrides = {};
+                _resetFaiRevisionTracking();
                 if (typeof _clearGeometryDiffContext === 'function') _clearGeometryDiffContext();
                 runBtn.textContent = 'Run Inspection';
                 runBtn.disabled = false;
@@ -45352,6 +46008,7 @@
                     workflowState: null,
                     workflowStateEvent: null,
                     activeStream: null,
+                    activeWorkingState: null,
                 };
             }
 
@@ -45530,11 +46187,15 @@
                 if (msg.meta && msg.meta.pending) {
                     row.classList.add('agent-stream-pending');
                     const textEl = content.querySelector('.agent-msg');
-                    if (textEl) textEl.insertAdjacentHTML('beforeend', '<span class="typing-cursor"></span>');
-                    const status = document.createElement('div');
-                    status.className = 'agent-stream-status';
-                    status.textContent = msg.meta.streamStatus || 'Generating';
-                    content.appendChild(status);
+                    if (textEl && !msg.meta.streamFailed && String(msg.blocks?.[0]?.text || '').length > 0) {
+                        textEl.insertAdjacentHTML('beforeend', '<span class="typing-cursor"></span>');
+                    }
+                    if (msg.meta.showStreamStatus !== false) {
+                        const status = document.createElement('div');
+                        status.className = 'agent-stream-status';
+                        status.textContent = msg.meta.streamStatus || 'Generating';
+                        content.appendChild(status);
+                    }
                 }
 
                 row.appendChild(avatar);
@@ -45641,6 +46302,7 @@
 
             function restoreSessionFromSnapshot(agentKey, rawSession) {
                 const session = getAgentSession(agentKey);
+                if (session.activeWorkingState) session.activeWorkingState.cancel();
                 session.messages = (rawSession.messages || []).map(deserializePersistedMessage);
                 session.summary = rawSession.summary || '';
                 session.scrollTop = rawSession.scrollTop || 0;
@@ -45653,6 +46315,7 @@
                     ? JSON.parse(JSON.stringify(rawSession.workflowStateEvent)) : null;
                 session.waiting = false;
                 session.activeStream = null;
+                session.activeWorkingState = null;
                 session.requestId = 0;
                 session.pendingCapture = null;
                 for (const msg of session.messages) {
@@ -45664,10 +46327,12 @@
             function resetAllSessions() {
                 for (const key of ['inspector', 'deviation-analyst', 'parts-finder']) {
                     const s = getAgentSession(key);
+                    if (s.activeWorkingState) s.activeWorkingState.cancel();
                     s.messages = []; s.summary = ''; s.scrollTop = 0;
                     s.pendingInput = ''; s.pendingCrossContext = null;
                     s.waiting = false; s.requestId = 0; s.pendingCapture = null;
                     s.activeStream = null;
+                    s.activeWorkingState = null;
                     s.chatSessionId = _newAgentChatSessionId(key);
                     s.workflowState = null; s.workflowStateEvent = null;
                 }
@@ -45851,6 +46516,7 @@
                 const progCard = document.getElementById('inspectionProgressCard');
                 if (progCard) progCard.remove();
                 removeTypingIndicator();
+                document.querySelectorAll('.agent-working-row').forEach(row => row.remove());
                 const asmeOverlay = document.getElementById('asmeRefOverlay');
                 if (asmeOverlay) asmeOverlay.remove();
                 const lightbox = document.getElementById('lightbox');
@@ -45876,6 +46542,7 @@
                 } else {
                     agentMessages.innerHTML = '<div class="agent-welcome">' + (AGENTS[currentAgent]._welcome || 'How can I help?') + '</div>';
                 }
+                if (activeSession.activeWorkingState) activeSession.activeWorkingState.attach();
                 // Restore input + clear capture
                 agentInput.value = activeSession.pendingInput || '';
                 clearAgentCapture();
@@ -46619,6 +47286,14 @@
                             is_reference: !!c.isReference,
                         };
                     });
+                    // Replace the legacy projection above with the immutable,
+                    // revisioned snapshot used by both the visible table and
+                    // Sage. Keeping the projection temporarily preserves the
+                    // legacy command path while the canonical snapshot owns
+                    // all reasoning fields.
+                    const faiSnapshot = _createFaiSnapshot();
+                    att.inspection.fai_characteristics = faiSnapshot.rows;
+                    att.inspection.fai_snapshot = faiSnapshot;
                 }
 
                 // SELECTION
@@ -47108,48 +47783,143 @@
                     source: opts.source || 'provider_stream',
                     pending: true,
                     streamStatus: opts.status || 'Routing',
+                    showStreamStatus: opts.showStatus !== false,
                     responseId: opts.responseId || null,
                 });
                 session.messages.push(msg);
 
-                let pendingDelta = '';
+                const streamRuntime = window.InspectorProChatStreamRuntime;
+                const visualQueue = streamRuntime && typeof streamRuntime.createVisualTextQueue === 'function'
+                    ? streamRuntime.createVisualTextQueue()
+                    : null;
                 let frameId = 0;
+                let disposed = false;
+                let cachedRow = null;
+                let cachedMessageEl = null;
+                let cachedTextEl = null;
+                let cachedTextNode = null;
+                let cachedCursorEl = null;
+                let cachedStatusEl = null;
 
                 const liveRow = () => agentKey === currentAgent
                     ? agentMessages.querySelector('[data-msg-id="' + msg.id + '"]')
                     : null;
 
-                const render = (cursor) => {
+                const resetCachedElements = () => {
+                    cachedRow = null;
+                    cachedMessageEl = null;
+                    cachedTextEl = null;
+                    cachedTextNode = null;
+                    cachedCursorEl = null;
+                    cachedStatusEl = null;
+                };
+
+                const ensureProvisionalElements = () => {
                     const row = liveRow();
-                    if (!row) return;
+                    if (!row) {
+                        resetCachedElements();
+                        return null;
+                    }
+                    if (cachedRow !== row) resetCachedElements();
+                    cachedRow = row;
                     row.classList.toggle('agent-stream-pending', !!msg.meta.pending);
                     const msgEl = row.querySelector('.agent-msg');
-                    if (msgEl) {
-                        msgEl.innerHTML = formatMessageText(msg.blocks[0].text || '')
-                            + (cursor && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-                                ? '<span class="typing-cursor"></span>' : '');
+                    if (!msgEl) return { row, msgEl: null };
+                    if (cachedMessageEl !== msgEl || !cachedTextEl || !msgEl.contains(cachedTextEl)) {
+                        cachedMessageEl = msgEl;
+                        msgEl.replaceChildren();
+                        cachedTextEl = document.createElement('span');
+                        cachedTextEl.className = 'agent-stream-provisional-text';
+                        cachedTextNode = document.createTextNode('');
+                        cachedTextEl.appendChild(cachedTextNode);
+                        msgEl.appendChild(cachedTextEl);
+                        cachedCursorEl = null;
                     }
-                    let statusEl = row.querySelector('.agent-stream-status');
-                    if (msg.meta.pending) {
+                    return { row, msgEl };
+                };
+
+                const renderStatus = (row) => {
+                    if (!row) return;
+                    let statusEl = cachedStatusEl && row.contains(cachedStatusEl)
+                        ? cachedStatusEl
+                        : row.querySelector('.agent-stream-status');
+                    if (msg.meta.pending && msg.meta.showStreamStatus !== false) {
                         if (!statusEl) {
                             statusEl = document.createElement('div');
                             statusEl.className = 'agent-stream-status';
                             row.querySelector('.agent-msg-content').appendChild(statusEl);
                         }
-                        statusEl.textContent = msg.meta.streamStatus || 'Generating';
+                        const statusText = msg.meta.streamStatus || 'Generating';
+                        if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
+                        cachedStatusEl = statusEl;
                     } else if (statusEl) {
                         statusEl.remove();
+                        cachedStatusEl = null;
                     }
                 };
 
-                const flush = () => {
-                    frameId = 0;
-                    if (pendingDelta) {
-                        msg.blocks[0].text += pendingDelta;
-                        pendingDelta = '';
+                const renderProvisional = (cursor, appendedText) => {
+                    const elements = ensureProvisionalElements();
+                    if (!elements || !elements.msgEl) return;
+                    if (msg.blocks[0].text) elements.row.classList.add('agent-stream-enter');
+                    const text = msg.blocks[0].text || '';
+                    if (appendedText && cachedTextNode.data + appendedText === text) {
+                        cachedTextNode.appendData(appendedText);
+                    } else if (cachedTextNode.data !== text) {
+                        cachedTextNode.data = text;
                     }
+                    const showCursor = cursor
+                        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                    if (showCursor && (!cachedCursorEl || !elements.msgEl.contains(cachedCursorEl))) {
+                        cachedCursorEl = document.createElement('span');
+                        cachedCursorEl.className = 'typing-cursor';
+                        elements.msgEl.appendChild(cachedCursorEl);
+                    } else if (!showCursor && cachedCursorEl) {
+                        cachedCursorEl.remove();
+                        cachedCursorEl = null;
+                    }
+                    renderStatus(elements.row);
+                };
+
+                const renderFinal = () => {
+                    const row = liveRow();
+                    if (!row) {
+                        resetCachedElements();
+                        return;
+                    }
+                    row.classList.remove('agent-stream-pending');
+                    const msgEl = row.querySelector('.agent-msg');
+                    if (msgEl) msgEl.innerHTML = formatMessageText(msg.blocks[0].text || '');
+                    const statusEl = row.querySelector('.agent-stream-status');
+                    if (statusEl) statusEl.remove();
+                    resetCachedElements();
+                };
+
+                const schedulePump = () => {
+                    if (disposed || frameId || !visualQueue || visualQueue.pendingLength < 1) return;
+                    frameId = requestAnimationFrame(pump);
+                };
+
+                const pump = (now) => {
+                    frameId = 0;
+                    if (disposed || !visualQueue) return;
+                    const step = visualQueue.drain(now);
+                    if (step.changed) {
+                        msg.blocks[0].text = step.text;
+                        const keepBottom = _agentMessagesNearBottom();
+                        renderProvisional(true, step.appended);
+                        if (keepBottom && agentKey === currentAgent) {
+                            agentMessages.scrollTop = agentMessages.scrollHeight;
+                        }
+                    }
+                    schedulePump();
+                };
+
+                const applyQueueStep = (step, cursor) => {
+                    if (!step || !step.changed) return;
+                    msg.blocks[0].text = step.text;
                     const keepBottom = _agentMessagesNearBottom();
-                    render(true);
+                    renderProvisional(cursor !== false, step.appended);
                     if (keepBottom && agentKey === currentAgent) {
                         agentMessages.scrollTop = agentMessages.scrollHeight;
                     }
@@ -47165,45 +47935,295 @@
 
                 const api = {
                     appendText: (text) => {
-                        pendingDelta += String(text || '');
-                        if (!frameId) frameId = requestAnimationFrame(flush);
+                        if (disposed) return;
+                        if (!visualQueue) {
+                            msg.blocks[0].text += String(text || '');
+                            renderProvisional(true);
+                            return;
+                        }
+                        visualQueue.push(text);
+                        schedulePump();
+                    },
+                    appendInitialText: (text) => {
+                        if (disposed) return;
+                        if (!visualQueue) {
+                            msg.blocks[0].text += String(text || '');
+                            renderProvisional(true);
+                            return;
+                        }
+                        visualQueue.push(text);
+                        applyQueueStep(visualQueue.revealFirstVisible(), true);
+                        schedulePump();
                     },
                     setText: (text, cursor) => {
+                        if (disposed) return;
                         if (frameId) cancelAnimationFrame(frameId);
                         frameId = 0;
-                        pendingDelta = '';
-                        msg.blocks[0].text = String(text || '');
-                        render(cursor !== false);
+                        if (visualQueue) {
+                            msg.blocks[0].text = visualQueue.replace(text).text;
+                        } else {
+                            msg.blocks[0].text = String(text || '');
+                        }
+                        renderProvisional(cursor !== false);
                     },
                     setStatus: (status) => {
+                        if (disposed) return;
                         msg.meta.streamStatus = String(status || 'Generating');
-                        render(true);
+                        renderProvisional(true);
                     },
                     commit: (text) => {
+                        if (disposed) return msg;
                         if (frameId) cancelAnimationFrame(frameId);
                         frameId = 0;
-                        if (pendingDelta) msg.blocks[0].text += pendingDelta;
-                        pendingDelta = '';
-                        if (text !== undefined && text !== null) msg.blocks[0].text = String(text);
+                        if (text !== undefined && text !== null) {
+                            msg.blocks[0].text = visualQueue
+                                ? visualQueue.replace(text).text
+                                : String(text);
+                        } else if (visualQueue) {
+                            msg.blocks[0].text = visualQueue.flush().text;
+                        }
                         msg.meta.pending = false;
                         msg.meta.streamStatus = 'Complete';
-                        render(false);
+                        disposed = true;
+                        if (visualQueue) visualQueue.dispose();
+                        renderFinal();
                         scheduleAgentStateSave();
+                        return msg;
+                    },
+                    fail: (status) => {
+                        if (disposed) return msg;
+                        if (frameId) cancelAnimationFrame(frameId);
+                        frameId = 0;
+                        if (visualQueue) {
+                            msg.blocks[0].text = visualQueue.flush().text;
+                        }
+                        msg.meta.streamStatus = String(status || 'Response interrupted. Retry the request to continue.');
+                        msg.meta.showStreamStatus = true;
+                        msg.meta.streamFailed = true;
+                        renderProvisional(false);
+                        disposed = true;
+                        if (visualQueue) visualQueue.dispose();
+                        const row = liveRow();
+                        if (row) row.classList.add('agent-stream-failed');
                         return msg;
                     },
                     discard: () => {
                         if (frameId) cancelAnimationFrame(frameId);
+                        frameId = 0;
+                        disposed = true;
+                        if (visualQueue) visualQueue.dispose();
                         const index = session.messages.indexOf(msg);
                         if (index >= 0) session.messages.splice(index, 1);
                         const row = liveRow();
                         if (row) row.remove();
+                        resetCachedElements();
                     },
                     get visibleText() {
-                        return String(msg.blocks[0].text || '') + pendingDelta;
+                        return visualQueue ? visualQueue.visibleText : String(msg.blocks[0].text || '');
                     },
                     message: msg,
                 };
                 return api;
+            }
+
+            const RESPONSE_UI_STATES = Object.freeze({
+                IDLE: 'idle',
+                WORKING: 'working',
+                STREAMING: 'streaming',
+                COMPLETE: 'complete',
+                ERROR: 'error',
+            });
+            let _agentWorkingIdSeq = 0;
+
+            function _agentWorkingOperationLabel(operation) {
+                const key = String(operation || '').toLowerCase().replace(/\s+/g, '_');
+                return {
+                    preparing_request: 'Preparing request',
+                    routing: 'Routing',
+                    context: 'Inspecting assembly context',
+                    generating: 'Preparing the response',
+                    executing: 'Preparing visual aids',
+                    finalizing: 'Finalizing response',
+                    searching: 'Searching sources',
+                }[key] || String(operation || 'Preparing the response');
+            }
+
+            function createAgentWorkingState(targetAgentKey, initialOperation) {
+                const agentKey = targetAgentKey || currentAgent || 'deviation-analyst';
+                const session = getAgentSession(agentKey);
+                const workingId = 'agent_working_' + (++_agentWorkingIdSeq);
+                let uiState = RESPONSE_UI_STATES.WORKING;
+                let currentOperation = _agentWorkingOperationLabel(initialOperation || 'Preparing request');
+                let completedOperations = [];
+                let row = null;
+                let removalTimer = null;
+                let api = null;
+
+                const visibleRow = () => {
+                    if (agentKey !== currentAgent) return null;
+                    if (row && row.isConnected) return row;
+                    row = agentMessages.querySelector('[data-agent-working-id="' + workingId + '"]');
+                    return row;
+                };
+
+                const render = () => {
+                    const currentRow = visibleRow();
+                    if (!currentRow) return;
+                    const operationEl = currentRow.querySelector('.agent-working-operation');
+                    if (operationEl) operationEl.textContent = currentOperation;
+                    const historyEl = currentRow.querySelector('.agent-working-history');
+                    if (historyEl) {
+                        historyEl.replaceChildren();
+                        completedOperations.slice(-3).forEach(operation => {
+                            const item = document.createElement('div');
+                            item.className = 'agent-working-history-item';
+                            item.textContent = operation;
+                            historyEl.appendChild(item);
+                        });
+                    }
+                };
+
+                const clearSessionPointer = () => {
+                    if (session.activeWorkingState === api) session.activeWorkingState = null;
+                };
+
+                const detach = (animate) => {
+                    if (removalTimer) {
+                        clearTimeout(removalTimer);
+                        removalTimer = null;
+                    }
+                    const currentRow = visibleRow();
+                    if (!currentRow) return;
+                    if (animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                        currentRow.classList.add('is-leaving');
+                        const rowToRemove = currentRow;
+                        removalTimer = setTimeout(() => {
+                            if (rowToRemove.isConnected) rowToRemove.remove();
+                            if (row === rowToRemove) row = null;
+                            removalTimer = null;
+                        }, 170);
+                    } else {
+                        currentRow.remove();
+                        row = null;
+                    }
+                };
+
+                const attach = () => {
+                    if (uiState !== RESPONSE_UI_STATES.WORKING || agentKey !== currentAgent) return;
+                    if (visibleRow()) {
+                        render();
+                        return;
+                    }
+                    const agent = AGENTS[agentKey];
+                    const nextRow = document.createElement('div');
+                    nextRow.className = 'agent-working-row';
+                    nextRow.dataset.agentWorkingId = workingId;
+
+                    const avatar = document.createElement('div');
+                    avatar.className = 'agent-msg-avatar bot-avatar';
+                    avatar.innerHTML = agent.avatar;
+                    avatar.style.background = 'transparent';
+                    avatar.style.border = '2px solid ' + agent.color;
+
+                    const content = document.createElement('div');
+                    content.className = 'agent-working-content';
+                    const name = document.createElement('div');
+                    name.className = 'agent-msg-name';
+                    name.textContent = agent.name;
+
+                    const activity = document.createElement('div');
+                    activity.className = 'agent-working-activity';
+                    const compass = document.createElement('img');
+                    compass.className = 'agent-working-compass';
+                    compass.src = '/static/logo.svg';
+                    compass.alt = '';
+                    compass.setAttribute('aria-hidden', 'true');
+                    const operation = document.createElement('span');
+                    operation.className = 'agent-working-operation';
+                    activity.appendChild(compass);
+                    activity.appendChild(operation);
+
+                    const history = document.createElement('div');
+                    history.className = 'agent-working-history';
+                    content.appendChild(name);
+                    content.appendChild(activity);
+                    content.appendChild(history);
+                    nextRow.appendChild(avatar);
+                    nextRow.appendChild(content);
+
+                    const welcome = agentMessages.querySelector('.agent-welcome');
+                    if (welcome) welcome.remove();
+                    agentMessages.appendChild(nextRow);
+                    row = nextRow;
+                    render();
+                    agentMessages.scrollTop = agentMessages.scrollHeight;
+                };
+
+                api = {
+                    attach,
+                    setOperation: (operation) => {
+                        if (uiState !== RESPONSE_UI_STATES.WORKING) return;
+                        const next = _agentWorkingOperationLabel(operation);
+                        if (next && next !== currentOperation) {
+                            if (currentOperation && !completedOperations.includes(currentOperation)) {
+                                completedOperations.push(currentOperation);
+                            }
+                            completedOperations = completedOperations.slice(-3);
+                            currentOperation = next;
+                        }
+                        attach();
+                        render();
+                    },
+                    beginStreaming: () => {
+                        if (uiState !== RESPONSE_UI_STATES.WORKING) return;
+                        uiState = RESPONSE_UI_STATES.STREAMING;
+                        clearSessionPointer();
+                        detach(true);
+                    },
+                    complete: () => {
+                        if (uiState === RESPONSE_UI_STATES.COMPLETE) return;
+                        uiState = RESPONSE_UI_STATES.COMPLETE;
+                        clearSessionPointer();
+                        detach(true);
+                    },
+                    cancel: () => {
+                        uiState = RESPONSE_UI_STATES.IDLE;
+                        clearSessionPointer();
+                        detach(false);
+                    },
+                    error: (operation) => {
+                        if (uiState !== RESPONSE_UI_STATES.WORKING) return;
+                        uiState = RESPONSE_UI_STATES.ERROR;
+                        currentOperation = _agentWorkingOperationLabel(operation || 'Unable to prepare a response');
+                        render();
+                        clearSessionPointer();
+                        detach(true);
+                    },
+                    get uiState() { return uiState; },
+                    get id() { return workingId; },
+                };
+                session.activeWorkingState = api;
+                api.attach();
+                return api;
+            }
+
+            function ensureAgentWorkingState(agentKey, operation) {
+                const session = getAgentSession(agentKey);
+                const working = session && session.activeWorkingState;
+                if (working && working.uiState === RESPONSE_UI_STATES.WORKING) {
+                    working.setOperation(operation || 'Preparing request');
+                    return working;
+                }
+                return createAgentWorkingState(agentKey, operation || 'Preparing request');
+            }
+
+            function clearAgentWorkingState(agentKey, outcome) {
+                const session = getAgentSession(agentKey);
+                const working = session && session.activeWorkingState;
+                if (!working) return;
+                if (outcome === 'cancel') working.cancel();
+                else if (outcome === 'error') working.error();
+                else working.complete();
             }
 
             function createPlantWalkStreamingMessage(targetAgentKey) {
@@ -49190,7 +50210,7 @@
                                 String(ch.charNumber) === key || ch.key === key
                             );
                             if (c) {
-                                state.faiMeasurements[c.key] = String(val);
+                                _commitFaiInputValue(c, 'measured', String(val));
                                 applied++;
                             }
                         }
@@ -49211,7 +50231,8 @@
                                 String(ch.charNumber) === key || ch.key === key
                             );
                             if (c) {
-                                state.faiTolOverrides[c.key] = { plus: String(val), minus: String(val) };
+                                _commitFaiInputValue(c, 'tol_plus', String(val));
+                                _commitFaiInputValue(c, 'tol_minus', String(val));
                                 applied++;
                             }
                         }
@@ -51006,12 +52027,16 @@
                 }
             }
 
-            function _showAgentStreamRetry(agentKey, originalText) {
-                const msg = addMessage('The response stopped before completion.', 'system', agentKey);
+            function _showAgentStreamRetry(agentKey, originalText, failedStreamMessage) {
+                const msg = failedStreamMessage && failedStreamMessage.message
+                    ? failedStreamMessage.message
+                    : addMessage('The response stopped before completion.', 'system', agentKey);
                 if (agentKey !== currentAgent) return;
                 const row = agentMessages.querySelector('[data-msg-id="' + msg.id + '"]');
                 const content = row && row.querySelector('.agent-msg-content');
                 if (!content) return;
+                const existing = content.querySelector('.agent-stream-retry');
+                if (existing) existing.remove();
                 const retry = document.createElement('button');
                 retry.type = 'button';
                 retry.className = 'agent-stream-retry';
@@ -51026,7 +52051,19 @@
                 content.appendChild(retry);
             }
 
-            async function _requestAgentChatStream(payload, originAgent, originSession, turnId) {
+            function _agentServiceFailureText(agentKey, error) {
+                const agentName = (AGENTS[agentKey] && AGENTS[agentKey].name) || 'The agent';
+                const code = String(error && error.agentErrorCode || '').toLowerCase();
+                if (code === 'provider_credit_unavailable') {
+                    return `${agentName} could not respond because the configured Anthropic API account does not have enough credit. Add API credit or update the API configuration, then retry.`;
+                }
+                if (code === 'provider_temporarily_unavailable') {
+                    return `${agentName} could not respond because the AI provider is temporarily unavailable. Retry in a moment.`;
+                }
+                return `${agentName} could not generate a response. Retry the request.`;
+            }
+
+            async function _requestAgentChatStream(payload, originAgent, originSession, turnId, preResponseWorkingState) {
                 const status = await _getChatStreamingStatus();
                 const allowed = status && status.enabled
                     && Array.isArray(status.agents)
@@ -51044,12 +52081,15 @@
                     return null;
                 }
 
+                const workingState = preResponseWorkingState
+                    || ensureAgentWorkingState(originAgent, 'Preparing request');
                 const controller = new AbortController();
                 const active = {
                     controller,
                     turnId,
                     partial: false,
                     streamingMessage: null,
+                    workingState,
                 };
                 originSession.activeStream = active;
                 setWaiting(true, originAgent);
@@ -51075,15 +52115,31 @@
                     originSession.activeStream = null;
                     setWaiting(true, originAgent);
                     if (response.status === 404 || response.status === 409) return null;
-                    return null;
+                    const body = await response.json().catch(() => ({}));
+                    const failed = new Error(String(body.detail || 'Stream generation failed'));
+                    failed.agentServiceFailure = true;
+                    failed.agentErrorCode = `http_${response.status}`;
+                    failed.streamRetryable = response.status >= 500;
+                    failed.workingState = workingState;
+                    throw failed;
                 }
 
                 if (currentAgent === originAgent) removeTypingIndicator();
-                const streamMessage = createStreamingAssistantMessage(originAgent, {
-                    source: 'provider_stream',
-                    status: 'Routing',
-                });
-                active.streamingMessage = streamMessage;
+                workingState.setOperation('Routing');
+                let streamMessage = null;
+                let preambleText = '';
+                let activeResponseId = null;
+                const beginStreaming = () => {
+                    if (streamMessage) return streamMessage;
+                    workingState.beginStreaming();
+                    streamMessage = createStreamingAssistantMessage(originAgent, {
+                        source: 'provider_stream',
+                        showStatus: false,
+                    });
+                    if (activeResponseId) streamMessage.message.meta.responseId = activeResponseId;
+                    active.streamingMessage = streamMessage;
+                    return streamMessage;
+                };
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -51119,31 +52175,44 @@
                                 stale.streamCancelled = true;
                                 throw stale;
                             }
-                            switch (event.event) {
-                                case 'response_started':
-                                    streamMessage.message.meta.responseId = event.response_id;
-                                    streamMessage.setStatus('Routing');
+                                switch (event.event) {
+                                    case 'response_started':
+                                    activeResponseId = event.response_id;
+                                    if (streamMessage) streamMessage.message.meta.responseId = event.response_id;
+                                    else workingState.setOperation('Routing');
                                     break;
                                 case 'status':
-                                    streamMessage.setStatus({
+                                    if (!streamMessage) workingState.setOperation({
                                         routing: 'Routing',
-                                        context: 'Reading context',
-                                        generating: 'Generating',
-                                        executing: 'Executing',
-                                        finalizing: 'Finalizing',
-                                    }[event.phase] || 'Generating');
+                                        context: 'Inspecting assembly context',
+                                        generating: 'Preparing the response',
+                                        executing: 'Preparing visual aids',
+                                        finalizing: 'Finalizing response',
+                                    }[event.phase] || 'Preparing the response');
                                     break;
-                                case 'text_delta':
-                                    active.partial = active.partial || !!event.text;
-                                    streamMessage.appendText(event.text || '');
+                                case 'text_delta': {
+                                    const delta = String(event.text || '');
+                                    if (!streamMessage) {
+                                        preambleText += delta;
+                                        // Whitespace is retained, but it is not enough to turn a
+                                        // working indicator into an empty answer bubble.
+                                        if (!/\S/.test(delta)) break;
+                                        active.partial = true;
+                                        beginStreaming().appendInitialText(preambleText);
+                                        preambleText = '';
+                                    } else {
+                                        active.partial = active.partial || /\S/.test(delta);
+                                        streamMessage.appendText(delta);
+                                    }
                                     break;
+                                }
                                 case 'tool_block_started':
                                 case 'action_bundle_validated':
-                                    streamMessage.setStatus('Preparing actions');
+                                    if (!streamMessage) workingState.setOperation('Preparing visual aids');
                                     break;
                                 case 'response_completed':
                                     finalData = event.final || null;
-                                    streamMessage.setStatus('Finalizing');
+                                    if (!streamMessage) workingState.setOperation('Finalizing response');
                                     terminal = true;
                                     break;
                                 case 'response_cancelled': {
@@ -51155,6 +52224,8 @@
                                     const failed = new Error(event.message || 'Stream generation failed');
                                     failed.streamPartial = active.partial;
                                     failed.streamRetryable = event.retryable !== false;
+                                    failed.agentServiceFailure = true;
+                                    failed.agentErrorCode = String(event.code || 'provider_request_failed');
                                     throw failed;
                                 }
                             }
@@ -51166,14 +52237,23 @@
                         incomplete.streamPartial = active.partial;
                         throw incomplete;
                     }
-                    return { data: finalData, streamingMessage: streamMessage, streamed: true };
+                    return {
+                        data: finalData,
+                        streamingMessage: streamMessage,
+                        workingState,
+                        streamed: true,
+                    };
                 } catch (error) {
                     if (error && error.name === 'AbortError') error.streamCancelled = true;
                     if (error && !error.streamCancelled && !error.streamPartial && !active.partial) {
-                        streamMessage.discard();
+                        if (error.agentServiceFailure) {
+                            error.workingState = workingState;
+                            throw error;
+                        }
                         return null;
                     }
-                    error.streamingMessage = streamMessage;
+                    if (streamMessage) error.streamingMessage = streamMessage;
+                    error.workingState = workingState;
                     throw error;
                 } finally {
                     originSession.activeStream = null;
@@ -51188,6 +52268,10 @@
             };
 
             async function handleAgentSend() {
+                // Flush active FAI editors before any asynchronous work. The
+                // immutable attachment created later must describe exactly
+                // what the operator can see in the table at send time.
+                _flushPendingFaiEdits();
                 const isBargeIn = state.narrationState === 'answering';
                 const bargeInSessionId = state.narrationSessionId;
                 const pendingText = agentInput.value.trim();
@@ -51238,21 +52322,25 @@
                 const hasImage = !!agentCapturedImage;
                 if ((!text && !hasImage) || (originSession.waiting && !isBargeIn)) return;
                 const turnId = ++originSession.requestId;
+                let workingAssistant = null;
 
                 const displayText = text || (hasImage ? '\uD83D\uDCF7 [Screenshot attached]' : '');
                 addMessage(displayText, 'user', originAgent);
                 maybeAutotitleFromMessage(text);
+                workingAssistant = ensureAgentWorkingState(originAgent, 'Preparing request');
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
                 const imageToSend = await _resolveAutoImage();
                 // Stale-turn guard: bail if another send happened during image resolution
-                if (originSession.requestId !== turnId) return;
+                if (originSession.requestId !== turnId) {
+                    if (workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) workingAssistant.cancel();
+                    return;
+                }
                 // Only touch live UI if origin agent is still visible
                 if (currentAgent === originAgent) {
                     clearAgentCapture();
                     agentInput.value = '';
                     updateSendButtonState();
-                    showTypingIndicator();
                 }
                 setWaiting(true, originAgent);
 
@@ -51266,6 +52354,7 @@
                 let streamingAssistant = null;
                 let streamTurnCancelled = false;
                 let streamTurnFailed = false;
+                let sentFaiSnapshot = null;
                 try {
                     // Viewport display state is persistent. Highlights, hidden
                     // parts, rotation, and motion are only changed by explicit
@@ -51300,6 +52389,10 @@
                     }
 
                     const inspCtx = buildInspectionContext();
+                    sentFaiSnapshot = inspCtx.attachments
+                        && inspCtx.attachments.inspection
+                        ? inspCtx.attachments.inspection.fai_snapshot || null
+                        : null;
 
                     // Inject paused walkthrough context for barge-in questions (per-request state)
                     if (isBargeIn && state._bargeInContext) {
@@ -51337,11 +52430,12 @@
                     }
                     let data = null;
                     const streamedReply = await _requestAgentChatStream(
-                        payload, originAgent, originSession, turnId
+                        payload, originAgent, originSession, turnId, workingAssistant
                     );
                     if (streamedReply) {
                         data = streamedReply.data;
                         streamingAssistant = streamedReply.streamingMessage;
+                        workingAssistant = streamedReply.workingState || workingAssistant;
                     } else {
                         const res = await fetch('/api/agent/chat', {
                             method: 'POST',
@@ -51355,8 +52449,18 @@
                         data = await res.json();
                     }
                         _ackExecutionReceipts(sentExecutionReceiptIds);
+                        if (originAgent === 'deviation-analyst') {
+                            _acknowledgeFaiSnapshot(sentFaiSnapshot, data);
+                        }
                         _applyServerWorkflowState(originSession, data);
                         response = data.response || data.message || 'No response from agent.';
+                        const answeredFaiRevision = data.fai_request
+                            ? Number(data.fai_request.table_revision || 0) : null;
+                        if (answeredFaiRevision !== null
+                            && answeredFaiRevision !== Number(state.faiTableRevision || 0)) {
+                            response += '\n\nThe FAI table changed while this answer was generated; '
+                                + `this answer reflects table revision ${answeredFaiRevision}.`;
+                        }
                         console.log('[Handler] Response keys:', Object.keys(data),
                             'highlight_parts:', data.highlight_parts,
                             'isolate_parts:', data.isolate_parts,
@@ -51540,14 +52644,33 @@
                         console.error('[AgentSend] request or stream handling failed:', err);
                     }
                     if (err && err.streamingMessage) {
-                        err.streamingMessage.discard();
-                        streamingAssistant = null;
+                        if (err.streamPartial && typeof err.streamingMessage.fail === 'function') {
+                            err.streamingMessage.fail('Response interrupted. Retry the request to continue.');
+                        } else {
+                            err.streamingMessage.discard();
+                        }
+                        streamingAssistant = err.streamingMessage;
                     }
                     if (err && err.streamCancelled) {
+                        if (workingAssistant && workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) {
+                            workingAssistant.cancel();
+                        }
                         streamTurnCancelled = true;
                         response = '';
                     } else if (err && err.streamPartial) {
-                        _showAgentStreamRetry(originAgent, messageText);
+                        _showAgentStreamRetry(originAgent, messageText, err.streamingMessage);
+                        streamTurnFailed = true;
+                        response = '';
+                    } else if (err && err.agentServiceFailure) {
+                        if (workingAssistant && workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) {
+                            workingAssistant.cancel();
+                        }
+                        const failureMessage = addMessage(
+                            _agentServiceFailureText(originAgent, err),
+                            'assistant',
+                            originAgent
+                        );
+                        _showAgentStreamRetry(originAgent, messageText, { message: failureMessage });
                         streamTurnFailed = true;
                         response = '';
                     } else {
@@ -51569,6 +52692,9 @@
 
                 if (streamTurnCancelled || streamTurnFailed) {
                     if (currentAgent === originAgent) removeTypingIndicator();
+                    if (workingAssistant && workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) {
+                        workingAssistant.cancel();
+                    }
                     setWaiting(false, originAgent);
                     return;
                 }
@@ -51600,7 +52726,7 @@
                     // but the session message retains the text for restore.
                     const narrationMsg = streamingAssistant
                         ? streamingAssistant.commit(textResponse)
-                        : addMessage(textResponse, 'assistant', originAgent);
+                        : (clearAgentWorkingState(originAgent), addMessage(textResponse, 'assistant', originAgent));
 
                     // Apply explode level for narration responses (stop motion first)
                     if (data.explode_level !== undefined && data.explode_level !== null) {
@@ -51636,9 +52762,15 @@
                     const suppressAssistantResponse = shouldSuppressAssistantResponseForToolCalls(response, toolCalls);
                     if (!suppressAssistantResponse) {
                         if (streamingAssistant) streamingAssistant.commit(response);
-                        else addMessage(response, 'assistant', originAgent);
+                        else {
+                            clearAgentWorkingState(originAgent);
+                            addMessage(response, 'assistant', originAgent);
+                        }
                     } else if (streamingAssistant) {
                         streamingAssistant.discard();
+                        clearAgentWorkingState(originAgent, 'cancel');
+                    } else {
+                        clearAgentWorkingState(originAgent, 'cancel');
                     }
                     // Barge-in response: route through barge-in handler (plays TTS, then prompts resume)
                     // Guard: only if session is still valid (user didn't cancel during Sage API call)
@@ -51882,21 +53014,25 @@
                 const hasImage = !!agentCapturedImage;
                 if ((!text && !hasImage) || originSession.waiting) return;
                 const turnId = ++originSession.requestId;
+                let scoutWorkingState = null;
 
                 const displayText = text || (hasImage ? '\ud83d\udcf7 [Screenshot attached]' : '');
                 addMessage(displayText, 'user', originAgent);
                 maybeAutotitleFromMessage(text);
+                scoutWorkingState = ensureAgentWorkingState(originAgent, 'Preparing request');
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
                 const imageToSend = await _resolveAutoImage();
                 // Stale-turn guard: bail if another send happened during image resolution
-                if (originSession.requestId !== turnId) return;
+                if (originSession.requestId !== turnId) {
+                    if (scoutWorkingState.uiState === RESPONSE_UI_STATES.WORKING) scoutWorkingState.cancel();
+                    return;
+                }
                 // Only touch live UI if origin agent is still visible
                 if (currentAgent === originAgent) {
                     clearAgentCapture();
                     agentInput.value = '';
                     updateSendButtonState();
-                    showTypingIndicator();
                 }
                 const scoutController = new AbortController();
                 const scoutActiveStream = {
@@ -51904,6 +53040,7 @@
                     turnId,
                     partial: false,
                     streamingMessage: null,
+                    workingState: scoutWorkingState,
                 };
                 originSession.activeStream = scoutActiveStream;
                 setWaiting(true, originAgent);
@@ -51959,11 +53096,18 @@
                     }
 
                     if (currentAgent === originAgent) removeTypingIndicator();
-                    scoutStreamingMessage = createStreamingAssistantMessage(originAgent, {
-                        source: 'scout_provider_stream',
-                        status: 'Generating',
-                    });
-                    scoutActiveStream.streamingMessage = scoutStreamingMessage;
+                    scoutWorkingState.setOperation('Preparing the response');
+                    let scoutPreambleText = '';
+                    const beginScoutStreaming = () => {
+                        if (scoutStreamingMessage) return scoutStreamingMessage;
+                        scoutWorkingState.beginStreaming();
+                        scoutStreamingMessage = createStreamingAssistantMessage(originAgent, {
+                            source: 'scout_provider_stream',
+                            showStatus: false,
+                        });
+                        scoutActiveStream.streamingMessage = scoutStreamingMessage;
+                        return scoutStreamingMessage;
+                    };
 
                     const reader = res.body.getReader();
                     const decoder = new TextDecoder();
@@ -51991,21 +53135,33 @@
 
                             switch (ev.type) {
                                 case 'status':
-                                    scoutStreamingMessage.setStatus(
-                                        ev.phase === 'searching' ? 'Searching' : 'Generating'
-                                    );
+                                    if (!scoutStreamingMessage) {
+                                        scoutWorkingState.setOperation(
+                                            ev.phase === 'searching' ? 'Searching sources' : 'Preparing the response'
+                                        );
+                                    }
                                     break;
 
-                                case 'text_delta':
-                                    scoutActiveStream.partial = scoutActiveStream.partial || !!ev.text;
-                                    scoutStreamingMessage.appendText(ev.text || '');
+                                case 'text_delta': {
+                                    const delta = String(ev.text || '');
+                                    if (!scoutStreamingMessage) {
+                                        scoutPreambleText += delta;
+                                        if (!/\S/.test(delta)) break;
+                                        scoutActiveStream.partial = true;
+                                        beginScoutStreaming().appendInitialText(scoutPreambleText);
+                                        scoutPreambleText = '';
+                                    } else {
+                                        scoutActiveStream.partial = scoutActiveStream.partial || /\S/.test(delta);
+                                        scoutStreamingMessage.appendText(delta);
+                                    }
                                     break;
+                                }
 
                                 case 'search_start':
                                     if (currentAgent === originAgent) removeTypingIndicator();
                                     showScoutBrowser();
                                     searchActive = true;
-                                    scoutStreamingMessage.setStatus('Searching');
+                                    if (!scoutStreamingMessage) scoutWorkingState.setOperation('Searching sources');
                                     scoutStatusText.textContent = 'Searching: ' + (ev.query || '');
                                     scoutProgressBar.style.width = '10%';
                                     break;
@@ -52070,7 +53226,7 @@
                                 case 'response':
                                     responseText = ev.text || '';
                                     if (ev.results) resultCards = ev.results;
-                                    scoutStreamingMessage.setStatus('Finalizing');
+                                    if (!scoutStreamingMessage) scoutWorkingState.setOperation('Finalizing response');
                                     break;
 
                                 case 'done':
@@ -52078,6 +53234,9 @@
                                     if (!searchActive && currentAgent === originAgent) removeTypingIndicator();
                                     const cards = formatPartCards(resultCards);
                                     const fullResponse = responseText + (cards ? '\n\n' + cards : '');
+                                    if (!scoutStreamingMessage) {
+                                        beginScoutStreaming().appendInitialText(fullResponse || 'Search completed.');
+                                    }
                                     scoutStreamingMessage.commit(fullResponse || 'Search completed.');
                                     // Voice reply for Scout — only if still visible
                                     if (voiceTriggered && responseText && currentAgent === originAgent) {
@@ -52090,8 +53249,13 @@
                                     scoutStreamFailed = true;
                                     if (currentAgent === originAgent) removeTypingIndicator();
                                     if (searchActive) hideScoutBrowser();
-                                    scoutStreamingMessage.discard();
-                                    addMessage('Search error: ' + (ev.message || 'Unknown error'), 'assistant', originAgent);
+                                    if (scoutStreamingMessage && scoutActiveStream.partial) {
+                                        scoutStreamingMessage.fail('Search interrupted. Retry the request to continue.');
+                                    } else {
+                                        if (scoutStreamingMessage) scoutStreamingMessage.discard();
+                                        clearAgentWorkingState(originAgent, 'error');
+                                        addMessage('Search error: ' + (ev.message || 'Unknown error'), 'assistant', originAgent);
+                                    }
                                     voiceTriggered = false;
                                     break;
                             }
@@ -52101,10 +53265,17 @@
                     if (currentAgent === originAgent) removeTypingIndicator();
                     hideScoutBrowser();
                     voiceTriggered = false;
-                    if (scoutStreamingMessage) scoutStreamingMessage.discard();
-                    if (err && err.name === 'AbortError') return;
+                    if (err && err.name === 'AbortError') {
+                        if (scoutStreamingMessage) scoutStreamingMessage.discard();
+                        if (scoutWorkingState && scoutWorkingState.uiState === RESPONSE_UI_STATES.WORKING) {
+                            scoutWorkingState.cancel();
+                        }
+                        return;
+                    }
                     if (scoutActiveStream.partial) {
-                        addMessage('Scout response interrupted. Retry the request to continue.', 'assistant', originAgent);
+                        if (scoutStreamingMessage) {
+                            scoutStreamingMessage.fail('Scout response interrupted. Retry the request to continue.');
+                        }
                         return;
                     }
                     // Fallback to non-streaming endpoint
@@ -52116,11 +53287,14 @@
                         });
                         if (fallbackRes.ok) {
                             const data = await fallbackRes.json();
+                            clearAgentWorkingState(originAgent);
                             addMessage(data.response || 'No response.', 'assistant', originAgent);
                         } else {
+                            clearAgentWorkingState(originAgent, 'error');
                             addMessage('Scout is unavailable right now. Try again later.', 'assistant', originAgent);
                         }
                     } catch {
+                        clearAgentWorkingState(originAgent, 'error');
                         addMessage('Scout is unavailable right now. Try again later.', 'assistant', originAgent);
                     }
                 } finally {
@@ -52340,6 +53514,7 @@
                     // No messages yet: show agent-specific welcome
                     agentMessages.innerHTML = '<div class="agent-welcome">' + (AGENTS[currentAgent]._welcome || 'How can I help?') + '</div>';
                 }
+                if (targetSession.activeWorkingState) targetSession.activeWorkingState.attach();
                 // Suggestion chips are Iris-only - strip from other agents
                 if (currentAgent !== 'inspector') {
                     removeSuggestions();
@@ -52606,6 +53781,7 @@
                 if (typeof syncAgentInputHeight === 'function') syncAgentInputHeight();
                 handleAgentSend();
             }
+            window._agentContextSendPrompt = _agentContextSendPrompt;
 
             async function _agentContextRestoreHidden() {
                 state.assemblyPartDisplayOverrides = {};

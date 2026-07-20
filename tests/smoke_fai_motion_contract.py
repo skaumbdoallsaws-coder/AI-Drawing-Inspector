@@ -189,6 +189,12 @@ def run() -> int:
                          tolMinus: c.tolMinusMm };
             })();
         """)
+        # The drawing map carries nominal values but this fixture uses the
+        # report's operator-applied global tolerance. Apply it through the
+        # real control so the failed row is FAIL rather than informational.
+        page.fill("#faiGlobalTol", "0.050")
+        page.click("#faiApplyTolAll")
+        page.wait_for_timeout(400)
         tol_band = max(abs(float(row["tolPlus"] or 0)), abs(float(row["tolMinus"] or 0)), 0.05)
         bad_value = round(float(row["nominal"] or 0) + tol_band + 1.95, 3)
         page.fill("#faiAgentInput", f"#{row['charNumber']}={bad_value}")
@@ -202,7 +208,7 @@ def run() -> int:
         findings["baseline"] = baseline
 
         # T1: FAI impact question -> prose only.
-        a1 = ask("what is the impact on the assembly of the failed dimension in the fai table?")
+        a1 = ask("What is the impact of the failed pin-bore dimension on the assembly?")
         s1 = snap()
         low1 = a1.lower()
         record("t1_answer_received", bool(a1.strip()), a1[:200])
@@ -293,7 +299,7 @@ def run() -> int:
         )
 
         # T3: explicit request -> assembly + highlight + playback @30, honest.
-        a3 = ask("show the affected motion")
+        a3 = ask("Show the affected components in motion.")
         try:
             page.wait_for_function("window.__compareDbg.state.motionPlaying === true", timeout=20_000)
         except Exception:
@@ -339,6 +345,23 @@ def run() -> int:
         s5 = snap()
         record("t5_highlights_cleared", len(s5["highlighted"]) == 0, s5)
         record("t5_no_hidden_parts", len(s5["hidden"]) == 0, s5)
+
+        # T6: the exact YC disposition question is answered by the approved
+        # policy, without reopening an engineering-decision loop.
+        page.click(".tab[data-tab='report']")
+        page.wait_for_function(
+            "window.__compareDbg.state.activeTab === 'report'", timeout=15_000
+        )
+        a6 = ask("What is the recommended disposition and next action?")
+        low6 = a6.lower()
+        record("t6_final_disposition", "scrap and replace" in low6, a6[:300])
+        record("t6_immediate_action", "do not assemble" in low6, a6[:300])
+        record("t6_decisive_measurement", "1.95 mm" in low6, a6[:300])
+        record(
+            "t6_no_engineering_loop",
+            "engineering disposition" not in low6 and "engineering must" not in low6,
+            a6[:300],
+        )
 
         png = OUT_DIR / "fai_motion_contract_smoke.png"
         page.screenshot(path=str(png), full_page=False)

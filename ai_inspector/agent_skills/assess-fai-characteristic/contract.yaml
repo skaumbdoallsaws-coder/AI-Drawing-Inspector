@@ -1,0 +1,32 @@
+schema_version: 1
+skill_id: assess-fai-characteristic
+version: 1.0.0
+intents:
+  - assess_fai_characteristic
+  - review_fai_evidence
+required_evidence:
+  - characteristic_identity
+  - measurement_state
+  - computed_limits
+  - computed_status
+forbidden_context:
+  - revision.diff
+  - disassembly.plan
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: concise_engineering_assessment
+  maximum_sentences: 3
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: fai-characteristic-v1
+context_budget:
+  maximum_tokens: 3500
+  priorities:
+    - fai.characteristics
+    - drawing.dimensions
+    - part.feature_map

@@ -5,24 +5,26 @@ description: Recommend accept, rework, reject, or engineering escalation for a s
 
 # Recommend FAI Disposition
 
-Base the recommendation on computed FAI evidence and explicitly available disposition evidence.
+Base the recommendation on computed FAI evidence and explicitly available disposition authority.
 
 ## Procedure
 
-1. State the measured status before recommending an action.
-2. Use `pass` only when a measured value is within computed limits.
-3. Use `pending` when the measurement, limit, or controlling requirement is missing.
-4. For an out-of-tolerance result, recommend reject or engineering disposition unless the context contains evidence supporting rework or accept-as-is.
-5. Recommend rework only when the affected feature, remaining material, and a feasible correction path are supported.
-6. Recommend accept-as-is only when authorized engineering evidence or a valid deviation approval is present.
+1. If an approved disposition policy matches the characteristic and deviation, state its final verdict directly.
+2. Put the verdict and immediate action first: accept, rework, reject and replace, or scrap and replace.
+3. Support it with one measurement sentence containing the measured value, controlling limit, and amount out of tolerance.
+4. Do not ask engineering to decide a case already covered by delegated engineering authority.
+5. Use `pass` only when a measured value is within computed limits.
+6. Recommend rework or accept-as-is only when the approved evidence permits it.
+7. When no approved policy matches, state that the case is not covered and name the single missing decision criterion or authority.
 
 ## Boundaries
 
 - Do not convert `reject or escalate for disposition` into `scrap` without explicit authority.
 - Do not invent lot containment, tooling drift, process capability, or inspection actions.
 - Keep the conclusion scoped to the inspected part and characteristic.
-- Separate measured fact, likely functional concern, and disposition recommendation.
+- Do not repeat the same measurement, status, functional concern, or disposition.
+- Do not first reject the part and then say engineering must decide whether to reject it.
 
 ## Output
 
-Give the recommendation, its controlling evidence, and the next decision owner or missing evidence in concise prose.
+Use no more than two sentences. For a policy-covered case: final disposition and next action; then the decisive measurement and policy basis. Do not list alternatives or unsupported repair methods.

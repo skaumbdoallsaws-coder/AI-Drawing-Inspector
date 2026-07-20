@@ -64,7 +64,7 @@ def test_report_fai_response_cleaner_removes_unsupported_damage_claims():
     assert "galling" not in lower
     assert "fracture" not in lower
     assert "forced assembly" not in lower
-    assert "exact interference or failure mode is not determined" in cleaned
+    assert "available context does not establish the mating fit" in cleaned
 
 
 def test_report_fai_response_cleaner_preserves_decimal_measurements():
@@ -81,7 +81,7 @@ def test_report_fai_response_cleaner_preserves_decimal_measurements():
     assert "pin will." not in cleaned
     assert "float" not in lower
     assert "rock" not in lower
-    assert "exact interference or failure mode is not determined" in cleaned
+    assert "available context does not establish the mating fit" in cleaned
 
 
 def test_report_fai_response_cleaner_trims_incomplete_allowing_clause():
@@ -94,7 +94,7 @@ def test_report_fai_response_cleaner_trims_incomplete_allowing_clause():
     assert "excessive clearance with the connecting rod small end." in cleaned
     assert "allowing piston" not in lower
     assert "rock" not in lower
-    assert "exact interference or failure mode is not determined" in cleaned
+    assert "available context does not establish the mating fit" in cleaned
 
 
 def test_report_fai_response_cleaner_trims_incomplete_increasing_clause():

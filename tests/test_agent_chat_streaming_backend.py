@@ -58,6 +58,136 @@ def test_accumulate_response_text_accepts_message_and_string():
     assert server._accumulate_response_text("already text") == "already text"
 
 
+def test_main_stream_retries_transient_failure_before_visible_text(monkeypatch):
+    class FakeStream:
+        def __init__(self, chunks=None, error=None):
+            self._chunks = chunks or []
+            self._error = error
+            self.text_stream = self._iterate()
+
+        async def _iterate(self):
+            if self._error is not None:
+                raise self._error
+            for chunk in self._chunks:
+                yield chunk
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get_final_message(self):
+            return _Response("Recovered answer.")
+
+    class FakeMessages:
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeStream(error=RuntimeError("overloaded_error: Overloaded"))
+            return FakeStream(chunks=["Recovered ", "answer."])
+
+    messages = FakeMessages()
+    received = []
+
+    async def run():
+        return await server._invoke_agent_model(
+            SimpleNamespace(messages=messages),
+            model="synthetic-model",
+            max_tokens=32,
+            system="system",
+            messages=[{"role": "user", "content": "question"}],
+            stream_sink=lambda text: received.append(text),
+        )
+
+    monkeypatch.setenv("INSPECTORPRO_AGENT_STREAM_ATTEMPTS", "2")
+    monkeypatch.setenv("INSPECTORPRO_AGENT_STREAM_RETRY_BASE_MS", "0")
+    response = asyncio.run(run())
+    assert messages.calls == 2
+    assert "".join(received) == "Recovered answer."
+    assert server._accumulate_response_text(response) == "Recovered answer."
+
+
+def test_main_stream_does_not_retry_after_visible_text(monkeypatch):
+    class PartialStream:
+        def __init__(self):
+            self.text_stream = self._iterate()
+
+        async def _iterate(self):
+            yield "Partial answer"
+            raise RuntimeError("overloaded_error: Overloaded")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakeMessages:
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, **_kwargs):
+            self.calls += 1
+            return PartialStream()
+
+    messages = FakeMessages()
+    received = []
+
+    async def run():
+        await server._invoke_agent_model(
+            SimpleNamespace(messages=messages),
+            model="synthetic-model",
+            max_tokens=32,
+            system="system",
+            messages=[{"role": "user", "content": "question"}],
+            stream_sink=lambda text: received.append(text),
+        )
+
+    monkeypatch.setenv("INSPECTORPRO_AGENT_STREAM_ATTEMPTS", "3")
+    monkeypatch.setenv("INSPECTORPRO_AGENT_STREAM_RETRY_BASE_MS", "0")
+    try:
+        asyncio.run(run())
+    except RuntimeError as exc:
+        assert "overloaded" in str(exc).lower()
+    else:
+        raise AssertionError("Expected the partial stream failure to propagate")
+    assert messages.calls == 1
+    assert received == ["Partial answer"]
+
+
+def test_executor_only_fallback_is_limited_to_pure_authorized_actions():
+    error = RuntimeError("overloaded_error: Overloaded")
+    plan = SimpleNamespace(executor_id="show-resolved-motion-group")
+    assert server._can_use_executor_only_provider_fallback(
+        "Show the affected components in motion.", plan, error, {}
+    )
+    assert not server._can_use_executor_only_provider_fallback(
+        "Explain the impact and show the affected components in motion.",
+        plan,
+        error,
+        {},
+    )
+    assert not server._can_use_executor_only_provider_fallback(
+        "What motion is affected?", plan, error, {}
+    )
+    assert not server._can_use_executor_only_provider_fallback(
+        "Show the affected components in motion.",
+        plan,
+        error,
+        {"first_token_perf": time.perf_counter()},
+    )
+    assert not server._can_use_executor_only_provider_fallback(
+        "Show the affected components in motion.",
+        plan,
+        RuntimeError("invalid request"),
+        {},
+    )
+
+
 def test_streaming_disabled_fails_before_generation(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-real")
     monkeypatch.setenv("INSPECTORPRO_CHAT_STREAMING", "0")
@@ -217,6 +347,33 @@ def test_failed_stream_never_enters_workflow_commit(monkeypatch):
     assert sum(event["event"] == "response_error" for event in events) == 1
     assert not any(event["event"] == "response_completed" for event in events)
     assert commit_calls == []
+
+
+def test_stream_surfaces_provider_credit_failure_without_generic_detail(monkeypatch):
+    class ProviderCreditError(Exception):
+        status_code = 400
+        message = (
+            "Error code: 400 - {'type': 'error', 'error': "
+            "{'type': 'invalid_request_error', 'message': 'Your credit balance "
+            "is too low to access the Anthropic API.'}}"
+        )
+
+    async def failing_chat(_payload):
+        raise ProviderCreditError()
+
+    monkeypatch.setattr(server, "agent_chat", failing_chat)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-real")
+    monkeypatch.setenv("INSPECTORPRO_CHAT_STREAMING", "1")
+    monkeypatch.setenv("INSPECTORPRO_STREAMING_AGENTS", "scout")
+
+    response = TestClient(server.app).post("/api/agent/chat/v2/stream", json=_payload())
+    events = _events(response)
+    failure = next(event for event in events if event["event"] == "response_error")
+    assert failure["code"] == "provider_credit_unavailable"
+    assert failure["retryable"] is False
+    assert "does not have enough credit" in failure["message"]
+    assert "Error code:" not in failure["message"]
+    assert not any(event["event"] == "response_completed" for event in events)
 
 
 if __name__ == "__main__":

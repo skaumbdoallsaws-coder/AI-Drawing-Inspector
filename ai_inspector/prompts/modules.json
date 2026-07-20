@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "modules": [
+    {
+      "id": "sage.policy.fai-assembly-impact",
+      "version": "1.0.2",
+      "path": "policies/fai_assembly_impact.md",
+      "agents": ["policy"],
+      "modes": ["*"]
+    },
+    {
+      "id": "sage.identity",
+      "version": "1.0.0",
+      "path": "base/sage_identity.md",
+      "agents": ["sage"],
+      "modes": ["*"]
+    },
+    {
+      "id": "sage.engineering-honesty",
+      "version": "1.0.0",
+      "path": "base/engineering_honesty.md",
+      "agents": ["sage"],
+      "modes": ["*"]
+    },
+    {
+      "id": "sage.response-style",
+      "version": "1.0.1",
+      "path": "base/response_style.md",
+      "agents": ["sage"],
+      "modes": ["*"]
+    },
+    {
+      "id": "sage.mode.assembly",
+      "version": "1.0.0",
+      "path": "modes/assembly.md",
+      "agents": ["sage"],
+      "modes": ["assembly"]
+    },
+    {
+      "id": "sage.mode.report-fai",
+      "version": "1.0.0",
+      "path": "modes/report_fai.md",
+      "agents": ["sage"],
+      "modes": ["report_fai", "report"]
+    },
+    {
+      "id": "sage.mode.drawing",
+      "version": "1.0.0",
+      "path": "modes/drawing.md",
+      "agents": ["sage"],
+      "modes": ["drawing"]
+    },
+    {
+      "id": "sage.mode.3dmodel",
+      "version": "1.0.0",
+      "path": "modes/3dmodel.md",
+      "agents": ["sage"],
+      "modes": ["3dmodel"]
+    }
+  ]
+}

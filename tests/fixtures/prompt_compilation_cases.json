@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "assembly-impact-read-only",
+      "mode": "assembly",
+      "speech_act": "question",
+      "primary": "trace-assembly-impact",
+      "supports": ["reason-about-assembly-context"],
+      "viewport_write": false,
+      "expected_skills": [
+        "assess-fai-characteristic",
+        "trace-assembly-impact",
+        "reason-about-assembly-context"
+      ],
+      "required_context": ["fai.characteristics", "assembly.parts"],
+      "allowed_tools": []
+    },
+    {
+      "id": "show-affected-parts",
+      "mode": "assembly",
+      "speech_act": "command",
+      "primary": "control-cad-viewport",
+      "supports": ["trace-assembly-impact"],
+      "viewport_write": true,
+      "expected_skills": [
+        "control-cad-viewport",
+        "assess-fai-characteristic",
+        "trace-assembly-impact"
+      ],
+      "required_context": ["viewport.state", "fai.characteristics", "assembly.parts"],
+      "allowed_tools": ["highlight_features", "ui_actions"]
+    },
+    {
+      "id": "explain-affected-motion",
+      "mode": "assembly",
+      "speech_act": "question",
+      "primary": "reason-about-motion",
+      "supports": ["reason-about-assembly-context"],
+      "viewport_write": false,
+      "expected_skills": [
+        "assess-fai-characteristic",
+        "trace-assembly-impact",
+        "reason-about-motion",
+        "reason-about-assembly-context"
+      ],
+      "required_context": ["fai.characteristics", "assembly.parts", "motion.groups"],
+      "allowed_tools": []
+    },
+    {
+      "id": "recommend-disposition",
+      "mode": "report_fai",
+      "speech_act": "question",
+      "primary": "recommend-fai-disposition",
+      "supports": ["trace-assembly-impact"],
+      "viewport_write": false,
+      "expected_skills": [
+        "assess-fai-characteristic",
+        "recommend-fai-disposition",
+        "trace-assembly-impact"
+      ],
+      "required_context": ["fai.characteristics", "assembly.parts"],
+      "allowed_tools": []
+    },
+    {
+      "id": "explain-feature",
+      "mode": "drawing",
+      "speech_act": "question",
+      "primary": "reason-about-part-features",
+      "supports": ["assess-fai-characteristic"],
+      "viewport_write": false,
+      "expected_skills": ["reason-about-part-features", "assess-fai-characteristic"],
+      "required_context": ["part.feature_map", "fai.characteristics"],
+      "allowed_tools": []
+    }
+  ]
+}

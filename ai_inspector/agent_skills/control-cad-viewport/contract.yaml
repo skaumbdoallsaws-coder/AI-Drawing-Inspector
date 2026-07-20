@@ -1,0 +1,34 @@
+schema_version: 1
+skill_id: control-cad-viewport
+version: 1.0.0
+intents:
+  - change_viewport_state
+  - visualize_engineering_context
+required_evidence:
+  - current_viewport_state
+  - validated_target_ids
+  - explicit_user_action
+forbidden_context:
+  - document.instructions
+  - prior_turn.authorization
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request:
+    - ui_actions
+    - highlight_features
+output_contract:
+  format: concise_action_confirmation
+  maximum_sentences: 2
+failure_behavior:
+  missing_required_context: request_clarification
+  contradictory_context: refuse_side_effect
+compatible_models:
+  - claude-sonnet
+evaluation_suite: viewport-control-v1
+context_budget:
+  maximum_tokens: 5000
+  priorities:
+    - viewport.state
+    - assembly.parts
+    - part.feature_map
+    - motion.groups

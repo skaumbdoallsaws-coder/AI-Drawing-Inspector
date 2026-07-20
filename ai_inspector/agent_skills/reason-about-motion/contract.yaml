@@ -1,0 +1,31 @@
+schema_version: 1
+skill_id: reason-about-motion
+version: 1.0.0
+intents:
+  - explain_motion
+  - explain_affected_motion
+required_evidence:
+  - motion_package_identity
+  - motion_group_identity
+forbidden_context:
+  - dynamic_loads
+  - operating_conditions
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: concise_motion_explanation
+  maximum_sentences: 3
+failure_behavior:
+  missing_required_context: report_motion_unavailable
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: motion-reasoning-v1
+context_budget:
+  maximum_tokens: 5500
+  priorities:
+    - motion.groups
+    - assembly.parts
+    - fai.characteristics
+    - viewport.state

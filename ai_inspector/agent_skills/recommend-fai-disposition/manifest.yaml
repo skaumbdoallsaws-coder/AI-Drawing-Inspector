@@ -1,7 +1,7 @@
 schema_version: 1
 id: recommend-fai-disposition
-version: 1.0.0
-description: Recommend a grounded supplier FAI disposition by separating measured status, available rework or acceptance evidence, and required engineering escalation.
+version: 1.2.0
+description: Return a concise approved supplier FAI disposition when policy covers the case, or identify the missing authority when it does not.
 agents:
   - sage
 workflows:

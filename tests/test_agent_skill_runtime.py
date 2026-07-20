@@ -100,6 +100,9 @@ def test_production_catalog_loads_and_schema_documents_match():
     skill = skills.get("assess-fai-characteristic")
     assert workflow.manifest.version == "1.0.0"
     assert skill.manifest.version == "1.0.0"
+    assert skill.contract is not None
+    assert skill.contract.version == "1.0.0"
+    assert skill.contract.evaluation_suite == "fai-characteristic-v1"
     assert skill.body_sha256 == "7281a9966de5255d675becca0a43c3248857b0f80313909af3a490a84847c6a3"
     assert "100006" not in skill.body
     assert skills.ids == {
@@ -114,16 +117,63 @@ def test_production_catalog_loads_and_schema_documents_match():
     for skill_id in skills.ids:
         package = skills.get(skill_id)
         assert all(byte < 128 for byte in (package.path / "SKILL.md").read_bytes())
+        assert package.contract is not None
+        assert package.contract.skill_id == skill_id
+        assert package.contract_sha256
+        assert all(byte < 128 for byte in (package.path / "contract.yaml").read_bytes())
+        assert set(package.contract.context_priorities) == (
+            set(package.manifest.requires_context) | set(package.manifest.optional_context)
+        )
         assert "100006" not in package.body
 
     skill_schema = json.loads(
         (SKILL_ROOT / "schemas" / "skill-manifest.schema.json").read_text(encoding="ascii")
     )
+    contract_schema = json.loads(
+        (SKILL_ROOT / "schemas" / "skill-contract.schema.json").read_text(encoding="ascii")
+    )
     workflow_schema = json.loads(
         (WORKFLOW_ROOT / "schemas" / "workflow-manifest.schema.json").read_text(encoding="ascii")
     )
     assert set(skill_schema["required"]) == set(skill_schema["properties"])
+    assert set(contract_schema["required"]) == set(contract_schema["properties"])
     assert set(workflow_schema["required"]) == set(workflow_schema["properties"])
+
+
+def test_skill_contract_rejects_identity_and_tool_policy_mismatches():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        package = _write_skill(root, "contract-skill", "1.0.0")
+        (package / "contract.yaml").write_text(
+            "schema_version: 1\n"
+            "skill_id: wrong-skill\n"
+            "version: 1.0.0\n"
+            "intents:\n  - test_intent\n"
+            "required_evidence: []\n"
+            "forbidden_context: []\n"
+            "side_effect_policy:\n"
+            "  default: prohibited\n"
+            "  require_explicit_user_request:\n    - ui_actions\n"
+            "output_contract:\n"
+            "  format: concise_answer\n"
+            "  maximum_sentences: 3\n"
+            "failure_behavior:\n"
+            "  missing_required_context: report_missing_evidence\n"
+            "  contradictory_context: abstain_and_report_conflict\n"
+            "compatible_models:\n  - claude-sonnet\n"
+            "evaluation_suite: contract-test-v1\n"
+            "context_budget:\n"
+            "  maximum_tokens: 1000\n"
+            "  priorities: []\n",
+            encoding="ascii",
+        )
+        exc = _expect_raises(
+            ManifestValidationError,
+            lambda: SkillRegistry.from_roots([root], workflow_ids={"test-workflow"}),
+        )
+        message = str(exc)
+        assert "does not match manifest id" in message
+        assert "tools not allowed by manifest" in message
 
 
 def test_semver_latest_and_exact_version_resolution():
@@ -326,7 +376,7 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
         assert status["production_chat_integration"] is True
         assert status["runtime_loaded"] is True
         assert len(status["skills"]) == 7
-        assert status["skills"][0]["id"] == "assess-fai-characteristic"
+        assert "assess-fai-characteristic" in {item["id"] for item in status["skills"]}
         result = asyncio.run(server.agent_skill_test_compose(request))
         assert result["production_chat_integration"] is True
         assert result["workflow"] == {"id": "supplier-fai-disposition", "version": "1.0.0"}

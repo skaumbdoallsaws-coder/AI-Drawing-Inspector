@@ -229,20 +229,28 @@ def record_openai_call(
     store:      Optional[TelemetryStore] = None,
     **tags,
 ) -> Optional[TelemetryEvent]:
-    """Record one OpenAI Chat Completions API call.
+    """Record one OpenAI Chat Completions or Responses API call.
 
-    Token counts come from `response.usage.{prompt_tokens,
-    completion_tokens}` defensively. OpenAI's cache-cost model is
-    different from Anthropic's and is not tracked in MVP — those fields
-    are left at 0 in the event.
+    Token counts are read from Chat Completions (`prompt_tokens`,
+    `completion_tokens`) or Responses (`input_tokens`, `output_tokens`)
+    defensively. OpenAI's cache-cost model is not tracked in MVP, so cache
+    fields remain zero in the event.
     """
     try:
         it = ot = 0
         if response is not None:
             usage = getattr(response, "usage", None)
             if usage is not None:
-                it = int(getattr(usage, "prompt_tokens",     0) or 0)
-                ot = int(getattr(usage, "completion_tokens", 0) or 0)
+                it = int(
+                    getattr(usage, "prompt_tokens", None)
+                    or getattr(usage, "input_tokens", 0)
+                    or 0
+                )
+                ot = int(
+                    getattr(usage, "completion_tokens", None)
+                    or getattr(usage, "output_tokens", 0)
+                    or 0
+                )
         return record_provider_call(
             provider="openai",
             model=model,

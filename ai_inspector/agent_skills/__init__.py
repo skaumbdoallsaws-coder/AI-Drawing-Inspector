@@ -5,6 +5,7 @@ from .runtime import (
     PromptBuild,
     PromptSection,
     RegistryValidationError,
+    SkillContract,
     SkillPackage,
     SkillRegistry,
     SkillRuntimeError,
@@ -12,6 +13,7 @@ from .runtime import (
     WorkflowPackage,
     WorkflowRegistry,
     compose_prompt_sections,
+    resolve_skill_contract_policy,
 )
 from .routing import (
     CandidateCatalog,
@@ -56,6 +58,7 @@ __all__ = [
     "PromptBuild",
     "PromptSection",
     "RegistryValidationError",
+    "SkillContract",
     "SkillPackage",
     "SkillRegistry",
     "SkillRuntimeError",
@@ -63,6 +66,7 @@ __all__ = [
     "WorkflowPackage",
     "WorkflowRegistry",
     "compose_prompt_sections",
+    "resolve_skill_contract_policy",
     "CandidateCatalog",
     "ExactRouteCache",
     "ROUTE_VERSION",

@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inspectorp.ro/schemas/functional-relationship-v1.json",
+  "title": "InspectorPro Functional Relationship Graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "graph_id",
+    "version",
+    "assembly",
+    "source_evidence",
+    "component_types",
+    "component_instances",
+    "external_entities",
+    "interfaces",
+    "coverage"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "graph_id": {"$ref": "#/$defs/identifier"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "assembly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["part_number", "name", "configuration"],
+      "properties": {
+        "part_number": {"$ref": "#/$defs/identifier"},
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "configuration": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "source_evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/sourceEvidence"}
+    },
+    "component_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/componentType"}
+    },
+    "component_instances": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/componentInstance"}
+    },
+    "external_entities": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/externalEntity"}
+    },
+    "interfaces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/interface"}
+    },
+    "coverage": {"$ref": "#/$defs/coverage"}
+  },
+  "$defs": {
+    "nonEmptyString": {"type": "string", "minLength": 1},
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "stringArray": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/nonEmptyString"}
+    },
+    "sourceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "type", "path", "sha256", "authority"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/identifier"},
+        "type": {
+          "enum": ["assembly_extract", "part_profile", "motion_summary", "engineering_review"]
+        },
+        "path": {"$ref": "#/$defs/nonEmptyString"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "authority": {
+          "enum": ["cad_structure", "cad_constraint", "curated_profile", "validated_motion", "reviewed_inference"]
+        }
+      }
+    },
+    "functionalFeature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature_ref", "label", "semantic_tags", "aliases", "source_refs"],
+      "properties": {
+        "feature_ref": {"$ref": "#/$defs/identifier"},
+        "label": {"$ref": "#/$defs/nonEmptyString"},
+        "semantic_tags": {"$ref": "#/$defs/stringArray"},
+        "aliases": {"$ref": "#/$defs/stringArray"},
+        "source_refs": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "componentType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["part_number", "name", "description", "mobility", "functional_roles", "functional_features"],
+      "properties": {
+        "part_number": {"$ref": "#/$defs/identifier"},
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "description": {"$ref": "#/$defs/nonEmptyString"},
+        "mobility": {"enum": ["fixed", "rotating", "reciprocating", "oscillating", "carried"]},
+        "functional_roles": {"$ref": "#/$defs/stringArray"},
+        "functional_features": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/functionalFeature"}
+        }
+      }
+    },
+    "componentInstance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "source_component_name", "part_number", "parent_instance_id", "kind", "occurrence_key"],
+      "properties": {
+        "instance_id": {"$ref": "#/$defs/identifier"},
+        "source_component_name": {"$ref": "#/$defs/nonEmptyString"},
+        "part_number": {"type": ["string", "null"]},
+        "parent_instance_id": {"type": ["string", "null"]},
+        "kind": {"enum": ["physical", "organizational"]},
+        "occurrence_key": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "externalEntity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_id", "name", "presence", "functional_roles", "functional_features", "evidence_refs"],
+      "properties": {
+        "entity_id": {"$ref": "#/$defs/identifier"},
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "presence": {"enum": ["present", "absent_from_extract", "unresolved"]},
+        "functional_roles": {"$ref": "#/$defs/stringArray"},
+        "functional_features": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/functionalFeature"}
+        },
+        "evidence_refs": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant_id", "part_number", "feature_refs", "role"],
+      "properties": {
+        "participant_id": {"$ref": "#/$defs/identifier"},
+        "part_number": {"type": ["string", "null"]},
+        "feature_refs": {"$ref": "#/$defs/stringArray"},
+        "role": {
+          "enum": [
+            "axial_locator",
+            "bearing_half",
+            "clamp_body",
+            "clearance_boundary",
+            "clearance_member",
+            "driven_interface",
+            "fastener",
+            "guide",
+            "guided_member",
+            "journal",
+            "load_path",
+            "oscillating_member",
+            "retained_member",
+            "retainer",
+            "rotating_member",
+            "sealing_member",
+            "sealing_surface",
+            "support"
+          ]
+        }
+      }
+    },
+    "relativeMotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "allowed", "constrained"],
+      "properties": {
+        "type": {
+          "enum": ["fixed", "revolute", "oscillating_revolute", "prismatic", "limited_axial_float", "sliding_contact", "non_contact_dynamic", "external_unknown"]
+        },
+        "allowed": {"$ref": "#/$defs/stringArray"},
+        "constrained": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "interfaceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_ref", "locator", "classification", "claim"],
+      "properties": {
+        "source_ref": {"$ref": "#/$defs/identifier"},
+        "locator": {"$ref": "#/$defs/nonEmptyString"},
+        "classification": {"enum": ["cad_mate", "assembly_hierarchy", "part_profile", "motion_package", "engineering_inference"]},
+        "claim": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "interface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interface_id", "pattern_id", "name", "interface_type", "participants", "functions", "relative_motion", "transfer_modes", "qualitative_requirements", "evidence", "confidence", "review_status"],
+      "properties": {
+        "interface_id": {"$ref": "#/$defs/identifier"},
+        "pattern_id": {"$ref": "#/$defs/identifier"},
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "interface_type": {
+          "enum": ["revolute_support", "split_journal_bearing", "bolted_clamp", "floating_pin_bearing", "oscillating_pin_bearing", "axial_guidance_clearance", "prismatic_guidance_clearance", "ring_retention", "sliding_seal", "dynamic_clearance_envelope", "structural_mount", "torque_output"]
+        },
+        "participants": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/participant"}
+        },
+        "functions": {"$ref": "#/$defs/stringArray"},
+        "relative_motion": {"$ref": "#/$defs/relativeMotion"},
+        "transfer_modes": {"$ref": "#/$defs/stringArray"},
+        "qualitative_requirements": {"$ref": "#/$defs/stringArray"},
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/interfaceEvidence"}
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "review_status": {"enum": ["verified", "reviewed_inference", "needs_confirmation"]}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["physical_instance_count", "covered_instance_count", "uncovered_instance_ids", "organizational_instance_count", "external_entity_count"],
+      "properties": {
+        "physical_instance_count": {"type": "integer", "minimum": 0},
+        "covered_instance_count": {"type": "integer", "minimum": 0},
+        "uncovered_instance_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/identifier"}
+        },
+        "organizational_instance_count": {"type": "integer", "minimum": 0},
+        "external_entity_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

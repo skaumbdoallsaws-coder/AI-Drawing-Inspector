@@ -1,0 +1,31 @@
+schema_version: 1
+skill_id: reason-about-assembly-context
+version: 1.0.0
+intents:
+  - explain_assembly_context
+  - identify_mating_components
+required_evidence:
+  - inspected_part
+  - assembly_component_identity
+forbidden_context:
+  - revision.diff
+  - disassembly.plan
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: concise_assembly_explanation
+  maximum_sentences: 3
+failure_behavior:
+  missing_required_context: explain_available_context_only
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: assembly-context-v1
+context_budget:
+  maximum_tokens: 5000
+  priorities:
+    - assembly.parts
+    - assembly.mates
+    - fai.characteristics
+    - viewport.state

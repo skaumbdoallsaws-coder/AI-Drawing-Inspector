@@ -25,7 +25,12 @@ def run() -> int:
         print("playwright not installed", file=sys.stderr)
         return 2
 
-    report = {"url": APP_URL, "checks": {}, "partial_samples": []}
+    report = {
+        "url": APP_URL,
+        "checks": {},
+        "partial_samples": [],
+        "presentation_samples": [],
+    }
 
     def record(name: str, ok: bool, detail=None):
         report["checks"][name] = {"ok": bool(ok), "detail": detail}
@@ -76,16 +81,89 @@ def run() -> int:
         )
         page.wait_for_selector("#agentInput", state="visible", timeout=15_000)
 
+        # Exercise the visual queue with a deterministic local append. This
+        # isolates presentation pacing from provider chunk sizes and confirms
+        # Markdown is deferred until the authoritative terminal commit.
+        display_text = "The visual queue reveals this response progressively without rendering raw transport chunks. " * 4
+        page.evaluate(
+            """text => {
+                const stream = window.__agentChatStreamV1.createMessage('inspector', {
+                    source: 'presentation_smoke', status: 'Generating'
+                });
+                window.__chatStreamPresentationSmoke = stream;
+                stream.appendText(text);
+            }""",
+            display_text,
+        )
+        deadline = time.time() + 4
+        last_length = -1
+        while time.time() < deadline:
+            pending_text = page.locator(".agent-stream-pending .agent-msg").last.inner_text()
+            if len(pending_text) != last_length:
+                report["presentation_samples"].append(len(pending_text))
+                last_length = len(pending_text)
+            if len(pending_text) >= len(display_text):
+                break
+            page.wait_for_timeout(35)
+        page.evaluate(
+            "() => window.__chatStreamPresentationSmoke.commit('**Final rendered Markdown**')"
+        )
+        page.wait_for_function(
+            "document.querySelectorAll('.agent-stream-pending').length === 0",
+            timeout=10_000,
+        )
+        presentation_deltas = [
+            current - previous
+            for previous, current in zip(
+                report["presentation_samples"], report["presentation_samples"][1:]
+            )
+        ]
+        final_presentation = page.locator("#agentMessages .agent-msg-row.assistant").last
+        record(
+            "visual_queue_drains_in_small_progressive_steps",
+            len(report["presentation_samples"]) >= 5
+            and report["presentation_samples"][-1] == len(display_text)
+            and max(presentation_deltas or [0]) <= 48,
+            report["presentation_samples"],
+        )
+        record(
+            "markdown_is_applied_at_terminal_commit",
+            final_presentation.locator("strong").inner_text() == "Final rendered Markdown",
+        )
+        page.evaluate("() => window.__chatStreamPresentationSmoke.discard()")
+
+        assistants_before_request = page.locator("#agentMessages .agent-msg-row.assistant").count()
         page.fill("#agentInput", "In two short sentences, explain what a datum is.")
         page.click("#agentSendBtn")
+        page.wait_for_selector(".agent-working-row", timeout=15_000)
+        working = page.locator(".agent-working-row").last
+        record(
+            "working_state_shows_compass_without_answer_bubble",
+            working.locator(".agent-working-compass").count() == 1
+            and page.locator("#agentMessages .agent-msg-row.assistant").count() == assistants_before_request,
+            working.inner_text(),
+        )
+        page.screenshot(path=str(OUT_DIR / "chat_streaming_working_state.png"))
         page.wait_for_selector(".agent-stream-pending", timeout=15_000)
+        page.wait_for_function(
+            "document.querySelectorAll('.agent-working-row').length === 0",
+            timeout=5_000,
+        )
+        record(
+            "working_state_exits_on_first_visible_text",
+            page.locator(".agent-stream-pending .agent-msg").last.inner_text().strip() != "",
+        )
         deadline = time.time() + 25
         last = None
         while time.time() < deadline:
-            pending = page.locator(".agent-stream-pending")
-            if pending.count() == 0:
+            text = page.evaluate(
+                """() => {
+                    const rows = document.querySelectorAll('.agent-stream-pending');
+                    return rows.length ? rows[rows.length - 1].innerText : null;
+                }"""
+            )
+            if text is None:
                 break
-            text = pending.last.inner_text()
             if text != last:
                 report["partial_samples"].append(text)
                 last = text
@@ -109,8 +187,28 @@ def run() -> int:
         storage = page.evaluate("localStorage.getItem('inspectorpro.chat_registry.v1') || ''")
         record("pending_message_not_persisted", '"pending":true' not in storage)
 
-        # Cancellation must discard the partial assistant message and leave no
-        # committed half-answer in history.
+        # A post-start error keeps the already rendered answer text visible
+        # and surfaces an error state without committing it to chat history.
+        page.evaluate(
+            """() => {
+                const stream = window.__agentChatStreamV1.createMessage('inspector', {
+                    source: 'error_presentation_smoke', showStatus: false
+                });
+                window.__chatStreamErrorSmoke = stream;
+                stream.appendInitialText('Partial answer remains visible.');
+                stream.fail('Response interrupted. Retry the request to continue.');
+            }"""
+        )
+        failed_stream = page.locator(".agent-stream-failed").last
+        record(
+            "stream_error_preserves_partial_text",
+            "Partial answer remains visible." in failed_stream.inner_text()
+            and "Response interrupted" in failed_stream.inner_text(),
+        )
+        page.evaluate("() => window.__chatStreamErrorSmoke.discard()")
+
+        # Cancellation during a visible stream preserves the existing product
+        # behavior: discard the provisional response and leave no history item.
         before_rows = assistants.count()
         page.fill("#agentInput", "Give a detailed explanation of datum reference frames in ten paragraphs.")
         page.click("#agentSendBtn")

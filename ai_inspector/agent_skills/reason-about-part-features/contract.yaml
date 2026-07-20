@@ -1,0 +1,30 @@
+schema_version: 1
+skill_id: reason-about-part-features
+version: 1.0.0
+intents:
+  - explain_part_feature
+  - resolve_characteristic_feature
+required_evidence:
+  - semantic_feature_identity
+  - inspected_part
+forbidden_context:
+  - revision.diff
+  - disassembly.plan
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: concise_feature_explanation
+  maximum_sentences: 3
+failure_behavior:
+  missing_required_context: report_unresolved_feature
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: part-feature-reasoning-v1
+context_budget:
+  maximum_tokens: 4000
+  priorities:
+    - part.feature_map
+    - fai.characteristics
+    - drawing.dimensions

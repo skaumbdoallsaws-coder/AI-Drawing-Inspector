@@ -1,0 +1,33 @@
+schema_version: 1
+skill_id: recommend-fai-disposition
+version: 1.2.0
+intents:
+  - recommend_fai_disposition
+  - identify_decision_owner
+required_evidence:
+  - characteristic_identity
+  - measurement_state
+  - computed_status
+  - disposition_authority
+forbidden_context:
+  - supplier.lot_history
+  - tooling.process_capability
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: concise_disposition_guidance
+  maximum_sentences: 2
+failure_behavior:
+  missing_required_context: escalate_without_invention
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: fai-disposition-v1
+context_budget:
+  maximum_tokens: 4500
+  priorities:
+    - fai.characteristics
+    - assembly.parts
+    - part.feature_map
+    - drawing.dimensions

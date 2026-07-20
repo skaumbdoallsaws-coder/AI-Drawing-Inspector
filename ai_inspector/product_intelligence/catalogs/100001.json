@@ -1,0 +1,4322 @@
+{
+  "schema_version": "1.0",
+  "graph_id": "functional-graph:100001",
+  "version": "1.0.0",
+  "assembly": {
+    "part_number": "100001",
+    "name": "Four Cylinder Engine Assembly",
+    "configuration": "Engine_Motion_Study"
+  },
+  "source_evidence": [
+    {
+      "source_id": "assembly:100001",
+      "type": "assembly_extract",
+      "path": "400S_Sorted_Library/assemblies/100001_assembly.json",
+      "sha256": "5cd314705248da075bcc3e3168d348525a4627c2428bf1c5b3b31173b5b151b0",
+      "authority": "cad_constraint"
+    },
+    {
+      "source_id": "profile:100002",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100002_inspection_profile.json",
+      "sha256": "975d6efd0d9f49fa9c37331c80eb9fad4dff0d39612617760b36b7592a0a27e7",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "profile:100003",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100003_inspection_profile.json",
+      "sha256": "b836593582ec6f8d893a1cc6604618875286e2c8d28a0c88b39f70a18c32eb56",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "profile:100004",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100004_inspection_profile.json",
+      "sha256": "012a723c5f0d211e6ca3a0b8dface35d4dcb1b5a7453a35431f11f0d49fd2d2e",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "profile:100005",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100005_inspection_profile.json",
+      "sha256": "64c023daebb08d1b5bd29bb47d6b7d73c1620cdb813dc3c1d895dd64700a5750",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "profile:100006",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100006_inspection_profile.json",
+      "sha256": "b2066d90a7c00f66979a0d9cd6859bb773427af106504e5653d5f95e5511ebfe",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "profile:100007",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100007_inspection_profile.json",
+      "sha256": "b19d765406ffe450abd8c83d95311a2b554ba0d7caed6db61aeda2bb9d44be42",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "profile:100008",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100008_inspection_profile.json",
+      "sha256": "07eccef44e59e465c279cdb050dd5dc3c53998a615c182eac18a5deef337b470",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "profile:100009",
+      "type": "part_profile",
+      "path": "400S_Sorted_Library/100009_inspection_profile.json",
+      "sha256": "5bccb5c77108f1e327e12ad13eb2778856ba1fae430c4f2bdf29748cb2c725ac",
+      "authority": "curated_profile"
+    },
+    {
+      "source_id": "motion:engine4cyl-crank-cycle",
+      "type": "motion_summary",
+      "path": "generated/engine_motion/motion/engine4cyl_crank_cycle_summary.json",
+      "sha256": "ffc773952aa9b870de54210c9d7f3779b579aabd1e352f712c106d4b4283fbc6",
+      "authority": "validated_motion"
+    }
+  ],
+  "component_types": [
+    {
+      "part_number": "100002",
+      "name": "Lower Engine Block",
+      "description": "Fixed crankcase structure that supports the crankshaft and provides the lower moving-clearance envelope.",
+      "mobility": "fixed",
+      "functional_roles": [
+        "crankshaft support",
+        "rotation-axis locator",
+        "clearance enclosure",
+        "lower structural base"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "lower-block.main-bearing-bores",
+          "label": "Main bearing bores in the end walls",
+          "semantic_tags": [
+            "internal_diameter",
+            "bearing_surface",
+            "axis_location"
+          ],
+          "aliases": [
+            "main bearing bore",
+            "end wall bore",
+            "crankshaft support bore"
+          ],
+          "source_refs": [
+            "profile:100002"
+          ]
+        },
+        {
+          "feature_ref": "lower-block.end-bearing-faces",
+          "label": "End bearing and locating faces",
+          "semantic_tags": [
+            "planar_face",
+            "axial_location",
+            "bearing_face"
+          ],
+          "aliases": [
+            "bearing boss face",
+            "end face",
+            "spot face"
+          ],
+          "source_refs": [
+            "profile:100002"
+          ]
+        },
+        {
+          "feature_ref": "lower-block.crankcase-clearance-envelope",
+          "label": "Inner crankcase clearance envelope",
+          "semantic_tags": [
+            "clearance_surface",
+            "enclosure",
+            "internal_surface"
+          ],
+          "aliases": [
+            "crankcase inner wall",
+            "semicylindrical crankcase wall",
+            "counterweight clearance"
+          ],
+          "source_refs": [
+            "profile:100002"
+          ]
+        },
+        {
+          "feature_ref": "lower-block.open-deck-interface",
+          "label": "Open deck and upper wall rim",
+          "semantic_tags": [
+            "structural_interface",
+            "datum_transfer",
+            "passage"
+          ],
+          "aliases": [
+            "open deck",
+            "upper wall rim",
+            "upper block interface"
+          ],
+          "source_refs": [
+            "profile:100002"
+          ]
+        }
+      ]
+    },
+    {
+      "part_number": "100003",
+      "name": "Crankshaft",
+      "description": "Rotating member that converts the four connecting-rod forces into shaft torque.",
+      "mobility": "rotating",
+      "functional_roles": [
+        "rotating driver",
+        "motion converter",
+        "torque output",
+        "counterbalanced shaft"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "crankshaft.main-journals",
+          "label": "Main journal bearing surfaces",
+          "semantic_tags": [
+            "external_diameter",
+            "journal",
+            "rotation_axis"
+          ],
+          "aliases": [
+            "main journal",
+            "bearing journal",
+            "crankshaft support journal"
+          ],
+          "source_refs": [
+            "profile:100003"
+          ]
+        },
+        {
+          "feature_ref": "crankshaft.crank-pin-journals",
+          "label": "Offset crank-pin journals",
+          "semantic_tags": [
+            "external_diameter",
+            "journal",
+            "eccentric_driver"
+          ],
+          "aliases": [
+            "crank pin",
+            "rod journal",
+            "big end journal"
+          ],
+          "source_refs": [
+            "profile:100003"
+          ]
+        },
+        {
+          "feature_ref": "crankshaft.counterweight-envelope",
+          "label": "Counterweight moving envelope",
+          "semantic_tags": [
+            "dynamic_envelope",
+            "clearance_member",
+            "rotating_mass"
+          ],
+          "aliases": [
+            "counterweight",
+            "crank web",
+            "rotating clearance envelope"
+          ],
+          "source_refs": [
+            "profile:100003"
+          ]
+        },
+        {
+          "feature_ref": "crankshaft.output-flange",
+          "label": "Output flange",
+          "semantic_tags": [
+            "torque_interface",
+            "external_connection",
+            "rotating_face"
+          ],
+          "aliases": [
+            "output flange",
+            "flange bolt circle",
+            "driven coupling"
+          ],
+          "source_refs": [
+            "profile:100003"
+          ]
+        },
+        {
+          "feature_ref": "crankshaft.nose-drive-interface",
+          "label": "Nose drive interface",
+          "semantic_tags": [
+            "torque_input",
+            "rotation_axis",
+            "external_connection"
+          ],
+          "aliases": [
+            "nose stub",
+            "drive interface",
+            "motor interface"
+          ],
+          "source_refs": [
+            "profile:100003"
+          ]
+        }
+      ]
+    },
+    {
+      "part_number": "100004",
+      "name": "Connecting Rod",
+      "description": "Oscillating load path between one crank pin and one piston pin.",
+      "mobility": "oscillating",
+      "functional_roles": [
+        "reciprocating load path",
+        "motion link",
+        "big-end bearing half",
+        "small-end bearing"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "connecting-rod.small-end-bore",
+          "label": "Small-end piston-pin bore",
+          "semantic_tags": [
+            "internal_diameter",
+            "oscillating_bearing",
+            "pin_joint"
+          ],
+          "aliases": [
+            "small end bore",
+            "piston pin bore",
+            "wrist pin bore"
+          ],
+          "source_refs": [
+            "profile:100004"
+          ]
+        },
+        {
+          "feature_ref": "connecting-rod.small-end-side-faces",
+          "label": "Small-end side faces and boss",
+          "semantic_tags": [
+            "axial_guidance",
+            "side_clearance",
+            "oscillating_member"
+          ],
+          "aliases": [
+            "small end boss",
+            "rod side face",
+            "small end side face"
+          ],
+          "source_refs": [
+            "profile:100004"
+          ]
+        },
+        {
+          "feature_ref": "connecting-rod.big-end-half-bore",
+          "label": "Big-end upper half bearing surface",
+          "semantic_tags": [
+            "internal_diameter",
+            "bearing_half",
+            "split_bore"
+          ],
+          "aliases": [
+            "big end half bore",
+            "split saddle",
+            "crank pin bore"
+          ],
+          "source_refs": [
+            "profile:100004"
+          ]
+        },
+        {
+          "feature_ref": "connecting-rod.cap-split-faces",
+          "label": "Big-end cap split faces",
+          "semantic_tags": [
+            "clamp_interface",
+            "joint_face",
+            "bore_integrity"
+          ],
+          "aliases": [
+            "cap split face",
+            "rod split face",
+            "big end joint face"
+          ],
+          "source_refs": [
+            "profile:100004"
+          ]
+        },
+        {
+          "feature_ref": "connecting-rod.fastener-bores",
+          "label": "Cap fastener bores and seats",
+          "semantic_tags": [
+            "fastener_interface",
+            "clamp_load_path",
+            "alignment"
+          ],
+          "aliases": [
+            "cap bolt hole",
+            "fastener bore",
+            "bolt seat"
+          ],
+          "source_refs": [
+            "profile:100004"
+          ]
+        }
+      ]
+    },
+    {
+      "part_number": "100005",
+      "name": "Connecting Rod Cap",
+      "description": "Removable lower bearing half that closes a connecting-rod big end around a crank pin.",
+      "mobility": "carried",
+      "functional_roles": [
+        "big-end bearing half",
+        "removable retainer",
+        "clamped joint member"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "rod-cap.big-end-half-bore",
+          "label": "Big-end lower half bearing surface",
+          "semantic_tags": [
+            "internal_diameter",
+            "bearing_half",
+            "split_bore"
+          ],
+          "aliases": [
+            "cap half bore",
+            "crank pin saddle",
+            "big end lower bore"
+          ],
+          "source_refs": [
+            "profile:100005"
+          ]
+        },
+        {
+          "feature_ref": "rod-cap.split-face",
+          "label": "Cap split face",
+          "semantic_tags": [
+            "clamp_interface",
+            "joint_face",
+            "bore_integrity"
+          ],
+          "aliases": [
+            "split face",
+            "cap joint face",
+            "rod mating face"
+          ],
+          "source_refs": [
+            "profile:100005"
+          ]
+        },
+        {
+          "feature_ref": "rod-cap.fastener-bores",
+          "label": "Cap fastener bore stack",
+          "semantic_tags": [
+            "fastener_interface",
+            "clamp_load_path",
+            "alignment"
+          ],
+          "aliases": [
+            "bolt bore",
+            "fastener bore",
+            "cap screw passage"
+          ],
+          "source_refs": [
+            "profile:100005"
+          ]
+        }
+      ]
+    },
+    {
+      "part_number": "100006",
+      "name": "Piston",
+      "description": "Reciprocating member guided by a cylinder bore and connected to a rod through a floating pin.",
+      "mobility": "reciprocating",
+      "functional_roles": [
+        "reciprocating load receiver",
+        "cylinder guided member",
+        "ring carrier",
+        "pin-joint support"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "piston.skirt-running-surface",
+          "label": "Piston body and skirt outside running surface",
+          "semantic_tags": [
+            "external_diameter",
+            "sliding_surface",
+            "radial_guidance",
+            "piston_body"
+          ],
+          "aliases": [
+            "main outside diameter",
+            "outer diameter",
+            "outside diameter",
+            "piston body diameter",
+            "piston od",
+            "skirt outside surface"
+          ],
+          "source_refs": [
+            "profile:100006"
+          ]
+        },
+        {
+          "feature_ref": "piston.pin-bores",
+          "label": "Pin bores through the piston bosses",
+          "semantic_tags": [
+            "internal_diameter",
+            "bearing_surface",
+            "pin_joint",
+            "load_transfer"
+          ],
+          "aliases": [
+            "pin bore",
+            "wrist pin hole",
+            "wrist-pin hole",
+            "piston pin bore",
+            "pin hole"
+          ],
+          "source_refs": [
+            "profile:100006"
+          ]
+        },
+        {
+          "feature_ref": "piston.boss-counterbores",
+          "label": "Boss faces and small-end guidance pockets",
+          "semantic_tags": [
+            "axial_guidance",
+            "side_clearance",
+            "counterbore",
+            "pin_boss"
+          ],
+          "aliases": [
+            "boss face counterbore",
+            "wrist pin boss",
+            "pin boss",
+            "boss depth"
+          ],
+          "source_refs": [
+            "profile:100006"
+          ]
+        },
+        {
+          "feature_ref": "piston.ring-grooves",
+          "label": "Piston ring grooves",
+          "semantic_tags": [
+            "groove",
+            "ring_retention",
+            "sealing_support"
+          ],
+          "aliases": [
+            "ring groove",
+            "ring grooves",
+            "groove width",
+            "groove depth",
+            "ring land"
+          ],
+          "source_refs": [
+            "profile:100006"
+          ]
+        },
+        {
+          "feature_ref": "piston.crown",
+          "label": "Piston crown and dome",
+          "semantic_tags": [
+            "load_surface",
+            "combustion_boundary",
+            "overall_height"
+          ],
+          "aliases": [
+            "crown dome",
+            "piston crown",
+            "dome rise",
+            "top face"
+          ],
+          "source_refs": [
+            "profile:100006"
+          ]
+        },
+        {
+          "feature_ref": "piston.skirt-reliefs",
+          "label": "Skirt arched reliefs and lower moving envelope",
+          "semantic_tags": [
+            "dynamic_envelope",
+            "clearance_member",
+            "skirt_relief"
+          ],
+          "aliases": [
+            "skirt relief",
+            "arched relief",
+            "lower side relief",
+            "skirt cutout"
+          ],
+          "source_refs": [
+            "profile:100006"
+          ]
+        }
+      ]
+    },
+    {
+      "part_number": "100007",
+      "name": "Piston Pin",
+      "description": "Floating journal that transfers load between a piston and connecting rod while permitting rod oscillation.",
+      "mobility": "carried",
+      "functional_roles": [
+        "journal",
+        "load-transfer pin",
+        "oscillation axis"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "piston-pin.outer-bearing-surface",
+          "label": "Outer bearing surface",
+          "semantic_tags": [
+            "external_diameter",
+            "journal",
+            "pin_joint",
+            "load_transfer"
+          ],
+          "aliases": [
+            "pin outer diameter",
+            "bearing surface",
+            "piston pin diameter",
+            "wrist pin"
+          ],
+          "source_refs": [
+            "profile:100007"
+          ]
+        },
+        {
+          "feature_ref": "piston-pin.end-faces",
+          "label": "Pin end faces",
+          "semantic_tags": [
+            "axial_boundary",
+            "retention_interface"
+          ],
+          "aliases": [
+            "pin end",
+            "end face",
+            "pin chamfer"
+          ],
+          "source_refs": [
+            "profile:100007"
+          ]
+        }
+      ]
+    },
+    {
+      "part_number": "100008",
+      "name": "Socket Head Cap Screw",
+      "description": "Fastener that clamps a connecting-rod cap to its rod body.",
+      "mobility": "carried",
+      "functional_roles": [
+        "clamp fastener",
+        "joint preload source",
+        "cap retainer"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "cap-screw.thread-interface",
+          "label": "Threaded engagement",
+          "semantic_tags": [
+            "thread",
+            "clamp_interface",
+            "retention"
+          ],
+          "aliases": [
+            "thread",
+            "threaded end",
+            "fastener engagement"
+          ],
+          "source_refs": [
+            "profile:100008"
+          ]
+        },
+        {
+          "feature_ref": "cap-screw.head-bearing-face",
+          "label": "Head bearing face",
+          "semantic_tags": [
+            "bearing_face",
+            "clamp_load_path",
+            "fastener_head"
+          ],
+          "aliases": [
+            "head face",
+            "bearing face",
+            "socket head"
+          ],
+          "source_refs": [
+            "profile:100008"
+          ]
+        },
+        {
+          "feature_ref": "cap-screw.shank",
+          "label": "Fastener shank",
+          "semantic_tags": [
+            "alignment",
+            "shear_path",
+            "fastener_body"
+          ],
+          "aliases": [
+            "shank",
+            "plain shank",
+            "bolt body"
+          ],
+          "source_refs": [
+            "profile:100008"
+          ]
+        }
+      ]
+    },
+    {
+      "part_number": "100009",
+      "name": "Piston Ring",
+      "description": "Split resilient ring retained by a piston groove and sliding against the cylinder bore to support sealing.",
+      "mobility": "carried",
+      "functional_roles": [
+        "sliding seal element",
+        "groove-retained element",
+        "bore contact element"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "piston-ring.outer-bore-contact",
+          "label": "Outer bore-contact surface",
+          "semantic_tags": [
+            "external_diameter",
+            "sliding_contact",
+            "sealing_surface"
+          ],
+          "aliases": [
+            "ring outer diameter",
+            "bore contact",
+            "outer sealing face"
+          ],
+          "source_refs": [
+            "profile:100009"
+          ]
+        },
+        {
+          "feature_ref": "piston-ring.inner-groove-seat",
+          "label": "Inner groove-seat surface",
+          "semantic_tags": [
+            "internal_diameter",
+            "groove_seat",
+            "retention"
+          ],
+          "aliases": [
+            "ring inner diameter",
+            "groove seat",
+            "inner ring face"
+          ],
+          "source_refs": [
+            "profile:100009"
+          ]
+        },
+        {
+          "feature_ref": "piston-ring.side-faces",
+          "label": "Ring side faces",
+          "semantic_tags": [
+            "axial_guidance",
+            "side_clearance",
+            "groove_contact"
+          ],
+          "aliases": [
+            "ring side face",
+            "ring thickness",
+            "groove side contact"
+          ],
+          "source_refs": [
+            "profile:100009"
+          ]
+        },
+        {
+          "feature_ref": "piston-ring.end-gap",
+          "label": "Ring end gap",
+          "semantic_tags": [
+            "installation_compliance",
+            "thermal_accommodation",
+            "split"
+          ],
+          "aliases": [
+            "end gap",
+            "ring split",
+            "ring opening"
+          ],
+          "source_refs": [
+            "profile:100009"
+          ]
+        }
+      ]
+    }
+  ],
+  "component_instances": [
+    {
+      "instance_id": "instance:engine-motion-study",
+      "source_component_name": "Engine_Motion_Study",
+      "part_number": null,
+      "parent_instance_id": null,
+      "kind": "organizational",
+      "occurrence_key": "assembly"
+    },
+    {
+      "instance_id": "instance:piston-pin-1",
+      "source_component_name": "piston pin-1",
+      "part_number": "100007",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:crankshaft-1",
+      "source_component_name": "crankshaft-1",
+      "part_number": "100003",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "assembly"
+    },
+    {
+      "instance_id": "instance:connecting-rod-1",
+      "source_component_name": "connecting rod-1",
+      "part_number": "100004",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:connecting-rod-cap-1",
+      "source_component_name": "connecting rod cap-1",
+      "part_number": "100005",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-1",
+      "source_component_name": "Socket Head Cap Screw-1",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-2",
+      "source_component_name": "Socket Head Cap Screw-2",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:piston-assembly-1",
+      "source_component_name": "Piston Assembly-1",
+      "part_number": null,
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "organizational",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:piston-assembly-1.piston-ring-1",
+      "source_component_name": "Piston Assembly-1/piston ring-1",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-1",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:piston-assembly-1.piston-ring-2",
+      "source_component_name": "Piston Assembly-1/piston ring-2",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-1",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:piston-assembly-1.piston-1",
+      "source_component_name": "Piston Assembly-1/piston-1",
+      "part_number": "100006",
+      "parent_instance_id": "instance:piston-assembly-1",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:piston-assembly-1.piston-ring-4",
+      "source_component_name": "Piston Assembly-1/piston ring-4",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-1",
+      "kind": "physical",
+      "occurrence_key": "one"
+    },
+    {
+      "instance_id": "instance:piston-assembly-2",
+      "source_component_name": "Piston Assembly-2",
+      "part_number": null,
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "organizational",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:piston-assembly-2.piston-ring-1",
+      "source_component_name": "Piston Assembly-2/piston ring-1",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-2",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:piston-assembly-2.piston-ring-2",
+      "source_component_name": "Piston Assembly-2/piston ring-2",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-2",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:piston-assembly-2.piston-1",
+      "source_component_name": "Piston Assembly-2/piston-1",
+      "part_number": "100006",
+      "parent_instance_id": "instance:piston-assembly-2",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:piston-assembly-2.piston-ring-4",
+      "source_component_name": "Piston Assembly-2/piston ring-4",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-2",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-3",
+      "source_component_name": "Socket Head Cap Screw-3",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:connecting-rod-cap-2",
+      "source_component_name": "connecting rod cap-2",
+      "part_number": "100005",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-4",
+      "source_component_name": "Socket Head Cap Screw-4",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:piston-pin-2",
+      "source_component_name": "piston pin-2",
+      "part_number": "100007",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:connecting-rod-2",
+      "source_component_name": "connecting rod-2",
+      "part_number": "100004",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "two"
+    },
+    {
+      "instance_id": "instance:connecting-rod-cap-4",
+      "source_component_name": "connecting rod cap-4",
+      "part_number": "100005",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:connecting-rod-4",
+      "source_component_name": "connecting rod-4",
+      "part_number": "100004",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:piston-pin-4",
+      "source_component_name": "piston pin-4",
+      "part_number": "100007",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-7",
+      "source_component_name": "Socket Head Cap Screw-7",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-8",
+      "source_component_name": "Socket Head Cap Screw-8",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:piston-assembly-4",
+      "source_component_name": "Piston Assembly-4",
+      "part_number": null,
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "organizational",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:piston-assembly-4.piston-ring-1",
+      "source_component_name": "Piston Assembly-4/piston ring-1",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-4",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:piston-assembly-4.piston-ring-2",
+      "source_component_name": "Piston Assembly-4/piston ring-2",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-4",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:piston-assembly-4.piston-1",
+      "source_component_name": "Piston Assembly-4/piston-1",
+      "part_number": "100006",
+      "parent_instance_id": "instance:piston-assembly-4",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:piston-assembly-4.piston-ring-4",
+      "source_component_name": "Piston Assembly-4/piston ring-4",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-4",
+      "kind": "physical",
+      "occurrence_key": "four"
+    },
+    {
+      "instance_id": "instance:connecting-rod-5",
+      "source_component_name": "connecting rod-5",
+      "part_number": "100004",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-10",
+      "source_component_name": "Socket Head Cap Screw-10",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:piston-pin-5",
+      "source_component_name": "piston pin-5",
+      "part_number": "100007",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:piston-assembly-5",
+      "source_component_name": "Piston Assembly-5",
+      "part_number": null,
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "organizational",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:piston-assembly-5.piston-ring-1",
+      "source_component_name": "Piston Assembly-5/piston ring-1",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-5",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:piston-assembly-5.piston-ring-2",
+      "source_component_name": "Piston Assembly-5/piston ring-2",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-5",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:piston-assembly-5.piston-1",
+      "source_component_name": "Piston Assembly-5/piston-1",
+      "part_number": "100006",
+      "parent_instance_id": "instance:piston-assembly-5",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:piston-assembly-5.piston-ring-4",
+      "source_component_name": "Piston Assembly-5/piston ring-4",
+      "part_number": "100009",
+      "parent_instance_id": "instance:piston-assembly-5",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:connecting-rod-cap-5",
+      "source_component_name": "connecting rod cap-5",
+      "part_number": "100005",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:socket-head-cap-screw-9",
+      "source_component_name": "Socket Head Cap Screw-9",
+      "part_number": "100008",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "five"
+    },
+    {
+      "instance_id": "instance:lower-block-1",
+      "source_component_name": "Lower block-1",
+      "part_number": "100002",
+      "parent_instance_id": "instance:engine-motion-study",
+      "kind": "physical",
+      "occurrence_key": "assembly"
+    }
+  ],
+  "external_entities": [
+    {
+      "entity_id": "external:upper-cylinder-block",
+      "name": "Upper cylinder block and cylinder-bore system",
+      "presence": "absent_from_extract",
+      "functional_roles": [
+        "piston guide",
+        "ring sealing surface",
+        "upper engine structure"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "upper-block.cylinder-bores",
+          "label": "Cylinder bores that guide the pistons",
+          "semantic_tags": [
+            "internal_diameter",
+            "sliding_surface",
+            "radial_guidance",
+            "sealing_surface"
+          ],
+          "aliases": [
+            "cylinder bore",
+            "upper block bore",
+            "piston travel path"
+          ],
+          "source_refs": [
+            "profile:100002"
+          ]
+        },
+        {
+          "feature_ref": "upper-block.lower-mating-face",
+          "label": "Lower mating face at the crankcase deck",
+          "semantic_tags": [
+            "structural_interface",
+            "datum_transfer",
+            "joint_face"
+          ],
+          "aliases": [
+            "upper block lower face",
+            "deck mating face",
+            "cylinder block mount"
+          ],
+          "source_refs": [
+            "profile:100002"
+          ]
+        }
+      ],
+      "evidence_refs": [
+        "profile:100002",
+        "profile:100006",
+        "profile:100009"
+      ]
+    },
+    {
+      "entity_id": "external:driven-system",
+      "name": "External driven system",
+      "presence": "absent_from_extract",
+      "functional_roles": [
+        "receive crankshaft torque",
+        "provide external rotational load"
+      ],
+      "functional_features": [
+        {
+          "feature_ref": "driven-system.input-coupling",
+          "label": "Input coupling to the crankshaft output flange",
+          "semantic_tags": [
+            "torque_interface",
+            "external_connection",
+            "rotating_member"
+          ],
+          "aliases": [
+            "driven coupling",
+            "output connection",
+            "flange mate"
+          ],
+          "source_refs": [
+            "profile:100003"
+          ]
+        }
+      ],
+      "evidence_refs": [
+        "profile:100003"
+      ]
+    }
+  ],
+  "interfaces": [
+    {
+      "interface_id": "interface:block-crank-main-support",
+      "pattern_id": "block-crank-main-support",
+      "name": "Crankshaft main-journal support in the lower block",
+      "interface_type": "revolute_support",
+      "participants": [
+        {
+          "participant_id": "instance:lower-block-1",
+          "part_number": "100002",
+          "feature_refs": [
+            "lower-block.main-bearing-bores",
+            "lower-block.end-bearing-faces"
+          ],
+          "role": "support"
+        },
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.main-journals"
+          ],
+          "role": "journal"
+        }
+      ],
+      "functions": [
+        "support the crankshaft on a stable axis",
+        "allow crankshaft rotation",
+        "locate the crankshaft axially"
+      ],
+      "relative_motion": {
+        "type": "revolute",
+        "allowed": [
+          "rotation about the shared journal axis"
+        ],
+        "constrained": [
+          "radial translation",
+          "axis misalignment",
+          "uncontrolled axial translation"
+        ]
+      },
+      "transfer_modes": [
+        "radial bearing load",
+        "structural reaction",
+        "axial location"
+      ],
+      "qualitative_requirements": [
+        "coaxial alignment",
+        "controlled running clearance",
+        "free rotation",
+        "stable axial location"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric42,Coincident31",
+          "classification": "cad_mate",
+          "claim": "The lower block and crankshaft share a constrained journal axis and locating face."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Main bearing bores, end walls",
+          "classification": "part_profile",
+          "claim": "The lower block end bores are the crankshaft supports."
+        },
+        {
+          "source_ref": "profile:100003",
+          "locator": "features:Main journals",
+          "classification": "part_profile",
+          "claim": "The crankshaft main journals are the supported rotating surfaces."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:block-crank-clearance-envelope",
+      "pattern_id": "block-crank-clearance-envelope",
+      "name": "Crank counterweight clearance inside the lower crankcase",
+      "interface_type": "dynamic_clearance_envelope",
+      "participants": [
+        {
+          "participant_id": "instance:lower-block-1",
+          "part_number": "100002",
+          "feature_refs": [
+            "lower-block.crankcase-clearance-envelope"
+          ],
+          "role": "clearance_boundary"
+        },
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.counterweight-envelope"
+          ],
+          "role": "clearance_member"
+        }
+      ],
+      "functions": [
+        "contain the rotating crank train",
+        "prevent contact between counterweights and the crankcase"
+      ],
+      "relative_motion": {
+        "type": "non_contact_dynamic",
+        "allowed": [
+          "counterweight rotation within the crankcase envelope"
+        ],
+        "constrained": [
+          "contact between the rotating envelope and crankcase wall"
+        ]
+      },
+      "transfer_modes": [
+        "clearance preservation"
+      ],
+      "qualitative_requirements": [
+        "positive dynamic clearance",
+        "stable crankshaft axis",
+        "crankcase shape integrity"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Semicylindrical crankcase wall",
+          "classification": "part_profile",
+          "claim": "The lower block provides the crankcase clearance envelope."
+        },
+        {
+          "source_ref": "profile:100003",
+          "locator": "features:Counterweight webs",
+          "classification": "part_profile",
+          "claim": "The counterweights define the principal rotating envelope."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:reciprocating-crank-train",
+          "classification": "motion_package",
+          "claim": "The validated package rotates the crankshaft through the stationary lower block."
+        }
+      ],
+      "confidence": 0.95,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:block-upper-structure",
+      "pattern_id": "block-upper-structure",
+      "name": "Lower crankcase deck to omitted upper cylinder structure",
+      "interface_type": "structural_mount",
+      "participants": [
+        {
+          "participant_id": "instance:lower-block-1",
+          "part_number": "100002",
+          "feature_refs": [
+            "lower-block.open-deck-interface"
+          ],
+          "role": "support"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.lower-mating-face"
+          ],
+          "role": "guided_member"
+        }
+      ],
+      "functions": [
+        "support and align the omitted upper cylinder structure",
+        "provide a continuous passage for the piston and rod system"
+      ],
+      "relative_motion": {
+        "type": "fixed",
+        "allowed": [
+          "no relative motion in normal service"
+        ],
+        "constrained": [
+          "relative translation",
+          "relative rotation",
+          "datum misalignment"
+        ]
+      },
+      "transfer_modes": [
+        "structural load",
+        "datum transfer"
+      ],
+      "qualitative_requirements": [
+        "stable mounting",
+        "datum continuity",
+        "alignment with the crank axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "part_profile",
+          "claim": "The open deck is the expected transfer surface to an upper engine structure."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "assembly_role",
+          "classification": "engineering_inference",
+          "claim": "The piston reciprocates above the open lower crankcase and requires an omitted guiding cylinder structure in a complete engine."
+        }
+      ],
+      "confidence": 0.72,
+      "review_status": "needs_confirmation"
+    },
+    {
+      "interface_id": "interface:crank-output",
+      "pattern_id": "crank-output",
+      "name": "Crankshaft output flange to external driven system",
+      "interface_type": "torque_output",
+      "participants": [
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.output-flange"
+          ],
+          "role": "rotating_member"
+        },
+        {
+          "participant_id": "external:driven-system",
+          "part_number": null,
+          "feature_refs": [
+            "driven-system.input-coupling"
+          ],
+          "role": "driven_interface"
+        }
+      ],
+      "functions": [
+        "deliver shaft rotation and torque to a downstream system"
+      ],
+      "relative_motion": {
+        "type": "external_unknown",
+        "allowed": [
+          "co-rotation when a coupling is installed"
+        ],
+        "constrained": [
+          "uncoupled relative translation under an installed joint"
+        ]
+      },
+      "transfer_modes": [
+        "torque",
+        "rotation"
+      ],
+      "qualitative_requirements": [
+        "concentric coupling",
+        "secure torque transfer",
+        "axial retention"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100003",
+          "locator": "features:Output flange with bolt circle",
+          "classification": "part_profile",
+          "claim": "The crankshaft profile identifies the flange as the output end."
+        }
+      ],
+      "confidence": 0.88,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:one:crank-big-end",
+      "pattern_id": "crank-rod-big-end",
+      "name": "Connecting-rod split big end on a crank-pin journal",
+      "interface_type": "split_journal_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.crank-pin-journals"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-1",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-1",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        }
+      ],
+      "functions": [
+        "carry one connecting rod on an offset crank journal",
+        "convert reciprocating rod force into crankshaft torque",
+        "allow relative journal rotation"
+      ],
+      "relative_motion": {
+        "type": "revolute",
+        "allowed": [
+          "rotation about the crank-pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial displacement"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "torque"
+      ],
+      "qualitative_requirements": [
+        "complete split bore",
+        "coaxial bearing halves",
+        "controlled running clearance",
+        "free journal rotation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric7,Concentric81",
+          "classification": "cad_mate",
+          "claim": "The rod and cap bearing surfaces share the crank-pin journal axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Big end half bore",
+          "classification": "part_profile",
+          "claim": "The rod supplies the upper bearing half and load path."
+        },
+        {
+          "source_ref": "profile:100005",
+          "locator": "features:Half bore",
+          "classification": "part_profile",
+          "claim": "The cap supplies the removable lower bearing half."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:crank-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves the rod-to-crank journal closure through the cycle."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:one:rod-cap-clamp",
+      "pattern_id": "rod-cap-clamp",
+      "name": "Bolted connecting-rod cap joint",
+      "interface_type": "bolted_clamp",
+      "participants": [
+        {
+          "participant_id": "instance:connecting-rod-1",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.cap-split-faces",
+            "connecting-rod.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-1",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.split-face",
+            "rod-cap.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-1",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-2",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        }
+      ],
+      "functions": [
+        "retain the cap on the rod",
+        "maintain the assembled big-end bore",
+        "carry clamp load across the split joint"
+      ],
+      "relative_motion": {
+        "type": "fixed",
+        "allowed": [
+          "no relative motion after fastening"
+        ],
+        "constrained": [
+          "split-face opening",
+          "cap translation",
+          "fastener loosening"
+        ]
+      },
+      "transfer_modes": [
+        "clamp preload",
+        "bearing reaction",
+        "joint retention"
+      ],
+      "qualitative_requirements": [
+        "full split-face seating",
+        "fastener engagement",
+        "stable clamp preload",
+        "assembled bore integrity"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric9,Concentric10,Coincident14,Concentric11,Coincident15",
+          "classification": "cad_mate",
+          "claim": "The cap and both fasteners are aligned and seated to the rod."
+        },
+        {
+          "source_ref": "profile:100008",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The two cap screws clamp each rod-cap pair."
+        }
+      ],
+      "confidence": 0.98,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:one:piston-pin-bearing",
+      "pattern_id": "piston-pin-bearing",
+      "name": "Piston boss bores supporting the floating pin",
+      "interface_type": "floating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-1.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.pin-bores"
+          ],
+          "role": "support"
+        },
+        {
+          "participant_id": "instance:piston-pin-1",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface",
+            "piston-pin.end-faces"
+          ],
+          "role": "journal"
+        }
+      ],
+      "functions": [
+        "support the piston pin in the piston bosses",
+        "transfer piston load into the pin",
+        "permit the intended pin float or rotation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "pin rotation relative to the piston",
+          "limited axial pin float"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial escape"
+        ]
+      },
+      "transfer_modes": [
+        "piston load",
+        "radial bearing load",
+        "pin support"
+      ],
+      "qualitative_requirements": [
+        "coaxial boss bores",
+        "controlled bearing clearance",
+        "free intended motion",
+        "positive axial retention strategy"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric13,Tangent1",
+          "classification": "cad_mate",
+          "claim": "The piston boss bore and pin share an axis and end relationship."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Pin bores through bosses",
+          "classification": "part_profile",
+          "claim": "The piston bores are the pin load-transfer supports."
+        },
+        {
+          "source_ref": "profile:100007",
+          "locator": "features:Outer diameter",
+          "classification": "part_profile",
+          "claim": "The pin outer surface is the supported journal."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:piston-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves pin-to-piston joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:one:rod-pin-bearing",
+      "pattern_id": "rod-pin-bearing",
+      "name": "Connecting-rod small end oscillating on the piston pin",
+      "interface_type": "oscillating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-pin-1",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-1",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-bore"
+          ],
+          "role": "oscillating_member"
+        }
+      ],
+      "functions": [
+        "transfer load between the pin and rod",
+        "allow the rod to oscillate as the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "oscillating_revolute",
+        "allowed": [
+          "rod oscillation about the pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled side translation"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "oscillating motion"
+      ],
+      "qualitative_requirements": [
+        "coaxial pin and bore",
+        "controlled running clearance",
+        "free rod oscillation",
+        "adequate bearing support"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric12",
+          "classification": "cad_mate",
+          "claim": "The rod small-end bore and piston pin share an axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "part_profile",
+          "claim": "The small end is the oscillating pin bearing."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:rod-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves rod-to-pin joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:one:rod-side-guidance",
+      "pattern_id": "rod-side-guidance",
+      "name": "Connecting-rod small-end side guidance between piston bosses",
+      "interface_type": "axial_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-1.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.boss-counterbores"
+          ],
+          "role": "guide"
+        },
+        {
+          "participant_id": "instance:connecting-rod-1",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-side-faces"
+          ],
+          "role": "guided_member"
+        }
+      ],
+      "functions": [
+        "keep the rod small end centered between the piston bosses",
+        "provide side clearance for rod oscillation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "rod oscillation with limited side float"
+        ],
+        "constrained": [
+          "large axial displacement",
+          "side-face interference"
+        ]
+      },
+      "transfer_modes": [
+        "side reaction",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "controlled side clearance",
+        "parallel guidance faces",
+        "free rod oscillation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Boss face counterbores",
+          "classification": "part_profile",
+          "claim": "The piston boss faces form the rod side-guidance region."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "engineering_inference",
+          "claim": "The rod small-end boss is located between the opposed piston bosses."
+        }
+      ],
+      "confidence": 0.78,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:one:piston-cylinder-guide",
+      "pattern_id": "piston-cylinder-guide",
+      "name": "Piston running surface guided by an omitted cylinder bore",
+      "interface_type": "prismatic_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-1.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-running-surface"
+          ],
+          "role": "guided_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "guide"
+        }
+      ],
+      "functions": [
+        "guide the piston along its reciprocating axis",
+        "control piston side motion",
+        "keep the piston aligned with the crank-slider mechanism"
+      ],
+      "relative_motion": {
+        "type": "prismatic",
+        "allowed": [
+          "axial piston translation"
+        ],
+        "constrained": [
+          "radial displacement",
+          "piston tilt beyond running allowance",
+          "rotation about a transverse axis"
+        ]
+      },
+      "transfer_modes": [
+        "piston side load",
+        "radial guidance",
+        "reciprocating motion"
+      ],
+      "qualitative_requirements": [
+        "controlled radial clearance",
+        "free axial translation",
+        "compatible running surfaces",
+        "alignment with the crank-slider axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The piston is the reciprocating guided member and its outside surface is the running interface."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The extracted lower crankcase is open and does not include the required upper cylinder-bore guide."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:reciprocating-components",
+          "classification": "motion_package",
+          "claim": "The validated package translates the pistons on fixed cylinder axes."
+        }
+      ],
+      "confidence": 0.86,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:one:ring-retention",
+      "pattern_id": "piston-ring-retention",
+      "name": "Piston ring pack retained in the piston grooves",
+      "interface_type": "ring_retention",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-1.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.ring-grooves"
+          ],
+          "role": "retainer"
+        },
+        {
+          "participant_id": "instance:piston-assembly-1.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-1.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-1.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        }
+      ],
+      "functions": [
+        "retain the ring pack on the piston",
+        "locate each ring axially",
+        "permit the ring compliance needed for installation and service"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "limited ring movement within each groove",
+          "ring expansion at the split"
+        ],
+        "constrained": [
+          "ring escape",
+          "excessive axial motion",
+          "groove binding"
+        ]
+      },
+      "transfer_modes": [
+        "ring retention",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "groove seating",
+        "controlled side clearance",
+        "end-gap accommodation",
+        "free ring compliance"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston grooves retain the ring pack."
+        },
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "Each split ring seats in a piston groove and remains compliant."
+        },
+        {
+          "source_ref": "assembly:100001",
+          "locator": "hierarchy:Piston Assembly-one",
+          "classification": "assembly_hierarchy",
+          "claim": "Three ring instances are carried by each piston subassembly."
+        }
+      ],
+      "confidence": 0.94,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:one:ring-cylinder-seal",
+      "pattern_id": "ring-cylinder-seal",
+      "name": "Piston ring pack sliding against an omitted cylinder bore",
+      "interface_type": "sliding_seal",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-1.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-1.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-1.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "sealing_surface"
+        }
+      ],
+      "functions": [
+        "maintain sliding contact with the cylinder bore",
+        "support sealing while the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "axial sliding along the cylinder bore",
+          "ring compliance against the bore"
+        ],
+        "constrained": [
+          "loss of bore contact",
+          "ring seizure",
+          "uncontrolled ring escape"
+        ]
+      },
+      "transfer_modes": [
+        "sealing contact",
+        "friction reaction",
+        "heat transfer"
+      ],
+      "qualitative_requirements": [
+        "continuous bore contact",
+        "compatible sliding surfaces",
+        "controlled ring loading",
+        "end-gap accommodation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The ring outer surface is the expected bore-sealing contact."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston carries the rings through the reciprocating stroke."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The required cylinder sealing surface belongs to an upper structure omitted from this extract."
+        }
+      ],
+      "confidence": 0.82,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:one:skirt-crank-clearance",
+      "pattern_id": "piston-skirt-crank-clearance",
+      "name": "Piston skirt relief clearance to the rotating crank train",
+      "interface_type": "dynamic_clearance_envelope",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-1.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-reliefs"
+          ],
+          "role": "clearance_member"
+        },
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.counterweight-envelope"
+          ],
+          "role": "clearance_boundary"
+        }
+      ],
+      "functions": [
+        "prevent contact between the piston skirt and rotating crank webs near the lower stroke region"
+      ],
+      "relative_motion": {
+        "type": "non_contact_dynamic",
+        "allowed": [
+          "piston translation past the rotating crank envelope"
+        ],
+        "constrained": [
+          "skirt-to-crank contact"
+        ]
+      },
+      "transfer_modes": [
+        "clearance preservation"
+      ],
+      "qualitative_requirements": [
+        "positive dynamic clearance",
+        "correct piston guidance",
+        "correct crankshaft axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Skirt with arched reliefs",
+          "classification": "part_profile",
+          "claim": "The skirt reliefs provide clearance to the crank webs."
+        },
+        {
+          "source_ref": "profile:100003",
+          "locator": "features:Counterweight webs",
+          "classification": "part_profile",
+          "claim": "The crank webs define the nearby rotating envelope."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:full-cycle",
+          "classification": "motion_package",
+          "claim": "The validated cycle exercises the relative skirt and crank motion."
+        }
+      ],
+      "confidence": 0.95,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:two:crank-big-end",
+      "pattern_id": "crank-rod-big-end",
+      "name": "Connecting-rod split big end on a crank-pin journal",
+      "interface_type": "split_journal_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.crank-pin-journals"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-2",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-2",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        }
+      ],
+      "functions": [
+        "carry one connecting rod on an offset crank journal",
+        "convert reciprocating rod force into crankshaft torque",
+        "allow relative journal rotation"
+      ],
+      "relative_motion": {
+        "type": "revolute",
+        "allowed": [
+          "rotation about the crank-pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial displacement"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "torque"
+      ],
+      "qualitative_requirements": [
+        "complete split bore",
+        "coaxial bearing halves",
+        "controlled running clearance",
+        "free journal rotation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric19,Concentric20",
+          "classification": "cad_mate",
+          "claim": "The rod and cap bearing surfaces share the crank-pin journal axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Big end half bore",
+          "classification": "part_profile",
+          "claim": "The rod supplies the upper bearing half and load path."
+        },
+        {
+          "source_ref": "profile:100005",
+          "locator": "features:Half bore",
+          "classification": "part_profile",
+          "claim": "The cap supplies the removable lower bearing half."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:crank-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves the rod-to-crank journal closure through the cycle."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:two:rod-cap-clamp",
+      "pattern_id": "rod-cap-clamp",
+      "name": "Bolted connecting-rod cap joint",
+      "interface_type": "bolted_clamp",
+      "participants": [
+        {
+          "participant_id": "instance:connecting-rod-2",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.cap-split-faces",
+            "connecting-rod.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-2",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.split-face",
+            "rod-cap.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-3",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-4",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        }
+      ],
+      "functions": [
+        "retain the cap on the rod",
+        "maintain the assembled big-end bore",
+        "carry clamp load across the split joint"
+      ],
+      "relative_motion": {
+        "type": "fixed",
+        "allowed": [
+          "no relative motion after fastening"
+        ],
+        "constrained": [
+          "split-face opening",
+          "cap translation",
+          "fastener loosening"
+        ]
+      },
+      "transfer_modes": [
+        "clamp preload",
+        "bearing reaction",
+        "joint retention"
+      ],
+      "qualitative_requirements": [
+        "full split-face seating",
+        "fastener engagement",
+        "stable clamp preload",
+        "assembled bore integrity"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric14,Concentric15,Coincident17,Concentric16,Coincident18",
+          "classification": "cad_mate",
+          "claim": "The cap and both fasteners are aligned and seated to the rod."
+        },
+        {
+          "source_ref": "profile:100008",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The two cap screws clamp each rod-cap pair."
+        }
+      ],
+      "confidence": 0.98,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:two:piston-pin-bearing",
+      "pattern_id": "piston-pin-bearing",
+      "name": "Piston boss bores supporting the floating pin",
+      "interface_type": "floating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-2.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.pin-bores"
+          ],
+          "role": "support"
+        },
+        {
+          "participant_id": "instance:piston-pin-2",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface",
+            "piston-pin.end-faces"
+          ],
+          "role": "journal"
+        }
+      ],
+      "functions": [
+        "support the piston pin in the piston bosses",
+        "transfer piston load into the pin",
+        "permit the intended pin float or rotation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "pin rotation relative to the piston",
+          "limited axial pin float"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial escape"
+        ]
+      },
+      "transfer_modes": [
+        "piston load",
+        "radial bearing load",
+        "pin support"
+      ],
+      "qualitative_requirements": [
+        "coaxial boss bores",
+        "controlled bearing clearance",
+        "free intended motion",
+        "positive axial retention strategy"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric18,Tangent2",
+          "classification": "cad_mate",
+          "claim": "The piston boss bore and pin share an axis and end relationship."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Pin bores through bosses",
+          "classification": "part_profile",
+          "claim": "The piston bores are the pin load-transfer supports."
+        },
+        {
+          "source_ref": "profile:100007",
+          "locator": "features:Outer diameter",
+          "classification": "part_profile",
+          "claim": "The pin outer surface is the supported journal."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:piston-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves pin-to-piston joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:two:rod-pin-bearing",
+      "pattern_id": "rod-pin-bearing",
+      "name": "Connecting-rod small end oscillating on the piston pin",
+      "interface_type": "oscillating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-pin-2",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-2",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-bore"
+          ],
+          "role": "oscillating_member"
+        }
+      ],
+      "functions": [
+        "transfer load between the pin and rod",
+        "allow the rod to oscillate as the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "oscillating_revolute",
+        "allowed": [
+          "rod oscillation about the pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled side translation"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "oscillating motion"
+      ],
+      "qualitative_requirements": [
+        "coaxial pin and bore",
+        "controlled running clearance",
+        "free rod oscillation",
+        "adequate bearing support"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric17",
+          "classification": "cad_mate",
+          "claim": "The rod small-end bore and piston pin share an axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "part_profile",
+          "claim": "The small end is the oscillating pin bearing."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:rod-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves rod-to-pin joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:two:rod-side-guidance",
+      "pattern_id": "rod-side-guidance",
+      "name": "Connecting-rod small-end side guidance between piston bosses",
+      "interface_type": "axial_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-2.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.boss-counterbores"
+          ],
+          "role": "guide"
+        },
+        {
+          "participant_id": "instance:connecting-rod-2",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-side-faces"
+          ],
+          "role": "guided_member"
+        }
+      ],
+      "functions": [
+        "keep the rod small end centered between the piston bosses",
+        "provide side clearance for rod oscillation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "rod oscillation with limited side float"
+        ],
+        "constrained": [
+          "large axial displacement",
+          "side-face interference"
+        ]
+      },
+      "transfer_modes": [
+        "side reaction",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "controlled side clearance",
+        "parallel guidance faces",
+        "free rod oscillation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Boss face counterbores",
+          "classification": "part_profile",
+          "claim": "The piston boss faces form the rod side-guidance region."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "engineering_inference",
+          "claim": "The rod small-end boss is located between the opposed piston bosses."
+        }
+      ],
+      "confidence": 0.78,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:two:piston-cylinder-guide",
+      "pattern_id": "piston-cylinder-guide",
+      "name": "Piston running surface guided by an omitted cylinder bore",
+      "interface_type": "prismatic_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-2.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-running-surface"
+          ],
+          "role": "guided_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "guide"
+        }
+      ],
+      "functions": [
+        "guide the piston along its reciprocating axis",
+        "control piston side motion",
+        "keep the piston aligned with the crank-slider mechanism"
+      ],
+      "relative_motion": {
+        "type": "prismatic",
+        "allowed": [
+          "axial piston translation"
+        ],
+        "constrained": [
+          "radial displacement",
+          "piston tilt beyond running allowance",
+          "rotation about a transverse axis"
+        ]
+      },
+      "transfer_modes": [
+        "piston side load",
+        "radial guidance",
+        "reciprocating motion"
+      ],
+      "qualitative_requirements": [
+        "controlled radial clearance",
+        "free axial translation",
+        "compatible running surfaces",
+        "alignment with the crank-slider axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The piston is the reciprocating guided member and its outside surface is the running interface."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The extracted lower crankcase is open and does not include the required upper cylinder-bore guide."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:reciprocating-components",
+          "classification": "motion_package",
+          "claim": "The validated package translates the pistons on fixed cylinder axes."
+        }
+      ],
+      "confidence": 0.86,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:two:ring-retention",
+      "pattern_id": "piston-ring-retention",
+      "name": "Piston ring pack retained in the piston grooves",
+      "interface_type": "ring_retention",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-2.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.ring-grooves"
+          ],
+          "role": "retainer"
+        },
+        {
+          "participant_id": "instance:piston-assembly-2.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-2.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-2.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        }
+      ],
+      "functions": [
+        "retain the ring pack on the piston",
+        "locate each ring axially",
+        "permit the ring compliance needed for installation and service"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "limited ring movement within each groove",
+          "ring expansion at the split"
+        ],
+        "constrained": [
+          "ring escape",
+          "excessive axial motion",
+          "groove binding"
+        ]
+      },
+      "transfer_modes": [
+        "ring retention",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "groove seating",
+        "controlled side clearance",
+        "end-gap accommodation",
+        "free ring compliance"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston grooves retain the ring pack."
+        },
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "Each split ring seats in a piston groove and remains compliant."
+        },
+        {
+          "source_ref": "assembly:100001",
+          "locator": "hierarchy:Piston Assembly-two",
+          "classification": "assembly_hierarchy",
+          "claim": "Three ring instances are carried by each piston subassembly."
+        }
+      ],
+      "confidence": 0.94,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:two:ring-cylinder-seal",
+      "pattern_id": "ring-cylinder-seal",
+      "name": "Piston ring pack sliding against an omitted cylinder bore",
+      "interface_type": "sliding_seal",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-2.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-2.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-2.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "sealing_surface"
+        }
+      ],
+      "functions": [
+        "maintain sliding contact with the cylinder bore",
+        "support sealing while the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "axial sliding along the cylinder bore",
+          "ring compliance against the bore"
+        ],
+        "constrained": [
+          "loss of bore contact",
+          "ring seizure",
+          "uncontrolled ring escape"
+        ]
+      },
+      "transfer_modes": [
+        "sealing contact",
+        "friction reaction",
+        "heat transfer"
+      ],
+      "qualitative_requirements": [
+        "continuous bore contact",
+        "compatible sliding surfaces",
+        "controlled ring loading",
+        "end-gap accommodation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The ring outer surface is the expected bore-sealing contact."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston carries the rings through the reciprocating stroke."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The required cylinder sealing surface belongs to an upper structure omitted from this extract."
+        }
+      ],
+      "confidence": 0.82,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:two:skirt-crank-clearance",
+      "pattern_id": "piston-skirt-crank-clearance",
+      "name": "Piston skirt relief clearance to the rotating crank train",
+      "interface_type": "dynamic_clearance_envelope",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-2.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-reliefs"
+          ],
+          "role": "clearance_member"
+        },
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.counterweight-envelope"
+          ],
+          "role": "clearance_boundary"
+        }
+      ],
+      "functions": [
+        "prevent contact between the piston skirt and rotating crank webs near the lower stroke region"
+      ],
+      "relative_motion": {
+        "type": "non_contact_dynamic",
+        "allowed": [
+          "piston translation past the rotating crank envelope"
+        ],
+        "constrained": [
+          "skirt-to-crank contact"
+        ]
+      },
+      "transfer_modes": [
+        "clearance preservation"
+      ],
+      "qualitative_requirements": [
+        "positive dynamic clearance",
+        "correct piston guidance",
+        "correct crankshaft axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Skirt with arched reliefs",
+          "classification": "part_profile",
+          "claim": "The skirt reliefs provide clearance to the crank webs."
+        },
+        {
+          "source_ref": "profile:100003",
+          "locator": "features:Counterweight webs",
+          "classification": "part_profile",
+          "claim": "The crank webs define the nearby rotating envelope."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:full-cycle",
+          "classification": "motion_package",
+          "claim": "The validated cycle exercises the relative skirt and crank motion."
+        }
+      ],
+      "confidence": 0.95,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:four:crank-big-end",
+      "pattern_id": "crank-rod-big-end",
+      "name": "Connecting-rod split big end on a crank-pin journal",
+      "interface_type": "split_journal_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.crank-pin-journals"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-4",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-4",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        }
+      ],
+      "functions": [
+        "carry one connecting rod on an offset crank journal",
+        "convert reciprocating rod force into crankshaft torque",
+        "allow relative journal rotation"
+      ],
+      "relative_motion": {
+        "type": "revolute",
+        "allowed": [
+          "rotation about the crank-pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial displacement"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "torque"
+      ],
+      "qualitative_requirements": [
+        "complete split bore",
+        "coaxial bearing halves",
+        "controlled running clearance",
+        "free journal rotation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric33,Concentric34",
+          "classification": "cad_mate",
+          "claim": "The rod and cap bearing surfaces share the crank-pin journal axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Big end half bore",
+          "classification": "part_profile",
+          "claim": "The rod supplies the upper bearing half and load path."
+        },
+        {
+          "source_ref": "profile:100005",
+          "locator": "features:Half bore",
+          "classification": "part_profile",
+          "claim": "The cap supplies the removable lower bearing half."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:crank-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves the rod-to-crank journal closure through the cycle."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:four:rod-cap-clamp",
+      "pattern_id": "rod-cap-clamp",
+      "name": "Bolted connecting-rod cap joint",
+      "interface_type": "bolted_clamp",
+      "participants": [
+        {
+          "participant_id": "instance:connecting-rod-4",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.cap-split-faces",
+            "connecting-rod.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-4",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.split-face",
+            "rod-cap.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-7",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-8",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        }
+      ],
+      "functions": [
+        "retain the cap on the rod",
+        "maintain the assembled big-end bore",
+        "carry clamp load across the split joint"
+      ],
+      "relative_motion": {
+        "type": "fixed",
+        "allowed": [
+          "no relative motion after fastening"
+        ],
+        "constrained": [
+          "split-face opening",
+          "cap translation",
+          "fastener loosening"
+        ]
+      },
+      "transfer_modes": [
+        "clamp preload",
+        "bearing reaction",
+        "joint retention"
+      ],
+      "qualitative_requirements": [
+        "full split-face seating",
+        "fastener engagement",
+        "stable clamp preload",
+        "assembled bore integrity"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric28,Concentric29,Coincident23,Concentric30,Coincident24",
+          "classification": "cad_mate",
+          "claim": "The cap and both fasteners are aligned and seated to the rod."
+        },
+        {
+          "source_ref": "profile:100008",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The two cap screws clamp each rod-cap pair."
+        }
+      ],
+      "confidence": 0.98,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:four:piston-pin-bearing",
+      "pattern_id": "piston-pin-bearing",
+      "name": "Piston boss bores supporting the floating pin",
+      "interface_type": "floating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-4.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.pin-bores"
+          ],
+          "role": "support"
+        },
+        {
+          "participant_id": "instance:piston-pin-4",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface",
+            "piston-pin.end-faces"
+          ],
+          "role": "journal"
+        }
+      ],
+      "functions": [
+        "support the piston pin in the piston bosses",
+        "transfer piston load into the pin",
+        "permit the intended pin float or rotation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "pin rotation relative to the piston",
+          "limited axial pin float"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial escape"
+        ]
+      },
+      "transfer_modes": [
+        "piston load",
+        "radial bearing load",
+        "pin support"
+      ],
+      "qualitative_requirements": [
+        "coaxial boss bores",
+        "controlled bearing clearance",
+        "free intended motion",
+        "positive axial retention strategy"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric32,Tangent8",
+          "classification": "cad_mate",
+          "claim": "The piston boss bore and pin share an axis and end relationship."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Pin bores through bosses",
+          "classification": "part_profile",
+          "claim": "The piston bores are the pin load-transfer supports."
+        },
+        {
+          "source_ref": "profile:100007",
+          "locator": "features:Outer diameter",
+          "classification": "part_profile",
+          "claim": "The pin outer surface is the supported journal."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:piston-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves pin-to-piston joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:four:rod-pin-bearing",
+      "pattern_id": "rod-pin-bearing",
+      "name": "Connecting-rod small end oscillating on the piston pin",
+      "interface_type": "oscillating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-pin-4",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-4",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-bore"
+          ],
+          "role": "oscillating_member"
+        }
+      ],
+      "functions": [
+        "transfer load between the pin and rod",
+        "allow the rod to oscillate as the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "oscillating_revolute",
+        "allowed": [
+          "rod oscillation about the pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled side translation"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "oscillating motion"
+      ],
+      "qualitative_requirements": [
+        "coaxial pin and bore",
+        "controlled running clearance",
+        "free rod oscillation",
+        "adequate bearing support"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric31",
+          "classification": "cad_mate",
+          "claim": "The rod small-end bore and piston pin share an axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "part_profile",
+          "claim": "The small end is the oscillating pin bearing."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:rod-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves rod-to-pin joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:four:rod-side-guidance",
+      "pattern_id": "rod-side-guidance",
+      "name": "Connecting-rod small-end side guidance between piston bosses",
+      "interface_type": "axial_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-4.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.boss-counterbores"
+          ],
+          "role": "guide"
+        },
+        {
+          "participant_id": "instance:connecting-rod-4",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-side-faces"
+          ],
+          "role": "guided_member"
+        }
+      ],
+      "functions": [
+        "keep the rod small end centered between the piston bosses",
+        "provide side clearance for rod oscillation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "rod oscillation with limited side float"
+        ],
+        "constrained": [
+          "large axial displacement",
+          "side-face interference"
+        ]
+      },
+      "transfer_modes": [
+        "side reaction",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "controlled side clearance",
+        "parallel guidance faces",
+        "free rod oscillation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Boss face counterbores",
+          "classification": "part_profile",
+          "claim": "The piston boss faces form the rod side-guidance region."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "engineering_inference",
+          "claim": "The rod small-end boss is located between the opposed piston bosses."
+        }
+      ],
+      "confidence": 0.78,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:four:piston-cylinder-guide",
+      "pattern_id": "piston-cylinder-guide",
+      "name": "Piston running surface guided by an omitted cylinder bore",
+      "interface_type": "prismatic_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-4.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-running-surface"
+          ],
+          "role": "guided_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "guide"
+        }
+      ],
+      "functions": [
+        "guide the piston along its reciprocating axis",
+        "control piston side motion",
+        "keep the piston aligned with the crank-slider mechanism"
+      ],
+      "relative_motion": {
+        "type": "prismatic",
+        "allowed": [
+          "axial piston translation"
+        ],
+        "constrained": [
+          "radial displacement",
+          "piston tilt beyond running allowance",
+          "rotation about a transverse axis"
+        ]
+      },
+      "transfer_modes": [
+        "piston side load",
+        "radial guidance",
+        "reciprocating motion"
+      ],
+      "qualitative_requirements": [
+        "controlled radial clearance",
+        "free axial translation",
+        "compatible running surfaces",
+        "alignment with the crank-slider axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The piston is the reciprocating guided member and its outside surface is the running interface."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The extracted lower crankcase is open and does not include the required upper cylinder-bore guide."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:reciprocating-components",
+          "classification": "motion_package",
+          "claim": "The validated package translates the pistons on fixed cylinder axes."
+        }
+      ],
+      "confidence": 0.86,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:four:ring-retention",
+      "pattern_id": "piston-ring-retention",
+      "name": "Piston ring pack retained in the piston grooves",
+      "interface_type": "ring_retention",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-4.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.ring-grooves"
+          ],
+          "role": "retainer"
+        },
+        {
+          "participant_id": "instance:piston-assembly-4.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-4.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-4.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        }
+      ],
+      "functions": [
+        "retain the ring pack on the piston",
+        "locate each ring axially",
+        "permit the ring compliance needed for installation and service"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "limited ring movement within each groove",
+          "ring expansion at the split"
+        ],
+        "constrained": [
+          "ring escape",
+          "excessive axial motion",
+          "groove binding"
+        ]
+      },
+      "transfer_modes": [
+        "ring retention",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "groove seating",
+        "controlled side clearance",
+        "end-gap accommodation",
+        "free ring compliance"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston grooves retain the ring pack."
+        },
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "Each split ring seats in a piston groove and remains compliant."
+        },
+        {
+          "source_ref": "assembly:100001",
+          "locator": "hierarchy:Piston Assembly-four",
+          "classification": "assembly_hierarchy",
+          "claim": "Three ring instances are carried by each piston subassembly."
+        }
+      ],
+      "confidence": 0.94,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:four:ring-cylinder-seal",
+      "pattern_id": "ring-cylinder-seal",
+      "name": "Piston ring pack sliding against an omitted cylinder bore",
+      "interface_type": "sliding_seal",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-4.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-4.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-4.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "sealing_surface"
+        }
+      ],
+      "functions": [
+        "maintain sliding contact with the cylinder bore",
+        "support sealing while the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "axial sliding along the cylinder bore",
+          "ring compliance against the bore"
+        ],
+        "constrained": [
+          "loss of bore contact",
+          "ring seizure",
+          "uncontrolled ring escape"
+        ]
+      },
+      "transfer_modes": [
+        "sealing contact",
+        "friction reaction",
+        "heat transfer"
+      ],
+      "qualitative_requirements": [
+        "continuous bore contact",
+        "compatible sliding surfaces",
+        "controlled ring loading",
+        "end-gap accommodation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The ring outer surface is the expected bore-sealing contact."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston carries the rings through the reciprocating stroke."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The required cylinder sealing surface belongs to an upper structure omitted from this extract."
+        }
+      ],
+      "confidence": 0.82,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:four:skirt-crank-clearance",
+      "pattern_id": "piston-skirt-crank-clearance",
+      "name": "Piston skirt relief clearance to the rotating crank train",
+      "interface_type": "dynamic_clearance_envelope",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-4.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-reliefs"
+          ],
+          "role": "clearance_member"
+        },
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.counterweight-envelope"
+          ],
+          "role": "clearance_boundary"
+        }
+      ],
+      "functions": [
+        "prevent contact between the piston skirt and rotating crank webs near the lower stroke region"
+      ],
+      "relative_motion": {
+        "type": "non_contact_dynamic",
+        "allowed": [
+          "piston translation past the rotating crank envelope"
+        ],
+        "constrained": [
+          "skirt-to-crank contact"
+        ]
+      },
+      "transfer_modes": [
+        "clearance preservation"
+      ],
+      "qualitative_requirements": [
+        "positive dynamic clearance",
+        "correct piston guidance",
+        "correct crankshaft axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Skirt with arched reliefs",
+          "classification": "part_profile",
+          "claim": "The skirt reliefs provide clearance to the crank webs."
+        },
+        {
+          "source_ref": "profile:100003",
+          "locator": "features:Counterweight webs",
+          "classification": "part_profile",
+          "claim": "The crank webs define the nearby rotating envelope."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:full-cycle",
+          "classification": "motion_package",
+          "claim": "The validated cycle exercises the relative skirt and crank motion."
+        }
+      ],
+      "confidence": 0.95,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:five:crank-big-end",
+      "pattern_id": "crank-rod-big-end",
+      "name": "Connecting-rod split big end on a crank-pin journal",
+      "interface_type": "split_journal_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.crank-pin-journals"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-5",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-5",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.big-end-half-bore"
+          ],
+          "role": "bearing_half"
+        }
+      ],
+      "functions": [
+        "carry one connecting rod on an offset crank journal",
+        "convert reciprocating rod force into crankshaft torque",
+        "allow relative journal rotation"
+      ],
+      "relative_motion": {
+        "type": "revolute",
+        "allowed": [
+          "rotation about the crank-pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial displacement"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "torque"
+      ],
+      "qualitative_requirements": [
+        "complete split bore",
+        "coaxial bearing halves",
+        "controlled running clearance",
+        "free journal rotation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric40,Concentric41",
+          "classification": "cad_mate",
+          "claim": "The rod and cap bearing surfaces share the crank-pin journal axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Big end half bore",
+          "classification": "part_profile",
+          "claim": "The rod supplies the upper bearing half and load path."
+        },
+        {
+          "source_ref": "profile:100005",
+          "locator": "features:Half bore",
+          "classification": "part_profile",
+          "claim": "The cap supplies the removable lower bearing half."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:crank-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves the rod-to-crank journal closure through the cycle."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:five:rod-cap-clamp",
+      "pattern_id": "rod-cap-clamp",
+      "name": "Bolted connecting-rod cap joint",
+      "interface_type": "bolted_clamp",
+      "participants": [
+        {
+          "participant_id": "instance:connecting-rod-5",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.cap-split-faces",
+            "connecting-rod.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:connecting-rod-cap-5",
+          "part_number": "100005",
+          "feature_refs": [
+            "rod-cap.split-face",
+            "rod-cap.fastener-bores"
+          ],
+          "role": "clamp_body"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-9",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        },
+        {
+          "participant_id": "instance:socket-head-cap-screw-10",
+          "part_number": "100008",
+          "feature_refs": [
+            "cap-screw.thread-interface",
+            "cap-screw.head-bearing-face",
+            "cap-screw.shank"
+          ],
+          "role": "fastener"
+        }
+      ],
+      "functions": [
+        "retain the cap on the rod",
+        "maintain the assembled big-end bore",
+        "carry clamp load across the split joint"
+      ],
+      "relative_motion": {
+        "type": "fixed",
+        "allowed": [
+          "no relative motion after fastening"
+        ],
+        "constrained": [
+          "split-face opening",
+          "cap translation",
+          "fastener loosening"
+        ]
+      },
+      "transfer_modes": [
+        "clamp preload",
+        "bearing reaction",
+        "joint retention"
+      ],
+      "qualitative_requirements": [
+        "full split-face seating",
+        "fastener engagement",
+        "stable clamp preload",
+        "assembled bore integrity"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric35,Concentric36,Coincident26,Concentric37,Coincident27",
+          "classification": "cad_mate",
+          "claim": "The cap and both fasteners are aligned and seated to the rod."
+        },
+        {
+          "source_ref": "profile:100008",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The two cap screws clamp each rod-cap pair."
+        }
+      ],
+      "confidence": 0.98,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:five:piston-pin-bearing",
+      "pattern_id": "piston-pin-bearing",
+      "name": "Piston boss bores supporting the floating pin",
+      "interface_type": "floating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-5.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.pin-bores"
+          ],
+          "role": "support"
+        },
+        {
+          "participant_id": "instance:piston-pin-5",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface",
+            "piston-pin.end-faces"
+          ],
+          "role": "journal"
+        }
+      ],
+      "functions": [
+        "support the piston pin in the piston bosses",
+        "transfer piston load into the pin",
+        "permit the intended pin float or rotation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "pin rotation relative to the piston",
+          "limited axial pin float"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled axial escape"
+        ]
+      },
+      "transfer_modes": [
+        "piston load",
+        "radial bearing load",
+        "pin support"
+      ],
+      "qualitative_requirements": [
+        "coaxial boss bores",
+        "controlled bearing clearance",
+        "free intended motion",
+        "positive axial retention strategy"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric39,Tangent10",
+          "classification": "cad_mate",
+          "claim": "The piston boss bore and pin share an axis and end relationship."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Pin bores through bosses",
+          "classification": "part_profile",
+          "claim": "The piston bores are the pin load-transfer supports."
+        },
+        {
+          "source_ref": "profile:100007",
+          "locator": "features:Outer diameter",
+          "classification": "part_profile",
+          "claim": "The pin outer surface is the supported journal."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:piston-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves pin-to-piston joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:five:rod-pin-bearing",
+      "pattern_id": "rod-pin-bearing",
+      "name": "Connecting-rod small end oscillating on the piston pin",
+      "interface_type": "oscillating_pin_bearing",
+      "participants": [
+        {
+          "participant_id": "instance:piston-pin-5",
+          "part_number": "100007",
+          "feature_refs": [
+            "piston-pin.outer-bearing-surface"
+          ],
+          "role": "journal"
+        },
+        {
+          "participant_id": "instance:connecting-rod-5",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-bore"
+          ],
+          "role": "oscillating_member"
+        }
+      ],
+      "functions": [
+        "transfer load between the pin and rod",
+        "allow the rod to oscillate as the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "oscillating_revolute",
+        "allowed": [
+          "rod oscillation about the pin axis"
+        ],
+        "constrained": [
+          "radial separation",
+          "axis misalignment",
+          "uncontrolled side translation"
+        ]
+      },
+      "transfer_modes": [
+        "reciprocating force",
+        "radial bearing load",
+        "oscillating motion"
+      ],
+      "qualitative_requirements": [
+        "coaxial pin and bore",
+        "controlled running clearance",
+        "free rod oscillation",
+        "adequate bearing support"
+      ],
+      "evidence": [
+        {
+          "source_ref": "assembly:100001",
+          "locator": "mates:Concentric38",
+          "classification": "cad_mate",
+          "claim": "The rod small-end bore and piston pin share an axis."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "part_profile",
+          "claim": "The small end is the oscillating pin bearing."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "joint-closure:rod-pin",
+          "classification": "motion_package",
+          "claim": "The validated motion preserves rod-to-pin joint closure."
+        }
+      ],
+      "confidence": 0.99,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:five:rod-side-guidance",
+      "pattern_id": "rod-side-guidance",
+      "name": "Connecting-rod small-end side guidance between piston bosses",
+      "interface_type": "axial_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-5.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.boss-counterbores"
+          ],
+          "role": "guide"
+        },
+        {
+          "participant_id": "instance:connecting-rod-5",
+          "part_number": "100004",
+          "feature_refs": [
+            "connecting-rod.small-end-side-faces"
+          ],
+          "role": "guided_member"
+        }
+      ],
+      "functions": [
+        "keep the rod small end centered between the piston bosses",
+        "provide side clearance for rod oscillation"
+      ],
+      "relative_motion": {
+        "type": "limited_axial_float",
+        "allowed": [
+          "rod oscillation with limited side float"
+        ],
+        "constrained": [
+          "large axial displacement",
+          "side-face interference"
+        ]
+      },
+      "transfer_modes": [
+        "side reaction",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "controlled side clearance",
+        "parallel guidance faces",
+        "free rod oscillation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Boss face counterbores",
+          "classification": "part_profile",
+          "claim": "The piston boss faces form the rod side-guidance region."
+        },
+        {
+          "source_ref": "profile:100004",
+          "locator": "features:Small end pin bore",
+          "classification": "engineering_inference",
+          "claim": "The rod small-end boss is located between the opposed piston bosses."
+        }
+      ],
+      "confidence": 0.78,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:five:piston-cylinder-guide",
+      "pattern_id": "piston-cylinder-guide",
+      "name": "Piston running surface guided by an omitted cylinder bore",
+      "interface_type": "prismatic_guidance_clearance",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-5.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-running-surface"
+          ],
+          "role": "guided_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "guide"
+        }
+      ],
+      "functions": [
+        "guide the piston along its reciprocating axis",
+        "control piston side motion",
+        "keep the piston aligned with the crank-slider mechanism"
+      ],
+      "relative_motion": {
+        "type": "prismatic",
+        "allowed": [
+          "axial piston translation"
+        ],
+        "constrained": [
+          "radial displacement",
+          "piston tilt beyond running allowance",
+          "rotation about a transverse axis"
+        ]
+      },
+      "transfer_modes": [
+        "piston side load",
+        "radial guidance",
+        "reciprocating motion"
+      ],
+      "qualitative_requirements": [
+        "controlled radial clearance",
+        "free axial translation",
+        "compatible running surfaces",
+        "alignment with the crank-slider axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The piston is the reciprocating guided member and its outside surface is the running interface."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The extracted lower crankcase is open and does not include the required upper cylinder-bore guide."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:reciprocating-components",
+          "classification": "motion_package",
+          "claim": "The validated package translates the pistons on fixed cylinder axes."
+        }
+      ],
+      "confidence": 0.86,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:five:ring-retention",
+      "pattern_id": "piston-ring-retention",
+      "name": "Piston ring pack retained in the piston grooves",
+      "interface_type": "ring_retention",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-5.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.ring-grooves"
+          ],
+          "role": "retainer"
+        },
+        {
+          "participant_id": "instance:piston-assembly-5.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-5.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-5.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.inner-groove-seat",
+            "piston-ring.side-faces",
+            "piston-ring.end-gap"
+          ],
+          "role": "retained_member"
+        }
+      ],
+      "functions": [
+        "retain the ring pack on the piston",
+        "locate each ring axially",
+        "permit the ring compliance needed for installation and service"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "limited ring movement within each groove",
+          "ring expansion at the split"
+        ],
+        "constrained": [
+          "ring escape",
+          "excessive axial motion",
+          "groove binding"
+        ]
+      },
+      "transfer_modes": [
+        "ring retention",
+        "axial guidance"
+      ],
+      "qualitative_requirements": [
+        "groove seating",
+        "controlled side clearance",
+        "end-gap accommodation",
+        "free ring compliance"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston grooves retain the ring pack."
+        },
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "Each split ring seats in a piston groove and remains compliant."
+        },
+        {
+          "source_ref": "assembly:100001",
+          "locator": "hierarchy:Piston Assembly-five",
+          "classification": "assembly_hierarchy",
+          "claim": "Three ring instances are carried by each piston subassembly."
+        }
+      ],
+      "confidence": 0.94,
+      "review_status": "verified"
+    },
+    {
+      "interface_id": "interface:five:ring-cylinder-seal",
+      "pattern_id": "ring-cylinder-seal",
+      "name": "Piston ring pack sliding against an omitted cylinder bore",
+      "interface_type": "sliding_seal",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-5.piston-ring-1",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-5.piston-ring-2",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "instance:piston-assembly-5.piston-ring-4",
+          "part_number": "100009",
+          "feature_refs": [
+            "piston-ring.outer-bore-contact",
+            "piston-ring.end-gap"
+          ],
+          "role": "sealing_member"
+        },
+        {
+          "participant_id": "external:upper-cylinder-block",
+          "part_number": null,
+          "feature_refs": [
+            "upper-block.cylinder-bores"
+          ],
+          "role": "sealing_surface"
+        }
+      ],
+      "functions": [
+        "maintain sliding contact with the cylinder bore",
+        "support sealing while the piston reciprocates"
+      ],
+      "relative_motion": {
+        "type": "sliding_contact",
+        "allowed": [
+          "axial sliding along the cylinder bore",
+          "ring compliance against the bore"
+        ],
+        "constrained": [
+          "loss of bore contact",
+          "ring seizure",
+          "uncontrolled ring escape"
+        ]
+      },
+      "transfer_modes": [
+        "sealing contact",
+        "friction reaction",
+        "heat transfer"
+      ],
+      "qualitative_requirements": [
+        "continuous bore contact",
+        "compatible sliding surfaces",
+        "controlled ring loading",
+        "end-gap accommodation"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100009",
+          "locator": "assembly_role",
+          "classification": "part_profile",
+          "claim": "The ring outer surface is the expected bore-sealing contact."
+        },
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Ring grooves",
+          "classification": "part_profile",
+          "claim": "The piston carries the rings through the reciprocating stroke."
+        },
+        {
+          "source_ref": "profile:100002",
+          "locator": "features:Open deck / upper wall rim",
+          "classification": "engineering_inference",
+          "claim": "The required cylinder sealing surface belongs to an upper structure omitted from this extract."
+        }
+      ],
+      "confidence": 0.82,
+      "review_status": "reviewed_inference"
+    },
+    {
+      "interface_id": "interface:five:skirt-crank-clearance",
+      "pattern_id": "piston-skirt-crank-clearance",
+      "name": "Piston skirt relief clearance to the rotating crank train",
+      "interface_type": "dynamic_clearance_envelope",
+      "participants": [
+        {
+          "participant_id": "instance:piston-assembly-5.piston-1",
+          "part_number": "100006",
+          "feature_refs": [
+            "piston.skirt-reliefs"
+          ],
+          "role": "clearance_member"
+        },
+        {
+          "participant_id": "instance:crankshaft-1",
+          "part_number": "100003",
+          "feature_refs": [
+            "crankshaft.counterweight-envelope"
+          ],
+          "role": "clearance_boundary"
+        }
+      ],
+      "functions": [
+        "prevent contact between the piston skirt and rotating crank webs near the lower stroke region"
+      ],
+      "relative_motion": {
+        "type": "non_contact_dynamic",
+        "allowed": [
+          "piston translation past the rotating crank envelope"
+        ],
+        "constrained": [
+          "skirt-to-crank contact"
+        ]
+      },
+      "transfer_modes": [
+        "clearance preservation"
+      ],
+      "qualitative_requirements": [
+        "positive dynamic clearance",
+        "correct piston guidance",
+        "correct crankshaft axis"
+      ],
+      "evidence": [
+        {
+          "source_ref": "profile:100006",
+          "locator": "features:Skirt with arched reliefs",
+          "classification": "part_profile",
+          "claim": "The skirt reliefs provide clearance to the crank webs."
+        },
+        {
+          "source_ref": "profile:100003",
+          "locator": "features:Counterweight webs",
+          "classification": "part_profile",
+          "claim": "The crank webs define the nearby rotating envelope."
+        },
+        {
+          "source_ref": "motion:engine4cyl-crank-cycle",
+          "locator": "motion:full-cycle",
+          "classification": "motion_package",
+          "claim": "The validated cycle exercises the relative skirt and crank motion."
+        }
+      ],
+      "confidence": 0.95,
+      "review_status": "verified"
+    }
+  ],
+  "coverage": {
+    "physical_instance_count": 38,
+    "covered_instance_count": 38,
+    "uncovered_instance_ids": [],
+    "organizational_instance_count": 5,
+    "external_entity_count": 2
+  }
+}

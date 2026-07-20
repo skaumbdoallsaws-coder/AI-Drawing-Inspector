@@ -35,6 +35,11 @@ venv/
 !docs/agent-skills-phase0-baseline.json
 !ai_inspector/agent_skills/schemas/*.json
 !ai_inspector/agent_workflows/schemas/*.json
+!ai_inspector/prompts/modules.json
+!ai_inspector/product_intelligence/catalogs/*.json
+!ai_inspector/product_intelligence/disposition_policies/*.json
+!ai_inspector/product_intelligence/schemas/*.json
+!tests/fixtures/prompt_compilation_cases.json
 
 # OS files
 .DS_Store

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inspectorp.ro/schemas/skill-contract-v1.json",
+  "title": "InspectorPro Skill Contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "skill_id",
+    "version",
+    "intents",
+    "required_evidence",
+    "forbidden_context",
+    "side_effect_policy",
+    "output_contract",
+    "failure_behavior",
+    "compatible_models",
+    "evaluation_suite",
+    "context_budget"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "skill_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "intents": {"$ref": "#/$defs/nonEmptyTokens"},
+    "required_evidence": {"$ref": "#/$defs/tokens"},
+    "forbidden_context": {"$ref": "#/$defs/tokens"},
+    "side_effect_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "require_explicit_user_request"],
+      "properties": {
+        "default": {"enum": ["prohibited", "allowed"]},
+        "require_explicit_user_request": {"$ref": "#/$defs/tokens"}
+      }
+    },
+    "output_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "maximum_sentences"],
+      "properties": {
+        "format": {"$ref": "#/$defs/token"},
+        "maximum_sentences": {"type": "integer", "minimum": 1, "maximum": 12}
+      }
+    },
+    "failure_behavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["missing_required_context", "contradictory_context"],
+      "properties": {
+        "missing_required_context": {"$ref": "#/$defs/token"},
+        "contradictory_context": {"$ref": "#/$defs/token"}
+      }
+    },
+    "compatible_models": {"$ref": "#/$defs/nonEmptyTokens"},
+    "evaluation_suite": {"$ref": "#/$defs/token"},
+    "context_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maximum_tokens", "priorities"],
+      "properties": {
+        "maximum_tokens": {"type": "integer", "minimum": 256, "maximum": 50000},
+        "priorities": {"$ref": "#/$defs/tokens"}
+      }
+    }
+  },
+  "$defs": {
+    "token": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$"},
+    "tokens": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/token"}},
+    "nonEmptyTokens": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/token"}}
+  }
+}

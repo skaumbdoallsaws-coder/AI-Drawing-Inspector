@@ -868,7 +868,8 @@ def run() -> int:
         initial_resize_hit = page.locator(".ip-pane-divider-resize").bounding_box()
         toggle_face = page.get_by_role("button", name="Collapse pane").evaluate(
             "el => { const s = getComputedStyle(el, '::before'); "
-            "return { width: parseFloat(s.width), height: parseFloat(s.height) }; }"
+            "return { width: parseFloat(s.width), height: parseFloat(s.height), "
+            "left: parseFloat(s.left) }; }"
         )
         record(
             "solidworks_splitter_toggle_is_attached_and_vertically_centered",
@@ -880,10 +881,12 @@ def run() -> int:
             and initial_resize_hit["width"] >= 8
             and toggle_face["width"] <= 16
             and toggle_face["height"] >= 40
+            and toggle_face["left"] <= 1
             and abs(
                 initial_sidebar["x"] + initial_sidebar["width"]
                 - initial_divider["x"]
             ) < 2
+            and abs(initial_toggle["x"] - initial_divider["x"]) < 2
             and abs(
                 initial_toggle["y"] + initial_toggle["height"] / 2
                 - (initial_divider["y"] + initial_divider["height"] / 2)

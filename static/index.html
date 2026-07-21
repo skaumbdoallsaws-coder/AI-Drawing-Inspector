@@ -5868,11 +5868,11 @@
             position: absolute;
             z-index: 2;
             top: 50%;
-            left: 50%;
+            left: 0;
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            width: 24px;
+            justify-content: flex-start;
+            width: 26px;
             height: 52px;
             padding: 0;
             border: 0;
@@ -5880,21 +5880,22 @@
             color: var(--text-secondary);
             cursor: pointer;
             touch-action: none;
-            transform: translate(-50%, -50%);
+            transform: translateY(-50%);
             transition: color 120ms ease;
         }
         .ip-pane-divider-toggle::before {
             position: absolute;
             top: 50%;
-            left: 50%;
-            width: 14px;
+            left: 0;
+            width: 15px;
             height: 46px;
             border: 1px solid var(--border-strong);
+            border-left: 0;
             border-radius: 0 3px 3px 0;
             background: var(--bg-toolbar);
             box-shadow: 0 1px 2px rgba(28, 46, 61, 0.14);
             content: '';
-            transform: translate(-50%, -50%);
+            transform: translateY(-50%);
             transition:
                 background 120ms ease,
                 border-color 120ms ease,
@@ -5908,7 +5909,8 @@
             background: var(--bg-hover);
         }
         .ip-pane-divider-toggle:active::before {
-            transform: translate(-50%, -50%) scale(0.96);
+            transform: translateY(-50%) scale(0.96);
+            transform-origin: left center;
         }
         .ip-pane-divider-toggle:focus-visible {
             outline: none;
@@ -5924,14 +5926,17 @@
             opacity: 0.45;
         }
         .ip-pane-divider-toggle-icon {
-            position: relative;
+            position: absolute;
             z-index: 1;
-            width: 10px;
-            height: 10px;
+            top: 50%;
+            left: 2px;
+            width: 11px;
+            height: 11px;
+            transform: translateY(-50%);
             transition: transform 160ms ease;
         }
         .ip-pane-divider.is-collapsed .ip-pane-divider-toggle-icon {
-            transform: rotate(180deg);
+            transform: translateY(-50%) rotate(180deg);
         }
         .pm-structure-header {
             padding: 12px 12px 10px;

@@ -865,11 +865,21 @@ def run() -> int:
         initial_sidebar = page.locator(".pm-structure-sidebar").bounding_box()
         initial_divider = page.locator(".ip-pane-divider").bounding_box()
         initial_toggle = page.get_by_role("button", name="Collapse pane").bounding_box()
+        initial_resize_hit = page.locator(".ip-pane-divider-resize").bounding_box()
+        toggle_face = page.get_by_role("button", name="Collapse pane").evaluate(
+            "el => { const s = getComputedStyle(el, '::before'); "
+            "return { width: parseFloat(s.width), height: parseFloat(s.height) }; }"
+        )
         record(
             "solidworks_splitter_toggle_is_attached_and_vertically_centered",
             initial_sidebar is not None
             and initial_divider is not None
             and initial_toggle is not None
+            and initial_resize_hit is not None
+            and initial_divider["width"] <= 2
+            and initial_resize_hit["width"] >= 8
+            and toggle_face["width"] <= 16
+            and toggle_face["height"] >= 40
             and abs(
                 initial_sidebar["x"] + initial_sidebar["width"]
                 - initial_divider["x"]
@@ -883,6 +893,8 @@ def run() -> int:
                 "sidebar": initial_sidebar,
                 "divider": initial_divider,
                 "toggle": initial_toggle,
+                "resizeHit": initial_resize_hit,
+                "toggleFace": toggle_face,
             },
         )
         resize_hit = page.locator(".ip-pane-divider-resize")

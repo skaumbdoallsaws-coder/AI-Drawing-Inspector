@@ -1,6 +1,6 @@
 schema_version: 1
 id: analyze-process-map
-version: 1.1.1
+version: 1.1.2
 description: Analyze a trusted process-map graph and identify descendant part occurrences for a named product-structure scope.
 agents:
   - sage

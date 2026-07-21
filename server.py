@@ -20796,11 +20796,166 @@ def _is_process_map_analysis_request(message: str) -> bool:
         r"entry|terminal|process map)\b",
         normalized,
     ))
-    parts_request = bool(
-        re.search(r"\b(parts?|components?)\b", normalized)
-        and re.search(r"\b(need|required|make|build|belong|contain|included?)\b", normalized)
+    return (
+        graph_request
+        or _is_process_map_required_parts_request(normalized)
+        or _is_process_map_clear_scope_request(normalized)
     )
-    return graph_request or parts_request
+
+
+def _is_process_map_required_parts_request(message: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
+    return bool(
+        re.search(r"\b(parts?|components?)\b", normalized)
+        and re.search(
+            r"\b(need|required|make|build|belong|contain|include(?:d|s)?|highlight)\b",
+            normalized,
+        )
+    )
+
+
+def _is_process_map_clear_scope_request(message: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
+    return bool(
+        re.search(r"\b(clear|remove|reset)\b", normalized)
+        and re.search(r"\b(required[ -]?parts?|highlights?)\b", normalized)
+    )
+
+
+def _process_map_scope_aliases(name: str) -> set[str]:
+    """Return conservative compact aliases for one trusted scope name."""
+    raw = str(name or "").strip()
+    if not raw:
+        return set()
+    values = [raw, *re.split(r"[&/]", raw)]
+    aliases: set[str] = set()
+    generic = {"assembly", "subassembly"}
+    for value in values:
+        words = re.findall(r"[a-z0-9]+", value.lower())
+        if not words:
+            continue
+        variants = [words]
+        trimmed = [word for word in words if word not in generic]
+        if trimmed and trimmed != words:
+            variants.append(trimmed)
+        for variant in variants:
+            compact = "".join(variant)
+            if len(compact) >= 4:
+                aliases.add(compact)
+    return aliases
+
+
+def _resolve_requested_process_map_scope(
+    ctx: Optional[Dict[str, Any]],
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    """Resolve one explicitly named catalog scope without consulting canvas nodes."""
+    graph = (
+        ctx.get("process_map_graph")
+        if isinstance(ctx, dict) and isinstance(ctx.get("process_map_graph"), dict)
+        else {}
+    )
+    structure = (
+        graph.get("product_structure")
+        if isinstance(graph.get("product_structure"), dict)
+        else {}
+    )
+    occurrences = structure.get("occurrences") or []
+    query_words = re.findall(r"[a-z0-9]+", str(message or "").lower())
+    query_compact = "".join(query_words)
+    generic_query_words = {
+        "a", "all", "and", "assembly", "build", "canvas", "components",
+        "do", "for", "highlight", "i", "in", "like", "make", "map",
+        "need", "of", "part", "parts", "please", "process", "required",
+        "subassembly", "the", "them", "to", "tree", "want", "what",
+        "will", "would",
+    }
+    scope_words = {
+        word for word in query_words
+        if len(word) >= 4 and word not in generic_query_words
+    }
+    ranked: list[tuple[int, str, Dict[str, Any]]] = []
+    for occurrence in occurrences:
+        if not isinstance(occurrence, dict) or not occurrence.get("id"):
+            continue
+        if str(occurrence.get("kind") or "").lower() not in {
+            "assembly", "subassembly", "part"
+        }:
+            continue
+        aliases = _process_map_scope_aliases(str(occurrence.get("name") or ""))
+        if not aliases:
+            continue
+        exact_lengths = [len(alias) for alias in aliases if alias in query_compact]
+        prefix_lengths = [
+            len(word)
+            for word in scope_words
+            if any(alias.startswith(word) for alias in aliases)
+        ]
+        if exact_lengths:
+            score = 1000 + max(exact_lengths)
+        elif prefix_lengths:
+            score = 500 + max(prefix_lengths)
+        else:
+            continue
+        ranked.append((score, str(occurrence.get("id")), occurrence))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+        return None
+    return ranked[0][2]
+
+
+def ensure_process_map_scope_tool_call(
+    tool_calls: list,
+    skill_prompt_plan: Optional[Dict[str, Any]],
+    ctx: Optional[Dict[str, Any]],
+    message: str,
+    agent_type: str,
+) -> tuple[list, list[str], bool]:
+    """Backstop an omitted transient tree-selection call for a clear catalog request."""
+    workflow = (
+        skill_prompt_plan.get("workflow")
+        if isinstance(skill_prompt_plan, dict)
+        and isinstance(skill_prompt_plan.get("workflow"), dict)
+        else {}
+    )
+    if workflow.get("id") != "process-map-analysis" or tool_calls:
+        return tool_calls, [], False
+    action: Optional[Dict[str, Any]] = None
+    if _is_process_map_clear_scope_request(message):
+        action = {"type": "clear_process_map_part_scope"}
+    elif _is_process_map_required_parts_request(message):
+        scope = _resolve_requested_process_map_scope(ctx, message)
+        if scope:
+            action = {
+                "type": "set_process_map_part_scope",
+                "scope_occurrence_id": str(scope.get("id")),
+                "label": str(scope.get("name") or scope.get("id")),
+            }
+    if action is None:
+        return tool_calls, [], False
+    synthesized, warnings = apply_tool_guardrails(
+        [{
+            "name": "ui_actions",
+            "args": {"workspace": "process_map", "actions": [action]},
+        }],
+        agent_type,
+        "process_map_scope_backstop",
+    )
+    synthesized, policy_warnings = apply_compiled_skill_tool_policy(
+        synthesized,
+        skill_prompt_plan,
+    )
+    warnings = list(warnings or []) + list(policy_warnings or [])
+    if not synthesized:
+        return tool_calls, warnings, False
+    logger.info(
+        "[SkillRuntime] synthesized process-map scope action %s for %s",
+        action["type"],
+        action.get("scope_occurrence_id") or "current selection",
+    )
+    return synthesized, warnings, True
 
 
 def _safe_process_map_compiler_route() -> Dict[str, Any]:
@@ -23696,8 +23851,18 @@ async def agent_chat(request: AgentChatRequest):
             _skill_prompt_plan,
         )
         warnings = list(warnings or []) + list(skill_policy_warnings or [])
+        guarded, backstop_warnings, backstop_added = ensure_process_map_scope_tool_call(
+            guarded or [],
+            _skill_prompt_plan,
+            ctx,
+            request.message,
+            request.agent_type,
+        )
+        warnings = list(warnings or []) + list(backstop_warnings or [])
         if guarded:
             result["tool_calls"] = guarded
+            if backstop_added:
+                result["tool_source"] = "skill_policy_backstop"
         else:
             result.pop("tool_calls", None)
 

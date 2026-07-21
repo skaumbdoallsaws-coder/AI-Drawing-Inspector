@@ -35,9 +35,15 @@ occurrence exists in `product_structure.occurrences`.
    different part list.
 3. Call `ui_actions` with exactly this non-persistent result action:
    `{"workspace":"process_map","actions":[{"type":"set_process_map_part_scope","scope_occurrence_id":"<trusted id>","label":"<trusted name>"}]}`.
+   This call is mandatory when the user explicitly asks to highlight or show the
+   parts. Execute it in the current response; do not merely describe the parts or
+   offer to highlight them later.
 4. Tell the user how many part occurrences were identified and that they are
    highlighted in the structure tree for individual drag-and-drop placement.
 5. Never create cards, edges, or groups automatically for this question.
+6. Once one trusted scope is resolved, do not ask whether the user wants an
+   assembly sequence or wants to place nodes first. Complete the requested
+   highlight action and stop after the concise confirmation.
 
 For an explicit request to clear this result, call `ui_actions` with
 `{"workspace":"process_map","actions":[{"type":"clear_process_map_part_scope"}]}`.

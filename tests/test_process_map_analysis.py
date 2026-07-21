@@ -181,6 +181,8 @@ def test_compiled_skill_treats_unplaced_catalog_scopes_as_available():
     assert "Canvas placement is irrelevant" in prompt
     assert "Do not search" in prompt
     assert "Never say that a scope is missing" in prompt
+    assert "This call is mandatory" in prompt
+    assert "do not merely describe the parts" in prompt
 
 
 def test_diamond_digest_finds_parallel_work_and_fan_in_candidate():
@@ -381,6 +383,135 @@ def test_process_map_parts_question_uses_analysis_workflow():
     assert server._is_process_map_analysis_request(
         "What parts will I need to make the body of the racing bike?"
     )
+    assert server._is_process_map_analysis_request(
+        "I would like to build a process map for the frontwheel assembly, "
+        "what parts do I need? Please highlight them in the assembly tree."
+    )
+
+
+def _scope_selection_context():
+    return {
+        "process_map_graph": {
+            "product_structure": {
+                "occurrences": [
+                    {
+                        "id": "root",
+                        "name": "Complete Racing Bike Assembly",
+                        "kind": "assembly",
+                        "descendantPartCount": 47,
+                    },
+                    {
+                        "id": "front-wheel",
+                        "name": "Front Wheel & Brake",
+                        "kind": "subassembly",
+                        "descendantPartCount": 8,
+                    },
+                    {
+                        "id": "rear-wheel",
+                        "name": "Rear Wheel & Brake",
+                        "kind": "subassembly",
+                        "descendantPartCount": 8,
+                    },
+                ],
+            },
+        },
+    }
+
+
+def test_process_map_scope_resolver_handles_compact_name_and_rejects_ambiguity():
+    context = _scope_selection_context()
+    resolved = server._resolve_requested_process_map_scope(
+        context,
+        "I would like to build a process map for the frontwheel assembly, "
+        "what parts do I need? Please highlight them in the assembly tree.",
+    )
+    assert resolved["id"] == "front-wheel"
+    assert server._resolve_requested_process_map_scope(
+        context,
+        "What parts are in the wheel assembly? Please highlight them.",
+    ) is None
+
+
+def test_process_map_scope_backstop_adds_missing_highlight_action():
+    calls, warnings, added = server.ensure_process_map_scope_tool_call(
+        [],
+        {"workflow": {"id": "process-map-analysis"}},
+        _scope_selection_context(),
+        "I would like to build a process map for the frontwheel assembly, "
+        "what parts do I need? Please highlight them in the assembly tree.",
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert added is True
+    assert calls == [{
+        "name": "ui_actions",
+        "args": {
+            "workspace": "process_map",
+            "actions": [{
+                "type": "set_process_map_part_scope",
+                "action_id": "a1",
+                "scope_occurrence_id": "front-wheel",
+                "label": "Front Wheel & Brake",
+            }],
+        },
+    }]
+
+
+def test_process_map_scope_backstop_preserves_model_call_and_avoids_guessing():
+    plan = {"workflow": {"id": "process-map-analysis"}}
+    existing = [{
+        "name": "ui_actions",
+        "args": {
+            "workspace": "process_map",
+            "actions": [{
+                "type": "clear_process_map_part_scope",
+                "action_id": "a1",
+            }],
+        },
+    }]
+    calls, warnings, added = server.ensure_process_map_scope_tool_call(
+        existing,
+        plan,
+        _scope_selection_context(),
+        "What parts are in the frontwheel assembly?",
+        "deviation-analyst",
+    )
+    assert calls == existing
+    assert warnings == []
+    assert added is False
+
+    calls, warnings, added = server.ensure_process_map_scope_tool_call(
+        [],
+        plan,
+        _scope_selection_context(),
+        "What parts are in the wheel assembly? Please highlight them.",
+        "deviation-analyst",
+    )
+    assert calls == []
+    assert warnings == []
+    assert added is False
+
+
+def test_process_map_scope_backstop_clears_transient_highlights():
+    calls, warnings, added = server.ensure_process_map_scope_tool_call(
+        [],
+        {"workflow": {"id": "process-map-analysis"}},
+        _scope_selection_context(),
+        "Clear the required-part highlights.",
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert added is True
+    assert calls == [{
+        "name": "ui_actions",
+        "args": {
+            "workspace": "process_map",
+            "actions": [{
+                "type": "clear_process_map_part_scope",
+                "action_id": "a1",
+            }],
+        },
+    }]
 
 
 def test_process_map_skill_tool_policy_allows_only_transient_tree_selection():

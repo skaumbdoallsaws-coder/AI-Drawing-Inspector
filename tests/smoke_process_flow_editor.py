@@ -1867,7 +1867,7 @@ def run() -> int:
         )
         page.locator(f".pm-edge-hit[data-edge-id='{branch_edge_id}']").focus()
         page.keyboard.press("Enter")
-        page.get_by_role("button", name="Delete selected node or connection").click()
+        page.get_by_role("button", name="Delete selected card, connection, or group").click()
         page.wait_for_function(
             "window.__processMapFlow.editor.processMap.canvasNodes.length === 4"
             " && window.__processMapFlow.editor.processMap.canvasEdges.length === 1"
@@ -2024,6 +2024,53 @@ def run() -> int:
         )
         group_id = group_setup["groupId"]
         page.wait_for_selector(f".pm-group-frame[data-group-id='{group_id}']")
+        page.wait_for_selector(f".pm-group-toolbar[data-group-id='{group_id}']")
+        group_member_count = page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length"
+        )
+        page.evaluate(
+            "nodeId => window.__processMapFlow.editor.select(nodeId, { openToolbar: false })",
+            first_id,
+        )
+        group_picker = page.get_by_label("Select group frame")
+        group_picker.select_option(group_id)
+        page.wait_for_function(
+            "groupId => window.__processMapFlow.editor.selectedGroupId === groupId",
+            arg=group_id,
+        )
+        record(
+            "ribbon_group_picker_selects_frame_and_enables_delete",
+            page.locator(f".pm-group-frame[data-group-id='{group_id}'].selected").count() == 1
+            and not page.get_by_role(
+                "button", name="Delete selected card, connection, or group"
+            ).is_disabled()
+            and page.locator(
+                "[data-process-map-command='processSelectGroup'] svg"
+            ).count() == 1,
+        )
+        page.get_by_role(
+            "button", name="Delete selected card, connection, or group"
+        ).click()
+        page.wait_for_function(
+            "groupId => !window.__processMapFlow.editor.processMap.canvasGroups"
+            ".some(group => group.groupId === groupId)",
+            arg=group_id,
+        )
+        group_delete_kept_members = page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length"
+        ) == group_member_count
+        page.get_by_role("button", name="Undo process-map edit").click()
+        page.wait_for_function(
+            "groupId => window.__processMapFlow.editor.processMap.canvasGroups"
+            ".some(group => group.groupId === groupId)",
+            arg=group_id,
+        )
+        record(
+            "group_picker_delete_removes_only_frame_and_undo_restores_it",
+            group_delete_kept_members
+            and page.locator(f".pm-group-frame[data-group-id='{group_id}']").count() == 1,
+        )
+        page.evaluate("groupId => window.__processMapFlow.editor.selectGroup(groupId)", group_id)
         page.wait_for_selector(f".pm-group-toolbar[data-group-id='{group_id}']")
         record(
             "group_layer_is_below_edges_and_nodes_with_click_through_body",
@@ -2765,7 +2812,8 @@ def run() -> int:
         expected_process_commands = {
             "processUndo", "processRedo", "processDelete", "processStep",
             "processGroup", "processSuggestions", "processAnalyze", "processZoomOut",
-            "processZoomIn", "processFit", "3dmodel", "processSave",
+            "processZoomIn", "processFit", "3dmodel", "processSave", "processClear",
+            "processSelectGroup",
         }
         actual_process_commands = set(
             page.locator("#trainingProcessMapRibbonHost [data-process-map-command]")
@@ -3016,6 +3064,52 @@ def run() -> int:
                 for style in management_theme_styles.values()
             ),
             management_theme_styles,
+        )
+        clear_command = page.locator("[data-process-map-command='processClear']")
+        clear_initially_disabled = clear_command.is_disabled()
+        source_occurrence_count = page.evaluate(
+            "window.__processMapFlow.editor.productStructure.occurrences.length"
+        )
+        page.get_by_role(
+            "button", name="Add an operation to the center of the process map"
+        ).click()
+        page.get_by_role(
+            "button", name="Add a grouping frame to the center of the process map"
+        ).click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 1"
+            " && window.__processMapFlow.editor.processMap.canvasGroups.length === 1"
+        )
+        page.once("dialog", lambda dialog: dialog.accept())
+        clear_command.click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 0"
+            " && window.__processMapFlow.editor.processMap.canvasEdges.length === 0"
+            " && window.__processMapFlow.editor.processMap.canvasGroups.length === 0"
+        )
+        record(
+            "clear_map_command_empties_viewport_without_touching_source_tree",
+            clear_initially_disabled
+            and clear_command.is_disabled()
+            and page.locator("[data-process-map-command='processClear'] svg").count() == 1
+            and page.locator(".pm-empty-state:visible").count() == 1
+            and page.evaluate(
+                "window.__processMapFlow.editor.productStructure.occurrences.length"
+            ) == source_occurrence_count,
+        )
+        page.get_by_role("button", name="Undo process-map edit").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 1"
+            " && window.__processMapFlow.editor.processMap.canvasGroups.length === 1"
+        )
+        page.get_by_role("button", name="Redo process-map edit").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 0"
+            " && window.__processMapFlow.editor.processMap.canvasGroups.length === 0"
+        )
+        record(
+            "clear_map_is_one_atomic_undoable_and_redoable_edit",
+            page.locator(".pm-empty-state:visible").count() == 1,
         )
         context.close()
 

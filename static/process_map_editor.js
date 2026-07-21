@@ -113,6 +113,24 @@
         );
     }
 
+    function hasProcessMapCanvasContent(processMap) {
+        return mapNodes(processMap).length > 0
+            || mapEdges(processMap).length > 0
+            || mapGroups(processMap).length > 0
+            || mapReferenceCatalog(processMap).length > 0
+            || mapDismissedSuggestions(processMap).length > 0;
+    }
+
+    function clearProcessMapCanvas(processMap) {
+        const next = cloneMap(processMap);
+        setMapNodes(next, []);
+        setMapEdges(next, []);
+        setMapGroups(next, []);
+        delete next.referenceCatalog;
+        delete next.dismissedSuggestions;
+        return next;
+    }
+
     function mapReferenceCatalog(processMap) {
         return Array.isArray(processMap && processMap.referenceCatalog)
             ? processMap.referenceCatalog
@@ -1853,7 +1871,16 @@
         if (this.editable) {
             this.undoButton = this._button('Undo', 'Undo process-map edit', this.undo.bind(this));
             this.redoButton = this._button('Redo', 'Redo process-map edit', this.redo.bind(this));
-            this.deleteButton = this._button('Delete', 'Delete selected node or connection', this.deleteSelection.bind(this));
+            this.deleteButton = this._button(
+                'Delete',
+                'Delete selected card, connection, or group',
+                this.deleteSelection.bind(this)
+            );
+            this.clearMapButton = this._button(
+                'Clear Map',
+                'Clear all cards, connections, junctions, and groups',
+                this.clearMap.bind(this)
+            );
             this.previewButton = this._button(
                 '3D',
                 'Open selected card in the interactive 3D preview',
@@ -1870,6 +1897,12 @@
                     'Add a grouping frame to the center of the process map',
                     this.addCanvasGroup.bind(this)
                 );
+                this.groupSelect = document.createElement('select');
+                this.groupSelect.className = 'pm-group-select';
+                this.groupSelect.setAttribute('aria-label', 'Select group frame');
+                this.groupSelect.title = 'Select a group frame to edit or delete';
+                this.groupSelect.addEventListener('change', this.changeGroupSelection.bind(this));
+                this._renderGroupSelect();
             }
             this.typeSelect = document.createElement('select');
             this.typeSelect.className = 'pm-type-select';
@@ -1920,7 +1953,9 @@
             this.toolbarActions.appendChild(this.redoButton);
             if (this.addStepButton) this.toolbarActions.appendChild(this.addStepButton);
             if (this.addGroupButton) this.toolbarActions.appendChild(this.addGroupButton);
+            if (this.groupSelect) this.toolbarActions.appendChild(this.groupSelect);
             this.toolbarActions.appendChild(this.deleteButton);
+            this.toolbarActions.appendChild(this.clearMapButton);
             this.toolbarActions.appendChild(this.previewButton);
             this.toolbarActions.appendChild(this.typeSelect);
             this.toolbarActions.appendChild(this.portOrientationSelect);
@@ -2413,6 +2448,22 @@
         return button;
     };
 
+    ProcessMapEditor.prototype._decorateRibbonPicker = function (control, iconKey, label, icons) {
+        if (!control) return null;
+        const picker = document.createElement('div');
+        picker.className = 'pm-ribbon-command-picker';
+        picker.setAttribute('data-process-map-command', iconKey);
+        picker.setAttribute('role', 'group');
+        picker.setAttribute('aria-label', label);
+        const icon = document.createElement('span');
+        icon.className = 'ribbon-btn-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = icons && icons[iconKey] ? icons[iconKey] : '';
+        picker.appendChild(icon);
+        picker.appendChild(control);
+        return picker;
+    };
+
     ProcessMapEditor.prototype._ribbonGroup = function (label) {
         const group = document.createElement('div');
         group.className = 'ribbon-group pm-ribbon-group';
@@ -2462,9 +2513,18 @@
         this._decorateRibbonButton(this.undoButton, 'processUndo', 'Undo', icons);
         this._decorateRibbonButton(this.redoButton, 'processRedo', 'Redo', icons);
         this._decorateRibbonButton(this.deleteButton, 'processDelete', 'Delete', icons);
+        this._decorateRibbonButton(this.clearMapButton, 'processClear', 'Clear Map', icons);
+        const groupPicker = this._decorateRibbonPicker(
+            this.groupSelect,
+            'processSelectGroup',
+            'Select Group',
+            icons
+        );
         if (this.undoButton) editing.appendChild(this.undoButton);
         if (this.redoButton) editing.appendChild(this.redoButton);
         if (this.deleteButton) editing.appendChild(this.deleteButton);
+        if (groupPicker) editing.appendChild(groupPicker);
+        if (this.clearMapButton) editing.appendChild(this.clearMapButton);
         host.appendChild(this._ribbonSeparator());
         host.appendChild(editing);
 
@@ -4498,6 +4558,38 @@
         this._openEdgeToolbar(edge);
     };
 
+    ProcessMapEditor.prototype._renderGroupSelect = function () {
+        if (!this.groupSelect) return;
+        const groups = mapGroups(this.processMap).slice().sort(function (left, right) {
+            const byLabel = String(left && left.label || '').localeCompare(
+                String(right && right.label || ''), undefined, { sensitivity: 'base' }
+            );
+            return byLabel || String(left && left.groupId || '').localeCompare(
+                String(right && right.groupId || '')
+            );
+        });
+        this.groupSelect.textContent = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = groups.length ? 'Select group' : 'No groups';
+        this.groupSelect.appendChild(placeholder);
+        groups.forEach(function (group) {
+            if (!group || !group.groupId) return;
+            const option = document.createElement('option');
+            option.value = group.groupId;
+            option.textContent = group.label || group.groupId;
+            this.groupSelect.appendChild(option);
+        }, this);
+        this.groupSelect.value = groups.some(function (group) {
+            return group && group.groupId === this.selectedGroupId;
+        }, this) ? this.selectedGroupId : '';
+    };
+
+    ProcessMapEditor.prototype.changeGroupSelection = function () {
+        if (!this.groupSelect || !this.groupSelect.value) return false;
+        return this.selectGroup(this.groupSelect.value);
+    };
+
     ProcessMapEditor.prototype.selectGroup = function (groupId) {
         const group = mapGroups(this.processMap).find(function (item) {
             return item && item.groupId === groupId;
@@ -4572,6 +4664,15 @@
         if (this.deleteButton) this.deleteButton.disabled = !commandStates.canDelete && !canDeleteGroup;
         if (this.addStepButton) this.addStepButton.disabled = this.saving || this.conflict;
         if (this.addGroupButton) this.addGroupButton.disabled = this.saving || this.conflict;
+        if (this.clearMapButton) {
+            this.clearMapButton.disabled = this.saving || this.conflict
+                || !hasProcessMapCanvasContent(this.processMap);
+        }
+        if (this.groupSelect) {
+            this._renderGroupSelect();
+            this.groupSelect.disabled = this.saving || this.conflict
+                || mapGroups(this.processMap).length === 0;
+        }
         if (this.previewButton) this.previewButton.disabled = !commandStates.canPreview;
         if (this.analyzeButton) {
             this.analyzeButton.disabled = this.saving || this.conflict || this.hasStructuralErrors();
@@ -4783,6 +4884,20 @@
         this._closeCardToolbar('preview', false);
         this.options.onOpenPreview(previewNode, sourceElement);
         return true;
+    };
+
+    ProcessMapEditor.prototype.clearMap = function () {
+        if (!this.editable || this.saving || this.conflict
+            || !hasProcessMapCanvasContent(this.processMap)) return false;
+        if (!this._confirmManagementAction(
+            'Clear all cards, connections, junctions, groups, and references from this process map? This can be undone.'
+        )) return false;
+        this._closeCardToolbar('clear_map', false);
+        this.selectedGroupId = null;
+        this.selectedNodeId = null;
+        this.selectedEdgeId = null;
+        this.groupMoveFrameOnly = false;
+        return this.commitMutation(clearProcessMapCanvas(this.processMap));
     };
 
     ProcessMapEditor.prototype.deleteSelection = function () {
@@ -5962,11 +6077,13 @@
         addConnectedProcessStep: addConnectedProcessStep,
         bezierPath: bezierPath,
         cloneMap: cloneMap,
+        clearProcessMapCanvas: clearProcessMapCanvas,
         collapseRedundantJunctions: collapseRedundantJunctions,
         deleteEdge: deleteEdge,
         deleteNode: deleteNode,
         deleteGroup: deleteGroup,
         graphBounds: graphBounds,
+        hasProcessMapCanvasContent: hasProcessMapCanvasContent,
         hasPrecedenceCycle: hasPrecedenceCycle,
         isJunctionNode: isJunctionNode,
         layeredLayout: layeredLayout,

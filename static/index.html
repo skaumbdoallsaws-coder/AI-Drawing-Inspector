@@ -1121,6 +1121,50 @@
         .pm-ribbon-command[hidden] {
             display: none;
         }
+        .pm-ribbon-command-picker {
+            display: grid;
+            grid-template-rows: 36px 22px;
+            align-items: center;
+            justify-items: center;
+            min-width: 94px;
+            min-height: 64px;
+            padding: 3px 4px 4px;
+        }
+        .pm-ribbon-command-picker .ribbon-btn-icon {
+            display: grid;
+            width: 38px;
+            height: 36px;
+            place-items: center;
+        }
+        .pm-ribbon-command-picker .ribbon-btn-icon svg {
+            width: 30px;
+            height: 30px;
+        }
+        .pm-ribbon-command-picker select {
+            width: 92px;
+            max-width: 92px;
+            height: 22px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            font-size: 9px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pm-ribbon-command-picker select:hover:not(:disabled) {
+            border-color: var(--accent);
+            background: var(--bg-hover);
+        }
+        .pm-ribbon-command-picker select:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+        .pm-ribbon-command-picker select:disabled {
+            cursor: default;
+            opacity: 0.45;
+        }
         .pm-ribbon-map-group {
             display: grid;
             grid-template-columns: 120px;
@@ -19591,6 +19635,8 @@
             processRedo: '<img class="ribbon-process-icon" src="/static/assets/global-toolbar-icons/redo.png" alt="" draggable="false">',
             processSave: '<img class="ribbon-process-icon" src="/static/assets/global-toolbar-icons/save.png" alt="" draggable="false">',
             processDelete: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 10h14l-1 17H10L9 10Z" fill="#dce8f0" stroke="#31586b" stroke-width="1.5"/><path d="M7 8h18M12 8V5h8v3M14 13v10M18 13v10" fill="none" stroke="#3f83ad" stroke-width="1.7" stroke-linecap="round"/></svg>',
+            processClear: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="5" width="24" height="21" rx="2" fill="#e9f3f8" stroke="#31586b" stroke-width="1.4"/><path d="M9 10h1M15 10h1M21 10h1M9 16h1M15 16h1M21 16h1M9 22h1M15 22h1" stroke="#8db7cc" stroke-width="1.5" stroke-linecap="round"/><path d="m15 23 8-12 5 3.4-7 10.5-6-.1Z" fill="#f1b24c" stroke="#765016" stroke-width="1.2" stroke-linejoin="round"/><path d="m22.8 11.3 5 3.4M15.5 22.3l5.3 2.4" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/><path d="M25 7v3M23.5 8.5h3" stroke="#4b91ba" stroke-width="1.4" stroke-linecap="round"/></svg>',
+            processSelectGroup: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4.5" y="5.5" width="23" height="20" rx="2" fill="rgba(217,119,36,0.14)" stroke="#d97724" stroke-width="1.5"/><path d="M5 11h22" stroke="#d97724" stroke-width="1.2"/><path d="M8 8h4M8 8v4M24 8h-4M24 8v4M8 23h4M8 23v-4M24 23h-4M24 23v-4" fill="none" stroke="#31586b" stroke-width="1.5" stroke-linecap="round"/><path d="m16 13 5.5 11-3.6-1.8-2.3 4.1-2.1-1.2 2.3-4.1-3.7-.2L16 13Z" fill="#8bc5e7" stroke="#31586b" stroke-width="1.1" stroke-linejoin="round"/></svg>',
             processStep: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="6" y="5" width="18" height="22" rx="2" fill="#e9f3f8" stroke="#31586b" stroke-width="1.5"/><path d="M10 11h10M10 16h7M10 21h6" stroke="#4b91ba" stroke-width="1.6" stroke-linecap="round"/><circle cx="24" cy="23" r="6" fill="#e7a73e" stroke="#765016" stroke-width="1.2"/><path d="M24 20v6M21 23h6" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
             processGroup: '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4.5" y="6" width="23" height="20" rx="2" fill="rgba(217,119,36,0.16)" stroke="#d97724" stroke-width="1.7"/><path d="M5 11h22" stroke="#d97724" stroke-width="1.4"/><rect x="9" y="14" width="6" height="6" rx="1" fill="#8bc5e7" stroke="#31586b"/><rect x="18" y="14" width="6" height="6" rx="1" fill="#8bc5e7" stroke="#31586b"/></svg>',
             processSuggestions: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M10 20c-2.6-1.8-4-4.2-4-7a10 10 0 0 1 20 0c0 2.8-1.4 5.2-4 7l-2 2v2h-8v-2l-2-2Z" fill="#f5c451" stroke="#765016" stroke-width="1.4"/><path d="M12 27h8M16 3V1M27 6l2-2M5 6 3 4" stroke="#4b91ba" stroke-width="1.6" stroke-linecap="round"/></svg>',

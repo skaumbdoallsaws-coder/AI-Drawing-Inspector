@@ -802,6 +802,44 @@ check('group edits and deletion never mutate member cards', () => {
     assert.strictEqual(runtime.mapNodes(withoutGroup)[0].name, 'Inspect');
 });
 
+check('clearing the map is atomic and preserves map identity', () => {
+    let processMap = runtime.addCanvasNode(placementFixture(), {
+        nodeId: 'node-a', nodeKind: 'process_step', processType: 'operation',
+        name: 'Machine', position: { x: 100, y: 120 },
+    });
+    processMap = runtime.addCanvasNode(processMap, {
+        nodeId: 'node-b', nodeKind: 'process_step', processType: 'inspection',
+        name: 'Inspect', position: { x: 420, y: 120 },
+    });
+    processMap = runtime.addEdge(processMap, edge('edge-a', 'node-a', 'node-b'));
+    processMap = runtime.addGroup(processMap, {
+        groupId: 'group-a', label: 'Cell', position: { x: 40, y: 60 },
+        size: { width: 700, height: 320 }, colorKey: 'orange',
+        memberNodeIds: ['node-a', 'node-b'], collapsed: false,
+    });
+    processMap = runtime.attachProcessReference(processMap, {
+        targetType: 'node', targetId: 'node-a',
+        reference: { referenceId: 'tool-1', kind: 'tool', name: 'Torque wrench' },
+    });
+    processMap = runtime.dismissSuggestion(processMap, 'suggestion-a');
+    const original = runtime.cloneMap(processMap);
+    const cleared = runtime.clearProcessMapCanvas(processMap);
+    assert.strictEqual(runtime.hasProcessMapCanvasContent(cleared), false);
+    assert.deepStrictEqual(runtime.mapNodes(cleared), []);
+    assert.deepStrictEqual(runtime.mapEdges(cleared), []);
+    assert.deepStrictEqual(runtime.mapGroups(cleared), []);
+    assert.deepStrictEqual(runtime.mapReferenceCatalog(cleared), []);
+    assert.deepStrictEqual(runtime.mapDismissedSuggestions(cleared), []);
+    assert.strictEqual(cleared.mapId, 'default');
+    assert.strictEqual(cleared.productId, 'fixture');
+    assert.strictEqual(cleared.sourceStructureRevision, 'structure-rev');
+    assert.strictEqual(runtime.mapNodes(processMap).length, 2);
+
+    const history = new runtime.SnapshotHistory(5);
+    history.record(original);
+    assert.deepStrictEqual(history.undo(cleared), original);
+});
+
 check('node deletion removes stale group membership', () => {
     let processMap = runtime.addCanvasNode(placementFixture(), {
         nodeId: 'node-a', nodeKind: 'process_step', processType: 'operation',

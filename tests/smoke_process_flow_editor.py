@@ -593,6 +593,7 @@ def _drag_tree_item(page, occurrence_id: str, target_x: float, target_y: float) 
 
 
 def _drag_connection(page, from_id: str, to_id: str) -> None:
+    page.evaluate("window.__processMapFlow.editor.setCanvasInteractionMode('select')")
     output_box = page.locator(f".pm-node[data-node-id='{from_id}'] .pm-port-out").bounding_box()
     input_box = page.locator(f".pm-node[data-node-id='{to_id}'] .pm-port-in").bounding_box()
     assert output_box is not None and input_box is not None
@@ -617,6 +618,7 @@ def _edge_screen_point(page, edge_id: str, fraction: float = 0.5) -> dict:
 
 
 def _drag_connection_to_edge(page, from_id: str, edge_id: str, fraction: float = 0.5) -> dict:
+    page.evaluate("window.__processMapFlow.editor.setCanvasInteractionMode('select')")
     output_box = page.locator(f".pm-node[data-node-id='{from_id}'] .pm-port-out").bounding_box()
     target = _edge_screen_point(page, edge_id, fraction)
     assert output_box is not None
@@ -632,6 +634,7 @@ def _drag_connection_to_edge(page, from_id: str, edge_id: str, fraction: float =
 
 
 def _drag_connection_to_junction(page, from_id: str, junction_id: str) -> None:
+    page.evaluate("window.__processMapFlow.editor.setCanvasInteractionMode('select')")
     output_box = page.locator(f".pm-node[data-node-id='{from_id}'] .pm-port-out").bounding_box()
     junction_box = page.locator(f".pm-junction[data-node-id='{junction_id}']").bounding_box()
     assert output_box is not None and junction_box is not None
@@ -642,6 +645,7 @@ def _drag_connection_to_junction(page, from_id: str, junction_id: str) -> None:
 
 
 def _drag_connection_from_junction(page, junction_id: str, to_id: str) -> None:
+    page.evaluate("window.__processMapFlow.editor.setCanvasInteractionMode('select')")
     junction = page.locator(f".pm-junction[data-node-id='{junction_id}']")
     junction.hover()
     output_box = junction.locator(".pm-junction-handle").bounding_box()
@@ -1598,9 +1602,9 @@ def run() -> int:
         )
 
         page.mouse.move(viewport_box["x"] + 80, viewport_box["y"] + viewport_box["height"] - 60)
-        page.mouse.down()
+        page.mouse.down(button="middle")
         page.mouse.move(viewport_box["x"] + 150, viewport_box["y"] + viewport_box["height"] - 105, steps=6)
-        page.mouse.up()
+        page.mouse.up(button="middle")
         page.mouse.move(viewport_box["x"] + viewport_box["width"] / 2, viewport_box["y"] + viewport_box["height"] / 2)
         page.mouse.wheel(0, -360)
         _expand(page, "module-b")
@@ -3110,6 +3114,202 @@ def run() -> int:
         record(
             "clear_map_is_one_atomic_undoable_and_redoable_edit",
             page.locator(".pm-empty-state:visible").count() == 1,
+        )
+
+        page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const runtime = window.InspectorProProcessMap;
+                let next = editor.processMap;
+                [
+                    { nodeId: 'marquee-a', name: 'Marquee A', position: { x: 80, y: 100 } },
+                    { nodeId: 'marquee-b', name: 'Marquee B', position: { x: 500, y: 100 } },
+                    { nodeId: 'marquee-c', name: 'Marquee C', position: { x: 940, y: 500 } },
+                ].forEach(spec => {
+                    next = runtime.addCanvasNode(next, {
+                        nodeId: spec.nodeId,
+                        nodeKind: 'process_step',
+                        processType: 'operation',
+                        name: spec.name,
+                        position: spec.position,
+                    });
+                });
+                next = runtime.addEdge(next, {
+                    edgeId: 'marquee-edge-a-b',
+                    from: { nodeId: 'marquee-a', port: 'out' },
+                    to: { nodeId: 'marquee-b', port: 'in' },
+                    kind: 'precedence',
+                });
+                editor.commitMutation(next);
+                editor.transform = { x: 40, y: 40, scale: 0.8 };
+                editor.applyTransform();
+            }
+            """
+        )
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+            " && document.querySelectorAll('.pm-node').length === 3"
+        )
+        select_mode = page.locator(".pm-canvas-mode-button[data-canvas-mode='select']")
+        pan_mode = page.locator(".pm-canvas-mode-button[data-canvas-mode='pan']")
+        record(
+            "canvas_exposes_cursor_and_hand_modes_with_select_as_default",
+            select_mode.count() == 1
+            and pan_mode.count() == 1
+            and select_mode.get_attribute("aria-pressed") == "true"
+            and pan_mode.get_attribute("aria-pressed") == "false",
+        )
+
+        pan_mode.click()
+        pan_before = page.evaluate(
+            """
+            () => ({
+                transform: { ...window.__processMapFlow.editor.transform },
+                positions: window.__processMapFlow.editor.processMap.canvasNodes
+                    .map(node => ({ nodeId: node.nodeId, position: { ...node.position } })),
+            })
+            """
+        )
+        viewport_box = page.locator(".pm-viewport").bounding_box()
+        pan_start = {
+            "x": viewport_box["x"] + viewport_box["width"] - 130,
+            "y": viewport_box["y"] + 90,
+        }
+        page.mouse.move(pan_start["x"], pan_start["y"])
+        page.mouse.down()
+        page.mouse.move(pan_start["x"] - 65, pan_start["y"] + 45, steps=6)
+        page.mouse.up()
+        pan_after = page.evaluate(
+            """
+            () => ({
+                transform: { ...window.__processMapFlow.editor.transform },
+                positions: window.__processMapFlow.editor.processMap.canvasNodes
+                    .map(node => ({ nodeId: node.nodeId, position: { ...node.position } })),
+            })
+            """
+        )
+        record(
+            "hand_mode_pans_without_moving_process_cards",
+            pan_after["transform"] != pan_before["transform"]
+            and pan_after["positions"] == pan_before["positions"]
+            and pan_mode.get_attribute("aria-pressed") == "true",
+            {"before": pan_before, "after": pan_after},
+        )
+        page.locator(".pm-node[data-node-id='marquee-a'] .pm-node-card").click()
+        record(
+            "hand_mode_click_does_not_select_or_edit_a_card",
+            page.evaluate(
+                "window.__processMapFlow.editor.selectedNodeIds.size === 0"
+                " && window.__processMapFlow.editor.selectedEdgeIds.size === 0"
+            ),
+        )
+
+        select_mode.click()
+        page.locator(".pm-viewport").focus()
+        page.keyboard.down("Space")
+        temporary_pan = page.evaluate(
+            "window.__processMapFlow.editor._effectiveCanvasInteractionMode()"
+        )
+        page.keyboard.up("Space")
+        restored_mode = page.evaluate(
+            "window.__processMapFlow.editor._effectiveCanvasInteractionMode()"
+        )
+        record(
+            "space_temporarily_activates_pan_without_changing_selected_mode",
+            temporary_pan == "pan"
+            and restored_mode == "select"
+            and select_mode.get_attribute("aria-pressed") == "true",
+            {"during": temporary_pan, "after": restored_mode},
+        )
+
+        page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                editor.transform = { x: 40, y: 40, scale: 0.8 };
+                editor.applyTransform();
+            }
+            """
+        )
+        first_box = page.locator(".pm-node[data-node-id='marquee-a']").bounding_box()
+        second_box = page.locator(".pm-node[data-node-id='marquee-b']").bounding_box()
+        selection_start = {
+            "x": min(first_box["x"], second_box["x"]) - 18,
+            "y": min(first_box["y"], second_box["y"]) - 18,
+        }
+        selection_end = {
+            "x": max(first_box["x"] + first_box["width"], second_box["x"] + second_box["width"]) + 18,
+            "y": max(first_box["y"] + first_box["height"], second_box["y"] + second_box["height"]) + 18,
+        }
+        page.mouse.move(selection_start["x"], selection_start["y"])
+        page.mouse.down()
+        page.mouse.move(selection_end["x"], selection_end["y"], steps=10)
+        marquee_visible_during_drag = page.locator(".pm-selection-marquee:visible").count() == 1
+        page.mouse.up()
+        marquee_selection = page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                return {
+                    nodeIds: Array.from(editor.selectedNodeIds).sort(),
+                    edgeIds: Array.from(editor.selectedEdgeIds).sort(),
+                    groupId: editor.selectedGroupId,
+                    deleteDisabled: editor.deleteButton.disabled,
+                };
+            }
+            """
+        )
+        page.screenshot(
+            path=str(OUT_DIR / "process_flow_marquee_selection.png"),
+            full_page=False,
+        )
+        record(
+            "cursor_marquee_selects_every_touched_card_and_wire_but_no_group",
+            marquee_visible_during_drag
+            and marquee_selection["nodeIds"] == ["marquee-a", "marquee-b"]
+            and marquee_selection["edgeIds"] == ["marquee-edge-a-b"]
+            and marquee_selection["groupId"] is None
+            and not marquee_selection["deleteDisabled"]
+            and page.locator(".pm-node.selected").count() == 2
+            and page.locator(".pm-edge.selected[data-edge-id='marquee-edge-a-b']").count() == 1,
+            marquee_selection,
+        )
+
+        history_before_delete = page.evaluate(
+            "window.__processMapFlow.editor.history.undoStack.length"
+        )
+        page.locator("[data-process-map-command='processDelete']").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 1"
+            " && window.__processMapFlow.editor.processMap.canvasEdges.length === 0"
+        )
+        deletion_result = page.evaluate(
+            """
+            () => ({
+                nodeIds: window.__processMapFlow.editor.processMap.canvasNodes
+                    .map(node => node.nodeId),
+                historyDepth: window.__processMapFlow.editor.history.undoStack.length,
+            })
+            """
+        )
+        record(
+            "delete_removes_the_full_marquee_selection_in_one_history_step",
+            deletion_result["nodeIds"] == ["marquee-c"]
+            and deletion_result["historyDepth"] == history_before_delete + 1,
+            deletion_result,
+        )
+        page.get_by_role("button", name="Undo process-map edit").click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+            " && window.__processMapFlow.editor.processMap.canvasEdges.length === 1"
+        )
+        record(
+            "one_undo_restores_the_complete_marquee_deletion",
+            page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes"
+                ".map(node => node.nodeId).sort().join(',')"
+            ) == "marquee-a,marquee-b,marquee-c",
         )
         context.close()
 

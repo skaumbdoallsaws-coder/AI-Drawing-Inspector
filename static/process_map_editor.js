@@ -43,6 +43,7 @@
     const MAX_PANE_WIDTH = 480;
     const MIN_VIEWPORT_WIDTH = 320;
     const PANE_RESIZE_STEP = 12;
+    const MARQUEE_DRAG_THRESHOLD_PX = 4;
     const REFERENCE_KINDS = ['machine', 'tool', 'requirement', 'standard'];
     const PORT_ORIENTATIONS = ['horizontal', 'vertical'];
     const PORT_ORDERS = ['input_first', 'output_first'];
@@ -59,6 +60,68 @@
 
     function cloneMap(processMap) {
         return JSON.parse(JSON.stringify(processMap || { nodes: [], edges: [] }));
+    }
+
+    function normalizedRect(firstX, firstY, secondX, secondY) {
+        return {
+            left: Math.min(firstX, secondX),
+            top: Math.min(firstY, secondY),
+            right: Math.max(firstX, secondX),
+            bottom: Math.max(firstY, secondY),
+        };
+    }
+
+    function rectsIntersect(first, second) {
+        return !!first && !!second
+            && first.left <= second.right
+            && first.right >= second.left
+            && first.top <= second.bottom
+            && first.bottom >= second.top;
+    }
+
+    function pointInRect(point, rect) {
+        return !!point && !!rect
+            && point.x >= rect.left && point.x <= rect.right
+            && point.y >= rect.top && point.y <= rect.bottom;
+    }
+
+    function _pointOnSegment(point, start, end) {
+        return point.x >= Math.min(start.x, end.x) && point.x <= Math.max(start.x, end.x)
+            && point.y >= Math.min(start.y, end.y) && point.y <= Math.max(start.y, end.y);
+    }
+
+    function _segmentOrientation(first, second, third) {
+        const value = (second.y - first.y) * (third.x - second.x)
+            - (second.x - first.x) * (third.y - second.y);
+        if (Math.abs(value) < 0.000001) return 0;
+        return value > 0 ? 1 : 2;
+    }
+
+    function _segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
+        const firstOrientation = _segmentOrientation(firstStart, firstEnd, secondStart);
+        const secondOrientation = _segmentOrientation(firstStart, firstEnd, secondEnd);
+        const thirdOrientation = _segmentOrientation(secondStart, secondEnd, firstStart);
+        const fourthOrientation = _segmentOrientation(secondStart, secondEnd, firstEnd);
+        if (firstOrientation !== secondOrientation && thirdOrientation !== fourthOrientation) {
+            return true;
+        }
+        return (firstOrientation === 0 && _pointOnSegment(secondStart, firstStart, firstEnd))
+            || (secondOrientation === 0 && _pointOnSegment(secondEnd, firstStart, firstEnd))
+            || (thirdOrientation === 0 && _pointOnSegment(firstStart, secondStart, secondEnd))
+            || (fourthOrientation === 0 && _pointOnSegment(firstEnd, secondStart, secondEnd));
+    }
+
+    function segmentIntersectsRect(start, end, rect) {
+        if (!start || !end || !rect) return false;
+        if (pointInRect(start, rect) || pointInRect(end, rect)) return true;
+        const topLeft = { x: rect.left, y: rect.top };
+        const topRight = { x: rect.right, y: rect.top };
+        const bottomRight = { x: rect.right, y: rect.bottom };
+        const bottomLeft = { x: rect.left, y: rect.bottom };
+        return _segmentsIntersect(start, end, topLeft, topRight)
+            || _segmentsIntersect(start, end, topRight, bottomRight)
+            || _segmentsIntersect(start, end, bottomRight, bottomLeft)
+            || _segmentsIntersect(start, end, bottomLeft, topLeft);
     }
 
     function isPlacementMap(processMap) {
@@ -485,6 +548,24 @@
                 && edge.to.nodeId !== nodeId;
         }));
         _removeNodeIdsFromGroups(next, new Set([nodeId]));
+        return pruneUnusedProcessReferences(collapseRedundantJunctions(next));
+    }
+
+    function deleteCanvasSelection(processMap, nodeIds, edgeIds) {
+        const selectedNodes = new Set(Array.isArray(nodeIds) ? nodeIds.filter(Boolean) : []);
+        const selectedEdges = new Set(Array.isArray(edgeIds) ? edgeIds.filter(Boolean) : []);
+        if (!selectedNodes.size && !selectedEdges.size) return cloneMap(processMap);
+        const next = cloneMap(processMap);
+        setMapNodes(next, mapNodes(next).filter(function (node) {
+            return node && !selectedNodes.has(node.nodeId);
+        }));
+        setMapEdges(next, mapEdges(next).filter(function (edge) {
+            return edge && edge.from && edge.to
+                && !selectedEdges.has(edge.edgeId)
+                && !selectedNodes.has(edge.from.nodeId)
+                && !selectedNodes.has(edge.to.nodeId);
+        }));
+        _removeNodeIdsFromGroups(next, selectedNodes);
         return pruneUnusedProcessReferences(collapseRedundantJunctions(next));
     }
 
@@ -1763,6 +1844,12 @@
         this.selectedNodeId = this.options.selectedNodeId || null;
         this.selectedEdgeId = null;
         this.selectedGroupId = null;
+        this.selectedNodeIds = new Set(this.selectedNodeId ? [this.selectedNodeId] : []);
+        this.selectedEdgeIds = new Set();
+        this.canvasInteractionMode = (
+            !this.editable || this.options.canvasInteractionMode === 'pan'
+        ) ? 'pan' : 'select';
+        this.spacePanActive = false;
         this.transform = { x: 0, y: 0, scale: 1 };
         this.structureCollapsed = !!this.options.structureCollapsed;
         this.structureWidth = normalizePaneWidth(
@@ -2080,6 +2167,69 @@
         this.emptyState.className = 'pm-empty-state';
         this.emptyState.textContent = 'Drag an assembly, subassembly, or part from the structure tree to begin building the process map.';
         this.viewport.appendChild(this.emptyState);
+        if (this.editable) {
+            this.selectionMarquee = document.createElement('div');
+            this.selectionMarquee.className = 'pm-selection-marquee';
+            this.selectionMarquee.hidden = true;
+            this.selectionMarquee.setAttribute('aria-hidden', 'true');
+            this.viewport.appendChild(this.selectionMarquee);
+
+            this.canvasModeControls = document.createElement('div');
+            this.canvasModeControls.className = 'pm-canvas-mode-controls';
+            this.canvasModeControls.setAttribute('role', 'toolbar');
+            this.canvasModeControls.setAttribute('aria-label', 'Canvas interaction mode');
+            const createModeButton = function (mode, label, paths) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'pm-canvas-mode-button';
+                button.setAttribute('data-canvas-mode', mode);
+                button.setAttribute('aria-label', label);
+                button.title = label;
+                const icon = svgElement('svg', {
+                    viewBox: '0 0 24 24',
+                    'aria-hidden': 'true',
+                });
+                paths.forEach(function (definition) {
+                    icon.appendChild(svgElement('path', definition));
+                });
+                button.appendChild(icon);
+                button.addEventListener('click', this.setCanvasInteractionMode.bind(this, mode));
+                return button;
+            }.bind(this);
+            this.selectModeButton = createModeButton('select', 'Select items (V)', [{
+                d: 'M4 3.5 11.3 21l2.4-7.1 7.3-2.5L4 3.5Z',
+                fill: 'none',
+                stroke: 'currentColor',
+                'stroke-width': '1.8',
+                'stroke-linecap': 'round',
+                'stroke-linejoin': 'round',
+            }]);
+            this.panModeButton = createModeButton('pan', 'Pan viewport (H or hold Space)', [
+                {
+                    d: 'M8 11V6.5a1.7 1.7 0 0 1 3.4 0V11',
+                    fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7',
+                    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+                },
+                {
+                    d: 'M11.4 10V4.8a1.7 1.7 0 0 1 3.4 0V10',
+                    fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7',
+                    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+                },
+                {
+                    d: 'M14.8 10V6.2a1.7 1.7 0 0 1 3.4 0v6.2',
+                    fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7',
+                    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+                },
+                {
+                    d: 'M8 10.8 6.5 9.4a1.8 1.8 0 0 0-2.6 2.5l4.9 6.2A5 5 0 0 0 12.7 20h1.8a5 5 0 0 0 5-5v-3.2a1.7 1.7 0 0 0-3.4 0',
+                    fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7',
+                    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+                },
+            ]);
+            this.canvasModeControls.appendChild(this.selectModeButton);
+            this.canvasModeControls.appendChild(this.panModeButton);
+            this.viewport.appendChild(this.canvasModeControls);
+        }
         this.root.appendChild(this.toolbar);
         this.workspace.appendChild(this.structureSidebar);
         this.workspace.appendChild(this.structureDivider);
@@ -2099,6 +2249,7 @@
         this._onPointerUp = this.pointerUp.bind(this);
         this._onWheel = this.wheel.bind(this);
         this._onKeyDown = this.keyDown.bind(this);
+        this._onKeyUp = this.keyUp.bind(this);
         this._onDragOver = this.dragOver.bind(this);
         this._onDragLeave = this.dragLeave.bind(this);
         this._onDrop = this.dropOccurrence.bind(this);
@@ -2111,9 +2262,100 @@
         this.viewport.addEventListener('dragleave', this._onDragLeave);
         this.viewport.addEventListener('drop', this._onDrop);
         this.root.addEventListener('keydown', this._onKeyDown);
+        this.root.addEventListener('keyup', this._onKeyUp);
+        this._syncCanvasInteractionMode();
         this._syncStructureCollapsedState();
         this.renderStructureTree();
         this.updateEditControls();
+    };
+
+    ProcessMapEditor.prototype._effectiveCanvasInteractionMode = function () {
+        return this.spacePanActive ? 'pan' : this.canvasInteractionMode;
+    };
+
+    ProcessMapEditor.prototype._syncCanvasInteractionMode = function () {
+        if (!this.viewport) return;
+        const effectiveMode = this._effectiveCanvasInteractionMode();
+        this.viewport.classList.toggle('mode-select', effectiveMode === 'select');
+        this.viewport.classList.toggle('mode-pan', effectiveMode === 'pan');
+        this.viewport.setAttribute('data-canvas-mode', effectiveMode);
+        if (this.selectModeButton) {
+            this.selectModeButton.classList.toggle('active', effectiveMode === 'select');
+            this.selectModeButton.setAttribute(
+                'aria-pressed', effectiveMode === 'select' ? 'true' : 'false'
+            );
+        }
+        if (this.panModeButton) {
+            this.panModeButton.classList.toggle('active', effectiveMode === 'pan');
+            this.panModeButton.setAttribute(
+                'aria-pressed', effectiveMode === 'pan' ? 'true' : 'false'
+            );
+        }
+    };
+
+    ProcessMapEditor.prototype.setCanvasInteractionMode = function (mode) {
+        if (!this.editable || ['select', 'pan'].indexOf(mode) < 0 || this.interaction) {
+            return false;
+        }
+        this.canvasInteractionMode = mode;
+        this.spacePanActive = false;
+        this._syncCanvasInteractionMode();
+        if (this.viewport && typeof this.viewport.focus === 'function') {
+            this.viewport.focus({ preventScroll: true });
+        }
+        return true;
+    };
+
+    ProcessMapEditor.prototype._applyGraphSelectionClasses = function () {
+        const selectedNodes = this.selectedNodeIds || new Set();
+        const selectedEdges = this.selectedEdgeIds || new Set();
+        Array.prototype.forEach.call(
+            this.nodeLayer.querySelectorAll('.pm-node, .pm-junction'),
+            function (node) {
+                const selected = selectedNodes.has(node.getAttribute('data-node-id'));
+                node.classList.toggle('selected', selected);
+                node.setAttribute('aria-selected', selected ? 'true' : 'false');
+            }
+        );
+        Array.prototype.forEach.call(this.edgeSvg.querySelectorAll('.pm-edge'), function (edge) {
+            const selected = selectedEdges.has(edge.getAttribute('data-edge-id'));
+            edge.classList.toggle('selected', selected);
+        });
+    };
+
+    ProcessMapEditor.prototype._resetGraphSelectionState = function () {
+        this.selectedNodeIds.clear();
+        this.selectedEdgeIds.clear();
+        this.selectedNodeId = null;
+        this.selectedEdgeId = null;
+        this.selectedGroupId = null;
+    };
+
+    ProcessMapEditor.prototype._clearGraphSelection = function (reason) {
+        this._closeCardToolbar(reason || 'selection_cleared', false);
+        this._resetGraphSelectionState();
+        Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (group) {
+            group.classList.remove('selected');
+        });
+        this._applyGraphSelectionClasses();
+        this.updateEditControls();
+    };
+
+    ProcessMapEditor.prototype.setGraphSelection = function (nodeIds, edgeIds) {
+        this._closeCardToolbar('marquee_selection', false);
+        this.selectedNodeIds = new Set(Array.isArray(nodeIds) ? nodeIds.filter(Boolean) : []);
+        this.selectedEdgeIds = new Set(Array.isArray(edgeIds) ? edgeIds.filter(Boolean) : []);
+        this.selectedNodeId = this.selectedNodeIds.size === 1 && !this.selectedEdgeIds.size
+            ? Array.from(this.selectedNodeIds)[0] : null;
+        this.selectedEdgeId = this.selectedEdgeIds.size === 1 && !this.selectedNodeIds.size
+            ? Array.from(this.selectedEdgeIds)[0] : null;
+        this.selectedGroupId = null;
+        Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (group) {
+            group.classList.remove('selected');
+        });
+        this._applyGraphSelectionClasses();
+        this.updateEditControls();
+        return this.selectedNodeIds.size + this.selectedEdgeIds.size;
     };
 
     ProcessMapEditor.prototype._syncStructureCollapsedState = function () {
@@ -2272,9 +2514,7 @@
         this.savedFingerprint = mapFingerprint(this.savedMap);
         this.history.clear();
         this._clearSuggestions();
-        this.selectedNodeId = null;
-        this.selectedEdgeId = null;
-        this.selectedGroupId = null;
+        this._resetGraphSelectionState();
         this.conflict = false;
         this.operationError = '';
         this._setDirty(false);
@@ -4235,7 +4475,7 @@
                 'pm-edge',
                 'pm-edge-' + String(edge.kind || 'precedence'),
             ];
-            if (edge.edgeId === this.selectedEdgeId) classes.push('selected');
+            if (this.selectedEdgeIds.has(edge.edgeId)) classes.push('selected');
             if (edgeFindings.some(function (finding) { return finding.severity === 'error'; })) {
                 classes.push('invalid');
             }
@@ -4249,6 +4489,12 @@
                     'aria-label': 'Select connection from ' + edge.from.nodeId + ' to ' + edge.to.nodeId,
                 });
                 hit.addEventListener('click', function (event) {
+                    if (this._suppressClick) {
+                        event.preventDefault();
+                        event.stopImmediatePropagation();
+                        this._suppressClick = false;
+                        return;
+                    }
                     event.preventDefault();
                     event.stopPropagation();
                     this.selectEdge(edge.edgeId);
@@ -4312,7 +4558,7 @@
         if (!position) return;
         const wrapper = document.createElement('div');
         wrapper.className = 'pm-junction';
-        if (node.nodeId === this.selectedNodeId) wrapper.classList.add('selected');
+        if (this.selectedNodeIds.has(node.nodeId)) wrapper.classList.add('selected');
         this._positionNodeElement(wrapper, position);
         wrapper.style.width = JUNCTION_HIT_SIZE + 'px';
         wrapper.style.height = JUNCTION_HIT_SIZE + 'px';
@@ -4367,7 +4613,7 @@
         wrapper.className = 'pm-node pm-node-type-' + String(node.type || 'unknown')
             + ' pm-node-ports-' + nodePortOrientation(node)
             + ' pm-node-port-order-' + nodePortOrder(node);
-        if (node.nodeId === this.selectedNodeId) wrapper.classList.add('selected');
+        if (this.selectedNodeIds.has(node.nodeId)) wrapper.classList.add('selected');
         this._positionNodeElement(wrapper, position);
         wrapper.style.width = position.width + 'px';
         wrapper.style.height = position.height + 'px';
@@ -4449,7 +4695,7 @@
         const onSelect = this.select.bind(this);
         const card = typeof this.options.createNodeCard === 'function'
             ? this.options.createNodeCard(node, {
-                selected: node.nodeId === this.selectedNodeId,
+                selected: this.selectedNodeIds.has(node.nodeId),
                 onSelect: onSelect,
                 onPreview: function () {
                     if (typeof this.options.onOpenPreview !== 'function') return false;
@@ -4508,15 +4754,12 @@
         this.selectedNodeId = nodeId;
         this.selectedEdgeId = null;
         this.selectedGroupId = null;
+        this.selectedNodeIds = new Set(nodeId ? [nodeId] : []);
+        this.selectedEdgeIds.clear();
         Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (group) {
             group.classList.remove('selected');
         });
-        Array.prototype.forEach.call(this.nodeLayer.querySelectorAll('.pm-node, .pm-junction'), function (node) {
-            node.classList.toggle('selected', node.getAttribute('data-node-id') === nodeId);
-        });
-        Array.prototype.forEach.call(this.edgeSvg.querySelectorAll('.pm-edge'), function (edge) {
-            edge.classList.remove('selected');
-        });
+        this._applyGraphSelectionClasses();
         this.updateEditControls();
         const selectedNode = mapNodes(this.processMap).find(function (node) {
             return node && node.nodeId === nodeId;
@@ -4539,18 +4782,15 @@
         this.selectedEdgeId = edgeId;
         this.selectedNodeId = null;
         this.selectedGroupId = null;
+        this.selectedNodeIds.clear();
+        this.selectedEdgeIds = new Set(edgeId ? [edgeId] : []);
         if (this.viewport && typeof this.viewport.focus === 'function') {
             this.viewport.focus({ preventScroll: true });
         }
-        Array.prototype.forEach.call(this.nodeLayer.querySelectorAll('.pm-node, .pm-junction'), function (node) {
-            node.classList.remove('selected');
-        });
         Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (group) {
             group.classList.remove('selected');
         });
-        Array.prototype.forEach.call(this.edgeSvg.querySelectorAll('.pm-edge'), function (edge) {
-            edge.classList.toggle('selected', edge.getAttribute('data-edge-id') === edgeId);
-        });
+        this._applyGraphSelectionClasses();
         this.updateEditControls();
         const edge = mapEdges(this.processMap).find(function (item) {
             return item && item.edgeId === edgeId;
@@ -4599,12 +4839,9 @@
         this.selectedGroupId = groupId;
         this.selectedNodeId = null;
         this.selectedEdgeId = null;
-        Array.prototype.forEach.call(this.nodeLayer.querySelectorAll('.pm-node, .pm-junction'), function (node) {
-            node.classList.remove('selected');
-        });
-        Array.prototype.forEach.call(this.edgeSvg.querySelectorAll('.pm-edge'), function (edge) {
-            edge.classList.remove('selected');
-        });
+        this.selectedNodeIds.clear();
+        this.selectedEdgeIds.clear();
+        this._applyGraphSelectionClasses();
         Array.prototype.forEach.call(this.groupLayer.querySelectorAll('.pm-group-frame'), function (frame) {
             frame.classList.toggle('selected', frame.getAttribute('data-group-id') === groupId);
         });
@@ -4659,9 +4896,16 @@
         if (!this.editable || !this.status) return;
         const commandStates = this.selectedNodeCommandStates();
         const canDeleteGroup = !!this.selectedGroupId && !this.saving && !this.conflict;
+        const canDeleteGraphSelection = !!(
+            this.selectedNodeIds.size || this.selectedEdgeIds.size
+        ) && !this.saving && !this.conflict;
         if (this.undoButton) this.undoButton.disabled = !this.history.undoStack.length || this.saving || this.conflict;
         if (this.redoButton) this.redoButton.disabled = !this.history.redoStack.length || this.saving || this.conflict;
-        if (this.deleteButton) this.deleteButton.disabled = !commandStates.canDelete && !canDeleteGroup;
+        if (this.deleteButton) {
+            this.deleteButton.disabled = !commandStates.canDelete
+                && !canDeleteGroup
+                && !canDeleteGraphSelection;
+        }
         if (this.addStepButton) this.addStepButton.disabled = this.saving || this.conflict;
         if (this.addGroupButton) this.addGroupButton.disabled = this.saving || this.conflict;
         if (this.clearMapButton) {
@@ -4893,9 +5137,7 @@
             'Clear all cards, connections, junctions, groups, and references from this process map? This can be undone.'
         )) return false;
         this._closeCardToolbar('clear_map', false);
-        this.selectedGroupId = null;
-        this.selectedNodeId = null;
-        this.selectedEdgeId = null;
+        this._resetGraphSelectionState();
         this.groupMoveFrameOnly = false;
         return this.commitMutation(clearProcessMapCanvas(this.processMap));
     };
@@ -4906,6 +5148,12 @@
             const groupId = this.selectedGroupId;
             this.selectedGroupId = null;
             return this.commitMutation(deleteGroup(this.processMap, groupId));
+        }
+        if (this.selectedNodeIds.size || this.selectedEdgeIds.size) {
+            const nodeIds = Array.from(this.selectedNodeIds);
+            const edgeIds = Array.from(this.selectedEdgeIds);
+            this._resetGraphSelectionState();
+            return this.commitMutation(deleteCanvasSelection(this.processMap, nodeIds, edgeIds));
         }
         if (this.selectedNodeId) {
             const nodeId = this.selectedNodeId;
@@ -4927,9 +5175,7 @@
         this.findings = [];
         this.conflict = false;
         this.operationError = '';
-        this.selectedEdgeId = null;
-        this.selectedNodeId = null;
-        this.selectedGroupId = null;
+        this._resetGraphSelectionState();
         this._clearSuggestions();
         this._setDirty(mapFingerprint(this.processMap) !== this.savedFingerprint);
         this._notifyMapChange();
@@ -4945,9 +5191,7 @@
         this.findings = [];
         this.conflict = false;
         this.operationError = '';
-        this.selectedEdgeId = null;
-        this.selectedNodeId = null;
-        this.selectedGroupId = null;
+        this._resetGraphSelectionState();
         this._clearSuggestions();
         this._setDirty(mapFingerprint(this.processMap) !== this.savedFingerprint);
         this._notifyMapChange();
@@ -5292,6 +5536,7 @@
             this.savedFingerprint = mapFingerprint(this.savedMap);
             this.history.clear();
             this._clearSuggestions();
+            this._resetGraphSelectionState();
             this.conflict = false;
             this.operationError = '';
             this._setDirty(false);
@@ -5310,6 +5555,7 @@
         this.processMap = cloneMap(this.savedMap);
         this.history.clear();
         this._clearSuggestions();
+        this._resetGraphSelectionState();
         this.findings = [];
         this.conflict = false;
         this.operationError = '';
@@ -5419,7 +5665,8 @@
     };
 
     ProcessMapEditor.prototype.startGroupDrag = function (groupId, event) {
-        if (!this.editable || this.conflict || event.button !== 0) return;
+        if (!this.editable || this.conflict || event.button !== 0
+            || this._effectiveCanvasInteractionMode() !== 'select') return;
         const group = this.groupPositions && this.groupPositions[groupId];
         if (!group) return;
         event.preventDefault();
@@ -5447,7 +5694,8 @@
     };
 
     ProcessMapEditor.prototype.startGroupResize = function (groupId, corner, event) {
-        if (!this.editable || this.conflict || event.button !== 0) return;
+        if (!this.editable || this.conflict || event.button !== 0
+            || this._effectiveCanvasInteractionMode() !== 'select') return;
         const group = this.groupPositions && this.groupPositions[groupId];
         if (!group) return;
         event.preventDefault();
@@ -5471,6 +5719,7 @@
 
     ProcessMapEditor.prototype.startNodeDrag = function (nodeId, event) {
         if (!this.editable || this.conflict || event.button !== 0
+            || this._effectiveCanvasInteractionMode() !== 'select'
             || event.target.closest('.pm-port, select')) return;
         const position = this.positions[nodeId];
         if (!position) return;
@@ -5489,7 +5738,8 @@
     };
 
     ProcessMapEditor.prototype.startWire = function (nodeId, event) {
-        if (!this.editable || this.conflict || event.button !== 0) return;
+        if (!this.editable || this.conflict || event.button !== 0
+            || this._effectiveCanvasInteractionMode() !== 'select') return;
         event.preventDefault();
         event.stopPropagation();
         const position = this.positions[nodeId];
@@ -5729,10 +5979,122 @@
         }
     };
 
+    ProcessMapEditor.prototype._updateSelectionMarquee = function (action, clientX, clientY) {
+        if (!action || action.mode !== 'marquee' || !this.selectionMarquee) return null;
+        const viewportRect = this.viewport.getBoundingClientRect();
+        const currentX = clamp(clientX, viewportRect.left, viewportRect.right);
+        const currentY = clamp(clientY, viewportRect.top, viewportRect.bottom);
+        const screenRect = normalizedRect(action.clientX, action.clientY, currentX, currentY);
+        action.screenRect = screenRect;
+        action.moved = action.moved || Math.hypot(
+            currentX - action.clientX,
+            currentY - action.clientY
+        ) >= MARQUEE_DRAG_THRESHOLD_PX;
+        if (!action.moved) return screenRect;
+        this.selectionMarquee.hidden = false;
+        this.selectionMarquee.style.left = (screenRect.left - viewportRect.left) + 'px';
+        this.selectionMarquee.style.top = (screenRect.top - viewportRect.top) + 'px';
+        this.selectionMarquee.style.width = (screenRect.right - screenRect.left) + 'px';
+        this.selectionMarquee.style.height = (screenRect.bottom - screenRect.top) + 'px';
+        this.viewport.classList.add('selecting');
+        return screenRect;
+    };
+
+    ProcessMapEditor.prototype._edgePathIntersectsScreenRect = function (path, screenRect) {
+        if (!path || !screenRect) return false;
+        const pathRect = path.getBoundingClientRect();
+        if (!rectsIntersect(screenRect, {
+            left: pathRect.left,
+            top: pathRect.top,
+            right: pathRect.right,
+            bottom: pathRect.bottom,
+        })) return false;
+        let length;
+        try { length = path.getTotalLength(); } catch (_) { return false; }
+        if (!finiteNumber(length) || length <= 0) return false;
+        const matrix = typeof path.getScreenCTM === 'function' ? path.getScreenCTM() : null;
+        if (!matrix) return false;
+        const sampleCount = clamp(Math.ceil(length * this.transform.scale / 6), 8, 240);
+        const toScreen = function (point) {
+            return {
+                x: matrix.a * point.x + matrix.c * point.y + matrix.e,
+                y: matrix.b * point.x + matrix.d * point.y + matrix.f,
+            };
+        };
+        let previous = toScreen(path.getPointAtLength(0));
+        if (pointInRect(previous, screenRect)) return true;
+        for (let index = 1; index <= sampleCount; index += 1) {
+            const current = toScreen(path.getPointAtLength(length * index / sampleCount));
+            if (segmentIntersectsRect(previous, current, screenRect)) return true;
+            previous = current;
+        }
+        return false;
+    };
+
+    ProcessMapEditor.prototype._finishSelectionMarquee = function (action, cancelled) {
+        if (this.selectionMarquee) {
+            this.selectionMarquee.hidden = true;
+            this.selectionMarquee.removeAttribute('style');
+        }
+        this.viewport.classList.remove('selecting');
+        if (cancelled) return false;
+        if (!action.moved || !action.screenRect) {
+            this._clearGraphSelection('canvas_clicked');
+            return true;
+        }
+        const screenRect = action.screenRect;
+        const nodeIds = [];
+        const edgeIds = [];
+        Array.prototype.forEach.call(
+            this.nodeLayer.querySelectorAll('.pm-node[data-node-id], .pm-junction[data-node-id]'),
+            function (wrapper) {
+                const bounds = wrapper.getBoundingClientRect();
+                if (rectsIntersect(screenRect, {
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom,
+                })) nodeIds.push(wrapper.getAttribute('data-node-id'));
+            }
+        );
+        Array.prototype.forEach.call(
+            this.edgeSvg.querySelectorAll('.pm-edge-hit[data-edge-id]'),
+            function (path) {
+                if (this._edgePathIntersectsScreenRect(path, screenRect)) {
+                    edgeIds.push(path.getAttribute('data-edge-id'));
+                }
+            }.bind(this)
+        );
+        this.setGraphSelection(nodeIds, edgeIds);
+        return true;
+    };
+
     ProcessMapEditor.prototype.pointerDown = function (event) {
-        if (event.button !== 0 || event.target.closest(
+        if (this.interaction || (event.button !== 0 && event.button !== 1)) return;
+        const effectiveMode = this._effectiveCanvasInteractionMode();
+        const target = event.target && event.target.closest ? event.target : null;
+        if (event.button === 0 && effectiveMode === 'select' && target && target.closest(
             '.pm-node, .pm-junction, button, .pm-edge-hit, .pm-ghost-edge-hit'
         )) return;
+        if (event.button === 0 && effectiveMode === 'pan' && target) {
+            const control = target.closest('button, input, select, textarea');
+            if (control && !control.closest(
+                '.pm-node-card, .pm-junction, .pm-group-header, .pm-group-resize'
+            )) return;
+        }
+        event.preventDefault();
+        if (event.button === 0 && effectiveMode === 'select' && this.editable) {
+            this.interaction = {
+                mode: 'marquee',
+                pointerId: event.pointerId,
+                clientX: event.clientX,
+                clientY: event.clientY,
+                screenRect: null,
+                moved: false,
+            };
+            this.viewport.setPointerCapture(event.pointerId);
+            return;
+        }
         this.interaction = {
             mode: 'pan',
             pointerId: event.pointerId,
@@ -5740,6 +6102,7 @@
             clientY: event.clientY,
             startX: this.transform.x,
             startY: this.transform.y,
+            moved: false,
         };
         this.viewport.setPointerCapture(event.pointerId);
         this.viewport.classList.add('panning');
@@ -5749,9 +6112,17 @@
         const action = this.interaction;
         if (!action || event.pointerId !== action.pointerId) return;
         if (action.mode === 'pan') {
+            action.moved = action.moved || Math.hypot(
+                event.clientX - action.clientX,
+                event.clientY - action.clientY
+            ) >= MARQUEE_DRAG_THRESHOLD_PX;
             this.transform.x = action.startX + event.clientX - action.clientX;
             this.transform.y = action.startY + event.clientY - action.clientY;
             this.applyTransform();
+            return;
+        }
+        if (action.mode === 'marquee') {
+            this._updateSelectionMarquee(action, event.clientX, event.clientY);
             return;
         }
         if (action.mode === 'group') {
@@ -5868,6 +6239,19 @@
         try { this.viewport.releasePointerCapture(event.pointerId); } catch (_) {}
         this.interaction = null;
         this.viewport.classList.remove('panning');
+        if (action.mode === 'pan') {
+            this._suppressClick = true;
+            this._suppressGroupClick = true;
+            setTimeout(function () {
+                this._suppressClick = false;
+                this._suppressGroupClick = false;
+            }.bind(this), 0);
+            return;
+        }
+        if (action.mode === 'marquee') {
+            this._finishSelectionMarquee(action, event.type === 'pointercancel');
+            return;
+        }
         if (action.mode === 'group') {
             const frame = this.groupLayer.querySelector('[data-group-id="' + action.groupId + '"]');
             if (frame) frame.classList.remove('dragging');
@@ -5979,8 +6363,39 @@
             return;
         }
         const targetName = String(event.target && event.target.tagName || '').toLowerCase();
-        if (['input', 'select', 'textarea'].indexOf(targetName) >= 0) return;
+        if (['a', 'button', 'input', 'select', 'textarea'].indexOf(targetName) >= 0
+            || (event.target && event.target.isContentEditable)) return;
         const modifier = event.ctrlKey || event.metaKey;
+        if (event.key === 'Escape') {
+            if (this.interaction && this.interaction.mode === 'marquee') {
+                const action = this.interaction;
+                this.interaction = null;
+                try { this.viewport.releasePointerCapture(action.pointerId); } catch (_) {}
+                this._finishSelectionMarquee(action, true);
+            } else {
+                this._clearGraphSelection('escape');
+            }
+            event.preventDefault();
+            return;
+        }
+        if (!modifier && !event.altKey && event.code === 'Space') {
+            if (!this.spacePanActive) {
+                this.spacePanActive = true;
+                this._syncCanvasInteractionMode();
+            }
+            event.preventDefault();
+            return;
+        }
+        if (!modifier && !event.altKey && event.key.toLowerCase() === 'v') {
+            event.preventDefault();
+            this.setCanvasInteractionMode('select');
+            return;
+        }
+        if (!modifier && !event.altKey && event.key.toLowerCase() === 'h') {
+            event.preventDefault();
+            this.setCanvasInteractionMode('pan');
+            return;
+        }
         if (modifier && event.key.toLowerCase() === 'z') {
             event.preventDefault();
             if (event.shiftKey) this.redo();
@@ -5996,6 +6411,13 @@
             event.preventDefault();
             this.deleteSelection();
         }
+    };
+
+    ProcessMapEditor.prototype.keyUp = function (event) {
+        if (!this.editable || event.code !== 'Space' || !this.spacePanActive) return;
+        this.spacePanActive = false;
+        this._syncCanvasInteractionMode();
+        event.preventDefault();
     };
 
     ProcessMapEditor.prototype.destroy = function () {
@@ -6027,7 +6449,10 @@
         this.viewport.removeEventListener('dragover', this._onDragOver);
         this.viewport.removeEventListener('dragleave', this._onDragLeave);
         this.viewport.removeEventListener('drop', this._onDrop);
-        if (this.root) this.root.removeEventListener('keydown', this._onKeyDown);
+        if (this.root) {
+            this.root.removeEventListener('keydown', this._onKeyDown);
+            this.root.removeEventListener('keyup', this._onKeyUp);
+        }
         if (this.pendingPath) this.pendingPath.remove();
         this._clearWireTarget(this.interaction);
         this.interaction = null;
@@ -6079,6 +6504,7 @@
         cloneMap: cloneMap,
         clearProcessMapCanvas: clearProcessMapCanvas,
         collapseRedundantJunctions: collapseRedundantJunctions,
+        deleteCanvasSelection: deleteCanvasSelection,
         deleteEdge: deleteEdge,
         deleteNode: deleteNode,
         deleteGroup: deleteGroup,
@@ -6099,6 +6525,8 @@
         moveGroup: moveGroup,
         normalizePaneWidth: normalizePaneWidth,
         normalizeMapCatalog: normalizeMapCatalog,
+        normalizedRect: normalizedRect,
+        rectsIntersect: rectsIntersect,
         connectedStepPosition: connectedStepPosition,
         portAnchor: portAnchor,
         portDirection: portDirection,
@@ -6116,6 +6544,7 @@
         setGroupMembers: setGroupMembers,
         resolveNodeGroupMembership: resolveNodeGroupMembership,
         resolveRequiredOccurrenceScope: resolveRequiredOccurrenceScope,
+        segmentIntersectsRect: segmentIntersectsRect,
         groupContainsPoint: groupContainsPoint,
         smallestContainingGroup: smallestContainingGroup,
         setEdgeLabel: setEdgeLabel,

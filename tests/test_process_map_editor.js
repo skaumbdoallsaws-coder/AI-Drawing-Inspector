@@ -990,4 +990,78 @@ check('pane width normalization preserves the last valid splitter width', () => 
     assert.strictEqual(runtime.normalizePaneWidth(333.6, 220, 480, 300), 334);
 });
 
+check('marquee geometry selects touching rectangles and wire segments', () => {
+    const marquee = runtime.normalizedRect(140, 90, 20, 210);
+    assert.deepStrictEqual(marquee, {
+        left: 20,
+        top: 90,
+        right: 140,
+        bottom: 210,
+    });
+    assert.strictEqual(runtime.rectsIntersect(
+        marquee,
+        { left: 140, top: 120, right: 220, bottom: 180 }
+    ), true);
+    assert.strictEqual(runtime.rectsIntersect(
+        marquee,
+        { left: 141, top: 120, right: 220, bottom: 180 }
+    ), false);
+    assert.strictEqual(runtime.segmentIntersectsRect(
+        { x: 0, y: 150 },
+        { x: 240, y: 150 },
+        marquee
+    ), true);
+    assert.strictEqual(runtime.segmentIntersectsRect(
+        { x: 0, y: 20 },
+        { x: 240, y: 20 },
+        marquee
+    ), false);
+});
+
+check('multi-selection deletion is immutable and removes one graph selection atomically', () => {
+    let processMap = placementFixture();
+    ['a', 'b', 'c'].forEach((nodeId, index) => {
+        processMap = runtime.addCanvasNode(processMap, {
+            nodeId,
+            nodeKind: 'process_step',
+            processType: 'operation',
+            name: nodeId.toUpperCase(),
+            position: { x: index * 320, y: 80 },
+        });
+    });
+    processMap = runtime.addEdge(processMap, edge('edge-a-b', 'a', 'b'));
+    processMap = runtime.addEdge(processMap, edge('edge-b-c', 'b', 'c'));
+    processMap = runtime.addGroup(processMap, {
+        groupId: 'group-a', label: 'Cell', position: { x: 20, y: 20 },
+        size: { width: 980, height: 300 }, colorKey: 'blue',
+        memberNodeIds: ['a', 'b', 'c'], collapsed: false,
+    });
+    processMap = runtime.attachProcessReference(processMap, {
+        targetType: 'node', targetId: 'a',
+        reference: { referenceId: 'tool-a', kind: 'tool', name: 'Fixture A' },
+    });
+    processMap = runtime.attachProcessReference(processMap, {
+        targetType: 'node', targetId: 'c',
+        reference: { referenceId: 'machine-c', kind: 'machine', name: 'Machine C' },
+    });
+    const before = runtime.cloneMap(processMap);
+    const deleted = runtime.deleteCanvasSelection(
+        processMap,
+        ['a', 'b'],
+        ['edge-b-c']
+    );
+    assert.deepStrictEqual(runtime.mapNodes(deleted).map(item => item.nodeId), ['c']);
+    assert.deepStrictEqual(runtime.mapEdges(deleted), []);
+    assert.deepStrictEqual(runtime.mapGroups(deleted)[0].memberNodeIds, ['c']);
+    assert.deepStrictEqual(
+        runtime.mapReferenceCatalog(deleted).map(item => item.referenceId),
+        ['machine-c']
+    );
+    assert.deepStrictEqual(processMap, before);
+
+    const history = new runtime.SnapshotHistory(5);
+    history.record(processMap);
+    assert.deepStrictEqual(history.undo(deleted), processMap);
+});
+
 process.stdout.write(`Process-map editor checks: ${checks}/${checks} passed\n`);

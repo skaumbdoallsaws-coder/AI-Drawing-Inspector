@@ -6835,7 +6835,7 @@
             height: 100% !important;
             min-height: 0 !important;
             overflow: hidden;
-            padding-top: 26px !important;
+            padding: 24px 11px 9px !important;
             border-radius: 6px !important;
             border-left: 4px solid #6089a5 !important;
         }
@@ -6846,12 +6846,51 @@
         }
         .pm-node-card .train-diagram-thumb-strip {
             min-height: 48px;
-            max-height: 58px;
+            max-height: 48px;
+            margin-bottom: 5px;
             overflow: hidden;
+        }
+        .pm-node-card .train-diagram-thumb-strip.single {
+            grid-template-columns: minmax(0, 1fr);
+        }
+        .pm-node-card .train-diagram-thumb.compact {
+            height: 48px;
+        }
+        .pm-node-card .train-diagram-thumb-strip.pm-preview-trigger {
+            position: relative;
+            border-radius: 6px;
+            cursor: zoom-in;
+            outline: 1px solid transparent;
+            outline-offset: 2px;
+            transition: outline-color 120ms ease, filter 120ms ease;
+        }
+        .pm-node-card .train-diagram-thumb-strip.pm-preview-trigger::after {
+            content: '';
+            position: absolute;
+            z-index: 2;
+            top: 4px;
+            right: 4px;
+            width: 18px;
+            height: 18px;
+            border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+            border-radius: 3px;
+            background:
+                color-mix(in srgb, var(--bg-panel) 88%, transparent)
+                url('/static/assets/view-toolbar-icons/view-iso.png') center / 14px 14px no-repeat;
+            box-shadow: 0 1px 3px rgba(20, 45, 62, 0.16);
+            pointer-events: none;
+        }
+        .pm-node-card .train-diagram-thumb-strip.pm-preview-trigger:hover {
+            outline-color: color-mix(in srgb, var(--accent) 58%, transparent);
+            filter: saturate(1.08);
         }
         .pm-node-card .train-diagram-card-title {
             font-size: 12px;
             line-height: 1.25;
+            padding-right: 24px;
+        }
+        .pm-node-card .train-diagram-card-meta {
+            margin-top: 5px;
         }
         .pm-node-type {
             position: absolute;
@@ -26145,7 +26184,23 @@
             const partIds = Array.isArray(node && node.partIds) ? node.partIds : [];
             if (!partIds.length) return;
             const strip = document.createElement('div');
-            strip.className = 'train-diagram-thumb-strip' + (opts.compact ? ' compact' : '');
+            strip.className = 'train-diagram-thumb-strip'
+                + (opts.compact ? ' compact' : '')
+                + (partIds.length === 1 ? ' single' : '');
+            if (typeof opts.onPreview === 'function') {
+                strip.classList.add('pm-preview-trigger');
+                strip.title = 'Open interactive 3D preview';
+                strip.addEventListener('pointerdown', (event) => event.stopPropagation());
+                strip.addEventListener('dblclick', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                });
+                strip.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    opts.onPreview(node, container, event);
+                });
+            }
             partIds.slice(0, maxCount).forEach((pid, idx) => {
                 const thumb = document.createElement('div');
                 thumb.className = 'train-diagram-thumb' + (opts.compact ? ' compact' : '');
@@ -26307,7 +26362,10 @@
                 ? _trainAppendNodeVisual(card, node, opts)
                 : false;
             if (!renderedNodeVisual) {
-                _trainAppendPartThumbStrip(card, node, opts.thumbCount || 3, { compact: !!opts.compactThumbs });
+                _trainAppendPartThumbStrip(card, node, opts.thumbCount || 3, {
+                    compact: !!opts.compactThumbs,
+                    onPreview: opts.onPreview,
+                });
             }
             const title = document.createElement('div');
             title.className = 'train-diagram-card-title';
@@ -26824,6 +26882,9 @@
                     : `${(node.partIds || []).length} part reference${(node.partIds || []).length === 1 ? '' : 's'}`,
                 onClick: () => {
                     if (typeof opts.onSelect === 'function') opts.onSelect(node.nodeId);
+                },
+                onPreview: (previewNode, sourceEl) => {
+                    if (typeof opts.onPreview === 'function') opts.onPreview(previewNode, sourceEl);
                 },
             });
             if (node && node.nodeKind === 'product_occurrence') {

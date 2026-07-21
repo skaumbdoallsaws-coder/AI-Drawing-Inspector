@@ -146,10 +146,12 @@ check('each card can persist horizontal or vertical connection ports', () => {
     processMap = runtime.setNodePortOrientation(processMap, 'canvas-a', 'vertical');
     const placed = runtime.mapNodes(processMap)[0];
     const position = runtime.layeredLayout(runtime.mapNodes(processMap), [])['canvas-a'];
+    const centerX = 20 + runtime.NODE_WIDTH / 2;
+    const bottomY = 40 + runtime.NODE_HEIGHT;
     assert.strictEqual(placed.portOrientation, 'vertical');
     assert.strictEqual(position.portOrientation, 'vertical');
-    assert.deepStrictEqual(runtime.portAnchor(position, 'in'), { x: 175, y: 40 });
-    assert.deepStrictEqual(runtime.portAnchor(position, 'out'), { x: 175, y: 210 });
+    assert.deepStrictEqual(runtime.portAnchor(position, 'in'), { x: centerX, y: 40 });
+    assert.deepStrictEqual(runtime.portAnchor(position, 'out'), { x: centerX, y: bottomY });
     assert.deepStrictEqual(
         runtime.portDirection('vertical', 'input_first', 'in'),
         { x: 0, y: -1 }
@@ -164,7 +166,7 @@ check('each card can persist horizontal or vertical connection ports', () => {
         position.portOrientation,
         'vertical'
     );
-    assert.ok(pathValue.startsWith('M 175 210 C 175 '));
+    assert.ok(pathValue.startsWith(`M ${centerX} ${bottomY} C ${centerX} `));
 
     const invalid = runtime.setNodePortOrientation(processMap, 'canvas-a', 'diagonal');
     assert.strictEqual(runtime.mapFingerprint(invalid), runtime.mapFingerprint(processMap));
@@ -172,8 +174,8 @@ check('each card can persist horizontal or vertical connection ports', () => {
     const swappedMap = runtime.setNodePortOrder(processMap, 'canvas-a', 'output_first');
     const swappedPosition = runtime.layeredLayout(runtime.mapNodes(swappedMap), [])['canvas-a'];
     assert.strictEqual(runtime.mapNodes(swappedMap)[0].portOrder, 'output_first');
-    assert.deepStrictEqual(runtime.portAnchor(swappedPosition, 'in'), { x: 175, y: 210 });
-    assert.deepStrictEqual(runtime.portAnchor(swappedPosition, 'out'), { x: 175, y: 40 });
+    assert.deepStrictEqual(runtime.portAnchor(swappedPosition, 'in'), { x: centerX, y: bottomY });
+    assert.deepStrictEqual(runtime.portAnchor(swappedPosition, 'out'), { x: centerX, y: 40 });
     assert.deepStrictEqual(
         runtime.portDirection('vertical', 'output_first', 'in'),
         { x: 0, y: 1 }

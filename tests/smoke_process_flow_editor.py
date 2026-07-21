@@ -924,6 +924,38 @@ def run() -> int:
             "placed_tree_occurrence_is_marked",
             page.locator(".pm-tree-row[data-occurrence-id='part-a-1'] .pm-tree-placed").count() == 1,
         )
+        compact_card = page.evaluate(
+            """nodeId => {
+                const node = document.querySelector(`.pm-node[data-node-id="${nodeId}"]`);
+                const card = node && node.querySelector('.pm-node-card');
+                const strip = card && card.querySelector('.train-diagram-thumb-strip');
+                const thumb = strip && strip.querySelector('.train-diagram-thumb');
+                return node && card ? {
+                    width: node.offsetWidth,
+                    height: node.offsetHeight,
+                    clientWidth: card.clientWidth,
+                    clientHeight: card.clientHeight,
+                    scrollWidth: card.scrollWidth,
+                    scrollHeight: card.scrollHeight,
+                    previewTrigger: !!card.querySelector('.pm-preview-trigger'),
+                    singlePreviewUsesRow: !!strip && !!thumb
+                        && strip.classList.contains('single')
+                        && thumb.offsetWidth >= strip.clientWidth - 2,
+                } : null;
+            }""",
+            first_id,
+        )
+        record(
+            "placed_cards_use_compact_geometry_without_clipping_content",
+            compact_card is not None
+            and compact_card["width"] == 270
+            and compact_card["height"] == 146
+            and compact_card["scrollWidth"] <= compact_card["clientWidth"] + 1
+            and compact_card["scrollHeight"] <= compact_card["clientHeight"] + 1
+            and compact_card["previewTrigger"] is True
+            and compact_card["singlePreviewUsesRow"] is True,
+            compact_card,
+        )
 
         page.get_by_role(
             "button", name="Ask Sage to analyze the saved process flow"
@@ -970,7 +1002,8 @@ def run() -> int:
 
         page.evaluate("window.__processMapEditorBeforePreview = window.__processMapFlow.editor")
         first_card = page.locator(f".pm-node[data-node-id='{first_id}'] .pm-node-card")
-        first_card.click()
+        first_card_select_target = first_card.locator(".train-diagram-card-title")
+        first_card_select_target.click()
         page.wait_for_selector(".pm-card-toolbar")
         record(
             "selecting_card_opens_actions_without_opening_preview",
@@ -1078,7 +1111,7 @@ def run() -> int:
             "one_undo_removes_connected_step_and_its_edge",
             page.locator(f".pm-node[data-node-id='{first_id}']").count() == 1,
         )
-        first_card.click()
+        first_card_select_target.click()
         page.wait_for_selector(".pm-card-toolbar")
         page.screenshot(
             path=str(OUT_DIR / "process_flow_card_toolbar.png"),
@@ -1141,8 +1174,11 @@ def run() -> int:
             scale_geometry,
         )
 
-        inset_x = (310 / 2 + 6) / viewport_box["width"]
-        inset_y = (170 / 2 + 6) / viewport_box["height"]
+        node_size = page.evaluate(
+            "({ width: InspectorProProcessMap.NODE_WIDTH, height: InspectorProProcessMap.NODE_HEIGHT })"
+        )
+        inset_x = (node_size["width"] / 2 + 6) / viewport_box["width"]
+        inset_y = (node_size["height"] / 2 + 6) / viewport_box["height"]
         edge_targets = {
             "top": (0.5, inset_y),
             "right": (1 - inset_x, 0.5),
@@ -1175,7 +1211,7 @@ def run() -> int:
             "outside_canvas_click_dismisses_card_toolbar",
             page.locator(".ip-floating-surface").count() == 0,
         )
-        first_card.click()
+        first_card_select_target.click()
         page.wait_for_selector(".pm-card-toolbar")
 
         drag_state_before = page.evaluate(
@@ -1187,16 +1223,17 @@ def run() -> int:
             first_id,
         )
         card_before_drag = first_card.bounding_box()
+        drag_handle_before = first_card_select_target.bounding_box()
         toolbar_before_drag = page.locator(".pm-card-toolbar").bounding_box()
-        assert card_before_drag is not None and toolbar_before_drag is not None
+        assert card_before_drag is not None and drag_handle_before is not None and toolbar_before_drag is not None
         page.mouse.move(
-            card_before_drag["x"] + card_before_drag["width"] / 2,
-            card_before_drag["y"] + card_before_drag["height"] / 2,
+            drag_handle_before["x"] + drag_handle_before["width"] / 2,
+            drag_handle_before["y"] + drag_handle_before["height"] / 2,
         )
         page.mouse.down()
         page.mouse.move(
-            card_before_drag["x"] + card_before_drag["width"] / 2 + 64,
-            card_before_drag["y"] + card_before_drag["height"] / 2 + 38,
+            drag_handle_before["x"] + drag_handle_before["width"] / 2 + 64,
+            drag_handle_before["y"] + drag_handle_before["height"] / 2 + 38,
             steps=7,
         )
         page.mouse.up()
@@ -1234,7 +1271,7 @@ def run() -> int:
             page.wait_for_timeout(160)
         else:
             page.evaluate("window.__processMapFlow.editor.renderGraph({ fit: false })")
-        first_card.click()
+        first_card_select_target.click()
         page.wait_for_selector(".pm-card-toolbar")
 
         page.evaluate(
@@ -1301,7 +1338,69 @@ def run() -> int:
                 " && window.__processMapFlow.editor.processMap.canvasNodes.length === 1"
             ),
         )
-        first_card.click()
+
+        direct_preview_state = page.evaluate(
+            """nodeId => {
+                const editor = window.__processMapFlow.editor;
+                const node = editor.processMap.canvasNodes.find(item => item.nodeId === nodeId);
+                return {
+                    position: structuredClone(node.position),
+                    undoDepth: editor.history.undoStack.length,
+                };
+            }""",
+            first_id,
+        )
+        first_card.locator(".pm-preview-trigger").click()
+        page.wait_for_selector("#trainUniquePreviewShell.open .train-unique-preview-viewer canvas")
+        page.wait_for_function(
+            "() => { const el = document.querySelector('#trainUniquePreviewShell.open .train-unique-preview-viewer-status'); return el && !el.textContent.toLowerCase().includes('loading'); }",
+            timeout=20_000,
+        )
+        preview_canvas = page.locator("#trainUniquePreviewShell.open .train-unique-preview-viewer canvas")
+        canvas_box = preview_canvas.bounding_box()
+        assert canvas_box is not None
+        before_orbit = preview_canvas.screenshot()
+        page.mouse.move(
+            canvas_box["x"] + canvas_box["width"] * 0.46,
+            canvas_box["y"] + canvas_box["height"] * 0.48,
+        )
+        page.mouse.down()
+        page.mouse.move(
+            canvas_box["x"] + canvas_box["width"] * 0.66,
+            canvas_box["y"] + canvas_box["height"] * 0.38,
+            steps=8,
+        )
+        page.mouse.up()
+        page.wait_for_timeout(180)
+        after_orbit = preview_canvas.screenshot()
+        after_direct_preview = page.evaluate(
+            """nodeId => {
+                const editor = window.__processMapFlow.editor;
+                const node = editor.processMap.canvasNodes.find(item => item.nodeId === nodeId);
+                return {
+                    position: structuredClone(node.position),
+                    undoDepth: editor.history.undoStack.length,
+                };
+            }""",
+            first_id,
+        )
+        record(
+            "card_thumbnail_opens_rotatable_3d_preview_without_moving_the_card",
+            before_orbit != after_orbit
+            and after_direct_preview == direct_preview_state
+            and page.locator(".pm-card-toolbar").count() == 0,
+            {
+                "pixelsChanged": before_orbit != after_orbit,
+                "before": direct_preview_state,
+                "after": after_direct_preview,
+            },
+        )
+        page.keyboard.press("Escape")
+        page.wait_for_function(
+            "!document.getElementById('trainUniquePreviewShell').classList.contains('open')"
+        )
+        page.wait_for_timeout(350)
+        first_card_select_target.click()
         page.wait_for_selector(".pm-card-toolbar")
         page.keyboard.press("Escape")
         page.wait_for_function("!document.querySelector('.pm-card-toolbar')")
@@ -1346,7 +1445,9 @@ def run() -> int:
             and abs((part_b_box["y"] + part_b_box["height"] / 2) - (viewport_box["y"] + transformed_target["y"])) < 14,
         )
 
-        page.locator(f".pm-node[data-node-id='{part_b_id}'] .pm-node-card").click()
+        page.locator(
+            f".pm-node[data-node-id='{part_b_id}'] .train-diagram-card-title"
+        ).click()
         page.wait_for_selector(".pm-card-toolbar")
         page.locator(".pm-card-toolbar [data-card-command='delete']").click()
         page.wait_for_function("window.__processMapFlow.editor.processMap.canvasNodes.length === 2")

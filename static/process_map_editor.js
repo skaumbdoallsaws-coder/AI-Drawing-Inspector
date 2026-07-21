@@ -6,8 +6,8 @@
 })(typeof window !== 'undefined' ? window : null, function () {
     'use strict';
 
-    const NODE_WIDTH = 310;
-    const NODE_HEIGHT = 170;
+    const NODE_WIDTH = 270;
+    const NODE_HEIGHT = 146;
     const COLUMN_GAP = 130;
     const ROW_GAP = 44;
     const WORLD_PADDING = 80;
@@ -3840,6 +3840,11 @@
             ? this.options.createNodeCard(node, {
                 selected: node.nodeId === this.selectedNodeId,
                 onSelect: onSelect,
+                onPreview: function () {
+                    if (typeof this.options.onOpenPreview !== 'function') return false;
+                    this.select(node.nodeId);
+                    return this.openSelectedPreview();
+                }.bind(this),
             })
             : fallbackCard(node, onSelect);
         card.classList.add('pm-node-card');

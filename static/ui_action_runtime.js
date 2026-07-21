@@ -172,7 +172,18 @@
         const overrides = (after && after.display && after.display.overrides) || {};
         const motion = (after && after.motion) || {};
         const rotation = (after && after.rotation) || {};
+        const processMapSelection = after && after.process_map_selection;
         switch (action.type) {
+            case 'set_process_map_part_scope':
+                return processMapSelection
+                    && processMapSelection.scope_occurrence_id === action.scope_occurrence_id
+                    && Number(processMapSelection.total) > 0
+                    ? { ok: true }
+                    : { ok: false, error: 'process_map_scope_not_applied' };
+            case 'clear_process_map_part_scope':
+                return processMapSelection == null
+                    ? { ok: true }
+                    : { ok: false, error: 'process_map_scope_not_cleared' };
             case 'play_motion':
                 return motion.playing ? { ok: true } : { ok: false, error: 'motion_not_playing' };
             case 'pause_motion':

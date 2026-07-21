@@ -1,7 +1,7 @@
 {
   "contract_version": 1,
   "max_actions": 25,
-  "workspaces": ["assembly", "assembly_compare", "3dmodel", "part", "drawing", "report", "current"],
+  "workspaces": ["assembly", "assembly_compare", "3dmodel", "part", "drawing", "report", "process_map", "current"],
   "actions": {
     "open_workspace": {
       "effect": "navigation",
@@ -10,6 +10,21 @@
         "tab": {"type": "string", "max_length": 40},
         "subtab": {"type": "string", "max_length": 40}
       },
+      "preserves": ["highlight", "display", "motion", "rotation"]
+    },
+    "set_process_map_part_scope": {
+      "effect": "process_map_selection",
+      "required": ["scope_occurrence_id"],
+      "fields": {
+        "scope_occurrence_id": {"type": "string", "max_length": 160},
+        "label": {"type": "string", "max_length": 160}
+      },
+      "preserves": ["highlight", "display", "motion", "rotation"]
+    },
+    "clear_process_map_part_scope": {
+      "effect": "process_map_selection",
+      "required": [],
+      "fields": {},
       "preserves": ["highlight", "display", "motion", "rotation"]
     },
     "set_compare_revisions": {

@@ -904,4 +904,44 @@ check('map catalog keeps the active map visible and sorts templates', () => {
     );
 });
 
+check('required-part scope resolves descendant occurrences without using part numbers', () => {
+    const structure = {
+        schemaVersion: 1,
+        productId: 'fixture',
+        productName: 'Fixture Assembly',
+        occurrences: [
+            { occurrenceId: 'root', parentOccurrenceId: null, name: 'Root', kind: 'assembly' },
+            { occurrenceId: 'body', parentOccurrenceId: 'root', name: 'Body', kind: 'subassembly' },
+            { occurrenceId: 'panel-group', parentOccurrenceId: 'body', name: 'Panels', kind: 'subassembly' },
+            { occurrenceId: 'panel-left', parentOccurrenceId: 'panel-group', itemId: 'PANEL', name: 'Panel', kind: 'part' },
+            { occurrenceId: 'panel-right', parentOccurrenceId: 'panel-group', itemId: 'PANEL', name: 'Panel', kind: 'part' },
+            { occurrenceId: 'frame', parentOccurrenceId: 'root', itemId: 'FRAME', name: 'Frame', kind: 'part' },
+        ],
+    };
+    const before = JSON.stringify(structure);
+    const resolved = runtime.resolveRequiredOccurrenceScope(structure, 'body');
+    assert.deepStrictEqual(resolved.requiredOccurrenceIds, ['panel-left', 'panel-right']);
+    assert.deepStrictEqual(new Set(resolved.expandedOccurrenceIds), new Set(['root', 'body', 'panel-group']));
+    assert.deepStrictEqual(resolved.parentMatchCounts, {
+        root: 2,
+        body: 2,
+        'panel-group': 2,
+    });
+    assert.strictEqual(JSON.stringify(structure), before);
+});
+
+check('required-part scope rejects unknown and empty non-part scopes', () => {
+    const structure = {
+        occurrences: [
+            { occurrenceId: 'root', parentOccurrenceId: null, name: 'Root', kind: 'assembly' },
+            { occurrenceId: 'empty', parentOccurrenceId: 'root', name: 'Empty', kind: 'subassembly' },
+        ],
+    };
+    assert.strictEqual(runtime.resolveRequiredOccurrenceScope(structure, 'missing'), null);
+    assert.deepStrictEqual(
+        runtime.resolveRequiredOccurrenceScope(structure, 'empty').requiredOccurrenceIds,
+        []
+    );
+});
+
 process.stdout.write(`Process-map editor checks: ${checks}/${checks} passed\n`);

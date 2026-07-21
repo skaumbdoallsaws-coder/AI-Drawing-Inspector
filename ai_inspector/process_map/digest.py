@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, Mapping, Sequence
 from .repository import ProcessMapConflictError, load_named_process_map
 
 
-PROCESS_MAP_DIGEST_VERSION = 1
+PROCESS_MAP_DIGEST_VERSION = 2
 PROCESS_MAP_DIGEST_MAX_TOKENS = 3500
 
 
@@ -259,6 +259,56 @@ def _bounded_list(
     return kept
 
 
+def _source_occurrence_records(
+    occurrences: Mapping[str, Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    children: dict[str | None, list[str]] = defaultdict(list)
+    for occurrence_id, occurrence in occurrences.items():
+        parent_id = occurrence.get("parentOccurrenceId")
+        parent_key = str(parent_id) if parent_id else None
+        children[parent_key].append(occurrence_id)
+    for child_ids in children.values():
+        child_ids.sort()
+
+    memo: dict[str, int] = {}
+
+    def descendant_part_count(occurrence_id: str, visiting: set[str]) -> int:
+        if occurrence_id in memo:
+            return memo[occurrence_id]
+        if occurrence_id in visiting:
+            return 0
+        occurrence = occurrences.get(occurrence_id) or {}
+        if str(occurrence.get("kind") or "").lower() == "part":
+            memo[occurrence_id] = 1
+            return 1
+        next_visiting = set(visiting)
+        next_visiting.add(occurrence_id)
+        count = sum(
+            descendant_part_count(child_id, next_visiting)
+            for child_id in children.get(occurrence_id, [])
+        )
+        memo[occurrence_id] = count
+        return count
+
+    records: list[dict[str, Any]] = []
+    for occurrence_id in sorted(occurrences):
+        occurrence = occurrences[occurrence_id]
+        record: dict[str, Any] = {
+            "id": occurrence_id,
+            "parentId": str(occurrence.get("parentOccurrenceId") or ""),
+            "name": _text(occurrence.get("name") or occurrence_id, 160),
+            "kind": _text(occurrence.get("kind") or "unknown", 40),
+            "descendantPartCount": descendant_part_count(occurrence_id, set()),
+        }
+        if isinstance(occurrence.get("level"), int):
+            record["level"] = occurrence["level"]
+        item_id = _text(occurrence.get("itemId"), 120)
+        if item_id:
+            record["itemId"] = item_id
+        records.append(record)
+    return records, children.get(None, [])
+
+
 def _fit_budget(digest: dict[str, Any], maximum_tokens: int) -> dict[str, Any]:
     result = copy.deepcopy(digest)
     truncation = result.setdefault("truncation", {})
@@ -266,6 +316,16 @@ def _fit_budget(digest: dict[str, Any], maximum_tokens: int) -> dict[str, Any]:
     paths.append((result, "nodes", "nodes", 12))
     paths.append((result, "groups", "groups", 4))
     paths.append((result, "logical_connections", "logical_connections", 10))
+    source_structure = result.get("product_structure")
+    if isinstance(source_structure, dict):
+        paths.append(
+            (
+                source_structure,
+                "occurrences",
+                "product_structure.occurrences",
+                12,
+            )
+        )
     findings = result.get("validator_findings")
     if isinstance(findings, list):
         paths.append((result, "validator_findings", "validator_findings", 8))
@@ -362,6 +422,7 @@ def build_process_map_digest(
         for node in nodes
         if node.get("nodeKind") == "junction" and node.get("nodeId")
     }
+    source_occurrences, source_roots = _source_occurrence_records(occurrences)
 
     node_records: list[dict[str, Any]] = []
     suggested_orders: dict[str, float] = {}
@@ -467,6 +528,19 @@ def build_process_map_digest(
             "structureRevision": structure_revision,
         },
         "nodes": _bounded_list(node_records, 160, "nodes", truncation),
+        "product_structure": {
+            "rootOccurrenceIds": source_roots,
+            "occurrenceCount": len(source_occurrences),
+            "partOccurrenceCount": sum(
+                1 for item in source_occurrences if item.get("kind") == "part"
+            ),
+            "occurrences": _bounded_list(
+                source_occurrences,
+                240,
+                "product_structure.occurrences",
+                truncation,
+            ),
+        },
         "groups": [
             {
                 "groupId": str(group.get("groupId") or ""),

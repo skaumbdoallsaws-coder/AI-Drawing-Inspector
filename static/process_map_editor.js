@@ -1340,6 +1340,67 @@
         return { byId: byId, children: children };
     }
 
+    function resolveRequiredOccurrenceScope(structure, scopeOccurrenceId) {
+        const normalized = normalizeProductStructure(structure);
+        const catalog = occurrenceIndex(normalized);
+        const scopeId = String(scopeOccurrenceId || '').trim();
+        const scope = catalog.byId.get(scopeId);
+        if (!scope) return null;
+
+        const requiredOccurrenceIds = [];
+        const visited = new Set();
+        function collect(occurrence) {
+            if (!occurrence || visited.has(occurrence.occurrenceId)) return;
+            visited.add(occurrence.occurrenceId);
+            if (String(occurrence.kind || '').toLowerCase() === 'part') {
+                requiredOccurrenceIds.push(occurrence.occurrenceId);
+                return;
+            }
+            (catalog.children.get(occurrence.occurrenceId) || []).forEach(collect);
+        }
+        collect(scope);
+
+        const expandedOccurrenceIds = new Set();
+        const parentMatchCounts = {};
+        requiredOccurrenceIds.forEach(function (occurrenceId) {
+            let current = catalog.byId.get(occurrenceId);
+            const parentGuard = new Set();
+            while (current && current.parentOccurrenceId) {
+                const parentId = String(current.parentOccurrenceId);
+                if (parentGuard.has(parentId)) break;
+                parentGuard.add(parentId);
+                expandedOccurrenceIds.add(parentId);
+                parentMatchCounts[parentId] = (parentMatchCounts[parentId] || 0) + 1;
+                current = catalog.byId.get(parentId);
+            }
+        });
+
+        return {
+            scopeOccurrenceId: scopeId,
+            scopeName: String(scope.name || scope.itemId || scopeId),
+            requiredOccurrenceIds: requiredOccurrenceIds,
+            expandedOccurrenceIds: Array.from(expandedOccurrenceIds),
+            parentMatchCounts: parentMatchCounts,
+        };
+    }
+
+    function normalizeRequiredOccurrenceSelection(structure, value) {
+        if (!value || typeof value !== 'object') return null;
+        const resolved = resolveRequiredOccurrenceScope(
+            structure,
+            value.scopeOccurrenceId || value.scope_occurrence_id
+        );
+        if (!resolved || !resolved.requiredOccurrenceIds.length) return null;
+        const requestedCurrent = String(
+            value.currentOccurrenceId || value.current_occurrence_id || ''
+        );
+        resolved.label = resolved.scopeName;
+        resolved.currentOccurrenceId = resolved.requiredOccurrenceIds.indexOf(requestedCurrent) >= 0
+            ? requestedCurrent
+            : resolved.requiredOccurrenceIds[0];
+        return resolved;
+    }
+
     function resolveCanvasNode(node, occurrences) {
         if (!node || node.nodeKind !== 'product_occurrence') {
             return node && node.nodeKind === 'process_step'
@@ -1399,6 +1460,20 @@
             this.expandedOccurrenceIds.add(rootOccurrence.occurrenceId);
         }, this);
         this.treeFilter = '';
+        this.requiredOccurrenceSelection = normalizeRequiredOccurrenceSelection(
+            this.productStructure,
+            this.options.requiredOccurrenceSelection
+        );
+        this.agentExpandedOccurrenceIds = new Set(
+            this.requiredOccurrenceSelection
+                ? this.requiredOccurrenceSelection.expandedOccurrenceIds
+                : []
+        );
+        this.requiredOccurrenceIds = new Set(
+            this.requiredOccurrenceSelection
+                ? this.requiredOccurrenceSelection.requiredOccurrenceIds
+                : []
+        );
         this.savedMap = cloneMap(this.processMap);
         this.savedFingerprint = mapFingerprint(this.savedMap);
         this.revision = this.options.revision || null;
@@ -1621,10 +1696,45 @@
         structureHeader.appendChild(structureTitle);
         structureHeader.appendChild(structureHint);
         structureHeader.appendChild(this.treeSearch);
+        this.requiredSummary = document.createElement('section');
+        this.requiredSummary.className = 'pm-required-summary';
+        this.requiredSummary.hidden = true;
+        this.requiredSummary.setAttribute('aria-label', 'Agent identified parts');
+        this.requiredSummaryTitle = document.createElement('div');
+        this.requiredSummaryTitle.className = 'pm-required-summary-title';
+        this.requiredSummaryProgress = document.createElement('div');
+        this.requiredSummaryProgress.className = 'pm-required-summary-progress';
+        this.requiredSummaryActions = document.createElement('div');
+        this.requiredSummaryActions.className = 'pm-required-summary-actions';
+        this.requiredPreviousButton = this._button(
+            '<',
+            'Previous required part',
+            this.focusRequiredOccurrence.bind(this, -1)
+        );
+        this.requiredPreviousButton.classList.add('pm-required-summary-button');
+        this.requiredNextButton = this._button(
+            '>',
+            'Next required part',
+            this.focusRequiredOccurrence.bind(this, 1)
+        );
+        this.requiredNextButton.classList.add('pm-required-summary-button');
+        this.requiredClearButton = this._button(
+            'x',
+            'Clear required-part highlights',
+            this.clearRequiredOccurrenceScope.bind(this)
+        );
+        this.requiredClearButton.classList.add('pm-required-summary-button');
+        this.requiredSummaryActions.appendChild(this.requiredPreviousButton);
+        this.requiredSummaryActions.appendChild(this.requiredNextButton);
+        this.requiredSummaryActions.appendChild(this.requiredClearButton);
+        this.requiredSummary.appendChild(this.requiredSummaryTitle);
+        this.requiredSummary.appendChild(this.requiredSummaryProgress);
+        this.requiredSummary.appendChild(this.requiredSummaryActions);
         this.structureTree = document.createElement('div');
         this.structureTree.className = 'pm-structure-tree';
         this.structureTree.setAttribute('role', 'tree');
         this.structureSidebar.appendChild(structureHeader);
+        this.structureSidebar.appendChild(this.requiredSummary);
         this.structureSidebar.appendChild(this.structureTree);
         this.structureToggle = document.createElement('button');
         this.structureToggle.type = 'button';
@@ -3093,6 +3203,116 @@
         return true;
     };
 
+    ProcessMapEditor.prototype.getRequiredOccurrenceSelection = function () {
+        const selection = this.requiredOccurrenceSelection;
+        if (!selection) return null;
+        const placed = this._placedOccurrenceIds();
+        const required = selection.requiredOccurrenceIds.slice();
+        const placedCount = required.filter(function (occurrenceId) {
+            return placed.has(occurrenceId);
+        }).length;
+        return {
+            scopeOccurrenceId: selection.scopeOccurrenceId,
+            scopeName: selection.scopeName,
+            label: selection.label,
+            requiredOccurrenceIds: required,
+            currentOccurrenceId: selection.currentOccurrenceId,
+            total: required.length,
+            placed: placedCount,
+            remaining: required.length - placedCount,
+        };
+    };
+
+    ProcessMapEditor.prototype._notifyRequiredOccurrenceSelectionChange = function () {
+        if (typeof this.options.onRequiredOccurrenceSelectionChange !== 'function') return;
+        const selection = this.getRequiredOccurrenceSelection();
+        this.options.onRequiredOccurrenceSelectionChange(
+            selection ? JSON.parse(JSON.stringify(selection)) : null
+        );
+    };
+
+    ProcessMapEditor.prototype._scrollToRequiredOccurrence = function (occurrenceId) {
+        if (!this.structureTree || !occurrenceId) return;
+        const schedule = typeof requestAnimationFrame === 'function'
+            ? requestAnimationFrame
+            : function (callback) { return setTimeout(callback, 0); };
+        schedule(function () {
+            if (!this.structureTree) return;
+            const rows = this.structureTree.querySelectorAll('[data-occurrence-id]');
+            const row = Array.prototype.find.call(rows, function (item) {
+                return item.getAttribute('data-occurrence-id') === occurrenceId;
+            });
+            if (row && typeof row.scrollIntoView === 'function') {
+                row.scrollIntoView({ block: 'nearest' });
+            }
+        }.bind(this));
+    };
+
+    ProcessMapEditor.prototype.setRequiredOccurrenceScope = function (scopeOccurrenceId, label) {
+        const selection = normalizeRequiredOccurrenceSelection(this.productStructure, {
+            scopeOccurrenceId: scopeOccurrenceId,
+            label: label,
+        });
+        if (!selection) return false;
+        this.requiredOccurrenceSelection = selection;
+        this.agentExpandedOccurrenceIds = new Set(selection.expandedOccurrenceIds);
+        this.requiredOccurrenceIds = new Set(selection.requiredOccurrenceIds);
+        if (this.treeFilter) {
+            this.treeFilter = '';
+            if (this.treeSearch) this.treeSearch.value = '';
+        }
+        if (this.structureCollapsed) this.setStructureCollapsed(false);
+        this.renderStructureTree();
+        this._notifyRequiredOccurrenceSelectionChange();
+        this._scrollToRequiredOccurrence(selection.currentOccurrenceId);
+        return true;
+    };
+
+    ProcessMapEditor.prototype.clearRequiredOccurrenceScope = function () {
+        this.requiredOccurrenceSelection = null;
+        this.agentExpandedOccurrenceIds.clear();
+        this.requiredOccurrenceIds.clear();
+        this.renderStructureTree();
+        this._notifyRequiredOccurrenceSelectionChange();
+        return true;
+    };
+
+    ProcessMapEditor.prototype.focusRequiredOccurrence = function (direction) {
+        const selection = this.requiredOccurrenceSelection;
+        if (!selection || !selection.requiredOccurrenceIds.length) return false;
+        const placed = this._placedOccurrenceIds();
+        const remaining = selection.requiredOccurrenceIds.filter(function (occurrenceId) {
+            return !placed.has(occurrenceId);
+        });
+        const candidates = remaining.length ? remaining : selection.requiredOccurrenceIds;
+        const currentIndex = candidates.indexOf(selection.currentOccurrenceId);
+        const delta = Number(direction) < 0 ? -1 : 1;
+        const nextIndex = currentIndex < 0
+            ? 0
+            : (currentIndex + delta + candidates.length) % candidates.length;
+        selection.currentOccurrenceId = candidates[nextIndex];
+        this.renderStructureTree();
+        this._notifyRequiredOccurrenceSelectionChange();
+        this._scrollToRequiredOccurrence(selection.currentOccurrenceId);
+        return true;
+    };
+
+    ProcessMapEditor.prototype._renderRequiredOccurrenceSummary = function () {
+        if (!this.requiredSummary) return;
+        const state = this.getRequiredOccurrenceSelection();
+        this.requiredSummary.hidden = !state;
+        if (!state) return;
+        this.requiredSummaryTitle.textContent = state.label;
+        this.requiredSummaryProgress.textContent = state.placed + ' of ' + state.total
+            + ' added to the process map; ' + state.remaining + ' remaining';
+        const multiple = state.total > 1;
+        this.requiredPreviousButton.disabled = !multiple;
+        this.requiredNextButton.disabled = !multiple;
+        this.requiredSummary.setAttribute('data-required-total', String(state.total));
+        this.requiredSummary.setAttribute('data-required-placed', String(state.placed));
+        this.requiredSummary.setAttribute('data-required-remaining', String(state.remaining));
+    };
+
     ProcessMapEditor.prototype._placedOccurrenceIds = function () {
         return new Set(mapNodes(this.processMap).filter(function (node) {
             return node && node.nodeKind === 'product_occurrence' && node.sourceOccurrenceId;
@@ -3115,6 +3335,8 @@
     ProcessMapEditor.prototype.renderStructureTree = function () {
         if (!this.structureTree) return;
         this.structureTree.innerHTML = '';
+        const placed = this._placedOccurrenceIds();
+        this._renderRequiredOccurrenceSummary();
         const roots = this.occurrenceChildren.get(null) || [];
         if (!roots.length) {
             const empty = document.createElement('div');
@@ -3123,7 +3345,6 @@
             this.structureTree.appendChild(empty);
             return;
         }
-        const placed = this._placedOccurrenceIds();
         const filterMemo = new Map();
         roots.forEach(function (occurrence) {
             this._renderStructureOccurrence(occurrence, 0, placed, filterMemo);
@@ -3138,9 +3359,26 @@
     ) {
         if (!this._occurrenceMatchesFilter(occurrence, filterMemo)) return;
         const children = this.occurrenceChildren.get(occurrence.occurrenceId) || [];
-        const expanded = !!this.treeFilter || this.expandedOccurrenceIds.has(occurrence.occurrenceId);
+        const selection = this.requiredOccurrenceSelection;
+        const isRequired = !!selection
+            && this.requiredOccurrenceIds.has(occurrence.occurrenceId);
+        const isRequiredPlaced = isRequired && placed.has(occurrence.occurrenceId);
+        const requiredChildCount = selection
+            ? Number(selection.parentMatchCounts[occurrence.occurrenceId] || 0)
+            : 0;
+        const expanded = !!this.treeFilter
+            || this.expandedOccurrenceIds.has(occurrence.occurrenceId)
+            || this.agentExpandedOccurrenceIds.has(occurrence.occurrenceId);
         const row = document.createElement('div');
-        row.className = 'pm-tree-row' + (placed.has(occurrence.occurrenceId) ? ' placed' : '');
+        const rowClasses = ['pm-tree-row'];
+        if (placed.has(occurrence.occurrenceId)) rowClasses.push('placed');
+        if (isRequired && !isRequiredPlaced) rowClasses.push('agent-required');
+        if (isRequiredPlaced) rowClasses.push('agent-required-complete');
+        if (requiredChildCount) rowClasses.push('agent-required-parent');
+        if (selection && selection.currentOccurrenceId === occurrence.occurrenceId) {
+            rowClasses.push('agent-required-current');
+        }
+        row.className = rowClasses.join(' ');
         row.setAttribute('role', 'treeitem');
         row.setAttribute('data-occurrence-id', occurrence.occurrenceId);
         row.setAttribute('data-product-kind', occurrence.kind || 'part');
@@ -3184,7 +3422,24 @@
             copy.appendChild(itemId);
         }
         row.appendChild(copy);
-        if (placed.has(occurrence.occurrenceId)) {
+        if (isRequired && !isRequiredPlaced) {
+            const badge = document.createElement('span');
+            badge.className = 'pm-tree-required';
+            badge.textContent = 'Required';
+            row.appendChild(badge);
+        } else if (isRequiredPlaced) {
+            const badge = document.createElement('span');
+            badge.className = 'pm-tree-required-complete';
+            badge.textContent = 'Added';
+            row.appendChild(badge);
+        } else if (requiredChildCount) {
+            const badge = document.createElement('span');
+            badge.className = 'pm-tree-required-count';
+            badge.textContent = String(requiredChildCount);
+            badge.title = requiredChildCount + ' required part'
+                + (requiredChildCount === 1 ? '' : 's') + ' in this branch';
+            row.appendChild(badge);
+        } else if (placed.has(occurrence.occurrenceId)) {
             const badge = document.createElement('span');
             badge.className = 'pm-tree-placed';
             badge.textContent = 'Placed';
@@ -4658,6 +4913,20 @@
         const catalog = occurrenceIndex(this.productStructure);
         this.occurrenceById = catalog.byId;
         this.occurrenceChildren = catalog.children;
+        this.requiredOccurrenceSelection = normalizeRequiredOccurrenceSelection(
+            this.productStructure,
+            this.requiredOccurrenceSelection
+        );
+        this.agentExpandedOccurrenceIds = new Set(
+            this.requiredOccurrenceSelection
+                ? this.requiredOccurrenceSelection.expandedOccurrenceIds
+                : []
+        );
+        this.requiredOccurrenceIds = new Set(
+            this.requiredOccurrenceSelection
+                ? this.requiredOccurrenceSelection.requiredOccurrenceIds
+                : []
+        );
         this.renderStructureTree();
     };
 
@@ -5424,6 +5693,7 @@
         recolorGroup: recolorGroup,
         setGroupMembers: setGroupMembers,
         resolveNodeGroupMembership: resolveNodeGroupMembership,
+        resolveRequiredOccurrenceScope: resolveRequiredOccurrenceScope,
         groupContainsPoint: groupContainsPoint,
         smallestContainingGroup: smallestContainingGroup,
         setEdgeLabel: setEdgeLabel,

@@ -16419,7 +16419,7 @@ AGENT_TOOL_SPECS = {
         {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers", "camera_view": "optional: front/top/right/back/bottom/left"}},
         {"name": "fai_fill", "description": "Fill FAI measured values", "args": {"values": "dict of char_number -> measured_value"}},
         {"name": "fai_tol", "description": "Set FAI tolerances", "args": {"values": "dict of char_number -> tolerance_value"}},
-        {"name": "ui_actions", "description": "Declarative UI action block validated against UI action contract v1 -- used for deterministic assembly motion, highlight, display, and viewport-rotation actions.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
+        {"name": "ui_actions", "description": "Declarative UI action block validated against UI action contract v1 -- used for deterministic CAD viewport actions and non-persistent process-map result selection.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
     ],
     "deviation-analyst": [
         {"name": "highlight_dimensions", "description": "Highlight dimensions on the drawing", "args": {"dim_keys": "list of dim_key strings"}},
@@ -16432,7 +16432,7 @@ AGENT_TOOL_SPECS = {
         {"name": "show_geometry_diff", "description": "Show geometry diff overlay on 3D compare viewer", "args": {}},
         {"name": "animate_motion", "description": "Start or stop motion animation", "args": {"action": "start or stop"}},
         {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
-        {"name": "ui_actions", "description": "Chat-first action registry validated against UI action contract v1 -- workspace plus an ordered list of compare, motion, highlight, display, rotation, or navigation actions.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
+        {"name": "ui_actions", "description": "Chat-first action registry validated against UI action contract v1 -- workspace plus ordered CAD viewport or non-persistent process-map selection actions.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
         {"name": "create_edit_session", "description": "Create an edit-session audit record from a cad-edit-handoff payload; does not execute CAD edits.", "args": {"handoffPayload": "cad-edit-handoff payload object", "notes": "optional note string"}},
     ],
     "parts-finder": [
@@ -16657,6 +16657,42 @@ def apply_tool_guardrails(tool_calls: list, agent_type: str, source: str = "unkn
     return calls, warnings
 
 
+def apply_compiled_skill_tool_policy(
+    tool_calls: list,
+    skill_prompt_plan: Optional[Dict[str, Any]],
+) -> tuple[list, list[str]]:
+    """Constrain broad provider tools to the selected workflow's action surface."""
+    workflow = (
+        skill_prompt_plan.get("workflow")
+        if isinstance(skill_prompt_plan, dict)
+        and isinstance(skill_prompt_plan.get("workflow"), dict)
+        else {}
+    )
+    if workflow.get("id") != "process-map-analysis":
+        return tool_calls, []
+    allowed_action_types = {
+        "set_process_map_part_scope",
+        "clear_process_map_part_scope",
+    }
+    filtered = []
+    warnings = []
+    for call in tool_calls or []:
+        if not isinstance(call, dict) or call.get("name") != "ui_actions":
+            warnings.append(f"skill_policy_dropped:{call.get('name') if isinstance(call, dict) else 'invalid'}")
+            continue
+        args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        actions = args.get("actions") if isinstance(args.get("actions"), list) else []
+        if len(actions) != 1 or args.get("workspace") != "process_map" or any(
+            not isinstance(action, dict)
+            or action.get("type") not in allowed_action_types
+            for action in actions
+        ):
+            warnings.append("skill_policy_dropped:ui_actions")
+            continue
+        filtered.append(call)
+    return filtered, warnings
+
+
 def extract_tool_calls_from_response(text: str, agent_type: str) -> tuple:
     """Extract a <tool_calls> JSON block from the model's response text.
     Returns (cleaned_text, tool_calls_list). If no valid block found, returns (text, [])."""
@@ -16807,7 +16843,8 @@ def build_native_tool_guidance(allowed_tools: set[str]) -> str:
         "NATIVE TOOL POLICY\n\n"
         "The API exposes only the tools allowed by the selected skills. Use provider-native tool calls only; "
         "never write control directives or action payloads in prose. "
-        "Call a tool only for an explicit user-requested action. Questions and explanations require no tool. "
+        "Call a tool only for an explicit user-requested action or for a selected skill's documented, "
+        "non-persistent result presentation. Ordinary questions and explanations require no tool. "
         "Use exact IDs from trusted application context, keep arguments minimal, and never claim execution success."
     )
 
@@ -20754,11 +20791,16 @@ def _safe_fai_compiler_route(mode: str) -> Dict[str, Any]:
 
 def _is_process_map_analysis_request(message: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
-    return bool(re.search(
+    graph_request = bool(re.search(
         r"\b(analy[sz]e|review|flow|sequence|bottleneck|parallel|disconnect(?:ed|ion)?|"
         r"entry|terminal|process map)\b",
         normalized,
     ))
+    parts_request = bool(
+        re.search(r"\b(parts?|components?)\b", normalized)
+        and re.search(r"\b(need|required|make|build|belong|contain|included?)\b", normalized)
+    )
+    return graph_request or parts_request
 
 
 def _safe_process_map_compiler_route() -> Dict[str, Any]:
@@ -21422,6 +21464,29 @@ def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[
                     "process_type": _skill_route_text(node.get("processType"), 40),
                 }
             )
+        source_structure = (
+            process_map_graph.get("product_structure")
+            if isinstance(process_map_graph.get("product_structure"), dict)
+            else {}
+        )
+        source_scopes = []
+        for occurrence in (source_structure.get("occurrences") or [])[:160]:
+            if not isinstance(occurrence, dict) or not occurrence.get("id"):
+                continue
+            occurrence_id = _skill_route_text(occurrence.get("id"), 120)
+            facts["target_index"]["process_node"].append(occurrence_id)
+            if str(occurrence.get("kind") or "") not in {"assembly", "subassembly"}:
+                continue
+            source_scopes.append(
+                {
+                    "id": occurrence_id,
+                    "name": _skill_route_text(occurrence.get("name"), 120),
+                    "kind": _skill_route_text(occurrence.get("kind"), 40),
+                    "descendant_part_count": int(
+                        occurrence.get("descendantPartCount") or 0
+                    ),
+                }
+            )
         derived = (
             process_map_graph.get("derived")
             if isinstance(process_map_graph.get("derived"), dict)
@@ -21436,6 +21501,7 @@ def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[
             "revision": _skill_route_text(process_map_identity.get("revision"), 128),
             "node_count": len(process_map_graph.get("nodes") or []),
             "nodes": compact_nodes,
+            "source_scopes": source_scopes,
             "entry_nodes": list(derived.get("entry_nodes") or [])[:20],
             "terminal_nodes": list(derived.get("terminal_nodes") or [])[:20],
             "bottleneck_candidate_count": len(
@@ -23625,6 +23691,16 @@ async def agent_chat(request: AgentChatRequest):
                 result["tool_source"] = "legacy_mirror"
             else:
                 guarded, warnings = [], []
+        guarded, skill_policy_warnings = apply_compiled_skill_tool_policy(
+            guarded or [],
+            _skill_prompt_plan,
+        )
+        warnings = list(warnings or []) + list(skill_policy_warnings or [])
+        if guarded:
+            result["tool_calls"] = guarded
+        else:
+            result.pop("tool_calls", None)
+
         if _skill_executor_plan is not None:
             merged_calls = merge_executor_tool_calls(guarded or [], _skill_executor_plan)
             guarded, executor_warnings = apply_tool_guardrails(

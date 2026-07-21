@@ -185,6 +185,10 @@ Routing rules:
   with analyze-process-map as primary. Use only process-map skill candidates;
   do not mix supplier FAI skills into that workflow. A missing or ambiguous map
   reference requires clarification rather than a guessed target.
+- A question asking which parts or components are required for a named product
+  scope in the process-map structure also selects process-map-analysis with
+  analyze-process-map as primary. Presenting that result as a temporary tree
+  selection is read-only: request no viewport, asset, or system effect.
 - Every skill row declares its workflows. Select a skill only when the selected
   primary_workflow appears in that row. When primary_workflow is null,
   skill_candidates MUST be empty even if the request resembles a skill description.

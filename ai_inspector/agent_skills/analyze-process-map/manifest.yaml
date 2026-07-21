@@ -1,7 +1,7 @@
 schema_version: 1
 id: analyze-process-map
-version: 1.0.0
-description: Analyze a trusted saved process-map graph for sequence gaps, disconnected regions, parallel branches, and bottleneck candidates.
+version: 1.1.0
+description: Analyze a trusted process-map graph and identify descendant part occurrences for a named product-structure scope.
 agents:
   - sage
 workflows:
@@ -11,7 +11,8 @@ modes:
 requires_context:
   - process_map.graph
 optional_context: []
-allowed_tools: []
+allowed_tools:
+  - ui_actions
 side_effects: []
 depends_on: []
 conflicts_with: []

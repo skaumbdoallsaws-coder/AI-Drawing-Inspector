@@ -1,12 +1,13 @@
 schema_version: 1
 id: process-map-analysis
-version: 1.0.0
-description: Analyze a saved manufacturing process map for sequence, connectivity, parallel work, and evidence-backed flow concerns.
+version: 1.1.0
+description: Analyze a saved manufacturing process map and identify product-structure parts for a named process scope.
 agents:
   - sage
 entry_signals:
   - process-map analysis or flow review request
   - sequence, disconnected region, parallel branch, or bottleneck question
+  - parts or components required for a named assembly or subassembly scope
 required_assets:
   - process_map
 optional_assets: []
@@ -18,3 +19,4 @@ stages:
 completion:
   - findings cite saved process-map node ids and names
   - timing or capacity conclusions are not invented
+  - required-part results use trusted occurrence ids and never auto-create cards

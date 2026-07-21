@@ -899,6 +899,60 @@ def run() -> int:
             and page.locator(".pm-node").count() == 0,
             {"expanded": expanded_viewport, "restored": restored_viewport},
         )
+        page.evaluate(
+            "window.__processMapFlow.setRequiredOccurrenceScope('module-b', 'Module B')"
+        )
+        page.evaluate(
+            "window._dispatchUiAction('process_map', {"
+            "type: 'set_process_map_part_scope', "
+            "scope_occurrence_id: 'module-a', label: 'Untrusted Label'})"
+        )
+        required_state = page.evaluate(
+            "window.__processMapFlow.requiredOccurrenceSelection"
+        )
+        record(
+            "agent_scope_replaces_previous_result_and_expands_only_matching_paths",
+            required_state is not None
+            and required_state["scopeOccurrenceId"] == "module-a"
+            and required_state["label"] == "Module A"
+            and required_state["requiredOccurrenceIds"] == ["part-a-1", "part-a-2"]
+            and page.locator(".pm-tree-row.agent-required").count() == 2
+            and page.locator(".pm-tree-row[data-occurrence-id='part-b'].agent-required").count() == 0
+            and page.locator(".pm-tree-row[data-occurrence-id='module-a']").get_attribute("aria-expanded") == "true"
+            and page.evaluate("window.__processMapFlow.editor.dirty") is False
+            and page.locator(".pm-node").count() == 0,
+            required_state,
+        )
+        summary = page.locator(".pm-required-summary")
+        record(
+            "required_part_summary_reports_progress_and_navigation",
+            summary.get_attribute("data-required-total") == "2"
+            and summary.get_attribute("data-required-placed") == "0"
+            and summary.get_attribute("data-required-remaining") == "2"
+            and page.get_by_role("button", name="Previous required part").count() == 1
+            and page.get_by_role("button", name="Next required part").count() == 1
+            and page.get_by_role("button", name="Clear required-part highlights").count() == 1,
+        )
+        page.screenshot(
+            path=str(OUT_DIR / "process_flow_required_parts.png"),
+            full_page=False,
+        )
+        page.get_by_role("button", name="Next required part").click()
+        record(
+            "required_part_navigation_moves_one_stable_tree_focus",
+            page.locator(".pm-tree-row.agent-required-current").count() == 1
+            and page.locator(
+                ".pm-tree-row[data-occurrence-id='part-a-2'].agent-required-current"
+            ).count() == 1,
+        )
+        page.locator(".tab[data-tab='drawing']").click()
+        page.locator(".tab[data-tab='training']").click()
+        page.wait_for_selector("[data-process-flow-editor='true']")
+        record(
+            "required_part_result_survives_process_map_remount",
+            page.locator(".pm-tree-row.agent-required").count() == 2
+            and page.locator(".pm-required-summary").get_attribute("data-required-total") == "2",
+        )
         _expand(page, "module-a")
         record(
             "assemblies_and_subassemblies_expand_independently",
@@ -920,6 +974,25 @@ def run() -> int:
             and abs((first_box["y"] + first_box["height"] / 2) - (viewport_box["y"] + first_target["y"])) < 12,
             {"card": first_box, "viewport": viewport_box, "target": first_target},
         )
+        record(
+            "placing_required_part_updates_progress_and_completion_state",
+            page.locator(".pm-required-summary").get_attribute("data-required-placed") == "1"
+            and page.locator(".pm-required-summary").get_attribute("data-required-remaining") == "1"
+            and page.locator(
+                ".pm-tree-row[data-occurrence-id='part-a-1'].agent-required-complete"
+            ).count() == 1
+            and page.locator(
+                ".pm-tree-row[data-occurrence-id='part-a-1'] .pm-tree-required-complete"
+            ).count() == 1,
+        )
+        page.get_by_role("button", name="Clear required-part highlights").click()
+        record(
+            "clearing_required_parts_keeps_placed_cards_and_normal_tree_state",
+            page.locator(".pm-required-summary:visible").count() == 0
+            and page.locator(".pm-tree-row.agent-required").count() == 0
+            and page.locator(".pm-node").count() == 1,
+        )
+        _expand(page, "module-a")
         record(
             "placed_tree_occurrence_is_marked",
             page.locator(".pm-tree-row[data-occurrence-id='part-a-1'] .pm-tree-placed").count() == 1,
@@ -1360,9 +1433,18 @@ def run() -> int:
         canvas_box = preview_canvas.bounding_box()
         assert canvas_box is not None
         before_orbit = preview_canvas.screenshot()
+        canvas_box = preview_canvas.bounding_box()
+        assert canvas_box is not None
+        before_camera = page.evaluate(
+            "trainingState.uniqueItemPreviewViewer.camera.position.toArray()"
+        )
+        orbit_start = {
+            "x": canvas_box["x"] + canvas_box["width"] * 0.46,
+            "y": canvas_box["y"] + canvas_box["height"] * 0.48,
+        }
         page.mouse.move(
-            canvas_box["x"] + canvas_box["width"] * 0.46,
-            canvas_box["y"] + canvas_box["height"] * 0.48,
+            orbit_start["x"],
+            orbit_start["y"],
         )
         page.mouse.down()
         page.mouse.move(
@@ -1371,8 +1453,11 @@ def run() -> int:
             steps=8,
         )
         page.mouse.up()
-        page.wait_for_timeout(180)
-        after_orbit = preview_canvas.screenshot()
+        after_orbit = before_orbit
+        orbit_deadline = time.time() + 1.5
+        while after_orbit == before_orbit and time.time() < orbit_deadline:
+            page.wait_for_timeout(100)
+            after_orbit = preview_canvas.screenshot()
         after_direct_preview = page.evaluate(
             """nodeId => {
                 const editor = window.__processMapFlow.editor;
@@ -1384,13 +1469,23 @@ def run() -> int:
             }""",
             first_id,
         )
+        after_camera = page.evaluate(
+            "trainingState.uniqueItemPreviewViewer.camera.position.toArray()"
+        )
+        camera_moved = any(
+            abs(float(before) - float(after)) > 0.0001
+            for before, after in zip(before_camera, after_camera)
+        )
         record(
             "card_thumbnail_opens_rotatable_3d_preview_without_moving_the_card",
-            before_orbit != after_orbit
+            camera_moved
             and after_direct_preview == direct_preview_state
             and page.locator(".pm-card-toolbar").count() == 0,
             {
                 "pixelsChanged": before_orbit != after_orbit,
+                "cameraMoved": camera_moved,
+                "cameraBefore": before_camera,
+                "cameraAfter": after_camera,
                 "before": direct_preview_state,
                 "after": after_direct_preview,
             },

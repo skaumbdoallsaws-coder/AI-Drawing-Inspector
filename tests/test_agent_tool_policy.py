@@ -64,17 +64,19 @@ def test_contract_is_ascii_strict_and_covers_existing_actions():
     assert all(byte < 128 for byte in raw)
     contract = load_ui_action_contract()
     assert contract["contract_version"] == 1
-    assert len(contract["actions"]) == 21
+    assert len(contract["actions"]) == 23
     assert {
         "set_part_highlight",
         "set_part_display",
         "play_motion",
         "rotate_view",
         "compare_supplier_specs",
+        "set_process_map_part_scope",
+        "clear_process_map_part_scope",
     } <= set(contract["actions"])
     assert tool_policy_metadata() == {
         "contract_version": 1,
-        "action_count": 21,
+        "action_count": 23,
         "max_actions": 25,
         "receipt_schema": "execution-receipt.schema.json",
     }
@@ -114,6 +116,20 @@ def test_server_tool_guard_applies_the_same_contract():
         "deviation-analyst",
     )
     assert rejected == []
+
+    process_map_bundle = {
+        "workspace": "process_map",
+        "actions": [{
+            "type": "set_process_map_part_scope",
+            "scope_occurrence_id": "bodywork-1",
+            "label": "Bodywork Assembly",
+        }],
+    }
+    guarded = server.sanitize_tool_calls(
+        [{"name": "ui_actions", "args": process_map_bundle}],
+        "deviation-analyst",
+    )
+    assert guarded[0]["args"]["actions"][0]["scope_occurrence_id"] == "bodywork-1"
 
 
 def test_receipt_sanitizer_is_strict_bounded_and_deduplicated():
@@ -178,7 +194,7 @@ def test_internal_status_reports_phase4_tool_policy():
             os.environ["INSPECTORPRO_SKILLS_SHADOW"] = previous_shadow
     assert result["phase"] == 5
     assert result["tool_policy"]["contract_version"] == 1
-    assert result["tool_policy"]["action_count"] == 21
+    assert result["tool_policy"]["action_count"] == 23
 
 
 def test_receipt_schema_is_ascii_and_closed():

@@ -114,8 +114,58 @@ def test_linear_digest_is_deterministic_bounded_and_golden():
         "sequence_conflicts": [],
     }
     assert _canonical_sha(first) == (
-        "02167fa976a35ba81924b283909298a39dc72fb93802f1bc56d8ad1b46db861f"
+        "28ef8ffe4da9e02c851285ff9d74777a25302abb4d50d92b6e3518cfd1518ca6"
     )
+
+
+def test_digest_exposes_trusted_scope_ids_and_deterministic_part_counts():
+    structure = {
+        "schemaVersion": 1,
+        "productId": "fixture-product",
+        "productName": "Fixture Product",
+        "occurrences": [
+            {
+                "occurrenceId": "root",
+                "parentOccurrenceId": None,
+                "name": "Complete Assembly",
+                "kind": "assembly",
+                "level": 0,
+            },
+            {
+                "occurrenceId": "body",
+                "parentOccurrenceId": "root",
+                "name": "Body Assembly",
+                "kind": "subassembly",
+                "level": 1,
+            },
+            {
+                "occurrenceId": "panel-left",
+                "parentOccurrenceId": "body",
+                "itemId": "PANEL",
+                "name": "Panel",
+                "kind": "part",
+                "level": 2,
+            },
+            {
+                "occurrenceId": "panel-right",
+                "parentOccurrenceId": "body",
+                "itemId": "PANEL",
+                "name": "Panel",
+                "kind": "part",
+                "level": 2,
+            },
+        ],
+    }
+    digest = _digest(_map([], []), structure)
+    records = {
+        item["id"]: item for item in digest["product_structure"]["occurrences"]
+    }
+    assert digest["digest_version"] == 2
+    assert digest["product_structure"]["rootOccurrenceIds"] == ["root"]
+    assert digest["product_structure"]["partOccurrenceCount"] == 2
+    assert records["root"]["descendantPartCount"] == 2
+    assert records["body"]["descendantPartCount"] == 2
+    assert records["panel-left"]["itemId"] == "PANEL"
 
 
 def test_diamond_digest_finds_parallel_work_and_fan_in_candidate():
@@ -294,7 +344,9 @@ def test_second_workflow_routes_compiles_read_only_and_has_no_executor():
     plan, reason = server._compose_production_skill_prompt(route, mode="training")
     assert reason == "" and plan is not None
     assert plan["workflow"]["id"] == "process-map-analysis"
-    assert plan["allowed_tools"] == []
+    assert plan["allowed_tools"] == ["ui_actions"]
+    assert "set_process_map_part_scope" in plan["prompt"]
+    assert plan["resolved_policy"]["side_effect_default"] == "allowed"
     assert "bottleneck candidate" in plan["prompt"].lower()
     compiled = server.compile_skill_context(
         {"active_mode": "training", "process_map_graph": digest},
@@ -308,6 +360,52 @@ def test_second_workflow_routes_compiles_read_only_and_has_no_executor():
         message="analyze this map",
         viewport_authorized=True,
     ) is None
+
+
+def test_process_map_parts_question_uses_analysis_workflow():
+    assert server._is_process_map_analysis_request(
+        "What parts will I need to make the body of the racing bike?"
+    )
+
+
+def test_process_map_skill_tool_policy_allows_only_transient_tree_selection():
+    plan = {"workflow": {"id": "process-map-analysis"}}
+    allowed = {
+        "name": "ui_actions",
+        "args": {
+            "workspace": "process_map",
+            "actions": [{
+                "type": "set_process_map_part_scope",
+                "scope_occurrence_id": "bodywork-1",
+                "label": "Bodywork Assembly",
+            }],
+        },
+    }
+    guarded, warnings = server.apply_compiled_skill_tool_policy([allowed], plan)
+    assert guarded == [allowed]
+    assert warnings == []
+
+    disallowed = {
+        "name": "ui_actions",
+        "args": {
+            "workspace": "assembly",
+            "actions": [{"type": "play_motion"}],
+        },
+    }
+    guarded, warnings = server.apply_compiled_skill_tool_policy([disallowed], plan)
+    assert guarded == []
+    assert warnings == ["skill_policy_dropped:ui_actions"]
+
+    unrelated = {"name": "highlight_parts", "args": {"part_numbers": ["100006"]}}
+    guarded, warnings = server.apply_compiled_skill_tool_policy([unrelated], plan)
+    assert guarded == []
+    assert warnings == ["skill_policy_dropped:highlight_parts"]
+
+    ambiguous = deepcopy(allowed)
+    ambiguous["args"]["actions"].append({"type": "clear_process_map_part_scope"})
+    guarded, warnings = server.apply_compiled_skill_tool_policy([ambiguous], plan)
+    assert guarded == []
+    assert warnings == ["skill_policy_dropped:ui_actions"]
 
 
 def test_registering_second_workflow_does_not_change_compiled_fai_prompt():

@@ -24,6 +24,7 @@ function baseState() {
         display: { overrides: {} },
         motion: { playing: false, package_mode: true, motion_id: null, rpm: null, angle_deg: 0 },
         rotation: { assembly: false, part: false },
+        process_map_selection: null,
     };
 }
 
@@ -156,6 +157,48 @@ check('successful receipt has the closed phase4 shape', () => {
         'error', 'evidence', 'receipt_id', 'requested_args', 'status', 'timestamp',
         'tool_call_id', 'tool_id',
     ]);
+});
+
+check('process-map scope selection is validated and receipt-verifiable', () => {
+    const validation = runtime.validateBundle(contract, {
+        workspace: 'process_map',
+        actions: [{
+            type: 'set_process_map_part_scope',
+            scope_occurrence_id: 'bodywork-1',
+            label: 'Bodywork Assembly',
+        }],
+    });
+    assert.strictEqual(validation.ok, true);
+    const before = baseState();
+    const after = baseState();
+    after.active_tab = 'training';
+    after.process_map_selection = {
+        scope_occurrence_id: 'bodywork-1',
+        label: 'Bodywork Assembly',
+        total: 24,
+        placed: 0,
+        remaining: 24,
+    };
+    assert.deepStrictEqual(runtime.verifyPostcondition(
+        contract,
+        validation.bundle.actions[0],
+        before,
+        after,
+        true
+    ), { ok: true });
+});
+
+check('process-map scope clear requires an empty transient selection', () => {
+    const before = baseState();
+    before.process_map_selection = { scope_occurrence_id: 'bodywork-1', total: 24 };
+    const after = baseState();
+    assert.deepStrictEqual(runtime.verifyPostcondition(
+        contract,
+        { type: 'clear_process_map_part_scope', action_id: 'a1' },
+        before,
+        after,
+        true
+    ), { ok: true });
 });
 
 process.stdout.write(`${checks} passed, 0 failed\n`);

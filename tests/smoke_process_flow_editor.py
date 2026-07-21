@@ -862,18 +862,62 @@ def run() -> int:
             "loading_and_expanding_tree_creates_no_canvas_nodes",
             page.locator(".pm-node").count() == 0,
         )
+        initial_sidebar = page.locator(".pm-structure-sidebar").bounding_box()
+        initial_divider = page.locator(".ip-pane-divider").bounding_box()
+        initial_toggle = page.get_by_role("button", name="Collapse pane").bounding_box()
+        record(
+            "solidworks_splitter_toggle_is_attached_and_vertically_centered",
+            initial_sidebar is not None
+            and initial_divider is not None
+            and initial_toggle is not None
+            and abs(
+                initial_sidebar["x"] + initial_sidebar["width"]
+                - initial_divider["x"]
+            ) < 2
+            and abs(
+                initial_toggle["y"] + initial_toggle["height"] / 2
+                - (initial_divider["y"] + initial_divider["height"] / 2)
+            ) < 2
+            and page.locator(".pm-workspace > .pm-structure-toggle").count() == 0,
+            {
+                "sidebar": initial_sidebar,
+                "divider": initial_divider,
+                "toggle": initial_toggle,
+            },
+        )
+        resize_hit = page.locator(".ip-pane-divider-resize")
+        resize_box = resize_hit.bounding_box()
+        assert resize_box is not None and initial_sidebar is not None
+        resize_y = resize_box["y"] + min(80, resize_box["height"] / 4)
+        page.mouse.move(resize_box["x"] + resize_box["width"] / 2, resize_y)
+        page.mouse.down()
+        page.mouse.move(resize_box["x"] + resize_box["width"] / 2 + 40, resize_y)
+        page.mouse.up()
+        resized_sidebar = page.locator(".pm-structure-sidebar").bounding_box()
         expanded_viewport = page.locator(".pm-viewport").bounding_box()
-        page.get_by_role("button", name="Collapse assembly tree").click()
+        record(
+            "splitter_drag_resizes_without_collapsing_or_changing_graph_state",
+            resized_sidebar is not None
+            and resized_sidebar["width"] > initial_sidebar["width"] + 30
+            and not page.locator(".pm-editor").evaluate(
+                "el => el.classList.contains('structure-collapsed')"
+            )
+            and page.locator(".pm-node").count() == 0,
+            {"before": initial_sidebar, "after": resized_sidebar},
+        )
+        page.get_by_role("button", name="Collapse pane").click()
         page.wait_for_selector(".pm-editor.structure-collapsed")
         page.wait_for_timeout(220)
         collapsed_viewport = page.locator(".pm-viewport").bounding_box()
         record(
-            "assembly_tree_collapses_to_a_stable_rail_without_changing_graph_state",
+            "assembly_tree_collapses_to_the_divider_without_changing_graph_state",
             expanded_viewport is not None
             and collapsed_viewport is not None
             and collapsed_viewport["x"] < expanded_viewport["x"] - 200
             and page.locator(".pm-structure-sidebar").get_attribute("aria-hidden") == "true"
-            and page.get_by_role("button", name="Expand assembly tree").get_attribute("aria-expanded") == "false"
+            and page.locator(".pm-structure-sidebar").get_attribute("inert") is not None
+            and page.get_by_role("button", name="Expand pane").get_attribute("aria-expanded") == "false"
+            and page.locator(".ip-pane-divider.is-collapsed").count() == 1
             and page.locator(".pm-node").count() == 0,
             {"expanded": expanded_viewport, "collapsed": collapsed_viewport},
         )
@@ -882,22 +926,41 @@ def run() -> int:
         page.wait_for_selector("[data-process-flow-editor='true'].structure-collapsed")
         record(
             "assembly_tree_collapse_state_survives_training_tab_remount",
-            page.get_by_role("button", name="Expand assembly tree").count() == 1
+            page.get_by_role("button", name="Expand pane").count() == 1
             and page.locator(".pm-node").count() == 0,
         )
-        page.get_by_role("button", name="Expand assembly tree").click()
+        page.get_by_role("button", name="Expand pane").click()
         page.wait_for_function(
             "!document.querySelector('[data-process-flow-editor=true]').classList.contains('structure-collapsed')"
         )
         page.wait_for_timeout(220)
         restored_viewport = page.locator(".pm-viewport").bounding_box()
+        restored_sidebar = page.locator(".pm-structure-sidebar").bounding_box()
         record(
-            "assembly_tree_expands_without_relaying_out_the_process_map",
+            "assembly_tree_expands_at_its_last_width_without_relaying_out_the_map",
             expanded_viewport is not None
             and restored_viewport is not None
             and abs(restored_viewport["x"] - expanded_viewport["x"]) < 2
+            and resized_sidebar is not None
+            and restored_sidebar is not None
+            and abs(restored_sidebar["width"] - resized_sidebar["width"]) < 2
             and page.locator(".pm-node").count() == 0,
-            {"expanded": expanded_viewport, "restored": restored_viewport},
+            {
+                "expanded": expanded_viewport,
+                "restored": restored_viewport,
+                "resizedSidebar": resized_sidebar,
+                "restoredSidebar": restored_sidebar,
+            },
+        )
+        page.get_by_role("button", name="Collapse pane").press("Space")
+        page.wait_for_selector(".pm-editor.structure-collapsed")
+        page.get_by_role("button", name="Expand pane").press("Enter")
+        page.wait_for_function(
+            "!document.querySelector('[data-process-flow-editor=true]').classList.contains('structure-collapsed')"
+        )
+        record(
+            "splitter_toggle_supports_space_and_enter",
+            page.get_by_role("button", name="Collapse pane").get_attribute("aria-expanded") == "true",
         )
         page.evaluate(
             "window.__processMapFlow.setRequiredOccurrenceScope('module-b', 'Module B')"

@@ -38,6 +38,11 @@
     const DEFAULT_GROUP_WIDTH = 660;
     const DEFAULT_GROUP_HEIGHT = 390;
     const GROUP_HEADER_OVERHANG = 28;
+    const DEFAULT_PANE_WIDTH = 300;
+    const MIN_PANE_WIDTH = 220;
+    const MAX_PANE_WIDTH = 480;
+    const MIN_VIEWPORT_WIDTH = 320;
+    const PANE_RESIZE_STEP = 12;
     const REFERENCE_KINDS = ['machine', 'tool', 'requirement', 'standard'];
     const PORT_ORIENTATIONS = ['horizontal', 'vertical'];
     const PORT_ORDERS = ['input_first', 'output_first'];
@@ -1255,6 +1260,264 @@
         return element;
     }
 
+    function normalizePaneWidth(value, minimum, maximum, fallback) {
+        const lower = Number.isFinite(Number(minimum)) ? Number(minimum) : MIN_PANE_WIDTH;
+        const upper = Math.max(
+            lower,
+            Number.isFinite(Number(maximum)) ? Number(maximum) : MAX_PANE_WIDTH
+        );
+        const fallbackWidth = Number.isFinite(Number(fallback))
+            ? Number(fallback)
+            : DEFAULT_PANE_WIDTH;
+        const numeric = Number.isFinite(Number(value)) ? Number(value) : fallbackWidth;
+        return Math.round(clamp(numeric, lower, upper));
+    }
+
+    function PaneDivider(options) {
+        this.options = options || {};
+        this.workspace = this.options.workspace;
+        this.pane = this.options.pane;
+        this.minimumWidth = Number(this.options.minimumWidth) || MIN_PANE_WIDTH;
+        this.maximumConfiguredWidth = Number(this.options.maximumWidth) || MAX_PANE_WIDTH;
+        this.minimumViewportWidth = Number(this.options.minimumViewportWidth)
+            || MIN_VIEWPORT_WIDTH;
+        this.width = normalizePaneWidth(
+            this.options.width,
+            this.minimumWidth,
+            this.maximumConfiguredWidth,
+            DEFAULT_PANE_WIDTH
+        );
+        this.collapsed = !!this.options.collapsed;
+        this.resizeState = null;
+        this.toggleDragState = null;
+        this.toggleDragged = false;
+
+        this.element = document.createElement('div');
+        this.element.className = 'ip-pane-divider';
+        this.resizeHandle = document.createElement('div');
+        this.resizeHandle.className = 'ip-pane-divider-resize';
+        this.resizeHandle.tabIndex = 0;
+        this.resizeHandle.setAttribute('role', 'separator');
+        this.resizeHandle.setAttribute('aria-orientation', 'vertical');
+        this.resizeHandle.setAttribute(
+            'aria-label',
+            this.options.resizeLabel || 'Resize pane'
+        );
+
+        this.toggle = document.createElement('button');
+        this.toggle.type = 'button';
+        this.toggle.className = 'ip-pane-divider-toggle';
+        if (this.pane && this.pane.id) {
+            this.toggle.setAttribute('aria-controls', this.pane.id);
+        }
+        const icon = svgElement('svg', {
+            class: 'ip-pane-divider-toggle-icon',
+            viewBox: '0 0 24 24',
+            'aria-hidden': 'true',
+        });
+        icon.appendChild(svgElement('path', {
+            d: 'M14.5 7.5L10 12l4.5 4.5',
+            fill: 'none',
+            stroke: 'currentColor',
+            'stroke-width': '2',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+        }));
+        this.toggle.appendChild(icon);
+        this.icon = icon;
+        this.element.appendChild(this.resizeHandle);
+        this.element.appendChild(this.toggle);
+
+        this._onResizePointerDown = this._resizePointerDown.bind(this);
+        this._onResizePointerMove = this._resizePointerMove.bind(this);
+        this._onResizePointerUp = this._resizePointerUp.bind(this);
+        this._onResizeKeyDown = this._resizeKeyDown.bind(this);
+        this._onTogglePointerDown = this._togglePointerDown.bind(this);
+        this._onTogglePointerMove = this._togglePointerMove.bind(this);
+        this._onTogglePointerUp = this._togglePointerUp.bind(this);
+        this._onTogglePointerCancel = this._togglePointerCancel.bind(this);
+        this._onToggleClick = this._toggleClick.bind(this);
+        this.resizeHandle.addEventListener('pointerdown', this._onResizePointerDown);
+        this.resizeHandle.addEventListener('pointermove', this._onResizePointerMove);
+        this.resizeHandle.addEventListener('pointerup', this._onResizePointerUp);
+        this.resizeHandle.addEventListener('pointercancel', this._onResizePointerUp);
+        this.resizeHandle.addEventListener('keydown', this._onResizeKeyDown);
+        this.toggle.addEventListener('pointerdown', this._onTogglePointerDown);
+        this.toggle.addEventListener('pointermove', this._onTogglePointerMove);
+        this.toggle.addEventListener('pointerup', this._onTogglePointerUp);
+        this.toggle.addEventListener('pointercancel', this._onTogglePointerCancel);
+        this.toggle.addEventListener('click', this._onToggleClick);
+        this.sync(this.collapsed, this.width);
+    }
+
+    PaneDivider.prototype._availableMaximumWidth = function () {
+        if (!this.workspace || typeof this.workspace.getBoundingClientRect !== 'function') {
+            return this.maximumConfiguredWidth;
+        }
+        const workspaceWidth = this.workspace.getBoundingClientRect().width;
+        if (!Number.isFinite(workspaceWidth) || workspaceWidth <= 0) {
+            return this.maximumConfiguredWidth;
+        }
+        return Math.max(
+            this.minimumWidth,
+            Math.min(
+                this.maximumConfiguredWidth,
+                Math.floor(workspaceWidth - this.minimumViewportWidth)
+            )
+        );
+    };
+
+    PaneDivider.prototype._normalizedWidth = function (value) {
+        return normalizePaneWidth(
+            value,
+            this.minimumWidth,
+            this._availableMaximumWidth(),
+            this.width
+        );
+    };
+
+    PaneDivider.prototype.sync = function (collapsed, width) {
+        this.collapsed = !!collapsed;
+        this.width = this._normalizedWidth(width);
+        if (this.workspace) {
+            this.workspace.style.setProperty('--pm-structure-width', this.width + 'px');
+        }
+        this.element.classList.toggle('is-collapsed', this.collapsed);
+        this.toggle.setAttribute('aria-expanded', this.collapsed ? 'false' : 'true');
+        const label = this.collapsed ? 'Expand pane' : 'Collapse pane';
+        this.toggle.setAttribute('aria-label', label);
+        this.toggle.title = label;
+        this.resizeHandle.tabIndex = this.collapsed ? -1 : 0;
+        this.resizeHandle.setAttribute('aria-disabled', this.collapsed ? 'true' : 'false');
+        this.resizeHandle.setAttribute('aria-valuemin', String(this.minimumWidth));
+        this.resizeHandle.setAttribute('aria-valuemax', String(this._availableMaximumWidth()));
+        this.resizeHandle.setAttribute('aria-valuenow', String(this.width));
+    };
+
+    PaneDivider.prototype._requestWidth = function (value) {
+        const next = this._normalizedWidth(value);
+        let applied = next;
+        if (typeof this.options.onResize === 'function') {
+            const result = this.options.onResize(next);
+            if (Number.isFinite(Number(result))) applied = Number(result);
+        }
+        this.sync(this.collapsed, applied);
+        return this.width;
+    };
+
+    PaneDivider.prototype._resizePointerDown = function (event) {
+        if (this.collapsed || event.button !== 0) return;
+        event.preventDefault();
+        this.resizeState = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: this.width,
+        };
+        this.element.classList.add('is-resizing');
+        if (this.workspace) this.workspace.classList.add('is-resizing-pane');
+        if (typeof this.resizeHandle.setPointerCapture === 'function') {
+            this.resizeHandle.setPointerCapture(event.pointerId);
+        }
+    };
+
+    PaneDivider.prototype._resizePointerMove = function (event) {
+        if (!this.resizeState || this.resizeState.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        this._requestWidth(
+            this.resizeState.startWidth + event.clientX - this.resizeState.startX
+        );
+    };
+
+    PaneDivider.prototype._resizePointerUp = function (event) {
+        if (!this.resizeState || this.resizeState.pointerId !== event.pointerId) return;
+        this.resizeState = null;
+        this.element.classList.remove('is-resizing');
+        if (this.workspace) this.workspace.classList.remove('is-resizing-pane');
+        if (
+            typeof this.resizeHandle.hasPointerCapture === 'function'
+            && this.resizeHandle.hasPointerCapture(event.pointerId)
+        ) {
+            this.resizeHandle.releasePointerCapture(event.pointerId);
+        }
+    };
+
+    PaneDivider.prototype._resizeKeyDown = function (event) {
+        if (this.collapsed) return;
+        let next = null;
+        if (event.key === 'ArrowLeft') next = this.width - PANE_RESIZE_STEP;
+        else if (event.key === 'ArrowRight') next = this.width + PANE_RESIZE_STEP;
+        else if (event.key === 'Home') next = this.minimumWidth;
+        else if (event.key === 'End') next = this._availableMaximumWidth();
+        if (next === null) return;
+        event.preventDefault();
+        this._requestWidth(next);
+    };
+
+    PaneDivider.prototype._togglePointerDown = function (event) {
+        if (event.button !== 0) return;
+        event.stopPropagation();
+        this.toggleDragged = false;
+        this.toggleDragState = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+        };
+        if (typeof this.toggle.setPointerCapture === 'function') {
+            this.toggle.setPointerCapture(event.pointerId);
+        }
+    };
+
+    PaneDivider.prototype._togglePointerMove = function (event) {
+        const state = this.toggleDragState;
+        if (!state || state.pointerId !== event.pointerId) return;
+        if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > 5) {
+            this.toggleDragged = true;
+        }
+    };
+
+    PaneDivider.prototype._togglePointerUp = function (event) {
+        const state = this.toggleDragState;
+        if (!state || state.pointerId !== event.pointerId) return;
+        this.toggleDragState = null;
+        if (
+            typeof this.toggle.hasPointerCapture === 'function'
+            && this.toggle.hasPointerCapture(event.pointerId)
+        ) {
+            this.toggle.releasePointerCapture(event.pointerId);
+        }
+        setTimeout(function () { this.toggleDragged = false; }.bind(this), 0);
+    };
+
+    PaneDivider.prototype._togglePointerCancel = function () {
+        this.toggleDragState = null;
+        this.toggleDragged = false;
+    };
+
+    PaneDivider.prototype._toggleClick = function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.toggleDragged) return;
+        if (typeof this.options.onToggle === 'function') {
+            this.options.onToggle(!this.collapsed);
+        }
+    };
+
+    PaneDivider.prototype.destroy = function () {
+        this.resizeState = null;
+        this.toggleDragState = null;
+        if (this.workspace) this.workspace.classList.remove('is-resizing-pane');
+        this.resizeHandle.removeEventListener('pointerdown', this._onResizePointerDown);
+        this.resizeHandle.removeEventListener('pointermove', this._onResizePointerMove);
+        this.resizeHandle.removeEventListener('pointerup', this._onResizePointerUp);
+        this.resizeHandle.removeEventListener('pointercancel', this._onResizePointerUp);
+        this.resizeHandle.removeEventListener('keydown', this._onResizeKeyDown);
+        this.toggle.removeEventListener('pointerdown', this._onTogglePointerDown);
+        this.toggle.removeEventListener('pointermove', this._onTogglePointerMove);
+        this.toggle.removeEventListener('pointerup', this._onTogglePointerUp);
+        this.toggle.removeEventListener('pointercancel', this._onTogglePointerCancel);
+        this.toggle.removeEventListener('click', this._onToggleClick);
+    };
+
     function fallbackCard(node, onSelect) {
         const card = document.createElement('button');
         card.type = 'button';
@@ -1484,6 +1747,13 @@
         this.selectedGroupId = null;
         this.transform = { x: 0, y: 0, scale: 1 };
         this.structureCollapsed = !!this.options.structureCollapsed;
+        this.structureWidth = normalizePaneWidth(
+            this.options.structureWidth,
+            MIN_PANE_WIDTH,
+            MAX_PANE_WIDTH,
+            DEFAULT_PANE_WIDTH
+        );
+        this.structurePaneDivider = null;
         this.interaction = null;
         this.history = new SnapshotHistory(this.options.historyLimit || 50);
         this.dirty = false;
@@ -1736,27 +2006,21 @@
         this.structureSidebar.appendChild(structureHeader);
         this.structureSidebar.appendChild(this.requiredSummary);
         this.structureSidebar.appendChild(this.structureTree);
-        this.structureToggle = document.createElement('button');
-        this.structureToggle.type = 'button';
-        this.structureToggle.className = 'pm-structure-toggle';
-        this.structureToggle.setAttribute('aria-controls', this.structureSidebar.id);
-        const structureToggleIcon = svgElement('svg', {
-            class: 'pm-structure-toggle-icon',
-            viewBox: '0 0 24 24',
-            'aria-hidden': 'true',
+        this.structurePaneDivider = new PaneDivider({
+            workspace: this.workspace,
+            pane: this.structureSidebar,
+            width: this.structureWidth,
+            collapsed: this.structureCollapsed,
+            resizeLabel: 'Resize assembly tree pane',
+            onResize: function (width) {
+                return this.setStructureWidth(width, true);
+            }.bind(this),
+            onToggle: this.setStructureCollapsed.bind(this),
         });
-        structureToggleIcon.appendChild(svgElement('path', {
-            d: 'M15 6l-6 6 6 6',
-            fill: 'none',
-            stroke: 'currentColor',
-            'stroke-width': '2',
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-        }));
-        this.structureToggle.appendChild(structureToggleIcon);
-        this.structureToggle.addEventListener('click', function () {
-            this.setStructureCollapsed(!this.structureCollapsed);
-        }.bind(this));
+        this.structureDivider = this.structurePaneDivider.element;
+        this.structureDivider.classList.add('pm-structure-divider');
+        this.structureToggle = this.structurePaneDivider.toggle;
+        this.structureToggle.classList.add('pm-structure-toggle');
 
         this.viewport = document.createElement('div');
         this.viewport.className = 'pm-viewport';
@@ -1783,7 +2047,7 @@
         this.viewport.appendChild(this.emptyState);
         this.root.appendChild(this.toolbar);
         this.workspace.appendChild(this.structureSidebar);
-        this.workspace.appendChild(this.structureToggle);
+        this.workspace.appendChild(this.structureDivider);
         this.workspace.appendChild(this.viewport);
         if (this.suggestionButton) {
             this.suggestionPanel = document.createElement('aside');
@@ -1822,10 +2086,42 @@
         const collapsed = !!this.structureCollapsed;
         this.root.classList.toggle('structure-collapsed', collapsed);
         this.structureSidebar.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
-        this.structureToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        const label = collapsed ? 'Expand assembly tree' : 'Collapse assembly tree';
-        this.structureToggle.setAttribute('aria-label', label);
-        this.structureToggle.title = label;
+        if (collapsed) this.structureSidebar.setAttribute('inert', '');
+        else this.structureSidebar.removeAttribute('inert');
+        if (this.structurePaneDivider) {
+            this.structurePaneDivider.sync(collapsed, this.structureWidth);
+            this.structureWidth = this.structurePaneDivider.width;
+        }
+    };
+
+    ProcessMapEditor.prototype.setStructureWidth = function (width, notify) {
+        const previous = this.structureWidth;
+        this.structureWidth = normalizePaneWidth(
+            width,
+            MIN_PANE_WIDTH,
+            MAX_PANE_WIDTH,
+            previous || DEFAULT_PANE_WIDTH
+        );
+        if (this.structurePaneDivider) {
+            this.structurePaneDivider.sync(this.structureCollapsed, this.structureWidth);
+            this.structureWidth = this.structurePaneDivider.width;
+        } else if (this.workspace) {
+            this.workspace.style.setProperty(
+                '--pm-structure-width',
+                this.structureWidth + 'px'
+            );
+        }
+        if (
+            notify !== false
+            && this.structureWidth !== previous
+            && typeof this.options.onStructureWidthChange === 'function'
+        ) {
+            this.options.onStructureWidthChange(this.structureWidth);
+        }
+        if (this.cardToolbarManager && this.cardToolbarManager.isOpen()) {
+            this.cardToolbarManager.reposition();
+        }
+        return this.structureWidth;
     };
 
     ProcessMapEditor.prototype.setStructureCollapsed = function (collapsed) {
@@ -5591,6 +5887,10 @@
         this.destroyed = true;
         this._clearSuggestions();
         this.suggestionPanelOpen = false;
+        if (this.structurePaneDivider) {
+            this.structurePaneDivider.destroy();
+            this.structurePaneDivider = null;
+        }
         if (this.cardToolbarManager) {
             this.cardToolbarManager.destroy();
             this.cardToolbarManager = null;
@@ -5650,6 +5950,10 @@
         GROUP_COLOR_KEYS: GROUP_COLOR_KEYS,
         MIN_GROUP_WIDTH: MIN_GROUP_WIDTH,
         MIN_GROUP_HEIGHT: MIN_GROUP_HEIGHT,
+        DEFAULT_PANE_WIDTH: DEFAULT_PANE_WIDTH,
+        MIN_PANE_WIDTH: MIN_PANE_WIDTH,
+        MAX_PANE_WIDTH: MAX_PANE_WIDTH,
+        PaneDivider: PaneDivider,
         SnapshotHistory: SnapshotHistory,
         addEdge: addEdge,
         acceptSuggestions: acceptSuggestions,
@@ -5676,6 +5980,7 @@
         mount: mount,
         moveNode: moveNode,
         moveGroup: moveGroup,
+        normalizePaneWidth: normalizePaneWidth,
         normalizeMapCatalog: normalizeMapCatalog,
         connectedStepPosition: connectedStepPosition,
         portAnchor: portAnchor,

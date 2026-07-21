@@ -944,4 +944,12 @@ check('required-part scope rejects unknown and empty non-part scopes', () => {
     );
 });
 
+check('pane width normalization preserves the last valid splitter width', () => {
+    assert.strictEqual(runtime.normalizePaneWidth(undefined, 220, 480, 300), 300);
+    assert.strictEqual(runtime.normalizePaneWidth(340, 220, 480, 300), 340);
+    assert.strictEqual(runtime.normalizePaneWidth(120, 220, 480, 300), 220);
+    assert.strictEqual(runtime.normalizePaneWidth(900, 220, 480, 300), 480);
+    assert.strictEqual(runtime.normalizePaneWidth(333.6, 220, 480, 300), 334);
+});
+
 process.stdout.write(`Process-map editor checks: ${checks}/${checks} passed\n`);

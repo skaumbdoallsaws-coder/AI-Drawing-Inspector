@@ -161,11 +161,26 @@ def test_digest_exposes_trusted_scope_ids_and_deterministic_part_counts():
         item["id"]: item for item in digest["product_structure"]["occurrences"]
     }
     assert digest["digest_version"] == 2
+    assert digest["nodes"] == []
     assert digest["product_structure"]["rootOccurrenceIds"] == ["root"]
     assert digest["product_structure"]["partOccurrenceCount"] == 2
     assert records["root"]["descendantPartCount"] == 2
     assert records["body"]["descendantPartCount"] == 2
     assert records["panel-left"]["itemId"] == "PANEL"
+
+
+def test_compiled_skill_treats_unplaced_catalog_scopes_as_available():
+    server._reset_agent_skill_runtime_cache_for_tests()
+    plan, reason = server._compose_production_skill_prompt(
+        server._safe_process_map_compiler_route(),
+        mode="training",
+    )
+    assert reason == "" and plan is not None
+    prompt = plan["prompt"]
+    assert "product_structure.occurrences` is the complete" in prompt
+    assert "Canvas placement is irrelevant" in prompt
+    assert "Do not search" in prompt
+    assert "Never say that a scope is missing" in prompt
 
 
 def test_diamond_digest_finds_parallel_work_and_fan_in_candidate():

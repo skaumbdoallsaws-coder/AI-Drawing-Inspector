@@ -21,8 +21,16 @@ Use only the trusted `process_map.graph` evidence supplied by the server.
 When the user asks which parts or components are needed for a named assembly or
 manufacturing scope:
 
+**Critical source distinction:** `product_structure.occurrences` is the complete
+product catalog and is authoritative for this lookup. `nodes` contains only cards
+already placed on the process-map canvas. Canvas placement is irrelevant: the
+requested scope and every one of its descendants may be absent from `nodes` and
+still be valid. Never say that a scope is missing or unavailable when its trusted
+occurrence exists in `product_structure.occurrences`.
+
 1. Resolve exactly one assembly, subassembly, or part from
-   `product_structure.occurrences` by its trusted name and ID.
+   `product_structure.occurrences` by its trusted name and ID. Do not search
+   `nodes` to establish whether the scope exists.
 2. Use its `descendantPartCount`; do not invent, expand, or manually enumerate a
    different part list.
 3. Call `ui_actions` with exactly this non-persistent result action:

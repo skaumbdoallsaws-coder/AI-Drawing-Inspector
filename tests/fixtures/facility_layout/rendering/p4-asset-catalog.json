@@ -1,0 +1,60 @@
+[
+  {
+    "assetId": "asset-pallet-rack-185e9914e281",
+    "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+    "displayName": "Pallet Racking",
+    "category": "rack",
+    "definition": {
+      "geometry": {
+        "aabb": {
+          "minimum": {
+            "x": -0.613599956,
+            "y": 0.0,
+            "z": -1.264199972
+          },
+          "maximum": {
+            "x": 0.613599956,
+            "y": 4.87680006,
+            "z": 1.264199972
+          }
+        },
+        "footprintPolygons": [
+          [
+            {
+              "x": -0.613599956,
+              "z": -1.264199972
+            },
+            {
+              "x": 0.613599956,
+              "z": -1.264199972
+            },
+            {
+              "x": 0.613599956,
+              "z": 1.264199972
+            },
+            {
+              "x": -0.613599956,
+              "z": 1.264199972
+            }
+          ]
+        ],
+        "heightInterval": {
+          "minimumY": 0.0,
+          "maximumY": 4.87680006
+        }
+      }
+    },
+    "artifacts": {
+      "overview": {
+        "path": "generated/industrial_assets/p0_spike/rack_prototypes/Pallet Racking_colored_overview_proxy.glb",
+        "sha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14",
+        "byteLength": 916
+      },
+      "detail": {
+        "path": "generated/industrial_assets/p0_spike/rack_prototypes/Pallet Racking_colored.glb",
+        "sha256": "185e9914e28106b14054a8467b941eba1cf31c85593cd566ab40d608cea77c0c",
+        "byteLength": 13493420
+      }
+    }
+  }
+]

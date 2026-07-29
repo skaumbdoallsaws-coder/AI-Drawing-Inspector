@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InspectorPro Facility Layout P4 Evidence</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #dfe5ea;
+      color: #172431;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      display: grid;
+      grid-template-rows: 50px minmax(0, 1fr);
+      background: #dfe5ea;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .app-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+      padding: 0 16px;
+      border-bottom: 1px solid #07131d;
+      background: #102332;
+      color: #f7fafc;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border: 1px solid #31a4d5;
+      background: #126e98;
+      color: #ffffff;
+      font-size: 13px;
+    }
+
+    .title-block {
+      min-width: 0;
+      margin-right: auto;
+    }
+
+    .title {
+      overflow: hidden;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .subtitle {
+      overflow: hidden;
+      margin-top: 2px;
+      color: #a9bdcb;
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .toolbar button,
+    .view-switch button {
+      min-height: 30px;
+      border: 1px solid #5e7483;
+      border-radius: 4px;
+      background: #1c3546;
+      color: #f5f8fa;
+      cursor: pointer;
+    }
+
+    .toolbar button {
+      padding: 0 13px;
+    }
+
+    .toolbar button:hover,
+    .view-switch button:hover {
+      border-color: #6fc2e2;
+      background: #25485e;
+    }
+
+    .toolbar button:focus-visible,
+    .view-switch button:focus-visible {
+      outline: 2px solid #73c8e8;
+      outline-offset: 2px;
+    }
+
+    .status {
+      min-width: 56px;
+      color: #8dd4ad;
+      font-size: 11px;
+      text-align: right;
+    }
+
+    .workspace {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: 290px minmax(0, 1fr) 270px;
+      background: #cad3da;
+    }
+
+    .plan-pane,
+    .properties-pane {
+      min-width: 0;
+      min-height: 0;
+      background: #f4f7f9;
+    }
+
+    .plan-pane {
+      display: grid;
+      grid-template-rows: 44px minmax(0, 1fr) 52px;
+      border-right: 1px solid #9eabb5;
+    }
+
+    .properties-pane {
+      display: grid;
+      grid-template-rows: 44px minmax(0, 1fr);
+      border-left: 1px solid #9eabb5;
+    }
+
+    .pane-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-width: 0;
+      padding: 0 12px;
+      border-bottom: 1px solid #c4cdd4;
+      color: #20313f;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pane-count {
+      color: #567181;
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    #plan-view {
+      min-width: 0;
+      min-height: 0;
+      background-color: #eef3f6;
+      background-image: radial-gradient(#aebbc5 0.8px, transparent 0.8px);
+      background-size: 16px 16px;
+    }
+
+    #plan-view svg {
+      display: block;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-content: center;
+      gap: 5px 10px;
+      padding: 7px 12px;
+      border-top: 1px solid #c4cdd4;
+      color: #526878;
+      font-size: 9px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .legend-swatch {
+      width: 18px;
+      height: 8px;
+      border: 1px solid #526273;
+      background: #e8edf2;
+    }
+
+    .legend-swatch.route {
+      height: 0;
+      border: 0;
+      border-top: 3px solid #d97706;
+      background: transparent;
+    }
+
+    .three-pane {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: #cbd4dc;
+    }
+
+    #three-view {
+      position: absolute;
+      inset: 0;
+      min-width: 0;
+      min-height: 0;
+      background: #cbd4dc;
+    }
+
+    #three-view canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .viewport-label {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 2;
+      padding: 6px 8px;
+      border: 1px solid rgba(57, 76, 89, 0.55);
+      border-radius: 4px;
+      background: rgba(244, 247, 249, 0.9);
+      color: #314555;
+      font-size: 10px;
+      pointer-events: none;
+    }
+
+    .view-switch {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      z-index: 3;
+      display: flex;
+      gap: 1px;
+      padding: 2px;
+      border: 1px solid #8a99a5;
+      border-radius: 5px;
+      background: #edf2f5;
+    }
+
+    .view-switch button {
+      min-width: 42px;
+      border-color: transparent;
+      background: transparent;
+      color: #344b5a;
+      font-size: 10px;
+    }
+
+    .view-switch button[aria-pressed="true"] {
+      border-color: #4489aa;
+      background: #d4eaf4;
+      color: #0f5374;
+    }
+
+    #properties-content {
+      min-height: 0;
+      overflow: auto;
+      padding: 12px;
+    }
+
+    .empty-properties {
+      padding-top: 12px;
+      color: #647987;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .selection-name {
+      margin: 0 0 3px;
+      color: #183245;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .selection-id {
+      overflow-wrap: anywhere;
+      color: #557181;
+      font-family: Consolas, monospace;
+      font-size: 9px;
+    }
+
+    .property-grid {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr);
+      gap: 8px 10px;
+      margin: 16px 0 0;
+      font-size: 10px;
+    }
+
+    .property-grid dt {
+      color: #6c7e89;
+    }
+
+    .property-grid dd {
+      min-width: 0;
+      margin: 0;
+      overflow-wrap: anywhere;
+      color: #243846;
+      font-weight: 600;
+    }
+
+    .mode-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border: 1px solid #7f9cab;
+      border-radius: 3px;
+      background: #e6eef2;
+      color: #294c5d;
+      text-transform: capitalize;
+    }
+
+    .degraded-banner {
+      display: none;
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      z-index: 3;
+      max-width: 230px;
+      padding: 7px 9px;
+      border: 1px solid #a35c25;
+      border-radius: 4px;
+      background: #fff1dd;
+      color: #753b12;
+      font-size: 10px;
+    }
+
+    .three-pane[data-degraded="true"] .degraded-banner {
+      display: block;
+    }
+
+    @media (max-width: 700px) {
+      body {
+        grid-template-rows: 48px minmax(0, 1fr);
+      }
+
+      .app-bar {
+        gap: 8px;
+        padding: 0 9px;
+      }
+
+      .brand {
+        font-size: 12px;
+      }
+
+      .brand-mark {
+        width: 22px;
+        height: 22px;
+      }
+
+      .subtitle,
+      .status {
+        display: none;
+      }
+
+      .toolbar button {
+        min-height: 28px;
+        padding: 0 9px;
+        font-size: 10px;
+      }
+
+      .workspace {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: 190px minmax(0, 1fr) 170px;
+      }
+
+      .plan-pane {
+        grid-template-rows: 34px minmax(0, 1fr);
+        border-right: 0;
+        border-bottom: 1px solid #9eabb5;
+      }
+
+      .properties-pane {
+        grid-template-rows: 34px minmax(0, 1fr);
+        border-top: 1px solid #9eabb5;
+        border-left: 0;
+      }
+
+      .pane-heading {
+        padding: 0 9px;
+      }
+
+      .legend {
+        display: none;
+      }
+
+      #properties-content {
+        padding: 8px 10px;
+      }
+
+      .property-grid {
+        grid-template-columns: 68px minmax(0, 1fr);
+        gap: 5px 8px;
+        margin-top: 8px;
+      }
+
+      .selection-name {
+        font-size: 12px;
+      }
+
+      .viewport-label {
+        top: 8px;
+        left: 8px;
+      }
+
+      .view-switch {
+        right: 8px;
+        bottom: 8px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/static/vendor/three/0.184.0/build/three.module.min.js",
+        "three/addons/": "/static/vendor/three/0.184.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="/static/facility_layout_editor.js"></script>
+  <script src="/static/facility_layout_three_adapter.js"></script>
+</head>
+<body>
+  <header class="app-bar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">IP</span>
+      <span>InspectorPro</span>
+    </div>
+    <div class="title-block">
+      <div class="title">Facility Layout</div>
+      <div class="subtitle">P4 synchronized renderer evidence</div>
+    </div>
+    <div class="toolbar">
+      <button id="fit-button" type="button" title="Fit facility layout">Fit</button>
+    </div>
+    <div id="status" class="status" aria-live="polite">Loading</div>
+  </header>
+
+  <main class="workspace">
+    <section class="plan-pane" aria-label="Top plan">
+      <div class="pane-heading">
+        <span>Top Plan</span>
+        <span class="pane-count">6 placements</span>
+      </div>
+      <div id="plan-view"></div>
+      <div class="legend" aria-label="Plan legend">
+        <div class="legend-item">
+          <span class="legend-swatch"></span>
+          <span>Rack placement</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-swatch route"></span>
+          <span>Forklift route</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="three-pane" class="three-pane" aria-label="Facility 3D view">
+      <div id="three-view"></div>
+      <div class="viewport-label">P4 Repeated Rack Cell</div>
+      <div class="degraded-banner">
+        3D is unavailable. The top plan remains operational.
+      </div>
+      <div class="view-switch" aria-label="Viewport mode">
+        <button type="button" data-view-mode="plan" aria-pressed="false">Plan</button>
+        <button type="button" data-view-mode="three" aria-pressed="true">3D</button>
+      </div>
+    </section>
+
+    <aside class="properties-pane" aria-label="Placement properties">
+      <div class="pane-heading">
+        <span>Properties</span>
+        <span id="selection-state" class="pane-count">No selection</span>
+      </div>
+      <div id="properties-content">
+        <div class="empty-properties">
+          Select a rack in the top plan or 3D view.
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="./p4-renderer.js"></script>
+</body>
+</html>

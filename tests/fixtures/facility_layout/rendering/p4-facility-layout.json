@@ -1,0 +1,284 @@
+{
+  "association": {
+    "areaId": "rack-cell-a",
+    "siteId": "site-p4"
+  },
+  "catalogSnapshotRevision": "3333333333333333333333333333333333333333333333333333333333333333",
+  "coordinateFrame": {
+    "datumId": "site-p4-origin",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "floorElevation": 0,
+    "handedness": "right",
+    "units": "m",
+    "upAxis": "+Y"
+  },
+  "createdAt": "2026-07-29T00:00:00Z",
+  "dismissedSuggestions": [],
+  "displayName": "P4 Repeated Rack Cell",
+  "layoutId": "fl-p4-rack-cell",
+  "placements": [
+    {
+      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+      "assetId": "asset-pallet-rack-185e9914e281",
+      "metadata": {
+        "instanceLabel": "Rack A1"
+      },
+      "placementId": "pl-rack-01",
+      "positionMode": "manual",
+      "snapRelationship": null,
+      "transform": {
+        "position": {
+          "x": 3,
+          "y": 0,
+          "z": 3
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    },
+    {
+      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+      "assetId": "asset-pallet-rack-185e9914e281",
+      "metadata": {
+        "instanceLabel": "Rack A2"
+      },
+      "placementId": "pl-rack-02",
+      "positionMode": "manual",
+      "snapRelationship": null,
+      "transform": {
+        "position": {
+          "x": 7,
+          "y": 0,
+          "z": 3
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    },
+    {
+      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+      "assetId": "asset-pallet-rack-185e9914e281",
+      "metadata": {
+        "instanceLabel": "Rack A3"
+      },
+      "placementId": "pl-rack-03",
+      "positionMode": "locked",
+      "snapRelationship": null,
+      "transform": {
+        "position": {
+          "x": 11,
+          "y": 0,
+          "z": 3
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    },
+    {
+      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+      "assetId": "asset-pallet-rack-185e9914e281",
+      "metadata": {
+        "instanceLabel": "Rack B1"
+      },
+      "placementId": "pl-rack-04",
+      "positionMode": "auto",
+      "snapRelationship": null,
+      "transform": {
+        "position": {
+          "x": 3,
+          "y": 0,
+          "z": 9
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    },
+    {
+      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+      "assetId": "asset-pallet-rack-185e9914e281",
+      "metadata": {
+        "instanceLabel": "Rack B2"
+      },
+      "placementId": "pl-rack-05",
+      "positionMode": "auto",
+      "snapRelationship": null,
+      "transform": {
+        "position": {
+          "x": 7,
+          "y": 0,
+          "z": 9
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    },
+    {
+      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+      "assetId": "asset-pallet-rack-185e9914e281",
+      "metadata": {
+        "instanceLabel": "Rack B3"
+      },
+      "placementId": "pl-rack-06",
+      "positionMode": "manual",
+      "snapRelationship": null,
+      "transform": {
+        "position": {
+          "x": 11,
+          "y": 0,
+          "z": 9
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    }
+  ],
+  "policySetRef": {
+    "policySetId": "policy-site-p4",
+    "policySetRevision": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "processBindings": [],
+  "routes": [
+    {
+      "centerline": [
+        {
+          "x": 1,
+          "y": 0,
+          "z": 6
+        },
+        {
+          "x": 13.5,
+          "y": 0,
+          "z": 6
+        },
+        {
+          "x": 13.5,
+          "y": 0,
+          "z": 9
+        },
+        {
+          "x": 11,
+          "y": 0,
+          "z": 9
+        }
+      ],
+      "corridorWidth": 1.1,
+      "evidence": [],
+      "requirements": [],
+      "routeFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+      "routeId": "rt-forklift-rack-a",
+      "routeKind": "forklift",
+      "routingMode": "orthogonal",
+      "sourceEndpoint": {
+        "anchorId": "za-forklift-entry",
+        "kind": "zone_anchor",
+        "zoneId": "zn-rack-storage"
+      },
+      "sourceRevisions": {
+        "layout": "6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "targetEndpoint": {
+        "connectorId": "forklift-service",
+        "kind": "placement_connector",
+        "placementId": "pl-rack-06"
+      }
+    }
+  ],
+  "schemaVersion": 1,
+  "sourceShellRef": {
+    "coordinateFrameFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+    "shellId": "shell-site-p4",
+    "shellRevision": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "status": "active",
+  "updatedAt": "2026-07-29T00:00:00Z",
+  "utilityNetworks": [],
+  "zones": [
+    {
+      "allowedAssetCategories": [
+        "rack"
+      ],
+      "anchors": [
+        {
+          "allowedRouteKinds": [
+            "forklift"
+          ],
+          "anchorId": "za-forklift-entry",
+          "anchorKind": "forklift",
+          "evidence": [],
+          "facing": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "position": {
+            "x": 1,
+            "y": 0,
+            "z": 6
+          }
+        }
+      ],
+      "boundary": [
+        {
+          "x": 0,
+          "z": 0
+        },
+        {
+          "x": 15,
+          "z": 0
+        },
+        {
+          "x": 15,
+          "z": 12
+        },
+        {
+          "x": 0,
+          "z": 12
+        }
+      ],
+      "edgeSetbacks": {
+        "egress": 1
+      },
+      "evidence": [],
+      "floorElevation": 0,
+      "gridSpacing": 0.25,
+      "heightLimit": 7,
+      "label": "Rack Storage A",
+      "policyRefs": [],
+      "zoneId": "zn-rack-storage",
+      "zoneType": "storage"
+    }
+  ]
+}

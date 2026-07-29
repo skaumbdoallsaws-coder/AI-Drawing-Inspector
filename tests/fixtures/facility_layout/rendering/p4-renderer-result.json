@@ -1,0 +1,2044 @@
+{
+  "browserEvidence": {
+    "desktop": {
+      "afterPlanPick": {
+        "activeObserverTargets": 2,
+        "activeRenderRequests": 0,
+        "canvasCount": 1,
+        "contextLost": false,
+        "degraded": false,
+        "demandRendering": {
+          "pendingFrame": false,
+          "renderRequests": 19,
+          "renderedFrames": 5
+        },
+        "lastFit": {
+          "center": {
+            "x": 7,
+            "y": 2.43840003,
+            "z": 6
+          },
+          "rootUnchanged": true,
+          "size": {
+            "x": 9.227199912,
+            "y": 4.87680006,
+            "z": 8.528399944
+          }
+        },
+        "lifecycle": {
+          "canvasCount": 1,
+          "listenerCount": 4,
+          "mountCount": 1,
+          "observerActive": true,
+          "teardownCount": 0
+        },
+        "loadTrace": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "resolved"
+          }
+        ],
+        "modelRootTransform": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "quaternion": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        "planPlacementIds": [
+          "pl-rack-01",
+          "pl-rack-02",
+          "pl-rack-03",
+          "pl-rack-04",
+          "pl-rack-05",
+          "pl-rack-06"
+        ],
+        "planSelection": "pl-rack-02",
+        "planSvgCount": 1,
+        "propertiesSelection": "pl-rack-02",
+        "representationGroups": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "instanceMappings": [
+              {
+                "meshIndex": 0,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 1,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 2,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 3,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 4,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 5,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 6,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 7,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 8,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 9,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              }
+            ],
+            "instanced": true,
+            "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+            "meshCount": 10,
+            "placementIds": [
+              "pl-rack-01",
+              "pl-rack-02",
+              "pl-rack-03",
+              "pl-rack-04",
+              "pl-rack-05",
+              "pl-rack-06"
+            ],
+            "representation": "detail"
+          }
+        ],
+        "selectedPlacementId": "pl-rack-02",
+        "threePlacementCount": 6,
+        "threeSelection": "pl-rack-02",
+        "threeStatus": "ready"
+      },
+      "afterThreePick": {
+        "activeObserverTargets": 2,
+        "activeRenderRequests": 0,
+        "canvasCount": 1,
+        "contextLost": false,
+        "degraded": false,
+        "demandRendering": {
+          "pendingFrame": false,
+          "renderRequests": 20,
+          "renderedFrames": 6
+        },
+        "lastFit": {
+          "center": {
+            "x": 7,
+            "y": 2.43840003,
+            "z": 6
+          },
+          "rootUnchanged": true,
+          "size": {
+            "x": 9.227199912,
+            "y": 4.87680006,
+            "z": 8.528399944
+          }
+        },
+        "lifecycle": {
+          "canvasCount": 1,
+          "listenerCount": 4,
+          "mountCount": 1,
+          "observerActive": true,
+          "teardownCount": 0
+        },
+        "loadTrace": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "resolved"
+          }
+        ],
+        "modelRootTransform": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "quaternion": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        "planPlacementIds": [
+          "pl-rack-01",
+          "pl-rack-02",
+          "pl-rack-03",
+          "pl-rack-04",
+          "pl-rack-05",
+          "pl-rack-06"
+        ],
+        "planSelection": "pl-rack-06",
+        "planSvgCount": 1,
+        "propertiesSelection": "pl-rack-06",
+        "representationGroups": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "instanceMappings": [
+              {
+                "meshIndex": 0,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 1,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 2,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 3,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 4,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 5,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 6,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 7,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 8,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 9,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              }
+            ],
+            "instanced": true,
+            "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+            "meshCount": 10,
+            "placementIds": [
+              "pl-rack-01",
+              "pl-rack-02",
+              "pl-rack-03",
+              "pl-rack-04",
+              "pl-rack-05",
+              "pl-rack-06"
+            ],
+            "representation": "detail"
+          }
+        ],
+        "selectedPlacementId": "pl-rack-06",
+        "threePlacementCount": 6,
+        "threeSelection": "pl-rack-06",
+        "threeStatus": "ready"
+      },
+      "canvas": {
+        "elementScreenshot": {
+          "backgroundRgb": [
+            203,
+            212,
+            220
+          ],
+          "changedPixelCount": 82924,
+          "changedPixelFraction": 0.11086096,
+          "height": 850,
+          "maximumDelta": 480,
+          "nonblank": true,
+          "width": 880
+        },
+        "elementScreenshotSha256": "dc14337dc76ad08097c0b021ba8cb42aedd33220634e0196b3030751c3844938",
+        "webglReadback": {
+          "available": true,
+          "changedPixelCount": 76490,
+          "changedPixelFraction": 0.10225935828877006,
+          "height": 850,
+          "maximumChannelSpan": 140,
+          "width": 880
+        }
+      },
+      "contextLoss": {
+        "defaultPrevented": true,
+        "summary": {
+          "activeObserverTargets": 2,
+          "activeRenderRequests": 0,
+          "canvasCount": 1,
+          "contextLost": true,
+          "degraded": true,
+          "demandRendering": {
+            "pendingFrame": false,
+            "renderRequests": 22,
+            "renderedFrames": 8
+          },
+          "lastFit": {
+            "center": {
+              "x": 7,
+              "y": 2.43840003,
+              "z": 6
+            },
+            "rootUnchanged": true,
+            "size": {
+              "x": 9.227199912,
+              "y": 4.87680006,
+              "z": 8.528399944
+            }
+          },
+          "lifecycle": {
+            "canvasCount": 1,
+            "listenerCount": 4,
+            "mountCount": 1,
+            "observerActive": true,
+            "teardownCount": 0
+          },
+          "loadTrace": [
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "manifest",
+              "status": "started"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "manifest",
+              "status": "resolved"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "footprint",
+              "status": "started"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "footprint",
+              "status": "resolved"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "proxy",
+              "status": "started"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "proxy",
+              "status": "resolved"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "overview",
+              "status": "started"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "overview",
+              "status": "resolved"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "detail",
+              "status": "started"
+            },
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "detail": null,
+              "stage": "detail",
+              "status": "resolved"
+            }
+          ],
+          "modelRootTransform": {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "quaternion": {
+              "w": 1,
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          },
+          "planPlacementIds": [
+            "pl-rack-01",
+            "pl-rack-02",
+            "pl-rack-03",
+            "pl-rack-04",
+            "pl-rack-05",
+            "pl-rack-06"
+          ],
+          "planSelection": "pl-rack-06",
+          "planSvgCount": 1,
+          "propertiesSelection": "pl-rack-06",
+          "representationGroups": [
+            {
+              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+              "assetId": "asset-pallet-rack-185e9914e281",
+              "instanceMappings": [
+                {
+                  "meshIndex": 0,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 1,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 2,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 3,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 4,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 5,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 6,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 7,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 8,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                },
+                {
+                  "meshIndex": 9,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ]
+                }
+              ],
+              "instanced": true,
+              "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+              "meshCount": 10,
+              "placementIds": [
+                "pl-rack-01",
+                "pl-rack-02",
+                "pl-rack-03",
+                "pl-rack-04",
+                "pl-rack-05",
+                "pl-rack-06"
+              ],
+              "representation": "detail"
+            }
+          ],
+          "selectedPlacementId": "pl-rack-06",
+          "threePlacementCount": 6,
+          "threeSelection": "pl-rack-06",
+          "threeStatus": "degraded"
+        }
+      },
+      "degradedPlanSelection": {
+        "activeObserverTargets": 2,
+        "activeRenderRequests": 0,
+        "canvasCount": 1,
+        "contextLost": true,
+        "degraded": true,
+        "demandRendering": {
+          "pendingFrame": false,
+          "renderRequests": 23,
+          "renderedFrames": 8
+        },
+        "lastFit": {
+          "center": {
+            "x": 7,
+            "y": 2.43840003,
+            "z": 6
+          },
+          "rootUnchanged": true,
+          "size": {
+            "x": 9.227199912,
+            "y": 4.87680006,
+            "z": 8.528399944
+          }
+        },
+        "lifecycle": {
+          "canvasCount": 1,
+          "listenerCount": 4,
+          "mountCount": 1,
+          "observerActive": true,
+          "teardownCount": 0
+        },
+        "loadTrace": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "resolved"
+          }
+        ],
+        "modelRootTransform": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "quaternion": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        "planPlacementIds": [
+          "pl-rack-01",
+          "pl-rack-02",
+          "pl-rack-03",
+          "pl-rack-04",
+          "pl-rack-05",
+          "pl-rack-06"
+        ],
+        "planSelection": "pl-rack-03",
+        "planSvgCount": 1,
+        "propertiesSelection": "pl-rack-03",
+        "representationGroups": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "instanceMappings": [
+              {
+                "meshIndex": 0,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 1,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 2,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 3,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 4,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 5,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 6,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 7,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 8,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 9,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              }
+            ],
+            "instanced": true,
+            "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+            "meshCount": 10,
+            "placementIds": [
+              "pl-rack-01",
+              "pl-rack-02",
+              "pl-rack-03",
+              "pl-rack-04",
+              "pl-rack-05",
+              "pl-rack-06"
+            ],
+            "representation": "detail"
+          }
+        ],
+        "selectedPlacementId": "pl-rack-03",
+        "threePlacementCount": 6,
+        "threeSelection": "pl-rack-03",
+        "threeStatus": "degraded"
+      },
+      "final": {
+        "activeObserverTargets": 2,
+        "activeRenderRequests": 0,
+        "canvasCount": 1,
+        "contextLost": false,
+        "degraded": false,
+        "demandRendering": {
+          "pendingFrame": false,
+          "renderRequests": 18,
+          "renderedFrames": 4
+        },
+        "lastFit": {
+          "center": {
+            "x": 7,
+            "y": 2.43840003,
+            "z": 6
+          },
+          "rootUnchanged": true,
+          "size": {
+            "x": 9.227199912,
+            "y": 4.87680006,
+            "z": 8.528399944
+          }
+        },
+        "lifecycle": {
+          "canvasCount": 1,
+          "listenerCount": 4,
+          "mountCount": 1,
+          "observerActive": true,
+          "teardownCount": 0
+        },
+        "loadTrace": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "resolved"
+          }
+        ],
+        "modelRootTransform": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "quaternion": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        "planPlacementIds": [
+          "pl-rack-01",
+          "pl-rack-02",
+          "pl-rack-03",
+          "pl-rack-04",
+          "pl-rack-05",
+          "pl-rack-06"
+        ],
+        "planSelection": null,
+        "planSvgCount": 1,
+        "propertiesSelection": null,
+        "representationGroups": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "instanceMappings": [
+              {
+                "meshIndex": 0,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 1,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 2,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 3,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 4,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 5,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 6,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 7,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 8,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 9,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              }
+            ],
+            "instanced": true,
+            "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+            "meshCount": 10,
+            "placementIds": [
+              "pl-rack-01",
+              "pl-rack-02",
+              "pl-rack-03",
+              "pl-rack-04",
+              "pl-rack-05",
+              "pl-rack-06"
+            ],
+            "representation": "detail"
+          }
+        ],
+        "selectedPlacementId": null,
+        "threePlacementCount": 6,
+        "threeSelection": null,
+        "threeStatus": "ready"
+      },
+      "fit": {
+        "adapterReportedRootUnchanged": true,
+        "controllerLayoutUnchanged": true,
+        "delegatedViewCount": 2,
+        "modelRootUnchanged": true,
+        "sourceLayoutUnchanged": true
+      },
+      "initial": {
+        "activeObserverTargets": 2,
+        "activeRenderRequests": 0,
+        "canvasCount": 1,
+        "contextLost": false,
+        "degraded": false,
+        "demandRendering": {
+          "pendingFrame": false,
+          "renderRequests": 18,
+          "renderedFrames": 4
+        },
+        "lastFit": {
+          "center": {
+            "x": 7,
+            "y": 2.43840003,
+            "z": 6
+          },
+          "rootUnchanged": true,
+          "size": {
+            "x": 9.227199912,
+            "y": 4.87680006,
+            "z": 8.528399944
+          }
+        },
+        "lifecycle": {
+          "canvasCount": 1,
+          "listenerCount": 4,
+          "mountCount": 1,
+          "observerActive": true,
+          "teardownCount": 0
+        },
+        "loadTrace": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "resolved"
+          }
+        ],
+        "modelRootTransform": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "quaternion": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        "planPlacementIds": [
+          "pl-rack-01",
+          "pl-rack-02",
+          "pl-rack-03",
+          "pl-rack-04",
+          "pl-rack-05",
+          "pl-rack-06"
+        ],
+        "planSelection": null,
+        "planSvgCount": 1,
+        "propertiesSelection": null,
+        "representationGroups": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "instanceMappings": [
+              {
+                "meshIndex": 0,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 1,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 2,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 3,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 4,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 5,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 6,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 7,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 8,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 9,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              }
+            ],
+            "instanced": true,
+            "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+            "meshCount": 10,
+            "placementIds": [
+              "pl-rack-01",
+              "pl-rack-02",
+              "pl-rack-03",
+              "pl-rack-04",
+              "pl-rack-05",
+              "pl-rack-06"
+            ],
+            "representation": "detail"
+          }
+        ],
+        "selectedPlacementId": null,
+        "threePlacementCount": 6,
+        "threeSelection": null,
+        "threeStatus": "ready"
+      },
+      "remount": {
+        "activeObserverTargets": 2,
+        "activeRenderRequests": 0,
+        "cycles": 20,
+        "finalCanvasCount": 1,
+        "finalPlanSvgCount": 1,
+        "finalRepresentation": "detail",
+        "idleRenderRequestsUnchanged": true,
+        "maximumCanvasCount": 1,
+        "maximumObserverTargets": 2,
+        "pendingFrame": false
+      },
+      "threePickPoint": {
+        "clientX": 798.1690140845071,
+        "clientY": 492.9577464788732,
+        "ndc": {
+          "x": 0.15492957746478875,
+          "y": -0.04225352112676051
+        },
+        "placementId": "pl-rack-06"
+      }
+    },
+    "mobile": {
+      "canvas": {
+        "elementScreenshot": {
+          "backgroundRgb": [
+            203,
+            212,
+            220
+          ],
+          "changedPixelCount": 24709,
+          "changedPixelFraction": 0.14531287,
+          "height": 436,
+          "maximumDelta": 498,
+          "nonblank": true,
+          "width": 390
+        },
+        "elementScreenshotSha256": "451701e6e31a7c371569414ed6d69a4b0641c212aa2103f00a08af0adc3b812b",
+        "webglReadback": {
+          "available": true,
+          "changedPixelCount": 18275,
+          "changedPixelFraction": 0.10747471183250999,
+          "height": 436,
+          "maximumChannelSpan": 140,
+          "width": 390
+        }
+      },
+      "summary": {
+        "activeObserverTargets": 2,
+        "activeRenderRequests": 0,
+        "canvasCount": 1,
+        "contextLost": false,
+        "degraded": false,
+        "demandRendering": {
+          "pendingFrame": false,
+          "renderRequests": 21,
+          "renderedFrames": 8
+        },
+        "lastFit": {
+          "center": {
+            "x": 7,
+            "y": 2.43840003,
+            "z": 6
+          },
+          "rootUnchanged": true,
+          "size": {
+            "x": 9.227199912,
+            "y": 4.87680006,
+            "z": 8.528399944
+          }
+        },
+        "lifecycle": {
+          "canvasCount": 1,
+          "listenerCount": 4,
+          "mountCount": 1,
+          "observerActive": true,
+          "teardownCount": 0
+        },
+        "loadTrace": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "manifest",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "footprint",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "proxy",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "overview",
+            "status": "resolved"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "started"
+          },
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "detail": null,
+            "stage": "detail",
+            "status": "resolved"
+          }
+        ],
+        "modelRootTransform": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "quaternion": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        "planPlacementIds": [
+          "pl-rack-01",
+          "pl-rack-02",
+          "pl-rack-03",
+          "pl-rack-04",
+          "pl-rack-05",
+          "pl-rack-06"
+        ],
+        "planSelection": "pl-rack-04",
+        "planSvgCount": 1,
+        "propertiesSelection": "pl-rack-04",
+        "representationGroups": [
+          {
+            "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+            "assetId": "asset-pallet-rack-185e9914e281",
+            "instanceMappings": [
+              {
+                "meshIndex": 0,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 1,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 2,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 3,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 4,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 5,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 6,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 7,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 8,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              },
+              {
+                "meshIndex": 9,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ]
+              }
+            ],
+            "instanced": true,
+            "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+            "meshCount": 10,
+            "placementIds": [
+              "pl-rack-01",
+              "pl-rack-02",
+              "pl-rack-03",
+              "pl-rack-04",
+              "pl-rack-05",
+              "pl-rack-06"
+            ],
+            "representation": "detail"
+          }
+        ],
+        "selectedPlacementId": "pl-rack-04",
+        "threePlacementCount": 6,
+        "threeSelection": "pl-rack-04",
+        "threeStatus": "ready"
+      }
+    }
+  },
+  "checks": {
+    "authoritative_schema_v1_fixture": true,
+    "context_loss_enters_degraded_mode": true,
+    "degraded_mode_preserves_top_plan": true,
+    "desktop_1440_by_900": true,
+    "desktop_webgl_canvas_nonblank": true,
+    "exact_six_stable_rack_placements": true,
+    "fit_changes_camera_only": true,
+    "mobile_390_by_844": true,
+    "mobile_webgl_canvas_nonblank": true,
+    "no_console_errors": true,
+    "no_external_requests": true,
+    "no_failed_http_responses": true,
+    "no_failed_requests": true,
+    "no_page_errors": true,
+    "official_local_three_r184": true,
+    "plan_pick_synchronized": true,
+    "progressive_resolution_order": true,
+    "real_detail_glb_loaded": true,
+    "real_proxy_glb_loaded": true,
+    "real_three_click_synchronized": true,
+    "remount_leaves_no_observer_growth": true,
+    "remount_leaves_no_orphan_render_request": true,
+    "remount_leaves_one_canvas": true,
+    "six_repeated_racks_instanced": true,
+    "twenty_remounts_completed": true
+  },
+  "consoleErrors": [],
+  "layout": {
+    "layoutId": "fl-p4-rack-cell",
+    "placementIds": [
+      "pl-rack-01",
+      "pl-rack-02",
+      "pl-rack-03",
+      "pl-rack-04",
+      "pl-rack-05",
+      "pl-rack-06"
+    ],
+    "revision": "f445fc1c92c5793d84936b01df393a8c82a138ffe8f5dbafef8073d25ed2b65b",
+    "routeCount": 1,
+    "zoneCount": 1
+  },
+  "network": {
+    "blockedExternalRequests": [],
+    "failedRequests": [],
+    "failedResponses": [],
+    "offlineOnly": true
+  },
+  "pageErrors": [],
+  "passed": true,
+  "schemaVersion": "facility-layout-p4-browser-evidence-v1",
+  "scope": {
+    "authoringIncluded": false,
+    "fiveThousandObjectPerformanceClaimed": false,
+    "phase": "P4",
+    "placementCount": 6,
+    "releaseScalePerformanceClaimed": false
+  },
+  "screenshots": {
+    "desktop": {
+      "bytes": 135229,
+      "height": 900,
+      "path": "tests/fixtures/facility_layout/rendering/p4-renderer-desktop.png",
+      "sha256": "610c96a106fbe389aaad9712786868a271f10fddbc7c479f4a6f4c47c3d0c1c0",
+      "width": 1440
+    },
+    "mobile": {
+      "bytes": 53350,
+      "height": 844,
+      "path": "tests/fixtures/facility_layout/rendering/p4-renderer-mobile.png",
+      "sha256": "b9bc01727a900891b47bb02bfabe3da55648044bf4cc251adcfe4676d02b8bfd",
+      "width": 390
+    }
+  },
+  "source": {
+    "assetCatalogSha256": "9dd60d2f319615c7107c60132eb88d1cc59c1103707b71aacf431ebce7975369",
+    "facilityLayoutEditorSha256": "4ad17751c05e401b3b81a9eeea904b1f7486d92b93240312afa9c05e16d0182b",
+    "facilityThreeAdapterSha256": "edf1063ed656588991eb17ca29aaed8273d0a22e7f33800399ba1cb339d71f29",
+    "fixturePageSha256": "5e7c04cd5832731ff0756c8514430c328e6fdc8b6423b22736f63b1cd5f13183",
+    "fixtureScriptSha256": "df4e024ab7220cfd7248b52f3deb3ced44a4c6917f3975b8d54b98a220a17d2c",
+    "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
+    "layoutFixtureSha256": "60892cb1ec25ba7f9b39446af4deea7c05868279063c181bfd68e54d22f3f772",
+    "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
+    "rackGlbSha256": "185e9914e28106b14054a8467b941eba1cf31c85593cd566ab40d608cea77c0c",
+    "rackOverviewSha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14",
+    "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
+    "verifierSha256": "f1c94481ebc0291294c646818377cca71b13dced4848e4dd6a16f46841babe2c"
+  }
+}

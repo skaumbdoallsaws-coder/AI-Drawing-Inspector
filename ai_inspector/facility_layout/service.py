@@ -394,6 +394,61 @@ class FacilityLayoutService:
         base_revision: str,
         operations: list[Mapping[str, Any]],
     ) -> dict[str, Any]:
+        operation_result, dependencies = self._prepare_operations(
+            principal,
+            site_id,
+            layout_id,
+            base_revision,
+            operations,
+        )
+        saved = self.layout_repository.save_layout(
+            principal,
+            site_id,
+            layout_id,
+            operation_result["document"],
+            base_revision,
+        )
+        return {
+            **saved,
+            "dependencies": dependencies.to_dict(),
+            "operationResult": deepcopy(operation_result),
+        }
+
+    def preview_operations(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        operations: list[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        operation_result, dependencies = self._prepare_operations(
+            principal,
+            site_id,
+            layout_id,
+            base_revision,
+            operations,
+        )
+        return {
+            **deepcopy(operation_result),
+            "baseRevision": base_revision,
+            "dependencies": dependencies.to_dict(),
+        }
+
+    def _prepare_operations(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        operations: list[Mapping[str, Any]],
+    ) -> tuple[dict[str, Any], FacilityDependencySnapshot]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="layout.edit",
+        )
         current = self.layout_repository.get_layout(
             principal,
             site_id,
@@ -415,18 +470,7 @@ class FacilityLayoutService:
             site_id,
             operation_result["document"],
         )
-        saved = self.layout_repository.save_layout(
-            principal,
-            site_id,
-            layout_id,
-            operation_result["document"],
-            base_revision,
-        )
-        return {
-            **saved,
-            "dependencies": dependencies.to_dict(),
-            "operationResult": deepcopy(operation_result),
-        }
+        return operation_result, dependencies
 
     def validate_layout(
         self,

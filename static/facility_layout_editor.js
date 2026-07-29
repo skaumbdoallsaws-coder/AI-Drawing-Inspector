@@ -123,6 +123,34 @@
             if (resolved) return resolved;
         }
 
+        const catalog = options && options.assetCatalog;
+        const catalogEntries = Array.isArray(catalog)
+            ? catalog
+            : (catalog && (catalog.entries || catalog.assets));
+        if (Array.isArray(catalogEntries)) {
+            const catalogEntry = catalogEntries.find(function (entry) {
+                if (!entry || typeof entry !== 'object') return false;
+                const revision = entry.assetDefinitionRevision
+                    || entry.publishedAssetDefinitionRevision
+                    || entry.definitionRevision;
+                return entry.assetId === placement.assetId
+                    && (!revision
+                        || revision === placement.assetDefinitionRevision);
+            });
+            if (catalogEntry) {
+                const definition = catalogEntry.definition
+                    || catalogEntry.assetDefinition
+                    || {};
+                const catalogFootprint = footprintFromValue(catalogEntry)
+                    || footprintFromValue(definition)
+                    || footprintFromValue(definition.geometry)
+                    || footprintFromValue(
+                        definition.geometry && definition.geometry.aabb
+                    );
+                if (catalogFootprint) return catalogFootprint;
+            }
+        }
+
         const maps = options && [
             options.assetFootprints,
             options.assetBounds,
@@ -240,6 +268,15 @@
             maxX = Math.max(maxX, value.x);
             maxZ = Math.max(maxZ, value.z);
         }
+        const worldBounds = options && options.worldBounds;
+        if (worldBounds
+                && finite(worldBounds.minX) && finite(worldBounds.minZ)
+                && finite(worldBounds.maxX) && finite(worldBounds.maxZ)
+                && worldBounds.maxX > worldBounds.minX
+                && worldBounds.maxZ > worldBounds.minZ) {
+            include({ x: worldBounds.minX, z: worldBounds.minZ });
+            include({ x: worldBounds.maxX, z: worldBounds.maxZ });
+        }
         geometry.zones.forEach(function (zone) { zone.points.forEach(include); });
         geometry.routes.forEach(function (route) {
             const half = route.corridorWidth / 2;
@@ -336,16 +373,55 @@
         while (element.firstChild) element.removeChild(element.firstChild);
     }
 
-    function targetPlacementId(target, boundary) {
+    function targetLayoutObjectId(target, boundary) {
         let cursor = target;
         while (cursor && cursor !== boundary) {
             if (typeof cursor.getAttribute === 'function') {
                 const placementId = cursor.getAttribute('data-placement-id');
                 if (placementId) return placementId;
+                const zoneId = cursor.getAttribute('data-zone-id');
+                if (zoneId) return zoneId;
             }
             cursor = cursor.parentNode;
         }
         return null;
+    }
+
+    function clientPlanPoint(input, svg, projection) {
+        if (!input || !svg || !projection) return null;
+        const rect = typeof svg.getBoundingClientRect === 'function'
+            ? svg.getBoundingClientRect() : null;
+        const left = finiteOr(rect && rect.left, 0);
+        const top = finiteOr(rect && rect.top, 0);
+        const width = Math.max(1, finiteOr(rect && rect.width, projection.width));
+        const height = Math.max(1, finiteOr(rect && rect.height, projection.height));
+        const clientX = finiteOr(input.clientX, finiteOr(input.x, left));
+        const clientY = finiteOr(input.clientY, finiteOr(input.y, top));
+        return {
+            x: ((clientX - left) / width) * projection.width,
+            y: ((clientY - top) / height) * projection.height,
+        };
+    }
+
+    function geometryBounds(points) {
+        let minX = Infinity;
+        let minZ = Infinity;
+        let maxX = -Infinity;
+        let maxZ = -Infinity;
+        (points || []).forEach(function (value) {
+            minX = Math.min(minX, value.x);
+            minZ = Math.min(minZ, value.z);
+            maxX = Math.max(maxX, value.x);
+            maxZ = Math.max(maxZ, value.z);
+        });
+        return { minX: minX, minZ: minZ, maxX: maxX, maxZ: maxZ };
+    }
+
+    function boundsTouch(left, right) {
+        return left.maxX >= right.minX
+            && left.minX <= right.maxX
+            && left.maxZ >= right.minZ
+            && left.minZ <= right.maxZ;
     }
 
     function TopPlanAdapter(host, options) {
@@ -367,7 +443,9 @@
         this.layout = null;
         this.geometry = null;
         this.projection = null;
+        this.ghostPlacement = null;
         this.selection = null;
+        this.selections = new Set();
         this.selectionHandler = null;
         this.renderCount = 0;
         this.observerCount = 0;
@@ -383,7 +461,9 @@
             'data-facility-layout-view': this.id,
         });
         this._handlePick = this._handlePick.bind(this);
+        this._handleKeyPick = this._handleKeyPick.bind(this);
         this.svg.addEventListener('click', this._handlePick);
+        this.svg.addEventListener('keydown', this._handleKeyPick);
         this.host.appendChild(this.svg);
 
         const ResizeObserverCtor = this.options.ResizeObserver
@@ -443,14 +523,19 @@
         const zoneLayer = svgElement(this.document, 'g');
         zoneLayer.setAttribute('data-layer', 'zones');
         this.geometry.zones.forEach(function (zone) {
+            const selected = this.selections.has(zone.zoneId);
             const polygon = svgElement(this.document, 'polygon');
             setAttributes(polygon, {
                 points: pointString(zone.points, this.projection),
-                fill: '#dcecf3',
+                fill: selected ? '#bfe3ff' : '#dcecf3',
                 'fill-opacity': '0.38',
-                stroke: '#4d7c8a',
-                'stroke-width': '1.5',
+                stroke: selected ? '#0878d1' : '#4d7c8a',
+                'stroke-width': selected ? '3' : '1.5',
                 'vector-effect': 'non-scaling-stroke',
+                tabindex: '0',
+                role: 'button',
+                'aria-label': zone.label,
+                'aria-selected': selected ? 'true' : 'false',
                 'data-zone-id': zone.zoneId,
             });
             zoneLayer.appendChild(polygon);
@@ -484,7 +569,7 @@
         const placementLayer = svgElement(this.document, 'g');
         placementLayer.setAttribute('data-layer', 'placements');
         this.geometry.placements.forEach(function (placement) {
-            const selected = placement.placementId === this.selection;
+            const selected = this.selections.has(placement.placementId);
             const polygon = svgElement(this.document, 'polygon');
             setAttributes(polygon, {
                 points: pointString(placement.points, this.projection),
@@ -502,11 +587,42 @@
             placementLayer.appendChild(polygon);
         }, this);
         this.svg.appendChild(placementLayer);
+
+        if (this.ghostPlacement) {
+            const ghostLayer = svgElement(this.document, 'g');
+            ghostLayer.setAttribute('data-layer', 'ghost');
+            const ghost = svgElement(this.document, 'polygon');
+            setAttributes(ghost, {
+                points: pointString(
+                    placementFootprint(this.ghostPlacement, this.options),
+                    this.projection
+                ),
+                fill: this.ghostPlacement.valid === false ? '#ef4444' : '#8b5cf6',
+                'fill-opacity': '0.22',
+                stroke: this.ghostPlacement.valid === false ? '#b91c1c' : '#6d28d9',
+                'stroke-width': '2',
+                'stroke-dasharray': '6 4',
+                'vector-effect': 'non-scaling-stroke',
+                'pointer-events': 'none',
+                'data-facility-ghost': this.ghostPlacement.assetId || '',
+            });
+            ghostLayer.appendChild(ghost);
+            this.svg.appendChild(ghostLayer);
+        }
     };
 
     TopPlanAdapter.prototype._handlePick = function (event) {
-        const placementId = targetPlacementId(event && event.target, this.svg);
-        if (placementId) this.pick(placementId);
+        const identifier = targetLayoutObjectId(event && event.target, this.svg);
+        if (identifier) this.pick(identifier);
+    };
+
+    TopPlanAdapter.prototype._handleKeyPick = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key !== 'enter' && key !== ' ') return;
+        const identifier = targetLayoutObjectId(event && event.target, this.svg);
+        if (!identifier) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        this.pick(identifier);
     };
 
     TopPlanAdapter.prototype.setSelectionHandler = function (handler) {
@@ -515,14 +631,64 @@
 
     TopPlanAdapter.prototype.setLayout = function (layout) {
         if (this.disposed) return false;
+        const hadLayout = Boolean(this.layout);
         this.layout = layout ? clone(assertLayout(layout)) : null;
-        if (this.selection && this.layout && !this.layout.placements.some(
-            function (placement) { return placement.placementId === this.selection; },
-            this
-        )) {
-            this.selection = null;
+        if (this.selection && this.layout) {
+            const selectedExists = this.layout.placements.some(
+                function (placement) {
+                    return placement.placementId === this.selection;
+                },
+                this
+            ) || this.layout.zones.some(
+                function (zone) { return zone.zoneId === this.selection; },
+                this
+            );
+            if (!selectedExists) this.selection = null;
         }
-        this.projection = null;
+        if (this.layout) {
+            const available = new Set(
+                this.layout.placements.map(function (placement) {
+                    return placement.placementId;
+                }).concat(this.layout.zones.map(function (zone) {
+                    return zone.zoneId;
+                }))
+            );
+            this.selections = new Set(Array.from(this.selections).filter(
+                function (identifier) { return available.has(identifier); }
+            ));
+        } else {
+            this.selections.clear();
+        }
+        if (!hadLayout || !this.layout) this.projection = null;
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.setGhostPlacement = function (ghost) {
+        if (this.disposed) return false;
+        if (!ghost) {
+            this.ghostPlacement = null;
+            this._render();
+            return true;
+        }
+        const position = ghost.worldPosition || ghost.position;
+        if (!position || !finite(position.x) || !finite(position.z)) return false;
+        this.ghostPlacement = {
+            assetId: ghost.assetId || '',
+            assetDefinitionRevision: ghost.assetDefinitionRevision || '',
+            transform: {
+                position: {
+                    x: position.x,
+                    y: finiteOr(position.y, 0),
+                    z: position.z,
+                },
+                quaternion: ghost.quaternion
+                    || { x: 0, y: 0, z: 0, w: 1 },
+                scale: finiteOr(ghost.scale, 1),
+            },
+            valid: ghost.valid !== false,
+            metadata: clone(ghost.metadata || {}),
+        };
         this._render();
         return true;
     };
@@ -530,20 +696,36 @@
     TopPlanAdapter.prototype.setSelection = function (placementId) {
         if (this.disposed) return false;
         const next = placementId || null;
-        if (this.selection === next) return true;
+        if (this.selection === next
+                && this.selections.size === (next ? 1 : 0)
+                && (!next || this.selections.has(next))) return true;
         this.selection = next;
+        this.selections = new Set(next ? [next] : []);
         this._render();
         return true;
     };
 
-    TopPlanAdapter.prototype.pick = function (placementId) {
+    TopPlanAdapter.prototype.setSelections = function (identifiers) {
+        if (this.disposed) return false;
+        const requested = Array.isArray(identifiers) ? identifiers : [];
+        this.selections = new Set(requested.filter(function (identifier) {
+            return typeof identifier === 'string' && identifier;
+        }));
+        this.selection = requested.length ? requested[0] : null;
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.pick = function (identifier) {
         if (this.disposed || !this.layout) return false;
         const exists = this.layout.placements.some(function (placement) {
-            return placement.placementId === placementId;
+            return placement.placementId === identifier;
+        }) || this.layout.zones.some(function (zone) {
+            return zone.zoneId === identifier;
         });
         if (!exists) return false;
-        if (this.selectionHandler) this.selectionHandler(placementId, this);
-        else this.setSelection(placementId);
+        if (this.selectionHandler) this.selectionHandler(identifier, this);
+        else this.setSelection(identifier);
         return true;
     };
 
@@ -558,6 +740,92 @@
         return clone(this.projection);
     };
 
+    TopPlanAdapter.prototype.clientToWorld = function (input) {
+        if (this.disposed || !this.layout) return null;
+        if (!this.projection) this.fit();
+        const planPoint = clientPlanPoint(input, this.svg, this.projection);
+        if (!planPoint) return null;
+        const world = unprojectTopPlanPoint(planPoint, this.projection);
+        return { x: world.x, y: finiteOr(input && input.floorY, 0), z: world.z };
+    };
+
+    TopPlanAdapter.prototype.worldToClient = function (input) {
+        if (this.disposed || !this.layout || !input) return null;
+        if (!this.projection) this.fit();
+        const planPoint = projectTopPlanPoint(input, this.projection);
+        const rect = typeof this.svg.getBoundingClientRect === 'function'
+            ? this.svg.getBoundingClientRect() : null;
+        const left = finiteOr(rect && rect.left, 0);
+        const top = finiteOr(rect && rect.top, 0);
+        const width = Math.max(1, finiteOr(rect && rect.width, this.projection.width));
+        const height = Math.max(1, finiteOr(rect && rect.height, this.projection.height));
+        return {
+            x: left + (planPoint.x / this.projection.width) * width,
+            y: top + (planPoint.y / this.projection.height) * height,
+        };
+    };
+
+    TopPlanAdapter.prototype.panByPixels = function (deltaX, deltaY) {
+        if (this.disposed || !this.layout) return false;
+        if (!this.projection) this.fit();
+        this.projection = Object.freeze(Object.assign({}, this.projection, {
+            offsetX: this.projection.offsetX + finiteOr(deltaX, 0),
+            offsetY: this.projection.offsetY + finiteOr(deltaY, 0),
+        }));
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.zoomAt = function (input, requestedFactor) {
+        if (this.disposed || !this.layout) return false;
+        if (!this.projection) this.fit();
+        const factor = Math.max(0.25, Math.min(4, finiteOr(requestedFactor, 1)));
+        if (factor === 1) return true;
+        const planPoint = clientPlanPoint(input, this.svg, this.projection);
+        if (!planPoint) return false;
+        const world = unprojectTopPlanPoint(planPoint, this.projection);
+        const scale = Math.max(
+            1e-6,
+            Math.min(1e6, this.projection.scale * factor)
+        );
+        this.projection = Object.freeze(Object.assign({}, this.projection, {
+            scale: scale,
+            offsetX: planPoint.x - (world.x - this.projection.minX) * scale,
+            offsetY: planPoint.y - (this.projection.maxZ - world.z) * scale,
+        }));
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.resolveMarquee = function (input) {
+        if (this.disposed || !this.layout || !input) return [];
+        const start = input.start;
+        const end = input.end;
+        if (!start || !end) return [];
+        const query = {
+            minX: Math.min(start.x, end.x),
+            minZ: Math.min(start.z, end.z),
+            maxX: Math.max(start.x, end.x),
+            maxZ: Math.max(start.z, end.z),
+        };
+        const geometry = this.geometry || collectTopPlanGeometry(
+            this.layout,
+            this.options
+        );
+        const ids = [];
+        geometry.placements.forEach(function (placement) {
+            if (boundsTouch(query, geometryBounds(placement.points))) {
+                ids.push(placement.placementId);
+            }
+        });
+        geometry.zones.forEach(function (zone) {
+            if (boundsTouch(query, geometryBounds(zone.points))) {
+                ids.push(zone.zoneId);
+            }
+        });
+        return ids.sort();
+    };
+
     TopPlanAdapter.prototype.getDiagnostics = function () {
         return {
             id: this.id,
@@ -566,6 +834,9 @@
             observerCount: this.observerCount,
             renderCount: this.renderCount,
             selection: this.selection,
+            selections: Array.from(this.selections).sort(),
+            ghostActive: Boolean(this.ghostPlacement),
+            projection: this.projection ? clone(this.projection) : null,
             placementIds: this.layout
                 ? this.layout.placements.map(function (placement) {
                     return placement.placementId;
@@ -582,12 +853,15 @@
         this.observerCount = 0;
         if (this.svg) {
             this.svg.removeEventListener('click', this._handlePick);
+            this.svg.removeEventListener('keydown', this._handleKeyPick);
             if (this.svg.parentNode) this.svg.parentNode.removeChild(this.svg);
         }
         this.selectionHandler = null;
+        this.selections.clear();
         this.layout = null;
         this.geometry = null;
         this.projection = null;
+        this.ghostPlacement = null;
     };
 
     function parseControllerArguments(layoutOrOptions, maybeOptions) {

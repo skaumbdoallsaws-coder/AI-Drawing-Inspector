@@ -153,6 +153,20 @@ def _placement_operation():
     }
 
 
+def _generated_placement_operation():
+    operation = _placement_operation()
+    operation["placement"].pop("placementId", None)
+    return operation
+
+
+def _file_snapshot(root):
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def test_layout_http_round_trip_and_operation_batch(tmp_path):
     client, _, shell, policy = _client(tmp_path)
     created = client.post(
@@ -191,6 +205,116 @@ def test_layout_http_round_trip_and_operation_batch(tmp_path):
     )
     assert validated.status_code == 200
     assert validated.json()["valid"] is True
+
+
+def test_http_operation_preview_is_read_only_and_matches_put(tmp_path):
+    client, _, shell, policy = _client(tmp_path)
+    created = client.post(
+        "/api/facility-layouts/site-a",
+        json={"layout": _layout(shell, policy)},
+    ).json()
+    operations = [_generated_placement_operation()]
+    before = _file_snapshot(tmp_path)
+
+    preview_response = client.post(
+        "/api/facility-layouts/site-a/fl-api-cell/preview",
+        json={
+            "baseRevision": created["revision"],
+            "operations": operations,
+        },
+    )
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert _file_snapshot(tmp_path) == before
+    assert preview["baseRevision"] == created["revision"]
+    assert preview["createdIds"][0].startswith("pl-")
+    assert preview["document"]["placements"][0]["placementId"] == (
+        preview["createdIds"][0]
+    )
+
+    applied = client.put(
+        "/api/facility-layouts/site-a/fl-api-cell",
+        json={
+            "baseRevision": created["revision"],
+            "operations": operations,
+        },
+    )
+
+    assert applied.status_code == 200
+    applied_body = applied.json()
+    assert applied_body["operationResult"] == {
+        key: value
+        for key, value in preview.items()
+        if key not in {"baseRevision", "dependencies"}
+    }
+    assert applied_body["dependencies"] == preview["dependencies"]
+
+
+def test_http_operation_preview_errors_are_structured_and_fail_closed(tmp_path):
+    client, _, shell, policy = _client(tmp_path)
+    created = client.post(
+        "/api/facility-layouts/site-a",
+        json={"layout": _layout(shell, policy)},
+    ).json()
+    endpoint = "/api/facility-layouts/site-a/fl-api-cell/preview"
+    before = _file_snapshot(tmp_path)
+
+    stale = client.post(
+        endpoint,
+        json={
+            "baseRevision": "f" * 64,
+            "operations": [_generated_placement_operation()],
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"] == {
+        "code": "revision_conflict",
+        "message": "Facility Layout revision conflict.",
+        "details": {"currentRevision": created["revision"]},
+    }
+
+    for body in (
+        {"baseRevision": created["revision"]},
+        {"baseRevision": created["revision"], "operations": {}},
+    ):
+        malformed = client.post(endpoint, json=body)
+        assert malformed.status_code == 422
+        assert malformed.json()["error"]["code"] == "invalid_request_body"
+
+    malformed_operation = client.post(
+        endpoint,
+        json={
+            "baseRevision": created["revision"],
+            "operations": ["not-an-operation"],
+        },
+    )
+    assert malformed_operation.status_code == 422
+    assert malformed_operation.json()["error"]["code"] == (
+        "operation_not_object"
+    )
+
+    viewer = client.post(
+        endpoint,
+        headers={"X-Test-Role": "viewer"},
+        json={
+            "baseRevision": created["revision"],
+            "operations": [_generated_placement_operation()],
+        },
+    )
+    assert viewer.status_code == 403
+    assert viewer.json()["error"]["code"] == "role_not_authorized"
+
+    cross_site = client.post(
+        "/api/facility-layouts/site-b/fl-api-cell/preview",
+        json={
+            "baseRevision": created["revision"],
+            "operations": [_generated_placement_operation()],
+        },
+    )
+    assert cross_site.status_code == 404
+    assert cross_site.json()["error"]["code"] == "not_found"
+    assert _file_snapshot(tmp_path) == before
 
 
 def test_stale_http_save_returns_current_revision(tmp_path):

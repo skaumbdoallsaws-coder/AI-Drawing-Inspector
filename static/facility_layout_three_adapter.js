@@ -288,6 +288,8 @@
             sceneGeneration: 0,
             abortController: null,
             currentInput: null,
+            ghostInput: null,
+            ghostObject: null,
             placements: [],
             baseGroups: new Map(),
             renderGroups: new Map(),
@@ -627,6 +629,7 @@
         }
 
         function clearModel() {
+            disposeGhostObject();
             state.renderGroups.forEach(disposeRenderGroup);
             state.renderGroups.clear();
             state.pickObjects = [];
@@ -641,6 +644,76 @@
                     }
                 }
             }
+        }
+
+        function disposeGhostObject() {
+            if (!state.ghostObject) return;
+            if (state.ghostObject.parent
+                && typeof state.ghostObject.parent.remove === 'function') {
+                state.ghostObject.parent.remove(state.ghostObject);
+            }
+            disposeObjectGraphs([state.ghostObject]);
+            state.ghostObject = null;
+        }
+
+        function ghostBounds(ghost) {
+            const catalog = state.currentInput && state.currentInput.assetCatalog;
+            const index = buildCatalogIndex(catalog);
+            const key = String(ghost.assetId || '') + '|'
+                + String(ghost.assetDefinitionRevision || '');
+            return extractBounds(index.exact.get(key))
+                || extractBounds(index.byAsset.get(ghost.assetId))
+                || cloneBounds(DEFAULT_BOUNDS);
+        }
+
+        function renderGhostObject() {
+            disposeGhostObject();
+            const ghost = state.ghostInput;
+            if (!ghost || !state.mounted || !state.modelRoot || state.degraded) {
+                invalidate();
+                return false;
+            }
+            const position = ghost.worldPosition || ghost.position;
+            if (!position) return false;
+            const prototype = makeFallbackPrototype(ghostBounds(ghost));
+            const object = prototype.object;
+            const visit = function (candidate) {
+                const materials = Array.isArray(candidate && candidate.material)
+                    ? candidate.material : [candidate && candidate.material];
+                materials.filter(Boolean).forEach(function (material) {
+                    material.transparent = true;
+                    material.opacity = ghost.valid === false ? 0.28 : 0.34;
+                    material.depthWrite = false;
+                    if (material.color && typeof material.color.setHex === 'function') {
+                        material.color.setHex(
+                            ghost.valid === false ? 0xef4444 : 0x8b5cf6
+                        );
+                    }
+                    material.needsUpdate = true;
+                });
+            };
+            if (typeof object.traverse === 'function') object.traverse(visit);
+            else visit(object);
+            applyPlacementTransform(object, {
+                placementId: '__facility_ghost__',
+                transform: {
+                    position: {
+                        x: finite(position.x, 0),
+                        y: finite(position.y, 0),
+                        z: finite(position.z, 0),
+                    },
+                    quaternion: ghost.quaternion
+                        || { x: 0, y: 0, z: 0, w: 1 },
+                    scale: finite(ghost.scale, 1),
+                },
+            });
+            object.name = 'FacilityPlacementGhost';
+            object.userData = object.userData || {};
+            object.userData.facilityGhost = true;
+            state.modelRoot.add(object);
+            state.ghostObject = object;
+            invalidate();
+            return true;
         }
 
         function abortLoading() {
@@ -725,6 +798,7 @@
             state.listenerCount = 0;
             state.teardownCount += 1;
             state.disposed = Boolean(finalDispose);
+            if (finalDispose) state.ghostInput = null;
             notifyStatus(finalDispose ? 'disposed' : 'unmounted', null);
         }
 
@@ -737,6 +811,7 @@
                 layout: state.currentInput.layout,
                 assetCatalog: state.currentInput.assetCatalog,
             } : null;
+            const replayGhost = state.ghostInput;
             if (state.mounted || state.renderer || state.canvas) teardownMount(false);
 
             state.disposed = false;
@@ -786,9 +861,13 @@
                 notifyStatus('ready', null);
                 resize();
                 if (replayInput) {
-                    setScene(replayInput).catch(function (error) {
+                    setScene(replayInput).then(function () {
+                        if (replayGhost) setGhostPlacement(replayGhost);
+                    }).catch(function (error) {
                         reportError('scene_remount_failed', error);
                     });
+                } else if (replayGhost) {
+                    setGhostPlacement(replayGhost);
                 }
             } catch (error) {
                 reportError('webgl_initialization_failed', error);
@@ -1361,6 +1440,7 @@
                     'footprint'
                 );
             });
+            renderGhostObject();
             state.worldBounds = computeWorldBounds();
             notifyStatus('loading', null);
 
@@ -1382,6 +1462,43 @@
                 invalidate();
             }
             return getDiagnostics();
+        }
+
+        function setGhostPlacement(ghost) {
+            if (!ghost) {
+                state.ghostInput = null;
+                disposeGhostObject();
+                invalidate();
+                return true;
+            }
+            const position = ghost.worldPosition || ghost.position;
+            if (!position
+                || !Number.isFinite(Number(position.x))
+                || !Number.isFinite(Number(position.z))) {
+                return false;
+            }
+            state.ghostInput = {
+                assetId: String(ghost.assetId || ''),
+                assetDefinitionRevision: String(
+                    ghost.assetDefinitionRevision || ''
+                ),
+                worldPosition: {
+                    x: Number(position.x),
+                    y: finite(Number(position.y), 0),
+                    z: Number(position.z),
+                },
+                quaternion: ghost.quaternion
+                    ? {
+                        x: finite(Number(ghost.quaternion.x), 0),
+                        y: finite(Number(ghost.quaternion.y), 0),
+                        z: finite(Number(ghost.quaternion.z), 0),
+                        w: finite(Number(ghost.quaternion.w), 1),
+                    }
+                    : { x: 0, y: 0, z: 0, w: 1 },
+                scale: finite(Number(ghost.scale), 1),
+                valid: ghost.valid !== false,
+            };
+            return renderGhostObject();
         }
 
         function rotatePoint(point, quaternion) {
@@ -1752,6 +1869,86 @@
             return null;
         }
 
+        function worldPointOnFloor(input, floorY) {
+            if (state.degraded || !state.raycaster || !state.camera) return null;
+            const pointer = normalizedPointer(input);
+            if (!pointer) return null;
+            const elevation = finite(Number(floorY), 0);
+            const vector = typeof THREE.Vector2 === 'function'
+                ? new THREE.Vector2(pointer.x, pointer.y) : pointer;
+            state.raycaster.setFromCamera(vector, state.camera);
+            if (typeof options.floorProjector === 'function') {
+                const projected = options.floorProjector({
+                    pointer: pointer,
+                    floorY: elevation,
+                    camera: state.camera,
+                    raycaster: state.raycaster,
+                });
+                return projected ? {
+                    x: finite(Number(projected.x), 0),
+                    y: elevation,
+                    z: finite(Number(projected.z), 0),
+                } : null;
+            }
+            const ray = state.raycaster.ray;
+            if (!ray) return null;
+            if (typeof ray.intersectPlane === 'function'
+                && typeof THREE.Plane === 'function'
+                && typeof THREE.Vector3 === 'function') {
+                const plane = new THREE.Plane(
+                    new THREE.Vector3(0, 1, 0),
+                    -elevation
+                );
+                const target = new THREE.Vector3();
+                const hit = ray.intersectPlane(plane, target);
+                return hit ? { x: hit.x, y: elevation, z: hit.z } : null;
+            }
+            const origin = ray.origin;
+            const direction = ray.direction;
+            if (!origin || !direction || Math.abs(finite(direction.y, 0)) < 1e-12) {
+                return null;
+            }
+            const distance = (elevation - finite(origin.y, 0)) / direction.y;
+            if (!Number.isFinite(distance) || distance < 0) return null;
+            return {
+                x: finite(origin.x, 0) + finite(direction.x, 0) * distance,
+                y: elevation,
+                z: finite(origin.z, 0) + finite(direction.z, 0) * distance,
+            };
+        }
+
+        function worldToClient(input) {
+            if (state.degraded || !state.camera || !state.canvas
+                    || !input || typeof THREE.Vector3 !== 'function') {
+                return null;
+            }
+            const point = new THREE.Vector3(
+                finite(Number(input.x), 0),
+                finite(Number(input.y), 0),
+                finite(Number(input.z), 0)
+            );
+            if (typeof point.project !== 'function') return null;
+            if (typeof state.camera.updateMatrixWorld === 'function') {
+                state.camera.updateMatrixWorld();
+            }
+            point.project(state.camera);
+            const rect = typeof state.canvas.getBoundingClientRect === 'function'
+                ? state.canvas.getBoundingClientRect() : null;
+            if (!rect) return null;
+            const width = Math.max(1, finite(rect.width, 1));
+            const height = Math.max(1, finite(rect.height, 1));
+            const clientX = finite(rect.left, 0) + (point.x + 1) * width / 2;
+            const clientY = finite(rect.top, 0) + (1 - point.y) * height / 2;
+            return {
+                x: clientX,
+                y: clientY,
+                clientX: clientX,
+                clientY: clientY,
+                ndc: { x: point.x, y: point.y, z: point.z },
+                visible: point.z >= -1 && point.z <= 1,
+            };
+        }
+
         function copyDiagnosticsGroup(record) {
             return {
                 key: record.representationKey,
@@ -1791,6 +1988,7 @@
                 assetGroupCount: state.baseGroups.size,
                 representationGroups: groups,
                 selectedPlacementIds: Array.from(state.selectedIds).sort(),
+                ghostActive: Boolean(state.ghostInput),
                 loadTrace: state.loadTrace.map(function (item) {
                     return Object.assign({}, item);
                 }),
@@ -1810,6 +2008,19 @@
                     listenerCount: state.listenerCount,
                     canvasCount: state.canvas && state.canvas.parentNode ? 1 : 0,
                 },
+                controlsActive: Boolean(state.controls),
+                camera: state.camera ? {
+                    position: state.camera.position ? {
+                        x: finite(state.camera.position.x, 0),
+                        y: finite(state.camera.position.y, 0),
+                        z: finite(state.camera.position.z, 0),
+                    } : null,
+                    target: state.controls && state.controls.target ? {
+                        x: finite(state.controls.target.x, 0),
+                        y: finite(state.controls.target.y, 0),
+                        z: finite(state.controls.target.z, 0),
+                    } : null,
+                } : null,
                 modelRootTransform: objectTransform(state.modelRoot),
                 worldBounds: state.worldBounds
                     ? cloneBounds(state.worldBounds) : null,
@@ -1837,6 +2048,9 @@
             setScene: setScene,
             setSelection: setSelection,
             setSelectionHandler: setSelectionHandler,
+            setGhostPlacement: setGhostPlacement,
+            worldPointOnFloor: worldPointOnFloor,
+            worldToClient: worldToClient,
             fit: fit,
             invalidate: invalidate,
             pick: pick,

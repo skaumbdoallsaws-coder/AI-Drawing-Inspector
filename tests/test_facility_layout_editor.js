@@ -75,14 +75,23 @@ class FakeElement {
         if (handlers) handlers.delete(handler);
     }
 
-    dispatch(type, target) {
+    dispatch(type, input) {
+        const event = input && input.target
+            ? input
+            : { target: input || this };
+        event.type = type;
+        event.target = event.target || this;
+        if (typeof event.preventDefault !== 'function') {
+            event.defaultPrevented = false;
+            event.preventDefault = function () {
+                this.defaultPrevented = true;
+            };
+        }
         const handlers = this.listeners.get(type);
         if (handlers) {
-            Array.from(handlers).forEach(handler => handler({
-                type,
-                target: target || this,
-            }));
+            Array.from(handlers).forEach(handler => handler(event));
         }
+        return event;
     }
 
     descendants() {
@@ -316,6 +325,16 @@ check('unknown asset bounds use one deterministic fallback footprint', () => {
     ]);
 });
 
+check('authored shell bounds keep sparse layouts in a stable world frame', () => {
+    const sparse = layout([placement('pl-machine', 'asset-machine', 0, 0)]);
+    assert.deepStrictEqual(
+        facility.collectTopPlanBounds(sparse, {
+            worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        }),
+        { minX: -0.6, minZ: -0.4, maxX: 40, maxZ: 30 }
+    );
+});
+
 check('top plan renders zones routes and placements with stable IDs', () => {
     FakeResizeObserver.reset();
     const { documentRef, host } = makeHost();
@@ -364,6 +383,32 @@ check('plan picking synchronizes one stable selection to every view', () => {
     controller.clearSelection();
     assert.strictEqual(top.getDiagnostics().selection, null);
     controller.dispose();
+});
+
+check('zones and placements are mouse and keyboard selectable', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const top = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+    });
+    top.setLayout(layout());
+    const zone = host.findByAttribute('data-zone-id', 'zn-cell')[0];
+    const placementNode = host.findByAttribute(
+        'data-placement-id',
+        'pl-machine'
+    )[0];
+    assert.strictEqual(zone.getAttribute('role'), 'button');
+    assert.strictEqual(zone.getAttribute('tabindex'), '0');
+    assert.strictEqual(top.pick('zn-cell'), true);
+    assert.strictEqual(top.getDiagnostics().selection, 'zn-cell');
+    const keyboard = top.svg.dispatch('keydown', {
+        target: placementNode,
+        key: ' ',
+    });
+    assert.strictEqual(keyboard.defaultPrevented, true);
+    assert.strictEqual(top.getDiagnostics().selection, 'pl-machine');
+    top.dispose();
 });
 
 check('fit delegates to views and leaves authoritative layout byte-identical', () => {
@@ -553,6 +598,67 @@ check('ready clears resolved asynchronous view updates', async () => {
     assert.strictEqual(state.diagnostics.pendingViewUpdates, 0);
     controller.dispose();
 });
+
+check('plan authoring projection preserves world intent through pan zoom and layout updates',
+    () => {
+        const { host } = makeHost();
+        const adapter = facility.createTopPlanAdapter(host, {
+            ResizeObserver: FakeResizeObserver,
+            getSize: () => ({ width: 640, height: 360 }),
+        });
+        adapter.setLayout(layout());
+        adapter.fit();
+
+        const intended = { x: 3, y: 0, z: 2 };
+        const firstClient = adapter.worldToClient(intended);
+        const firstRoundTrip = adapter.clientToWorld({
+            clientX: firstClient.x,
+            clientY: firstClient.y,
+        });
+        assert(Math.abs(firstRoundTrip.x - intended.x) < 1e-9);
+        assert(Math.abs(firstRoundTrip.z - intended.z) < 1e-9);
+
+        adapter.panByPixels(87, -41);
+        const pannedClient = adapter.worldToClient(intended);
+        assert.notDeepStrictEqual(pannedClient, firstClient);
+        adapter.zoomAt({
+            clientX: pannedClient.x,
+            clientY: pannedClient.y,
+        }, 1.75);
+        const zoomRoundTrip = adapter.clientToWorld({
+            clientX: pannedClient.x,
+            clientY: pannedClient.y,
+        });
+        assert(Math.abs(zoomRoundTrip.x - intended.x) < 1e-9);
+        assert(Math.abs(zoomRoundTrip.z - intended.z) < 1e-9);
+
+        const projectionBefore = adapter.getDiagnostics().projection;
+        adapter.setLayout(layout([
+            placement('pl-machine', 'asset-machine', 4, 2),
+            placement('pl-rack', 'asset-rack', 10, 6),
+        ]));
+        assert.deepStrictEqual(adapter.getDiagnostics().projection, projectionBefore);
+
+        const hits = adapter.resolveMarquee({
+            start: { x: 2, z: 1 },
+            end: { x: 4, z: 3 },
+        });
+        assert(hits.includes('pl-machine'));
+        adapter.setGhostPlacement({
+            assetId: 'asset-machine',
+            assetDefinitionRevision: 'f'.repeat(64),
+            worldPosition: { x: 5, y: 0, z: 4 },
+            valid: true,
+        });
+        assert.strictEqual(adapter.getDiagnostics().ghostActive, true);
+        assert.strictEqual(
+            host.findByAttribute('data-facility-ghost', 'asset-machine').length,
+            1
+        );
+        adapter.setGhostPlacement(null);
+        assert.strictEqual(adapter.getDiagnostics().ghostActive, false);
+        adapter.dispose();
+    });
 
 Promise.all(pendingChecks).then(() => {
     process.stdout.write(

@@ -352,6 +352,10 @@ class FakeRaycaster {
     setFromCamera(pointer, camera) {
         this.pointer = pointer;
         this.camera = camera;
+        this.ray = {
+            origin: { x: pointer.x * 10, y: 10, z: pointer.y * 10 },
+            direction: { x: 0, y: -1, z: 0 },
+        };
     }
 
     intersectObjects() {
@@ -603,9 +607,11 @@ test('exports the classic UMD global, CommonJS API, and complete adapter contrac
         'setScene',
         'setSelection',
         'setSelectionHandler',
+        'setGhostPlacement',
         'fit',
         'invalidate',
         'pick',
+        'worldPointOnFloor',
         'getDiagnostics',
         'dispose',
     ].forEach(method => {
@@ -639,6 +645,9 @@ test('resolves every asset progressively in the required deterministic order', a
     );
     const diagnostics = data.adapter.getDiagnostics();
     assert.strictEqual(diagnostics.status, 'ready');
+    assert.strictEqual(diagnostics.controlsActive, true);
+    assert.ok(diagnostics.camera);
+    assert.ok(diagnostics.camera.position);
     assert.strictEqual(diagnostics.representationGroups.length, 1);
     assert.strictEqual(
         diagnostics.representationGroups[0].representation,
@@ -799,6 +808,45 @@ test('Fit mutates only camera and controls while model and scene roots stay fixe
         Object.assign({}, renderer.lastRender.camera.position),
         cameraBefore
     );
+    data.adapter.dispose();
+});
+
+test('facility-floor projection and transient ghost remain outside picking state', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [
+                placement('pl-a', 'asset-machine', REV_A, 0, 0, 0),
+            ],
+        },
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+    assert.deepStrictEqual(
+        data.adapter.worldPointOnFloor(
+            { normalized: true, x: 0.2, y: -0.3 },
+            0
+        ),
+        { x: 2, y: 0, z: -3 }
+    );
+    assert.strictEqual(data.adapter.setGhostPlacement({
+        assetId: 'asset-machine',
+        assetDefinitionRevision: REV_A,
+        worldPosition: { x: 4, y: 0, z: 5 },
+        valid: true,
+    }), true);
+    let diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.ghostActive, true);
+    assert.strictEqual(diagnostics.placementCount, 1);
+    data.scheduler.flush();
+    let ghostCount = 0;
+    FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+        if (object.userData && object.userData.facilityGhost) ghostCount += 1;
+    });
+    assert.strictEqual(ghostCount, 1);
+    assert.strictEqual(data.adapter.setGhostPlacement(null), true);
+    diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.ghostActive, false);
     data.adapter.dispose();
 });
 

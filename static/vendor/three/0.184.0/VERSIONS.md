@@ -36,8 +36,8 @@ No Draco, Meshopt, KTX2, Basis, or other decoder is included or approved by
 this manifest. Compression support requires a separate measured dependency
 decision.
 
-The current InspectorPro application still uses its existing r128 classic
-script path. These r184 modules are isolated P0 proof inputs and must not be
-loaded alongside r128 in production. Application migration requires the
-viewer compatibility and lifecycle gates in
+InspectorPro's legacy viewers use the separately pinned local r128 classic
+build. Facility Layout uses these r184 modules in an isolated adapter runtime;
+objects are never exchanged between the two Three.js revisions. This boundary
+was accepted by the compatibility and lifecycle gates in
 `docs/facility-layout-p0-renderer-dependency-spike.md`.

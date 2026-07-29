@@ -152,6 +152,20 @@ def _placement_operation():
     return {"op": "place_asset", "placement": placement}
 
 
+def _generated_placement_operation():
+    operation = _placement_operation()
+    operation["placement"].pop("placementId", None)
+    return operation
+
+
+def _file_snapshot(root):
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def test_service_creates_and_reads_revision_bound_layout(tmp_path):
     service, principal, shell, policy, _ = _service(tmp_path)
     result = service.create_layout(
@@ -204,6 +218,110 @@ def test_service_applies_one_atomic_operation_batch(tmp_path):
     )
     reopened = service.get_layout(principal, "site-a", "fl-service-cell")
     assert reopened["layout"] == applied["layout"]
+
+
+def test_operation_preview_is_stable_read_only_and_matches_apply(tmp_path):
+    service, principal, shell, policy, _ = _service(tmp_path)
+    created = service.create_layout(
+        principal,
+        "site-a",
+        _layout(shell, policy),
+    )
+    operations = [_generated_placement_operation()]
+    before = _file_snapshot(tmp_path)
+
+    preview = service.preview_operations(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        created["revision"],
+        operations,
+    )
+    repeated = service.preview_operations(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        created["revision"],
+        operations,
+    )
+
+    assert _file_snapshot(tmp_path) == before
+    assert preview == repeated
+    assert preview["baseRevision"] == created["revision"]
+    assert preview["createdIds"] == repeated["createdIds"]
+    assert preview["createdIds"][0].startswith("pl-")
+    assert preview["affectedIds"] == preview["createdIds"]
+    assert preview["findings"] == []
+    assert preview["canonicalDiff"]["changed"] is True
+    assert len(preview["diffHash"]) == 64
+    assert preview["dependencies"]["shellRevision"] == shell.revision
+
+    applied = service.apply_operations(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        created["revision"],
+        operations,
+    )
+
+    assert applied["operationResult"] == {
+        key: value
+        for key, value in preview.items()
+        if key not in {"baseRevision", "dependencies"}
+    }
+    assert applied["dependencies"] == preview["dependencies"]
+
+
+def test_operation_preview_rejects_stale_and_unauthorized_requests(tmp_path):
+    service, principal, shell, policy, _ = _service(tmp_path)
+    created = service.create_layout(
+        principal,
+        "site-a",
+        _layout(shell, policy),
+    )
+    before = _file_snapshot(tmp_path)
+
+    with pytest.raises(FacilityConflictError) as stale:
+        service.preview_operations(
+            principal,
+            "site-a",
+            "fl-service-cell",
+            "f" * 64,
+            [_generated_placement_operation()],
+        )
+    assert stale.value.code == "revision_conflict"
+    assert stale.value.details["currentRevision"] == created["revision"]
+
+    with pytest.raises(FacilityLayoutError) as viewer:
+        service.preview_operations(
+            _principal(roles=("viewer",)),
+            "site-a",
+            "fl-service-cell",
+            created["revision"],
+            [_generated_placement_operation()],
+        )
+    assert viewer.value.code == "role_not_authorized"
+
+    with pytest.raises(FacilityLayoutError) as cross_site:
+        service.preview_operations(
+            principal,
+            "site-b",
+            "fl-service-cell",
+            created["revision"],
+            [_generated_placement_operation()],
+        )
+    assert cross_site.value.code == "not_found"
+
+    with pytest.raises(FacilityLayoutError) as cross_tenant:
+        service.preview_operations(
+            _principal(tenant_id="tenant-b"),
+            "site-a",
+            "fl-service-cell",
+            created["revision"],
+            [_generated_placement_operation()],
+        )
+    assert cross_tenant.value.code == "not_found"
+    assert _file_snapshot(tmp_path) == before
 
 
 def test_stale_operation_batch_writes_nothing(tmp_path):

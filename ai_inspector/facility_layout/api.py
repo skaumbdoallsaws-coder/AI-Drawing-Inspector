@@ -295,6 +295,37 @@ def create_facility_layout_router(
             )
         )
 
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/preview"
+    )
+    async def preview_layout_operations(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        operations = payload.get("operations")
+        if not isinstance(operations, list):
+            return _error_response(
+                FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+            )
+        return _result(
+            lambda: service.preview_operations(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                operations,
+            )
+        )
+
     @router.post("/api/facility-layouts/{site_id}/{layout_id}/archive")
     async def archive_layout(
         site_id: str,

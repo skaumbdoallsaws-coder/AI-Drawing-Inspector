@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InspectorPro Facility Layout P5 Authoring</title>
+  <link rel="icon" href="data:,">
+  <script>
+    (function () {
+      const requested = new URLSearchParams(location.search).get('theme');
+      document.documentElement.dataset.theme = requested === 'dark'
+        ? 'dark'
+        : 'light';
+    }());
+  </script>
+  <link rel="stylesheet" href="/static/facility_layout_workspace.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #e7edf1;
+      --bg-panel: #ffffff;
+      --bg-secondary: #eef3f6;
+      --border-color: #bdc8d1;
+      --border-strong: #758696;
+      --text-primary: #162330;
+      --text-secondary: #596976;
+      --accent-primary: #0878d1;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg-main: #17202a;
+      --bg-panel: #202a36;
+      --bg-secondary: #283442;
+      --border-color: #3a4a59;
+      --border-strong: #6e7f8f;
+      --text-primary: #e8eef4;
+      --text-secondary: #a9b6c2;
+      --accent-primary: #4aa9e8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg-main);
+    }
+
+    body {
+      display: grid;
+      grid-template-rows: 42px minmax(0, 1fr);
+    }
+
+    .app-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 12px;
+      border-bottom: 1px solid #06111a;
+      color: #f7fafc;
+      background: #102332;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 23px;
+      height: 23px;
+      place-items: center;
+      border: 1px solid #40a9d8;
+      background: #126e98;
+      color: #ffffff;
+      font-size: 12px;
+    }
+
+    .app-title {
+      min-width: 0;
+      margin-right: auto;
+      overflow: hidden;
+      color: #dce7ef;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .phase {
+      border: 1px solid #4c6d82;
+      padding: 3px 7px;
+      color: #c7d8e3;
+      background: #162f40;
+      font-size: 10px;
+    }
+
+    #facility-workspace {
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .boot-error {
+      margin: 24px;
+      border: 1px solid #b91c1c;
+      padding: 12px;
+      color: #7f1d1d;
+      background: #fee2e2;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 520px) {
+      .app-bar {
+        gap: 7px;
+        padding: 0 8px;
+      }
+
+      .app-title {
+        display: none;
+      }
+
+      .phase {
+        margin-left: auto;
+      }
+
+      .ip-flw-command {
+        grid-template-columns: 24px;
+        padding-inline: 5px;
+      }
+
+      .ip-flw-command-label {
+        display: none;
+      }
+
+      .ip-flw-shell {
+        grid-template-columns: 120px minmax(270px, 1fr);
+      }
+
+      .ip-flw-properties {
+        display: none;
+      }
+
+      .ip-flw-asset-row {
+        grid-template-columns: 22px minmax(0, 1fr);
+        padding-inline: 5px;
+      }
+
+      .ip-flw-drag-grip {
+        display: none;
+      }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/static/vendor/three/0.184.0/build/three.module.min.js",
+        "three/addons/": "/static/vendor/three/0.184.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="/static/facility_layout_editor.js"></script>
+  <script src="/static/facility_layout_three_adapter.js"></script>
+  <script src="/static/facility_layout_session.js"></script>
+  <script src="/static/facility_layout_workspace.js"></script>
+</head>
+<body>
+  <header class="app-bar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">IP</span>
+      <span>InspectorPro</span>
+    </div>
+    <div class="app-title">Facility Layout - Manual Authoring Alpha</div>
+    <div class="phase">P5 Authoring</div>
+  </header>
+  <div id="facility-workspace"></div>
+  <script type="module" src="./p5-authoring.js"></script>
+</body>
+</html>

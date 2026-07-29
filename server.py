@@ -820,6 +820,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Facility Layout uses the same principal-bound domain router in the product
+# and in its tests. Local mode provisions only the explicit local principal;
+# it does not bypass the domain authorization or revision checks.
+from ai_inspector.facility_layout.host import (  # noqa: E402
+    create_local_facility_layout_router,
+)
+
+app.include_router(
+    create_local_facility_layout_router(
+        Path(
+            os.getenv(
+                "INSPECTORPRO_FACILITY_LAYOUT_ROOT",
+                str(REPO_ROOT / ".runtime" / "facility-layout"),
+            )
+        )
+    )
+)
+
 
 # Phase 3 telemetry: endpoint timing middleware. Records one telemetry
 # event per /api/* request (route, method, http status, latency). Skips

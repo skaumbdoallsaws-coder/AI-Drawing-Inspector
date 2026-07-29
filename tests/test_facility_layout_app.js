@@ -1,0 +1,123 @@
+'use strict';
+
+const assert = require('assert');
+const App = require('../static/facility_layout_app.js');
+
+const tests = [];
+function test(name, fn) { tests.push({ name, fn }); }
+
+function rootElement() {
+    return { ownerDocument: {}, marker: 'host' };
+}
+
+function fixture() {
+    const calls = [];
+    const receipt = {
+        revision: 'a'.repeat(64),
+        layout: {
+            layoutId: 'fl-a',
+            placements: [],
+            zones: [],
+        },
+    };
+    const transport = {
+        previewOperations: async () => ({}),
+        applyOperations: async () => ({}),
+        reloadLayout: async () => {
+            calls.push('reload');
+            return receipt;
+        },
+    };
+    const session = {
+        load(value) { calls.push(['load', value]); },
+    };
+    const workspace = {
+        getState: () => ({ viewMode: 'plan' }),
+        destroy: () => { calls.push('destroy'); },
+    };
+    const options = {
+        root: rootElement(),
+        siteId: 'site-a',
+        layoutId: 'fl-a',
+        assetCatalog: [{ assetId: 'asset-a' }],
+        transport,
+        session,
+        transportRuntime: {},
+        sessionRuntime: {},
+        layoutRuntime: {},
+        workspaceRuntime: {
+            createWorkspace(value) {
+                calls.push(['workspace', value]);
+                return workspace;
+            },
+        },
+    };
+    return { options, calls, receipt, session, workspace };
+}
+
+test('loads canonical receipt before mounting one shared workspace', async () => {
+    const value = fixture();
+    const app = App.createFacilityLayoutApp(value.options);
+    await app.ready;
+    assert.strictEqual(value.calls[0], 'reload');
+    assert.deepStrictEqual(value.calls[1], ['load', value.receipt]);
+    assert.strictEqual(value.calls[2][0], 'workspace');
+    assert.strictEqual(value.calls[2][1].session, value.session);
+    assert.strictEqual(value.calls[2][1].assetCatalog, value.options.assetCatalog);
+    assert.strictEqual(app.getState().loaded, true);
+    assert.strictEqual(app.getState().workspace.viewMode, 'plan');
+});
+
+test('accepts an initial receipt without a read request', async () => {
+    const value = fixture();
+    value.options.initialReceipt = value.receipt;
+    const app = App.createFacilityLayoutApp(value.options);
+    await app.ready;
+    assert.deepStrictEqual(value.calls.map(item => (
+        Array.isArray(item) ? item[0] : item
+    )), ['load', 'workspace']);
+});
+
+test('destroy is idempotent and prevents late workspace mount', async () => {
+    const value = fixture();
+    let resolveReload;
+    value.options.transport.reloadLayout = () => new Promise(resolve => {
+        resolveReload = resolve;
+    });
+    let reportedErrors = 0;
+    value.options.onError = () => { reportedErrors += 1; };
+    const app = App.createFacilityLayoutApp(value.options);
+    await Promise.resolve();
+    assert.strictEqual(app.destroy(), true);
+    assert.strictEqual(app.destroy(), false);
+    resolveReload(value.receipt);
+    await assert.rejects(app.ready, error => {
+        assert.strictEqual(error.name, 'AbortError');
+        assert.strictEqual(error.code, 'facility_layout_app_destroyed');
+        return true;
+    });
+    assert.strictEqual(reportedErrors, 0);
+    assert.strictEqual(app.getState().loadReceipt, null);
+    assert.strictEqual(value.calls.some(item => (
+        Array.isArray(item) && item[0] === 'workspace'
+    )), false);
+});
+
+(async () => {
+    let passed = 0;
+    for (const item of tests) {
+        try {
+            await item.fn();
+            passed += 1;
+            console.log('ok - ' + item.name);
+        } catch (error) {
+            console.error('not ok - ' + item.name);
+            throw error;
+        }
+    }
+    console.log('Facility layout app tests: ' + passed + '/' + tests.length
+        + ' passed');
+})().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

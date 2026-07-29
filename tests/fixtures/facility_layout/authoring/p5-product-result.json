@@ -1,0 +1,284 @@
+{
+  "appUrl": "http://127.0.0.1:8023/",
+  "camera": {
+    "after": {
+      "position": {
+        "x": -0.894438902763497,
+        "y": 0.11228735642733323,
+        "z": 8.834022917076714
+      },
+      "target": {
+        "x": 0,
+        "y": 1.35,
+        "z": 0
+      }
+    },
+    "before": {
+      "position": {
+        "x": 5.175967363313932,
+        "y": 6.525967363313935,
+        "z": 5.175967363313933
+      },
+      "target": {
+        "x": 0,
+        "y": 1.35,
+        "z": 0
+      }
+    }
+  },
+  "checks": {
+    "drop_after_orbit_uses_world_coordinates": true,
+    "local_orbit_controls_active": true,
+    "no_console_errors": true,
+    "no_page_errors": true,
+    "orbit_changes_camera": true,
+    "production_three_tab_enabled": true,
+    "production_workspace_mounted": true,
+    "remount_has_one_workspace": true,
+    "undo_restores_exact_draft": true,
+    "workflow_switch_disposes_workspace": true
+  },
+  "disposed": {
+    "appCleared": true,
+    "canvases": 0,
+    "roots": 0
+  },
+  "drop": {
+    "after": 2,
+    "afterUndo": 1,
+    "before": 1,
+    "createdWorld": {
+      "x": 0.5,
+      "y": 0,
+      "z": 3.5
+    },
+    "dirtyAfterUndo": false,
+    "ghostWorld": {
+      "x": 0.5,
+      "y": 0,
+      "z": 3.5
+    }
+  },
+  "errors": {
+    "console": [],
+    "page": []
+  },
+  "initial": {
+    "assetRows": 4,
+    "canvases": 1,
+    "diagnostics": {
+      "assetGroupCount": 1,
+      "camera": {
+        "position": {
+          "x": 5.175967363313932,
+          "y": 6.525967363313935,
+          "z": 5.175967363313933
+        },
+        "target": {
+          "x": 0,
+          "y": 1.35,
+          "z": 0
+        }
+      },
+      "contextLost": false,
+      "controlsActive": true,
+      "degraded": false,
+      "demandRendering": {
+        "pendingFrame": false,
+        "renderRequests": 15,
+        "renderedFrames": 2
+      },
+      "disposed": false,
+      "ghostActive": false,
+      "lastFit": {
+        "center": {
+          "x": 0,
+          "y": 1.35,
+          "z": 0
+        },
+        "rootUnchanged": true,
+        "size": {
+          "x": 3,
+          "y": 2.7,
+          "z": 3.7
+        }
+      },
+      "lifecycle": {
+        "canvasCount": 1,
+        "listenerCount": 4,
+        "mountCount": 1,
+        "observerActive": true,
+        "teardownCount": 0
+      },
+      "loadTrace": [
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "manifest",
+          "status": "started"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "manifest",
+          "status": "resolved"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "footprint",
+          "status": "started"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "footprint",
+          "status": "resolved"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "proxy",
+          "status": "started"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "proxy",
+          "status": "skipped"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "overview",
+          "status": "started"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "overview",
+          "status": "skipped"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "detail",
+          "status": "started"
+        },
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "detail": null,
+          "stage": "detail",
+          "status": "skipped"
+        }
+      ],
+      "modelRootTransform": {
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "mounted": true,
+      "pendingLoads": 0,
+      "placementCount": 1,
+      "representationGroups": [
+        {
+          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+          "assetId": "asset-cnc-mill",
+          "instanceMappings": [
+            {
+              "placementId": "pl-32e304a5c324ed41b565d813"
+            }
+          ],
+          "instanced": false,
+          "key": "asset-cnc-mill|a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c|footprint",
+          "meshCount": 1,
+          "placementIds": [
+            "pl-32e304a5c324ed41b565d813"
+          ],
+          "representation": "footprint"
+        }
+      ],
+      "selectedPlacementIds": [],
+      "status": "ready",
+      "statusReason": null,
+      "warnings": [],
+      "worldBounds": {
+        "maximum": {
+          "x": 1.5,
+          "y": 2.7,
+          "z": 1.85
+        },
+        "minimum": {
+          "x": -1.5,
+          "y": 0,
+          "z": -1.85
+        }
+      }
+    },
+    "placements": 1,
+    "planSvgs": 1,
+    "roots": 1,
+    "threeDisabled": false
+  },
+  "passed": true,
+  "remounted": {
+    "canvases": 1,
+    "planSvgs": 1,
+    "roots": 1
+  },
+  "schemaVersion": "facility-layout-p5-product-evidence-v1",
+  "screenshots": {
+    "plan": {
+      "bytes": 175972,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/authoring/p5-product-integration.png",
+      "sha256": "94f61194b6668e92fe2c98bfa12cb5e8c2f6ed66b00a784dc08581dee3215bee",
+      "width": 1920
+    },
+    "three": {
+      "bytes": 178077,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/authoring/p5-product-three-integration.png",
+      "sha256": "bac639cbe010be3bd8acde8f6085e741a8bdd6b4bd838be65da572fedf5bddeb",
+      "width": 1920
+    }
+  },
+  "source": {
+    "appSha256": "c4dd058c21d8a49e3478973d8e134d2c9bd2c3bdf246b9ddb3e7a7c821fa7f93",
+    "editorSha256": "a332c05763f2cd7ba672e53d9cec96c76c01598437fee9cf404429baba4736c5",
+    "hostSha256": "5f8f8a6851b4ad188cdbfdc9b4820802da7eca0dff838b7b95ea2f53f24c93b3",
+    "indexSha256": "1f2647d5e9dc0a88acfac1f21ea04e97a3b22faca1b349e602d28123d6ff04e6",
+    "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
+    "threeAdapterSha256": "4bc577bca01355d68972fe59c221be2e497efefb1dd70a0e70bc3af383d0ab66",
+    "threeClassicSha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2",
+    "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
+    "transportSha256": "b9114f15f91e24fce3a354363d80ee0fe2f4deb91bfa551446c1964e9a5419df",
+    "verifierSha256": "ffc00972b8ef5275299a36d56879b38479d2a56b6e890b061e5e3379a0bd6881",
+    "workspaceSha256": "29ee73d04bf744f248e3856a7adb3650438f6ffa5b5052737224b3148e4b1227"
+  }
+}

@@ -12702,7 +12702,7 @@
         }
     </style>
     <!-- Three.js for 3D Model Viewer -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/static/vendor/three/0.128.0/build/three.min.js"></script>
     <script>
     // Minimal CSS2DRenderer for Three.js (inline — not in r128 CDN build)
     THREE.CSS2DObject = class extends THREE.Object3D {
@@ -12967,6 +12967,15 @@
             return { scene, scenes: [scene], asset: json.asset || {} };
         }
     };
+    </script>
+    <link rel="stylesheet" href="/static/facility_layout_workspace.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "/static/vendor/three/0.184.0/build/three.module.min.js",
+            "three/addons/": "/static/vendor/three/0.184.0/examples/jsm/"
+        }
+    }
     </script>
 </head>
 <body>
@@ -13823,6 +13832,12 @@
     <script src="/static/vendor/floating-ui/floating-ui.dom.umd.min.js"></script>
     <script src="/static/floating_surface.js"></script>
     <script src="/static/process_map_editor.js"></script>
+    <script src="/static/facility_layout_editor.js"></script>
+    <script src="/static/facility_layout_three_adapter.js"></script>
+    <script src="/static/facility_layout_session.js"></script>
+    <script src="/static/facility_layout_transport.js"></script>
+    <script src="/static/facility_layout_workspace.js"></script>
+    <script src="/static/facility_layout_app.js"></script>
     <script>
         /* ============================================================
            InspectorPro - Frontend Application Logic
@@ -23927,6 +23942,10 @@
                 trainingState._playbackStarted = false;
                 try { _trainRenderPlaybackPanel(); } catch (_) {}
             }
+            if (prevType === 'facility_layout'
+                    && trainingState.type !== 'facility_layout') {
+                try { _trainDisposeFacilityLayoutAuthoring(); } catch (_) {}
+            }
             if (trainingState.type === 'plant_process') {
                 if (!trainingState.targetComponent || prevType !== 'plant_process') {
                     trainingState.targetComponent = 'Cooling Tower Process';
@@ -27499,7 +27518,120 @@
             return _trainMountFacilityLayoutViewer();
         }
 
-        function _trainMountFacilityLayoutViewer() {
+        let _trainFacilityLayoutAuthoringApp = null;
+        let _trainFacilityLayoutMountGeneration = 0;
+        let _trainFacilityThreeRuntimePromise = null;
+
+        function _trainLoadFacilityThreeRuntime() {
+            if (_trainFacilityThreeRuntimePromise) {
+                return _trainFacilityThreeRuntimePromise;
+            }
+            _trainFacilityThreeRuntimePromise = Promise.all([
+                import('three'),
+                import('three/addons/controls/OrbitControls.js'),
+                import('three/addons/loaders/GLTFLoader.js'),
+            ]).then(([THREE, controlsModule, loaderModule]) => ({
+                THREE,
+                OrbitControls: controlsModule.OrbitControls,
+                GLTFLoader: loaderModule.GLTFLoader,
+            })).catch(error => {
+                _trainFacilityThreeRuntimePromise = null;
+                throw error;
+            });
+            return _trainFacilityThreeRuntimePromise;
+        }
+
+        function _trainDisposeFacilityLayoutAuthoring() {
+            _trainFacilityLayoutMountGeneration += 1;
+            if (_trainFacilityLayoutAuthoringApp) {
+                try { _trainFacilityLayoutAuthoringApp.destroy(); } catch (_) {}
+            }
+            _trainFacilityLayoutAuthoringApp = null;
+        }
+
+        async function _trainMountFacilityLayoutViewer() {
+            const host = document.getElementById('trainViewportHost');
+            if (!host) return false;
+            const runtimesReady = window.InspectorProFacilityApp
+                && window.InspectorProFacilityTransport
+                && window.InspectorProFacilitySession
+                && window.InspectorProFacilityWorkspace
+                && window.InspectorProFacilityLayout;
+            if (!runtimesReady) return _trainMountLegacyFacilityLayoutViewer();
+            if (_trainFacilityLayoutAuthoringApp) {
+                const appState = _trainFacilityLayoutAuthoringApp.getState();
+                if (!appState.destroyed && appState.loaded) return true;
+            }
+
+            _trainDisposeFacilityLayoutAuthoring();
+            try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
+            host.innerHTML = '';
+            const mountGeneration = _trainFacilityLayoutMountGeneration;
+            const workspaceRoot = document.createElement('div');
+            workspaceRoot.id = 'trainFacilityLayoutAuthoring';
+            workspaceRoot.style.cssText = 'position:absolute;inset:0;min-width:0;min-height:0;';
+            host.appendChild(workspaceRoot);
+            const loading = document.createElement('div');
+            loading.className = 'train-viewport-empty';
+            loading.textContent = 'Loading Facility Layout editor...';
+            workspaceRoot.appendChild(loading);
+
+            try {
+                const response = await fetch('/api/facility-layout-bootstrap', {
+                    cache: 'no-store',
+                });
+                if (!response.ok) {
+                    throw new Error('Facility Layout bootstrap failed (' + response.status + ')');
+                }
+                const bootstrap = await response.json();
+                if (mountGeneration !== _trainFacilityLayoutMountGeneration
+                        || !_trainIsFacilityLayoutMode()) return false;
+                const facilityThree = await _trainLoadFacilityThreeRuntime();
+                if (mountGeneration !== _trainFacilityLayoutMountGeneration
+                        || !_trainIsFacilityLayoutMode()) return false;
+                workspaceRoot.innerHTML = '';
+                const appInstance = window.InspectorProFacilityApp
+                    .createFacilityLayoutApp({
+                        root: workspaceRoot,
+                        siteId: bootstrap.siteId,
+                        layoutId: bootstrap.layoutId,
+                        initialReceipt: bootstrap.layout,
+                        assetCatalog: bootstrap.assetCatalog || [],
+                        topPlanOptions: {
+                            worldBounds: bootstrap.worldBounds || null,
+                        },
+                        threeRuntime: window.InspectorProFacilityThree,
+                        threeOptions: {
+                            THREE: facilityThree.THREE,
+                            OrbitControls: facilityThree.OrbitControls,
+                            GLTFLoader: facilityThree.GLTFLoader,
+                        },
+                        onError: error => {
+                            console.warn('Facility Layout authoring error:', error);
+                        },
+                    });
+                _trainFacilityLayoutAuthoringApp = appInstance;
+                await appInstance.ready;
+                if (mountGeneration !== _trainFacilityLayoutMountGeneration
+                        || !_trainIsFacilityLayoutMode()) {
+                    appInstance.destroy();
+                    return false;
+                }
+                if (appInstance.workspace) {
+                    await appInstance.workspace.executeCommand('fit');
+                }
+                return true;
+            } catch (error) {
+                console.warn('Facility Layout authoring mount failed:', error);
+                if (mountGeneration !== _trainFacilityLayoutMountGeneration) {
+                    return false;
+                }
+                _trainDisposeFacilityLayoutAuthoring();
+                return _trainMountLegacyFacilityLayoutViewer();
+            }
+        }
+
+        function _trainMountLegacyFacilityLayoutViewer() {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
             const desiredViewerId = '__facility_layout_assem3__';
@@ -46409,6 +46541,7 @@
         };
 
         const annotationToolbar = $('annotationToolbar');
+        window.__inspectorProMainScriptReady = true;
 
         // Show/hide annotation toolbar based on whether a drawing is loaded
         // Feature #94: Only show on Drawing Only tab (not Split View)

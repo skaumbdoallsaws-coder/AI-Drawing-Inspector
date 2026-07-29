@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "layoutId": "fl-repeated-assets",
+  "displayName": "Repeated Asset Instances",
+  "status": "draft",
+  "association": {
+    "siteId": "site-a",
+    "areaId": "cell-repeat"
+  },
+  "coordinateFrame": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "datumId": "site-a-origin",
+    "floorElevation": 0.0
+  },
+  "sourceShellRef": {
+    "shellId": "shell-site-a",
+    "shellRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "coordinateFrameFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "catalogSnapshotRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "policySetRef": {
+    "policySetId": "policy-site-a",
+    "policySetRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "zones": [],
+  "placements": [
+    {
+      "placementId": "pl-rack-a",
+      "assetId": "asset-standard-rack",
+      "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transform": {
+        "position": {
+          "x": 2.0,
+          "y": 0.0,
+          "z": 2.0
+        },
+        "quaternion": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0,
+          "w": 1.0
+        },
+        "scale": 1
+      },
+      "positionMode": "auto",
+      "snapRelationship": null,
+      "metadata": {
+        "instanceLabel": "Rack A"
+      }
+    },
+    {
+      "placementId": "pl-rack-b",
+      "assetId": "asset-standard-rack",
+      "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transform": {
+        "position": {
+          "x": 6.0,
+          "y": 0.0,
+          "z": 2.0
+        },
+        "quaternion": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0,
+          "w": 1.0
+        },
+        "scale": 1
+      },
+      "positionMode": "locked",
+      "snapRelationship": null,
+      "metadata": {
+        "instanceLabel": "Rack B"
+      }
+    }
+  ],
+  "routes": [],
+  "utilityNetworks": [],
+  "processBindings": [],
+  "dismissedSuggestions": [],
+  "createdAt": "2026-07-28T00:00:00Z",
+  "updatedAt": "2026-07-28T00:00:00Z"
+}

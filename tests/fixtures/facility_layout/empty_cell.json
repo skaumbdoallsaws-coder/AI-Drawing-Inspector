@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "layoutId": "fl-empty-cell",
+  "displayName": "Empty Cell",
+  "status": "draft",
+  "association": {
+    "siteId": "site-a",
+    "areaId": "cell-empty"
+  },
+  "coordinateFrame": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "datumId": "site-a-origin",
+    "floorElevation": 0.0
+  },
+  "sourceShellRef": {
+    "shellId": "shell-site-a",
+    "shellRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "coordinateFrameFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "catalogSnapshotRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "policySetRef": {
+    "policySetId": "policy-site-a",
+    "policySetRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "zones": [],
+  "placements": [],
+  "routes": [],
+  "utilityNetworks": [],
+  "processBindings": [],
+  "dismissedSuggestions": [],
+  "createdAt": "2026-07-28T00:00:00Z",
+  "updatedAt": "2026-07-28T00:00:00Z"
+}

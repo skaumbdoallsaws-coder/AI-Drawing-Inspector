@@ -41,6 +41,9 @@ venv/
 !ai_inspector/product_intelligence/schemas/*.json
 !tests/fixtures/prompt_compilation_cases.json
 !generated/training/synthetic-process-map-eval/**/*.json
+!static/contracts/facility-*.json
+!static/contracts/industrial-*.json
+!tests/fixtures/facility_layout/**/*.json
 
 # OS files
 .DS_Store

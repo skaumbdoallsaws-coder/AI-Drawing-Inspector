@@ -1,0 +1,356 @@
+{
+  "schemaVersion": "facility-layout-p0-asset-definition-candidate-v1",
+  "fixturePurpose": "P0 asset-normalization evidence fixture; not a published catalog definition",
+  "candidateKey": "p0-wa01-w48-d36-machine-table",
+  "contractBasis": {
+    "document": "docs/industrial-layout-platform-implementation-plan.md",
+    "revision": 2,
+    "sections": [
+      "6.1",
+      "6.2",
+      "6.5",
+      "6.6",
+      "7.2",
+      "7.3",
+      "7.4",
+      "7.5",
+      "7.6",
+      "16.P0"
+    ]
+  },
+  "lifecycle": "draft",
+  "identity": {
+    "assetId": null,
+    "assetDefinitionRevision": null,
+    "sourceRevision": null,
+    "displayName": "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002",
+    "familyId": null,
+    "variantId": null,
+    "category": "workstation",
+    "tags": []
+  },
+  "sourceBinding": {
+    "requestedRoot": {
+      "safeLabel": "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002.sldprt",
+      "protectedPath": "protected://machine-library/RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002.sldprt",
+      "visibility": "server_only",
+      "format": "sldprt",
+      "byteLength": 265982,
+      "primaryDataSha256": "e773742615b2d72827d623556051297335a60412e0f5fb50f7455c8992fa61d2",
+      "hashScope": "primary NTFS data stream only; alternate streams excluded"
+    },
+    "acquisitionPackage": {
+      "safeLabel": "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002.zip",
+      "protectedPath": "protected://acquisition-cache/RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002.zip",
+      "visibility": "server_only",
+      "byteLength": 260457,
+      "primaryDataSha256": "e77a3259b576e75ec58b93dd3cadcf3bbb7f45df13a2c393f14e452c093bbdd5",
+      "hashScope": "primary NTFS data stream only; alternate streams excluded",
+      "entries": [
+        {
+          "path": "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002.sldprt",
+          "byteLength": 265982,
+          "contentSha256": null
+        }
+      ],
+      "relationToRequestedRoot": {
+        "matchingEvidence": [
+          "file_name",
+          "byte_length"
+        ],
+        "byteIdentityVerified": false
+      }
+    },
+    "rootResolution": {
+      "status": "candidate_only",
+      "evidenceStatus": "derived",
+      "filesystemAmbiguity": "none_observed_for_single_loose_part",
+      "cadReferenceAmbiguity": "unknown",
+      "reason": "The loose SLDPRT and one-entry acquisition archive identify a practical candidate root, but no CAD reference graph or external-reference audit was run."
+    },
+    "dependencies": {
+      "evidenceStatus": "unknown",
+      "knownPackageEntries": [
+        "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002.sldprt"
+      ],
+      "verifiedCadDependencies": [],
+      "cadDependencyCompleteness": "unknown",
+      "assemblyReferenceGraphBuilt": false
+    },
+    "sourceRevisionStatus": {
+      "value": null,
+      "reason": "The contract sourceRevision also binds configuration and extraction inputs; only source-package and source-file byte hashes are available."
+    }
+  },
+  "coordinateFrame": {
+    "evidenceStatus": "unknown",
+    "nativeSourceUnits": null,
+    "sourceHandedness": null,
+    "sourceUpAxis": null,
+    "sourceToCanonical": null,
+    "canonicalLocalOrigin": null,
+    "floorAnchor": null,
+    "defaultFacingVector": null,
+    "allowedMountingSurfaces": null
+  },
+  "geometry": {
+    "evidenceStatus": "unknown",
+    "aabb": null,
+    "obb": null,
+    "footprintPolygons": null,
+    "heightInterval": null,
+    "selectionBounds": null
+  },
+  "rendering": {
+    "evidenceStatus": "unknown",
+    "compatibleRenderBundleSchema": null,
+    "geometryInterfaceConstraints": null,
+    "artifacts": []
+  },
+  "collision": {
+    "evidenceStatus": "unknown",
+    "footprint2_5d": null,
+    "verticalInterval": null,
+    "compoundBoxes": null,
+    "convexProxies": null
+  },
+  "loading": {
+    "evidenceStatus": "unknown",
+    "transportMass": null,
+    "installedMass": null,
+    "operatingMass": null,
+    "centerOfGravity": null,
+    "supportPoints": null,
+    "contactPoints": null,
+    "contactAreas": null,
+    "pointLoads": null,
+    "dynamicLoadFactors": null,
+    "anchoringAssumptions": null
+  },
+  "clearances": {
+    "evidenceStatus": "unknown",
+    "items": []
+  },
+  "connectors": {
+    "evidenceStatus": "unknown",
+    "items": []
+  },
+  "utilities": {
+    "evidenceStatus": "unknown",
+    "electrical": null,
+    "air": null,
+    "water": null,
+    "exhaust": null,
+    "network": null,
+    "gas": null,
+    "drains": null,
+    "foundation": null
+  },
+  "mobility": {
+    "evidenceStatus": "unknown",
+    "classification": null,
+    "footprint": null,
+    "heading": null,
+    "turningRadius": null,
+    "speed": null,
+    "loadLimits": null
+  },
+  "capabilities": {
+    "evidenceStatus": "unknown",
+    "processTypes": [],
+    "capacity": null,
+    "operatingEnvelope": null,
+    "compatibleProducts": null,
+    "compatibleFixtures": null
+  },
+  "provenance": {
+    "provider": "3D ContentCentral",
+    "sourcePageUrl": "https://www.3dcontentcentral.com/secure/download-model.aspx?catalogid=12368&id=1050942",
+    "vendor": null,
+    "model": null,
+    "sourceDescription": null,
+    "supplierLabel": null,
+    "contributor": null,
+    "attribution": {
+      "status": "unresolved",
+      "text": null
+    },
+    "license": {
+      "status": "restricted_review_required",
+      "evidenceStatus": "authored",
+      "termsUrl": "https://www.3dcontentcentral.com/Terms-of-use.aspx",
+      "termsRevisionDate": "2023-10-11",
+      "termsObservedOn": "2026-07-28",
+      "publicRedistributionEvidencePresent": false,
+      "privateNormalizationAuthorization": null,
+      "reviewNote": "Provider terms describe internal CAD use and restrict distribution and public use. Asset-owner permission for an InspectorPro render bundle was not found."
+    }
+  },
+  "propertyEvidence": [
+    {
+      "property": "/identity/displayName",
+      "status": "derived",
+      "evidenceRefs": [
+        "ev-source-file-hash"
+      ]
+    },
+    {
+      "property": "/identity/category",
+      "status": "inferred",
+      "evidenceRefs": [
+        "ev-source-file-hash",
+        "ev-same-catalog-family-page"
+      ]
+    },
+    {
+      "property": "/provenance/sourcePageUrl",
+      "status": "derived",
+      "evidenceRefs": [
+        "ev-zone-identifier"
+      ]
+    }
+  ],
+  "evidenceRecords": [
+    {
+      "evidenceId": "ev-source-file-hash",
+      "type": "filesystem_hash",
+      "status": "derived",
+      "observedOn": "2026-07-28",
+      "summary": "Primary source file exists with the recorded name, byte length, and SHA-256."
+    },
+    {
+      "evidenceId": "ev-acquisition-archive",
+      "type": "archive_inventory",
+      "status": "derived",
+      "observedOn": "2026-07-28",
+      "summary": "Acquisition ZIP exists, has the recorded SHA-256, and lists one same-name, same-length SLDPRT entry. Entry content hash was not obtained."
+    },
+    {
+      "evidenceId": "ev-zone-identifier",
+      "type": "ntfs_zone_identifier",
+      "status": "derived",
+      "observedOn": "2026-07-28",
+      "summary": "The acquisition ZIP alternate stream records the exact 3D ContentCentral model page and download host URLs."
+    },
+    {
+      "evidenceId": "ev-same-catalog-family-page",
+      "type": "official_provider_page",
+      "status": "inferred",
+      "observedOn": "2026-07-28",
+      "url": "https://wwwcmnip.3dcontentcentral.com/download-model.aspx?catalogid=12368&id=1050944",
+      "summary": "A neighboring WA01 entry under the same provider catalog identifies the family as Rhino Frame machine tables. It is not the selected variant page and is used only to support candidate categorization."
+    },
+    {
+      "evidenceId": "ev-provider-terms",
+      "type": "official_provider_terms",
+      "status": "authored",
+      "observedOn": "2026-07-28",
+      "url": "https://www.3dcontentcentral.com/Terms-of-use.aspx",
+      "summary": "Current provider terms were reviewed for the catalog-publication gate."
+    }
+  ],
+  "readiness": {
+    "visual_ready": {
+      "value": false,
+      "blockers": [
+        "No nonblank web geometry.",
+        "No thumbnail."
+      ]
+    },
+    "placement_ready": {
+      "value": false,
+      "blockers": [
+        "Native units are unknown; filename tokens were not treated as dimensions or units.",
+        "Canonical local frame is unknown.",
+        "Floor anchor is unknown.",
+        "Footprint is unknown.",
+        "Collision proxy is unknown."
+      ]
+    },
+    "planning_ready": {
+      "value": false,
+      "blockers": [
+        "Connectors are unreviewed.",
+        "Relevant clearances are unknown.",
+        "Loading, utility, mobility, and capacity facts are unknown."
+      ]
+    },
+    "public_ready": {
+      "value": false,
+      "blockers": [
+        "No asset-owner redistribution permission is present.",
+        "Observed provider terms restrict distribution and public use."
+      ]
+    }
+  },
+  "verificationBoundary": {
+    "verifiedWithoutCadExtraction": [
+      "Requested-root existence, format by extension, byte length, and primary-data-stream SHA-256.",
+      "Acquisition-package existence, byte length, primary-data-stream SHA-256, and one-entry archive inventory.",
+      "Exact 3D ContentCentral source-page association from NTFS acquisition metadata.",
+      "Same-catalog WA01 family evidence supporting workstation categorization only.",
+      "Absence of ready web, placement, planning, and public-publication evidence in the inspected source set."
+    ],
+    "notVerifiedWithoutCadExtraction": [
+      "Whether filename tokens encode authoritative dimensions, units, options, or configuration.",
+      "CAD-internal units, handedness, up axis, origin, configurations, features, bodies, suppression state, and external references.",
+      "A source-to-canonical transform or alignment residual.",
+      "Floor support plane, floor anchor, facing vector, mounting surfaces, bounds, height, or footprint.",
+      "Collision geometry, mass, support loads, center of gravity, anchoring, clearances, connectors, utilities, mobility, capacity, or operating envelope.",
+      "Any safety, clearance, structural, floor-load, or code-compliance claim.",
+      "Archive-entry byte identity with the installed source file.",
+      "The selected variant's supplier, model description, attribution, or authorization to transform or redistribute it as an InspectorPro asset."
+    ]
+  },
+  "unresolvedFields": [
+    {
+      "fields": [
+        "/identity/assetId",
+        "/identity/assetDefinitionRevision",
+        "/identity/sourceRevision",
+        "/identity/familyId",
+        "/identity/variantId"
+      ],
+      "reason": "No catalog intake, server identity assignment, canonical semantic revision, or complete source-revision input set exists."
+    },
+    {
+      "fields": [
+        "/sourceBinding/acquisitionPackage/entries/0/contentSha256",
+        "/sourceBinding/dependencies"
+      ],
+      "reason": "Archive-entry stream hashing did not complete, and no CAD reference graph or external-reference audit was run."
+    },
+    {
+      "fields": [
+        "/coordinateFrame",
+        "/geometry",
+        "/rendering",
+        "/collision"
+      ],
+      "reason": "These fields require CAD-aware geometry inspection, normalization, artifact generation, and review. Filename tokens are not accepted as geometry evidence."
+    },
+    {
+      "fields": [
+        "/loading",
+        "/clearances",
+        "/connectors",
+        "/utilities",
+        "/mobility",
+        "/capabilities"
+      ],
+      "reason": "No reviewed manufacturer specification, site record, extracted physical property, or authored engineering source for the selected variant was found."
+    },
+    {
+      "fields": [
+        "/provenance/vendor",
+        "/provenance/model",
+        "/provenance/sourceDescription",
+        "/provenance/supplierLabel",
+        "/provenance/contributor",
+        "/provenance/attribution/text",
+        "/provenance/license/privateNormalizationAuthorization"
+      ],
+      "reason": "The exact source URL is preserved, but selected-variant attribution and separate asset-owner permission were not established. Same-catalog family evidence is not promoted to exact-variant provenance."
+    }
+  ]
+}

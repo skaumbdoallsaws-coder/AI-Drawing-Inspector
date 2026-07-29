@@ -1,0 +1,256 @@
+{
+  "contractId": "facility-layout-authorization-v1",
+  "contractVersion": 1,
+  "identity": {
+    "principalSource": "server_authenticated",
+    "tenantSource": "server_principal_scope",
+    "siteSource": "server_principal_scope",
+    "trustBrowserTenantOrSite": false,
+    "hideCrossScopeExistence": true,
+    "localModePrincipal": "local-user"
+  },
+  "roles": {
+    "viewer": [
+      "catalog.read",
+      "layout.read",
+      "authority.read",
+      "proposal.read",
+      "receipt.read"
+    ],
+    "editor": [
+      "catalog.read",
+      "layout.read",
+      "layout.create",
+      "layout.edit",
+      "layout.archive",
+      "authority.read",
+      "proposal.create",
+      "proposal.dismiss",
+      "proposal.read",
+      "receipt.read"
+    ],
+    "approver": [
+      "catalog.read",
+      "layout.read",
+      "authority.read",
+      "proposal.read",
+      "proposal.approve",
+      "proposal.apply",
+      "receipt.read"
+    ],
+    "catalog_curator": [
+      "catalog.read",
+      "catalog.intake",
+      "catalog.review",
+      "catalog.publish",
+      "catalog.deprecate",
+      "catalog.quarantine",
+      "authority.read"
+    ],
+    "authority_curator": [
+      "catalog.read",
+      "authority.read",
+      "authority.create",
+      "authority.edit",
+      "authority.review",
+      "authority.publish",
+      "authority.deprecate",
+      "authority.archive"
+    ],
+    "admin": [
+      "*"
+    ]
+  },
+  "writeRules": {
+    "proposalApplyRequiresExplicitApproval": true,
+    "approvalAndApplyRequireApproverRole": true,
+    "approvalBindsPrincipalAndSession": true,
+    "approvalBindsExactDiff": true,
+    "approvalBindsDependencyFingerprint": true,
+    "idempotencyRequired": true,
+    "staleProposalFailsClosed": true,
+    "alteredProposalFailsClosed": true,
+    "replayFailsClosed": true
+  },
+  "cases": [
+    {
+      "caseId": "viewer-reads-own-site-layout",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "viewer"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-a",
+        "action": "layout.read"
+      },
+      "authorized": true,
+      "reason": "authorized"
+    },
+    {
+      "caseId": "viewer-cannot-edit",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "viewer"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-a",
+        "action": "layout.edit"
+      },
+      "authorized": false,
+      "reason": "role_not_authorized"
+    },
+    {
+      "caseId": "editor-cannot-approve",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "editor"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-a",
+        "action": "proposal.approve"
+      },
+      "authorized": false,
+      "reason": "role_not_authorized"
+    },
+    {
+      "caseId": "approver-applies-exact-proposal",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "approver"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-a",
+        "action": "proposal.apply",
+        "explicitApproval": true,
+        "dependencyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "idempotencyKey": "facility-apply-0001"
+      },
+      "authorized": true,
+      "reason": "authorized"
+    },
+    {
+      "caseId": "cross-tenant-read-hidden",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "viewer"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-b",
+        "siteId": "site-b",
+        "action": "layout.read"
+      },
+      "authorized": false,
+      "reason": "not_found"
+    },
+    {
+      "caseId": "cross-site-read-hidden",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "viewer"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-b",
+        "action": "layout.read"
+      },
+      "authorized": false,
+      "reason": "not_found"
+    },
+    {
+      "caseId": "catalog-curator-cannot-publish-policy",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "catalog_curator"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-a",
+        "action": "authority.publish"
+      },
+      "authorized": false,
+      "reason": "role_not_authorized"
+    },
+    {
+      "caseId": "authority-curator-cannot-publish-machine",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "authority_curator"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-a",
+        "action": "catalog.publish"
+      },
+      "authorized": false,
+      "reason": "role_not_authorized"
+    },
+    {
+      "caseId": "implicit-apply-denied",
+      "principal": {
+        "tenantId": "tenant-a",
+        "siteIds": [
+          "site-a"
+        ],
+        "roles": [
+          "approver"
+        ]
+      },
+      "request": {
+        "tenantId": "tenant-a",
+        "siteId": "site-a",
+        "action": "proposal.apply",
+        "explicitApproval": false,
+        "dependencyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "diffHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "idempotencyKey": "facility-apply-0002"
+      },
+      "authorized": false,
+      "reason": "explicit_approval_required"
+    }
+  ]
+}

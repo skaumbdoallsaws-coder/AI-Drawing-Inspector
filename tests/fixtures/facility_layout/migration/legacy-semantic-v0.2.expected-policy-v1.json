@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "documentKind": "policy_set",
+  "policySetId": "policy-legacy-bd9684d48638d0524305",
+  "tenantId": "tenant-fixture",
+  "siteId": "site-fixture",
+  "status": "draft",
+  "applicability": {
+    "layoutId": "fl-legacy-33ea0aeb31bb98a2f8f0",
+    "compatibilityOnly": true
+  },
+  "deterministicRules": [],
+  "sourceDocuments": [],
+  "evidence": [],
+  "unresolvedItems": [
+    {
+      "findingId": "finding-legacy-policy-missing",
+      "code": "legacy_policy_unavailable",
+      "message": "The legacy semantic document contains no authoritative deterministic facility policy."
+    }
+  ],
+  "extensions": {
+    "inspectorproLegacyMigration": {
+      "readOnly": true
+    }
+  }
+}

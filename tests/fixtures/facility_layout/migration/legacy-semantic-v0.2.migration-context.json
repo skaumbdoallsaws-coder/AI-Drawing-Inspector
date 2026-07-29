@@ -1,0 +1,87 @@
+{
+  "caseId": "legacy-semantic-v0.2-compact",
+  "migrationContractVersion": 1,
+  "source": {
+    "fixture": "legacy-semantic-v0.2.input.json",
+    "schemaVersion": "facility-layout-semantic-v0.2",
+    "byteLength": 8965,
+    "sha256": "80c1fc1dd72b3a8fc7d931c214f01f2846886fa260730246401d0d6d1aa82199"
+  },
+  "canonicalization": {
+    "encoding": "ascii",
+    "jsonKeys": "sorted",
+    "jsonSeparators": [
+      ",",
+      ":"
+    ],
+    "trailingLf": false,
+    "hashAlgorithm": "sha256"
+  },
+  "serverContext": {
+    "tenantId": "tenant-fixture",
+    "siteId": "site-fixture",
+    "areaId": "area-fixture",
+    "createdAt": "2026-07-28T00:00:00Z",
+    "updatedAt": "2026-07-28T00:00:00Z"
+  },
+  "layoutId": "fl-legacy-33ea0aeb31bb98a2f8f0",
+  "coordinateFrame": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "datumId": "legacy-assem3-origin",
+    "floorElevation": -1.566829
+  },
+  "coordinateFrameFingerprint": "cca6e5480e44494e9e35aff98140e0297c0a0ff70bd1bddacd850bc8c34c1027",
+  "sourceShellRef": {
+    "shellId": "shell-legacy-cc6490e95e7c50f92ed1",
+    "shellRevision": "1dc805a3fdd5cddcf9b9014cc8f557a38f7473512a67ea3537023f4790a07ec4",
+    "coordinateFrameFingerprint": "cca6e5480e44494e9e35aff98140e0297c0a0ff70bd1bddacd850bc8c34c1027"
+  },
+  "policySetRef": {
+    "policySetId": "policy-legacy-bd9684d48638d0524305",
+    "policySetRevision": "c4e505590bbca83547283766f9666f6abd6ffe8843ecfec790155383c3a2a7e1"
+  },
+  "assetBindings": [
+    {
+      "legacyComponentName": "Rack-01",
+      "assetId": "asset-fixture-rack",
+      "assetDefinitionRevision": "6dea3acd750cb9aacb27f707c1b8d4671f1a01ae047796b07cc927fd87df2119",
+      "sourceOriginMatchesPlacementOrigin": true,
+      "quaternionSource": "pinned_companion_extractor",
+      "sourceQuaternionOrder": "WXYZ",
+      "canonicalQuaternion": {
+        "x": 0,
+        "y": -0.707106781,
+        "z": 0,
+        "w": 0.707106781
+      }
+    }
+  ],
+  "zonePromotions": [
+    {
+      "legacyZoneId": "Zone_North_Rack_Bank",
+      "zoneId": "zn-legacy-b8c3ba5b369e128fd3af",
+      "evidenceStatus": "inferred",
+      "demoOnly": true
+    }
+  ],
+  "compatibility": {
+    "mode": "read_only",
+    "writeAllowed": false,
+    "promotionRequiresReviewedAuthority": true,
+    "floorElevationSource": "minimum_rack_occurrence_y_compatibility_inference"
+  },
+  "unpromotedLegacyContent": [
+    "materialHandlingAssets[0]",
+    "aisles[0]",
+    "layoutMap.aisleCorridors[0]",
+    "layoutMap.pathGraph",
+    "rackRows[0].rackInstances[0].rackEnvelopeEstimate",
+    "rackRows[0].capacityModel"
+  ]
+}

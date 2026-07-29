@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "facility-rack-instance-spike-v1",
+  "source": {
+    "legacyLayoutPath": "generated/training/facility-layout/facility_layout.json",
+    "legacyLayoutSha256": "c07f8bd574ea151d1a6e2060e8716ec96db1279bf11b6e0769a03e737e0b7c0a",
+    "sourceCadFileName": "Pallet Racking.SLDASM",
+    "sourceCadSha256": "81575b23be1559cb6a6ca6e655db83b622d2291d478344aaeb866190eb0334b7",
+    "activeConfiguration": "8x16",
+    "authority": "inferred",
+    "purpose": "rendering_spike_only"
+  },
+  "prototype": {
+    "prototypeId": "proto-rack-8x16",
+    "geometryPath": "generated/industrial_assets/p0_spike/rack_prototypes/Pallet Racking_colored.glb",
+    "geometrySha256": "185e9914e28106b14054a8467b941eba1cf31c85593cd566ab40d608cea77c0c",
+    "geometryBytes": 13493420,
+    "extractionPath": "generated/industrial_assets/p0_spike/rack_prototypes/pallet-racking-default.json",
+    "extractionSha256": "af69542c91bea6b163422622b8c3c241fdfd04454514524eef3e327eb449e364",
+    "meshCount": 10,
+    "materialCount": 10
+  },
+  "idDerivation": {
+    "algorithm": "sha256",
+    "input": "prototypeId + '|' + sourceOccurrenceName",
+    "prefix": "pl-",
+    "hexCharacters": 16
+  },
+  "coordinateSemantics": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "quaternionOrder": "xyzw",
+    "note": "Legacy occurrence transforms are retained for rendering evidence only. They are not reviewed placement authority."
+  },
+  "placements": [
+    {
+      "placementId": "pl-393ce5e8347f2fc7",
+      "sourceOccurrenceName": "Pallet Racking-1",
+      "semanticGroup": "Rack_Row_B_Upper_Middle",
+      "position": {
+        "x": -2.653436243,
+        "y": -1.566829203,
+        "z": 0.0759958122
+      },
+      "quaternion": {
+        "x": 0.0,
+        "y": -0.7071067812,
+        "z": 0.0,
+        "w": 0.7071067812
+      },
+      "scale": 1.0
+    },
+    {
+      "placementId": "pl-20034837181c2232",
+      "sourceOccurrenceName": "Pallet Racking-15",
+      "semanticGroup": "Rack_Row_B_Upper_Middle",
+      "position": {
+        "x": 4.931370467,
+        "y": -1.566829203,
+        "z": 0.0759958122
+      },
+      "quaternion": {
+        "x": 0.0,
+        "y": -0.7071067812,
+        "z": 0.0,
+        "w": 0.7071067812
+      },
+      "scale": 1.0
+    },
+    {
+      "placementId": "pl-f63f3c94ff593b49",
+      "sourceOccurrenceName": "Pallet Racking-17",
+      "semanticGroup": "Rack_Row_C_Lower_Middle",
+      "position": {
+        "x": -2.653436243,
+        "y": -1.566829203,
+        "z": 4.343195812
+      },
+      "quaternion": {
+        "x": 0.0,
+        "y": -0.7071067812,
+        "z": 0.0,
+        "w": 0.7071067812
+      },
+      "scale": 1.0
+    },
+    {
+      "placementId": "pl-64381e9f582227d8",
+      "sourceOccurrenceName": "Pallet Racking-22",
+      "semanticGroup": "Rack_Row_A_North_Wall",
+      "position": {
+        "x": 9.288439371,
+        "y": -1.566829203,
+        "z": -4.191204188
+      },
+      "quaternion": {
+        "x": 0.0,
+        "y": -0.7071067812,
+        "z": 0.0,
+        "w": 0.7071067812
+      },
+      "scale": 1.0
+    },
+    {
+      "placementId": "pl-1ac82f7ca87726e7",
+      "sourceOccurrenceName": "Pallet Racking-29",
+      "semanticGroup": "Rack_Row_D_South_Wall",
+      "position": {
+        "x": 9.288439371,
+        "y": -1.566829203,
+        "z": 8.606395812
+      },
+      "quaternion": {
+        "x": 0.0,
+        "y": -0.7071067812,
+        "z": 0.0,
+        "w": 0.7071067812
+      },
+      "scale": 1.0
+    },
+    {
+      "placementId": "pl-c4990f316a583b6d",
+      "sourceOccurrenceName": "Pallet Racking-33",
+      "semanticGroup": "Rack_Row_C_Lower_Middle",
+      "position": {
+        "x": 4.931370467,
+        "y": -1.566829203,
+        "z": 4.343195812
+      },
+      "quaternion": {
+        "x": 0.0,
+        "y": -0.7071067812,
+        "z": 0.0,
+        "w": 0.7071067812
+      },
+      "scale": 1.0
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "caseId": "unsupported-newer-schema-v2",
+  "source": {
+    "fixture": "newer-schema-v2.input.json",
+    "byteLength": 197,
+    "sha256": "0aea43bcdaeb13aec43378e65fcdaf5afc8d950c09a5cd2b9de37e067a9e5149"
+  },
+  "compatibility": {
+    "mode": "read_only",
+    "reason": "unsupported_newer_schema",
+    "detectedSchemaVersion": 2,
+    "maximumReadableSchemaVersion": 1,
+    "maximumWritableSchemaVersion": 1,
+    "readAllowed": true,
+    "writeAllowed": false,
+    "migrationAllowed": false,
+    "canonicalRewriteAllowed": false,
+    "originalBytesMustRemainUnchanged": true
+  },
+  "writeFailure": {
+    "status": 409,
+    "code": "unsupported_schema_version_read_only"
+  }
+}

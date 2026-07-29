@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "facility-layout-renderer-benchmark-v1",
+  "description": "Deterministic top-plan placement-layer workload; zones, routes, labels, clearances, picking, and spatial queries are intentionally excluded.",
+  "seed": 20260728,
+  "coordinatePlane": "X/Z",
+  "viewport": {
+    "width": 1440,
+    "height": 960,
+    "devicePixelRatio": 1
+  },
+  "generator": {
+    "cellSpacingMeters": [
+      8,
+      8
+    ],
+    "positionJitterMeters": 0.7,
+    "selectionColor": "#ffb000",
+    "palette": [
+      "#136f8a",
+      "#368f8b",
+      "#5a9d70",
+      "#859f57",
+      "#b08f45",
+      "#ba6846",
+      "#a9474f",
+      "#884f73",
+      "#645a8d",
+      "#496a99",
+      "#287f9c",
+      "#3f927a",
+      "#6b985d",
+      "#96904d",
+      "#b77b42",
+      "#b55749",
+      "#98485f",
+      "#765681",
+      "#56618f",
+      "#3d739a"
+    ]
+  },
+  "scenarios": {
+    "edit-500": {
+      "placementCount": 500,
+      "prototypeCount": 20,
+      "columns": 25,
+      "workload": "pan-zoom-drag",
+      "panAmplitudeFraction": [
+        0.08,
+        0.06
+      ],
+      "zoomAmplitudeFraction": 0.12,
+      "dragAmplitudeMeters": [
+        3.2,
+        2.4
+      ]
+    },
+    "navigate-5000": {
+      "placementCount": 5000,
+      "prototypeCount": 20,
+      "columns": 100,
+      "workload": "pan-zoom",
+      "panAmplitudeFraction": [
+        0.1,
+        0.08
+      ],
+      "zoomAmplitudeFraction": 0.14,
+      "dragAmplitudeMeters": [
+        0,
+        0
+      ]
+    }
+  }
+}

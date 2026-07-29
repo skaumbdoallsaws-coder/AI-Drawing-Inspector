@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "layoutId": "fl-overlapping-zones",
+  "displayName": "Overlapping Zone Membership",
+  "status": "draft",
+  "association": {
+    "siteId": "site-a",
+    "areaId": "cell-overlap"
+  },
+  "coordinateFrame": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "datumId": "site-a-origin",
+    "floorElevation": 0.0
+  },
+  "sourceShellRef": {
+    "shellId": "shell-site-a",
+    "shellRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "coordinateFrameFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "catalogSnapshotRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "policySetRef": {
+    "policySetId": "policy-site-a",
+    "policySetRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "zones": [
+    {
+      "zoneId": "zn-production",
+      "zoneType": "workcell",
+      "label": "Production Zone",
+      "boundary": [
+        {
+          "x": 0.0,
+          "z": 0.0
+        },
+        {
+          "x": 10.0,
+          "z": 0.0
+        },
+        {
+          "x": 10.0,
+          "z": 8.0
+        },
+        {
+          "x": 0.0,
+          "z": 8.0
+        }
+      ],
+      "floorElevation": 0.0,
+      "anchors": [],
+      "evidence": []
+    },
+    {
+      "zoneId": "zn-safety",
+      "zoneType": "safety",
+      "label": "Shared Safety Zone",
+      "boundary": [
+        {
+          "x": 3.0,
+          "z": 2.0
+        },
+        {
+          "x": 8.0,
+          "z": 2.0
+        },
+        {
+          "x": 8.0,
+          "z": 7.0
+        },
+        {
+          "x": 3.0,
+          "z": 7.0
+        }
+      ],
+      "floorElevation": 0.0,
+      "anchors": [],
+      "evidence": []
+    }
+  ],
+  "placements": [
+    {
+      "placementId": "pl-overlap-machine",
+      "assetId": "asset-machine-01",
+      "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transform": {
+        "position": {
+          "x": 5.0,
+          "y": 0.0,
+          "z": 4.0
+        },
+        "quaternion": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0,
+          "w": 1.0
+        },
+        "scale": 1
+      },
+      "positionMode": "manual",
+      "snapRelationship": null,
+      "metadata": {
+        "membershipResolvedAtRuntime": true
+      }
+    }
+  ],
+  "routes": [],
+  "utilityNetworks": [],
+  "processBindings": [],
+  "dismissedSuggestions": [],
+  "createdAt": "2026-07-28T00:00:00Z",
+  "updatedAt": "2026-07-28T00:00:00Z"
+}

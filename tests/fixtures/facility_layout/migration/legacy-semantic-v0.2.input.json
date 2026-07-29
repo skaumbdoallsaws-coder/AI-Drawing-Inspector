@@ -1,0 +1,369 @@
+{
+  "schemaVersion": "facility-layout-semantic-v0.2",
+  "generatedAt": "2026-06-25T07:04:34+00:00",
+  "source": {
+    "extractorJson": "sanitized/facility_layout_extract.json",
+    "solidWorksFileName": "Assem3.SLDASM",
+    "solidWorksFilePath": "sanitized/Assem3.SLDASM",
+    "extractionTime": "2026-06-24T20:59:18-05:00",
+    "units": "meters",
+    "legacyVendorField": {
+      "retain": true
+    }
+  },
+  "facility": {
+    "id": "Assem3-compact",
+    "displayName": "Sanitized warehouse sample",
+    "statistics": {
+      "totalComponents": 3,
+      "uniquePartCount": 2,
+      "subAssemblyCount": 1,
+      "totalMates": 0,
+      "resolvedCount": 3,
+      "lightweightCount": 0,
+      "suppressedCount": 0,
+      "mateTypeCounts": {}
+    },
+    "topLevelComponentCount": 2,
+    "semanticTopLevelGroupCounts": {
+      "Forklift_01_West_Aisle": 1,
+      "Rack_Row_A_North_Wall": 1
+    },
+    "semanticComponentGroupCounts": {
+      "Forklift_01_West_Aisle": 1,
+      "Rack_Row_A_North_Wall": 2
+    }
+  },
+  "rackRows": [
+    {
+      "id": "Rack_Row_A_North_Wall",
+      "displayName": "A North Wall",
+      "kind": "rack_row",
+      "aliases": [
+        "A North Wall",
+        "row a"
+      ],
+      "rackCount": 1,
+      "rackInstances": [
+        {
+          "componentName": "Rack-01",
+          "referencedFileName": "Rack.SLDASM",
+          "activeConfiguration": "8x8",
+          "positionMeters": {
+            "x": 1.25,
+            "y": -1.566829,
+            "z": 2.75
+          },
+          "rackEnvelopeEstimate": {
+            "basis": "child component centerline transforms",
+            "confidence": "rough",
+            "componentCountUsed": 2,
+            "estimatedUsableEnvelopeMeters": {
+              "basis": "upper-bound estimate; member thickness and clearance are not subtracted",
+              "alongRow": 2.4384,
+              "crossRowDepth": 1.2,
+              "verticalSpan": 2.4384
+            },
+            "estimatedShelfLevels": 2,
+            "assumptions": [
+              "Shelf levels are inferred.",
+              "Envelope is demo-only."
+            ]
+          }
+        }
+      ],
+      "orientation": "east-west",
+      "primaryAxis": "x",
+      "centerlineBoundsMeters": {
+        "min": {
+          "x": 1.25,
+          "y": -1.566829,
+          "z": 2.75
+        },
+        "max": {
+          "x": 1.25,
+          "y": -1.566829,
+          "z": 2.75
+        },
+        "center": {
+          "x": 1.25,
+          "y": -1.566829,
+          "z": 2.75
+        }
+      },
+      "centerlineSpanMeters": 0,
+      "centerlineRackSpacing": {
+        "count": 1,
+        "minSpacingMeters": null,
+        "averageSpacingMeters": null,
+        "maxSpacingMeters": null
+      },
+      "capacityModel": {
+        "status": "rough_envelope_available_needs_box_dimensions",
+        "inputsNeeded": [
+          "box dimensions",
+          "clearance rules"
+        ]
+      },
+      "futureRowField": [
+        1,
+        "two",
+        null
+      ]
+    }
+  ],
+  "materialHandlingAssets": [
+    {
+      "id": "Forklift_01_West_Aisle",
+      "displayName": "01 West Aisle",
+      "kind": "forklift",
+      "aliases": [
+        "west aisle"
+      ],
+      "componentName": "Forklift-01",
+      "referencedFileName": "Forklift.SLDPRT",
+      "positionMeters": {
+        "x": -2.5,
+        "y": -1.566829,
+        "z": 1.0
+      },
+      "nearestRackRows": [
+        {
+          "rowId": "Rack_Row_A_North_Wall",
+          "centerlineDistanceMeters": 1.75
+        }
+      ]
+    }
+  ],
+  "aisles": [
+    {
+      "id": "Aisle_Between_A_and_B",
+      "kind": "inferred_row_to_row_aisle",
+      "betweenRows": [
+        "Rack_Row_A_North_Wall",
+        "Rack_Row_B_Compact"
+      ],
+      "centerlineSpacingMeters": 4.2672,
+      "approxCenterlineMeters": {
+        "x": 1.25,
+        "y": -1.566829,
+        "z": 4.8836
+      },
+      "forkliftsCurrentlyInBand": [
+        "Forklift_01_West_Aisle"
+      ],
+      "assumptions": [
+        "Spacing is centerline-to-centerline, not clear driveable width."
+      ]
+    }
+  ],
+  "layoutMap": {
+    "schemaVersion": "facility-layout-map-v0.1",
+    "status": "manual_annotation_seeded_from_layout_screenshots",
+    "updatedAt": "2026-06-27",
+    "sourceEvidence": [
+      {
+        "type": "solidworks_extraction",
+        "description": "Component names and positions came from a standalone extraction."
+      },
+      {
+        "type": "layout_dimension_screenshot",
+        "description": "A repeated 168 inch spacing was visible."
+      }
+    ],
+    "coordinateFrame": {
+      "cadUnits": "meters",
+      "drawingUnits": "inches",
+      "rackLabelUnits": "feet",
+      "floorPlaneAxes": [
+        "x",
+        "z"
+      ],
+      "verticalAxis": "y",
+      "conversion": {
+        "inchToMeter": 0.0254,
+        "footToMeter": 0.3048
+      },
+      "transformSchemaVersion": "facility-coordinate-frame-v1",
+      "transformSource": "resolved_from_glb_semantic_alignment",
+      "transformClass": "identity",
+      "matrixOrder": "column-major",
+      "units": "meters",
+      "transformSolidWorksToGlb": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "translationMeters": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "measuredBestFitTranslationMeters": {
+        "x": 0.045,
+        "y": -0.041647,
+        "z": 0
+      },
+      "glbAsset": {
+        "path": "sanitized/Assem3_colored.glb",
+        "byteLength": 12345,
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "validation": {
+        "correspondenceKind": "rack_component_geometric_centers",
+        "rackCorrespondences": 1,
+        "maxResidualMeters": 0.06131,
+        "meanResidualMeters": 0.0612,
+        "rmsResidualMeters": 0.0612,
+        "rotationDegFromIdentity": 0.07395,
+        "scale": 1.001203,
+        "allTransformedCentersWithinGlbBounds": true,
+        "residualToleranceMeters": 0.5,
+        "containmentEpsilonMeters": 0.1,
+        "passed": true
+      }
+    },
+    "drawingConfirmedDimensions": {
+      "standardAisleSpacing": {
+        "valueInches": 168,
+        "valueMeters": 4.2672,
+        "source": "sanitized top-view drawing"
+      }
+    },
+    "floorZones": [
+      {
+        "id": "Zone_North_Rack_Bank",
+        "kind": "rack_storage_zone",
+        "rowIds": [
+          "Rack_Row_A_North_Wall"
+        ],
+        "approxFloorPolygonMeters": [
+          {
+            "x": 0,
+            "z": 1
+          },
+          {
+            "x": 3,
+            "z": 1
+          },
+          {
+            "x": 3,
+            "z": 4
+          },
+          {
+            "x": 0,
+            "z": 4
+          }
+        ],
+        "description": "Approximate rack storage overlay."
+      }
+    ],
+    "aisleCorridors": [
+      {
+        "id": "Aisle_AB_North_Clear_Aisle",
+        "kind": "primary_forklift_corridor",
+        "betweenRows": [
+          "Rack_Row_A_North_Wall",
+          "Rack_Row_B_Compact"
+        ],
+        "clearSpacingInches": 168,
+        "clearSpacingMeters": 4.2672,
+        "centerlineMeters": {
+          "x": 1.25,
+          "z": 4.8836
+        },
+        "approxFloorPolygonMeters": [
+          {
+            "x": 0,
+            "z": 4
+          },
+          {
+            "x": 3,
+            "z": 4
+          },
+          {
+            "x": 3,
+            "z": 5.5
+          },
+          {
+            "x": 0,
+            "z": 5.5
+          }
+        ],
+        "confidence": "drawing_confirmed_spacing_cad_aligned"
+      }
+    ],
+    "pathGraph": {
+      "status": "seed_for_future_route_planning",
+      "nodes": [
+        {
+          "id": "Node_AB_West",
+          "aisleId": "Aisle_AB_North_Clear_Aisle",
+          "positionMeters": {
+            "x": 0,
+            "z": 4.8836
+          }
+        },
+        {
+          "id": "Node_AB_East",
+          "aisleId": "Aisle_AB_North_Clear_Aisle",
+          "positionMeters": {
+            "x": 3,
+            "z": 4.8836
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "Node_AB_West",
+          "to": "Node_AB_East",
+          "corridorId": "Aisle_AB_North_Clear_Aisle"
+        }
+      ]
+    },
+    "usageNotes": [
+      "Path graph is a routing seed, not a validated route."
+    ],
+    "queryAliases": {
+      "north rack": [
+        "Zone_North_Rack_Bank"
+      ]
+    },
+    "futureLayoutField": {
+      "nestedUnknown": "preserve me"
+    }
+  },
+  "semanticIndex": {
+    "row a": "Rack_Row_A_North_Wall",
+    "west aisle": "Forklift_01_West_Aisle"
+  },
+  "globalAssumptions": [
+    "Coordinates are expressed in meters.",
+    "Capacity and aisle geometry are planning estimates."
+  ],
+  "nextDataNeeded": [
+    "confirmed floor datum",
+    "verified rack footprint",
+    "clearance rules"
+  ],
+  "futureRootField": {
+    "retain": [
+      true,
+      7,
+      "verbatim"
+    ]
+  }
+}

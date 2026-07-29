@@ -1,0 +1,335 @@
+[
+  {
+    "schemaVersion": 1,
+    "documentKind": "facility_shell",
+    "shellId": "shell-site-a",
+    "tenantId": "tenant-a",
+    "siteId": "site-a",
+    "status": "reviewed",
+    "coordinateFrame": {
+      "units": "m",
+      "handedness": "right",
+      "upAxis": "+Y",
+      "floorAxes": [
+        "+X",
+        "+Z"
+      ],
+      "datumId": "site-a-origin",
+      "floorElevation": 0.0
+    },
+    "features": [
+      {
+        "featureId": "shell-floor-main",
+        "featureKind": "floor_surface",
+        "geometry": {
+          "boundary": [
+            {
+              "x": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 30.0,
+              "z": 0.0
+            },
+            {
+              "x": 30.0,
+              "z": 20.0
+            },
+            {
+              "x": 0.0,
+              "z": 20.0
+            }
+          ],
+          "elevation": 0.0
+        },
+        "evidence": [
+          "ev-shell-floor"
+        ]
+      }
+    ],
+    "shellConnectors": [
+      {
+        "connectorId": "air-header",
+        "serviceType": "compressed_air",
+        "position": {
+          "x": 0.0,
+          "y": 3.0,
+          "z": 3.0
+        },
+        "facing": {
+          "x": 1.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "role": "source",
+        "evidence": [
+          "ev-shell-floor"
+        ]
+      },
+      {
+        "connectorId": "personnel-door-east",
+        "serviceType": "operator",
+        "position": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 3.0
+        },
+        "facing": {
+          "x": 1.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "role": "bidirectional",
+        "evidence": [
+          "ev-shell-floor"
+        ]
+      }
+    ],
+    "sourceDocuments": [
+      {
+        "trustedSourceId": "source-site-cad",
+        "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "locator": "site-a/facility-shell"
+      }
+    ],
+    "evidence": [
+      "ev-shell-floor"
+    ],
+    "unresolvedItems": []
+  },
+  {
+    "schemaVersion": 1,
+    "documentKind": "policy_set",
+    "policySetId": "policy-site-a",
+    "tenantId": "tenant-a",
+    "siteId": "site-a",
+    "status": "reviewed",
+    "applicability": {
+      "areaIds": [
+        "cell-01",
+        "cell-utility"
+      ]
+    },
+    "deterministicRules": [
+      {
+        "ruleId": "rule-egress-clearance",
+        "ruleType": "minimum_egress_clearance",
+        "severity": "error",
+        "applicability": {
+          "zoneTypes": [
+            "workcell"
+          ]
+        },
+        "parameters": {
+          "minimumWidthMeters": 1.1
+        },
+        "evidence": [
+          "ev-policy-egress"
+        ]
+      }
+    ],
+    "sourceDocuments": [
+      {
+        "trustedSourceId": "source-site-policy",
+        "sourceRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "locator": "site-a/policy/egress"
+      }
+    ],
+    "evidence": [
+      "ev-policy-egress"
+    ],
+    "unresolvedItems": []
+  },
+  {
+    "schemaVersion": 1,
+    "documentKind": "vehicle_profile",
+    "vehicleProfileId": "vehicle-forklift-a",
+    "tenantId": "tenant-a",
+    "siteId": "site-a",
+    "status": "reviewed",
+    "displayName": "Site A Forklift",
+    "overallDimensions": {
+      "length": 3.5,
+      "width": 1.2,
+      "height": 2.2
+    },
+    "footprint": [
+      {
+        "x": -1.75,
+        "z": -0.6
+      },
+      {
+        "x": 1.75,
+        "z": -0.6
+      },
+      {
+        "x": 1.75,
+        "z": 0.6
+      },
+      {
+        "x": -1.75,
+        "z": 0.6
+      }
+    ],
+    "wheelbase": 2.0,
+    "steeringLimits": {
+      "minimumTurningRadiusMeters": 2.3
+    },
+    "speedLimits": {
+      "maximumMetersPerSecond": 2.0
+    },
+    "loadLimits": {
+      "maximumKilograms": 1800
+    },
+    "gradeLimits": {
+      "maximumPercent": 8
+    },
+    "reversePolicy": "site_policy",
+    "sourceDocuments": [
+      {
+        "trustedSourceId": "source-forklift-spec",
+        "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "locator": "manufacturer/forklift-a"
+      }
+    ],
+    "evidence": [
+      "ev-forklift-envelope"
+    ],
+    "unresolvedItems": []
+  },
+  {
+    "schemaVersion": 1,
+    "documentKind": "trusted_source_registry",
+    "tenantId": "tenant-a",
+    "sources": [
+      {
+        "trustedSourceId": "source-site-cad",
+        "ownerTenantId": "tenant-a",
+        "sourceType": "cad",
+        "issuer": "Site A Engineering",
+        "status": "active",
+        "permittedClaimScopes": [
+          "facility_shell.geometry"
+        ],
+        "allowedSiteIds": [
+          "site-a"
+        ],
+        "freshnessPolicy": {
+          "maximumAgeDays": 365
+        }
+      },
+      {
+        "trustedSourceId": "source-site-policy",
+        "ownerTenantId": "tenant-a",
+        "sourceType": "policy",
+        "issuer": "Site A EHS",
+        "status": "active",
+        "permittedClaimScopes": [
+          "facility_policy.clearance"
+        ],
+        "allowedSiteIds": [
+          "site-a"
+        ],
+        "freshnessPolicy": {
+          "maximumAgeDays": 180
+        }
+      },
+      {
+        "trustedSourceId": "source-forklift-spec",
+        "ownerTenantId": "tenant-a",
+        "sourceType": "manufacturer_specification",
+        "issuer": "Forklift Manufacturer",
+        "status": "active",
+        "permittedClaimScopes": [
+          "vehicle_profile.geometry",
+          "vehicle_profile.capacity"
+        ],
+        "allowedSiteIds": [
+          "site-a"
+        ],
+        "freshnessPolicy": {
+          "maximumAgeDays": 730
+        }
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "documentKind": "evidence_record",
+    "evidenceId": "ev-shell-floor",
+    "tenantId": "tenant-a",
+    "subjectRef": {
+      "documentKind": "facility_shell",
+      "shellId": "shell-site-a",
+      "featureId": "shell-floor-main"
+    },
+    "claimKey": "facility_shell.geometry.floor_boundary",
+    "valueFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "status": "derived",
+    "sourceRef": {
+      "trustedSourceId": "source-site-cad",
+      "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "locator": "site-a/facility-shell#floor-main"
+    },
+    "derivation": {
+      "methodId": "facility-shell-normalizer",
+      "methodVersion": "1.0.0",
+      "inputEvidenceIds": []
+    },
+    "assertedBy": "system-facility-normalizer",
+    "assertedAt": "2026-07-28T00:00:00Z",
+    "validFrom": "2026-07-28T00:00:00Z",
+    "validUntil": null,
+    "revokedAt": null,
+    "revocationReason": null
+  },
+  {
+    "schemaVersion": 1,
+    "documentKind": "evidence_record",
+    "evidenceId": "ev-policy-egress",
+    "tenantId": "tenant-a",
+    "subjectRef": {
+      "documentKind": "policy_set",
+      "policySetId": "policy-site-a",
+      "ruleId": "rule-egress-clearance"
+    },
+    "claimKey": "facility_policy.clearance.egress",
+    "valueFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+    "status": "authored",
+    "sourceRef": {
+      "trustedSourceId": "source-site-policy",
+      "sourceRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "locator": "site-a/policy/egress#minimum-width"
+    },
+    "assertedBy": "site-a-ehs",
+    "assertedAt": "2026-07-28T00:00:00Z",
+    "validFrom": "2026-07-28T00:00:00Z",
+    "validUntil": null,
+    "revokedAt": null,
+    "revocationReason": null
+  },
+  {
+    "schemaVersion": 1,
+    "documentKind": "evidence_record",
+    "evidenceId": "ev-forklift-envelope",
+    "tenantId": "tenant-a",
+    "subjectRef": {
+      "documentKind": "vehicle_profile",
+      "vehicleProfileId": "vehicle-forklift-a"
+    },
+    "claimKey": "vehicle_profile.geometry.envelope",
+    "valueFingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
+    "status": "authored",
+    "sourceRef": {
+      "trustedSourceId": "source-forklift-spec",
+      "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "locator": "manufacturer/forklift-a#dimensions"
+    },
+    "assertedBy": "catalog-curator-a",
+    "assertedAt": "2026-07-28T00:00:00Z",
+    "validFrom": "2026-07-28T00:00:00Z",
+    "validUntil": null,
+    "revokedAt": null,
+    "revocationReason": null
+  }
+]

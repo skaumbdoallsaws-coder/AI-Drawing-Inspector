@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 2,
+  "layoutId": "fl-future-fixture",
+  "displayName": "Future layout fixture",
+  "status": "draft",
+  "futureRequiredField": {
+    "meaning": "unknown to the v1 reader"
+  }
+}

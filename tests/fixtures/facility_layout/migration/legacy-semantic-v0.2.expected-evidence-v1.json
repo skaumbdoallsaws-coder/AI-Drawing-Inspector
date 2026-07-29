@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "documentKind": "evidence_record",
+  "evidenceId": "ev-legacy-zone-inferred",
+  "tenantId": "tenant-fixture",
+  "subjectRef": {
+    "zoneId": "zn-legacy-b8c3ba5b369e128fd3af"
+  },
+  "claimKey": "facility.zone.boundary",
+  "valueFingerprint": "7a0364dfaa3addfe3154efcb08e0225bd15c69a7b2ae3a946bdf899d3c58a59e",
+  "status": "inferred",
+  "sourceRef": {
+    "trustedSourceId": "legacy-unregistered-source",
+    "sourceRevision": "80c1fc1dd72b3a8fc7d931c214f01f2846886fa260730246401d0d6d1aa82199",
+    "locator": "layoutMap.floorZones[0].approxFloorPolygonMeters"
+  },
+  "assertedBy": "facility-layout-migration-v1",
+  "assertedAt": "2026-07-28T00:00:00Z"
+}

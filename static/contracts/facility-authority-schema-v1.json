@@ -1,0 +1,786 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inspectorp.ro/contracts/facility-authority-schema-v1.json",
+  "title": "InspectorPro Facility Authority Documents v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/facilityShell"
+    },
+    {
+      "$ref": "#/$defs/policySet"
+    },
+    {
+      "$ref": "#/$defs/vehicleProfile"
+    },
+    {
+      "$ref": "#/$defs/trustedSourceRegistry"
+    },
+    {
+      "$ref": "#/$defs/evidenceRecord"
+    }
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "note": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "finiteNumber": {
+      "type": "number",
+      "minimum": -1000000,
+      "maximum": 1000000
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "vector2": {
+      "type": "object",
+      "required": [
+        "x",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "z": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "vector3": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "y": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "z": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "polygon2": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 2048,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/vector2"
+      }
+    },
+    "coordinateFrame": {
+      "type": "object",
+      "required": [
+        "units",
+        "handedness",
+        "upAxis",
+        "floorAxes",
+        "datumId",
+        "floorElevation"
+      ],
+      "properties": {
+        "units": {
+          "const": "m"
+        },
+        "handedness": {
+          "const": "right"
+        },
+        "upAxis": {
+          "const": "+Y"
+        },
+        "floorAxes": {
+          "const": [
+            "+X",
+            "+Z"
+          ]
+        },
+        "datumId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "floorElevation": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lifecycleStatus": {
+      "enum": [
+        "draft",
+        "reviewed",
+        "published",
+        "deprecated",
+        "archived"
+      ]
+    },
+    "evidenceStatus": {
+      "enum": [
+        "authored",
+        "derived",
+        "inferred",
+        "unknown"
+      ]
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stableId"
+      }
+    },
+    "sourceDocumentRef": {
+      "type": "object",
+      "required": [
+        "trustedSourceId",
+        "sourceRevision",
+        "locator"
+      ],
+      "properties": {
+        "trustedSourceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "sourceRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "locator": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "additionalProperties": false
+    },
+    "unresolvedItem": {
+      "type": "object",
+      "required": [
+        "findingId",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "findingId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "code": {
+          "$ref": "#/$defs/stableId"
+        },
+        "message": {
+          "$ref": "#/$defs/note"
+        }
+      },
+      "additionalProperties": true
+    },
+    "shellFeature": {
+      "type": "object",
+      "required": [
+        "featureId",
+        "featureKind",
+        "geometry",
+        "evidence"
+      ],
+      "properties": {
+        "featureId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "featureKind": {
+          "enum": [
+            "floor_surface",
+            "mounting_surface",
+            "boundary",
+            "wall",
+            "column",
+            "door",
+            "dock",
+            "fixed_obstacle",
+            "egress",
+            "floor_load_zone"
+          ]
+        },
+        "geometry": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "shellConnector": {
+      "type": "object",
+      "required": [
+        "connectorId",
+        "serviceType",
+        "position",
+        "facing",
+        "role",
+        "evidence"
+      ],
+      "properties": {
+        "connectorId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "serviceType": {
+          "enum": [
+            "material",
+            "operator",
+            "forklift",
+            "conveyor",
+            "electrical",
+            "compressed_air",
+            "water",
+            "exhaust",
+            "network",
+            "gas",
+            "drain"
+          ]
+        },
+        "position": {
+          "$ref": "#/$defs/vector3"
+        },
+        "facing": {
+          "$ref": "#/$defs/vector3"
+        },
+        "role": {
+          "enum": [
+            "source",
+            "sink",
+            "bidirectional"
+          ]
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "facilityShell": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "documentKind",
+        "shellId",
+        "tenantId",
+        "siteId",
+        "status",
+        "coordinateFrame",
+        "features",
+        "shellConnectors",
+        "sourceDocuments",
+        "evidence",
+        "unresolvedItems"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "documentKind": {
+          "const": "facility_shell"
+        },
+        "shellId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "tenantId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "siteId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "status": {
+          "$ref": "#/$defs/lifecycleStatus"
+        },
+        "coordinateFrame": {
+          "$ref": "#/$defs/coordinateFrame"
+        },
+        "features": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/shellFeature"
+          }
+        },
+        "shellConnectors": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/shellConnector"
+          }
+        },
+        "sourceDocuments": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/sourceDocumentRef"
+          }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        },
+        "unresolvedItems": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/unresolvedItem"
+          }
+        },
+        "shellRevision": false
+      },
+      "additionalProperties": true
+    },
+    "policyRule": {
+      "type": "object",
+      "required": [
+        "ruleId",
+        "ruleType",
+        "severity",
+        "applicability",
+        "parameters",
+        "evidence"
+      ],
+      "properties": {
+        "ruleId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "ruleType": {
+          "$ref": "#/$defs/stableId"
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "blocked",
+            "unverified",
+            "warning",
+            "info"
+          ]
+        },
+        "applicability": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": true
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": true
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "policySet": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "documentKind",
+        "policySetId",
+        "tenantId",
+        "siteId",
+        "status",
+        "applicability",
+        "deterministicRules",
+        "sourceDocuments",
+        "evidence",
+        "unresolvedItems"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "documentKind": {
+          "const": "policy_set"
+        },
+        "policySetId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "tenantId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "siteId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "status": {
+          "$ref": "#/$defs/lifecycleStatus"
+        },
+        "applicability": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": true
+        },
+        "deterministicRules": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "$ref": "#/$defs/policyRule"
+          }
+        },
+        "sourceDocuments": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/sourceDocumentRef"
+          }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        },
+        "unresolvedItems": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/unresolvedItem"
+          }
+        },
+        "policySetRevision": false
+      },
+      "additionalProperties": true
+    },
+    "vehicleProfile": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "documentKind",
+        "vehicleProfileId",
+        "tenantId",
+        "siteId",
+        "status",
+        "displayName",
+        "overallDimensions",
+        "footprint",
+        "wheelbase",
+        "steeringLimits",
+        "speedLimits",
+        "loadLimits",
+        "gradeLimits",
+        "reversePolicy",
+        "sourceDocuments",
+        "evidence",
+        "unresolvedItems"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "documentKind": {
+          "const": "vehicle_profile"
+        },
+        "vehicleProfileId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "tenantId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "siteId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "status": {
+          "$ref": "#/$defs/lifecycleStatus"
+        },
+        "displayName": {
+          "$ref": "#/$defs/label"
+        },
+        "overallDimensions": {
+          "type": "object",
+          "required": [
+            "length",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "length": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            },
+            "width": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            },
+            "height": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            }
+          },
+          "additionalProperties": false
+        },
+        "footprint": {
+          "$ref": "#/$defs/polygon2"
+        },
+        "wheelbase": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "steeringLimits": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "speedLimits": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "loadLimits": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "gradeLimits": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "reversePolicy": {
+          "enum": [
+            "forbidden",
+            "allowed",
+            "required_when_loaded",
+            "site_policy"
+          ]
+        },
+        "sourceDocuments": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/sourceDocumentRef"
+          }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        },
+        "unresolvedItems": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/unresolvedItem"
+          }
+        },
+        "vehicleProfileRevision": false
+      },
+      "additionalProperties": true
+    },
+    "trustedSource": {
+      "type": "object",
+      "required": [
+        "trustedSourceId",
+        "ownerTenantId",
+        "sourceType",
+        "issuer",
+        "status",
+        "permittedClaimScopes",
+        "allowedSiteIds",
+        "freshnessPolicy"
+      ],
+      "properties": {
+        "trustedSourceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "ownerTenantId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "sourceType": {
+          "enum": [
+            "cad",
+            "drawing",
+            "procedure",
+            "policy",
+            "manufacturer_specification",
+            "site_record",
+            "user_statement"
+          ]
+        },
+        "issuer": {
+          "$ref": "#/$defs/label"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "suspended",
+            "revoked"
+          ]
+        },
+        "permittedClaimScopes": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "allowedSiteIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "freshnessPolicy": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "trustedSourceRegistry": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "documentKind",
+        "tenantId",
+        "sources"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "documentKind": {
+          "const": "trusted_source_registry"
+        },
+        "tenantId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/trustedSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "evidenceRecord": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "documentKind",
+        "evidenceId",
+        "tenantId",
+        "subjectRef",
+        "claimKey",
+        "valueFingerprint",
+        "status",
+        "sourceRef",
+        "assertedBy",
+        "assertedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "documentKind": {
+          "const": "evidence_record"
+        },
+        "evidenceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "tenantId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "subjectRef": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": true
+        },
+        "claimKey": {
+          "$ref": "#/$defs/stableId"
+        },
+        "valueFingerprint": {
+          "$ref": "#/$defs/revision"
+        },
+        "status": {
+          "$ref": "#/$defs/evidenceStatus"
+        },
+        "sourceRef": {
+          "$ref": "#/$defs/sourceDocumentRef"
+        },
+        "derivation": {
+          "type": "object",
+          "required": [
+            "methodId",
+            "methodVersion",
+            "inputEvidenceIds"
+          ],
+          "properties": {
+            "methodId": {
+              "$ref": "#/$defs/stableId"
+            },
+            "methodVersion": {
+              "$ref": "#/$defs/stableId"
+            },
+            "inputEvidenceIds": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/stableId"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "assertedBy": {
+          "$ref": "#/$defs/stableId"
+        },
+        "assertedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "validFrom": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "validUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "revokedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "revocationReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

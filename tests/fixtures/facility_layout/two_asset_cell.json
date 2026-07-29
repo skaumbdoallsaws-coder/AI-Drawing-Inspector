@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "layoutId": "fl-two-asset-cell",
+  "displayName": "Two Asset Cell",
+  "status": "draft",
+  "association": {
+    "siteId": "site-a",
+    "areaId": "cell-01"
+  },
+  "coordinateFrame": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "datumId": "site-a-origin",
+    "floorElevation": 0.0
+  },
+  "sourceShellRef": {
+    "shellId": "shell-site-a",
+    "shellRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "coordinateFrameFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "catalogSnapshotRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "policySetRef": {
+    "policySetId": "policy-site-a",
+    "policySetRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "zones": [
+    {
+      "zoneId": "zn-machine-cell",
+      "zoneType": "workcell",
+      "label": "Machine Cell",
+      "boundary": [
+        {
+          "x": 0.0,
+          "z": 0.0
+        },
+        {
+          "x": 12.0,
+          "z": 0.0
+        },
+        {
+          "x": 12.0,
+          "z": 8.0
+        },
+        {
+          "x": 0.0,
+          "z": 8.0
+        }
+      ],
+      "floorElevation": 0.0,
+      "heightLimit": 6.0,
+      "allowedAssetCategories": [
+        "machine",
+        "workstation"
+      ],
+      "gridSpacing": 0.25,
+      "edgeSetbacks": {},
+      "policyRefs": [],
+      "anchors": [
+        {
+          "anchorId": "za-material-in",
+          "anchorKind": "material",
+          "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 4.0
+          },
+          "facing": {
+            "x": 1.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "allowedRouteKinds": [
+            "material"
+          ],
+          "evidence": []
+        }
+      ],
+      "evidence": []
+    }
+  ],
+  "placements": [
+    {
+      "placementId": "pl-machine-01",
+      "assetId": "asset-machine-01",
+      "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transform": {
+        "position": {
+          "x": 4.0,
+          "y": 0.0,
+          "z": 4.0
+        },
+        "quaternion": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0,
+          "w": 1.0
+        },
+        "scale": 1
+      },
+      "positionMode": "manual",
+      "snapRelationship": null,
+      "metadata": {}
+    },
+    {
+      "placementId": "pl-workstation-01",
+      "assetId": "asset-workstation-01",
+      "assetDefinitionRevision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "transform": {
+        "position": {
+          "x": 8.0,
+          "y": 0.0,
+          "z": 4.0
+        },
+        "quaternion": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0,
+          "w": 1.0
+        },
+        "scale": 1
+      },
+      "positionMode": "auto",
+      "snapRelationship": null,
+      "metadata": {}
+    }
+  ],
+  "routes": [
+    {
+      "routeId": "rt-material-01",
+      "routeKind": "material",
+      "sourceEndpoint": {
+        "kind": "zone_anchor",
+        "zoneId": "zn-machine-cell",
+        "anchorId": "za-material-in"
+      },
+      "targetEndpoint": {
+        "kind": "placement_connector",
+        "placementId": "pl-machine-01",
+        "connectorId": "material-in"
+      },
+      "routingMode": "orthogonal",
+      "centerline": [
+        {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 4.0
+        },
+        {
+          "x": 4.0,
+          "y": 0.0,
+          "z": 4.0
+        }
+      ],
+      "corridorWidth": 1.0,
+      "routeFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+      "sourceRevisions": {
+        "layout": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "requirements": [],
+      "evidence": []
+    }
+  ],
+  "utilityNetworks": [],
+  "processBindings": [],
+  "dismissedSuggestions": [],
+  "createdAt": "2026-07-28T00:00:00Z",
+  "updatedAt": "2026-07-28T00:00:00Z"
+}

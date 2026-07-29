@@ -1,0 +1,375 @@
+{
+  "schemaVersion": "facility-layout-p0-asset-definition-candidate-v1",
+  "fixturePurpose": "P0 asset-normalization evidence fixture; not a published catalog definition",
+  "candidateKey": "p0-cnc-vmc-milling-machine",
+  "contractBasis": {
+    "document": "docs/industrial-layout-platform-implementation-plan.md",
+    "revision": 2,
+    "sections": [
+      "6.1",
+      "6.2",
+      "6.5",
+      "6.6",
+      "7.2",
+      "7.3",
+      "7.4",
+      "7.5",
+      "7.6",
+      "16.P0"
+    ]
+  },
+  "lifecycle": "draft",
+  "identity": {
+    "assetId": null,
+    "assetDefinitionRevision": null,
+    "sourceRevision": null,
+    "displayName": "CNC VMC Milling machine",
+    "familyId": null,
+    "variantId": null,
+    "category": "cnc_machine",
+    "tags": []
+  },
+  "sourceBinding": {
+    "requestedRoot": {
+      "safeLabel": "User Library-CNC Milling machine.sldprt",
+      "protectedPath": "protected://machine-library/User Library-CNC Milling machine.sldprt",
+      "visibility": "server_only",
+      "format": "sldprt",
+      "byteLength": 980184,
+      "primaryDataSha256": "f26678cafa91cd752ca0abd3ed2b2373c18941e6240f7132a91a0326129da2f1",
+      "hashScope": "primary NTFS data stream only; alternate streams excluded"
+    },
+    "acquisitionPackage": {
+      "safeLabel": "User Library-CNC Milling machine.zip",
+      "protectedPath": "protected://acquisition-cache/User Library-CNC Milling machine.zip",
+      "visibility": "server_only",
+      "byteLength": 946837,
+      "primaryDataSha256": "bd47f8bcadf243487b7fc46dfce6fbab27839c6ed22f4f30b47ee6788d0dbbf0",
+      "hashScope": "primary NTFS data stream only; alternate streams excluded",
+      "entries": [
+        {
+          "path": "User Library-CNC Milling machine.sldprt",
+          "byteLength": 980184,
+          "contentSha256": null
+        }
+      ],
+      "relationToRequestedRoot": {
+        "matchingEvidence": [
+          "file_name",
+          "byte_length"
+        ],
+        "byteIdentityVerified": false
+      }
+    },
+    "rootResolution": {
+      "status": "candidate_only",
+      "evidenceStatus": "derived",
+      "filesystemAmbiguity": "none_observed_for_single_loose_part",
+      "cadReferenceAmbiguity": "unknown",
+      "reason": "The loose SLDPRT and one-entry acquisition archive identify a practical candidate root, but no CAD reference graph or external-reference audit was run."
+    },
+    "dependencies": {
+      "evidenceStatus": "unknown",
+      "knownPackageEntries": [
+        "User Library-CNC Milling machine.sldprt"
+      ],
+      "verifiedCadDependencies": [],
+      "cadDependencyCompleteness": "unknown",
+      "assemblyReferenceGraphBuilt": false
+    },
+    "sourceRevisionStatus": {
+      "value": null,
+      "reason": "The contract sourceRevision also binds configuration and extraction inputs; only source-package and source-file byte hashes are available."
+    }
+  },
+  "coordinateFrame": {
+    "evidenceStatus": "unknown",
+    "nativeSourceUnits": null,
+    "sourceHandedness": null,
+    "sourceUpAxis": null,
+    "sourceToCanonical": null,
+    "canonicalLocalOrigin": null,
+    "floorAnchor": null,
+    "defaultFacingVector": null,
+    "allowedMountingSurfaces": null
+  },
+  "geometry": {
+    "evidenceStatus": "unknown",
+    "aabb": null,
+    "obb": null,
+    "footprintPolygons": null,
+    "heightInterval": null,
+    "selectionBounds": null
+  },
+  "rendering": {
+    "evidenceStatus": "unknown",
+    "compatibleRenderBundleSchema": null,
+    "geometryInterfaceConstraints": null,
+    "artifacts": []
+  },
+  "collision": {
+    "evidenceStatus": "unknown",
+    "footprint2_5d": null,
+    "verticalInterval": null,
+    "compoundBoxes": null,
+    "convexProxies": null
+  },
+  "loading": {
+    "evidenceStatus": "unknown",
+    "transportMass": null,
+    "installedMass": null,
+    "operatingMass": null,
+    "centerOfGravity": null,
+    "supportPoints": null,
+    "contactPoints": null,
+    "contactAreas": null,
+    "pointLoads": null,
+    "dynamicLoadFactors": null,
+    "anchoringAssumptions": null
+  },
+  "clearances": {
+    "evidenceStatus": "unknown",
+    "items": []
+  },
+  "connectors": {
+    "evidenceStatus": "unknown",
+    "items": []
+  },
+  "utilities": {
+    "evidenceStatus": "unknown",
+    "electrical": null,
+    "air": null,
+    "water": null,
+    "exhaust": null,
+    "network": null,
+    "gas": null,
+    "drains": null,
+    "foundation": null
+  },
+  "mobility": {
+    "evidenceStatus": "unknown",
+    "classification": null,
+    "footprint": null,
+    "heading": null,
+    "turningRadius": null,
+    "speed": null,
+    "loadLimits": null
+  },
+  "capabilities": {
+    "evidenceStatus": "inferred",
+    "processTypes": [
+      "milling"
+    ],
+    "capacity": null,
+    "operatingEnvelope": null,
+    "compatibleProducts": null,
+    "compatibleFixtures": null
+  },
+  "provenance": {
+    "provider": "3D ContentCentral",
+    "sourcePageUrl": "https://www.3dcontentcentral.com/Download-Model.aspx?catalogid=171&id=212592",
+    "vendor": null,
+    "model": "CNC VMC Milling machine",
+    "sourceDescription": "CNC Vertical Machining Center",
+    "supplierLabel": "User Library",
+    "contributor": "Rafael de Souza Clark",
+    "attribution": {
+      "status": "partial",
+      "text": "3D ContentCentral User Library; contributor Rafael de Souza Clark"
+    },
+    "license": {
+      "status": "restricted_review_required",
+      "evidenceStatus": "authored",
+      "termsUrl": "https://www.3dcontentcentral.com/Terms-of-use.aspx",
+      "termsRevisionDate": "2023-10-11",
+      "termsObservedOn": "2026-07-28",
+      "publicRedistributionEvidencePresent": false,
+      "privateNormalizationAuthorization": null,
+      "reviewNote": "Provider terms describe internal CAD use and restrict distribution and public use. Asset-owner permission for an InspectorPro render bundle was not found."
+    }
+  },
+  "propertyEvidence": [
+    {
+      "property": "/identity/displayName",
+      "status": "authored",
+      "evidenceRefs": [
+        "ev-provider-model-page"
+      ]
+    },
+    {
+      "property": "/identity/category",
+      "status": "inferred",
+      "evidenceRefs": [
+        "ev-provider-model-page"
+      ]
+    },
+    {
+      "property": "/capabilities/processTypes",
+      "status": "inferred",
+      "evidenceRefs": [
+        "ev-provider-model-page"
+      ]
+    },
+    {
+      "property": "/provenance/sourcePageUrl",
+      "status": "derived",
+      "evidenceRefs": [
+        "ev-zone-identifier"
+      ]
+    },
+    {
+      "property": "/provenance/model",
+      "status": "authored",
+      "evidenceRefs": [
+        "ev-provider-model-page"
+      ]
+    },
+    {
+      "property": "/provenance/contributor",
+      "status": "authored",
+      "evidenceRefs": [
+        "ev-provider-model-page"
+      ]
+    }
+  ],
+  "evidenceRecords": [
+    {
+      "evidenceId": "ev-source-file-hash",
+      "type": "filesystem_hash",
+      "status": "derived",
+      "observedOn": "2026-07-28",
+      "summary": "Primary source file exists with the recorded byte length and SHA-256."
+    },
+    {
+      "evidenceId": "ev-acquisition-archive",
+      "type": "archive_inventory",
+      "status": "derived",
+      "observedOn": "2026-07-28",
+      "summary": "Acquisition ZIP exists, has the recorded SHA-256, and lists one same-name, same-length SLDPRT entry. Entry content hash was not obtained."
+    },
+    {
+      "evidenceId": "ev-zone-identifier",
+      "type": "ntfs_zone_identifier",
+      "status": "derived",
+      "observedOn": "2026-07-28",
+      "summary": "The acquisition ZIP alternate stream records the 3D ContentCentral model page and download host URLs."
+    },
+    {
+      "evidenceId": "ev-provider-model-page",
+      "type": "official_provider_page",
+      "status": "authored",
+      "observedOn": "2026-07-28",
+      "url": "https://www.3dcontentcentral.com/Download-Model.aspx?catalogid=171&id=212592",
+      "summary": "The provider page identifies a User Library CNC VMC milling-machine model, its description, and its contributor."
+    },
+    {
+      "evidenceId": "ev-provider-terms",
+      "type": "official_provider_terms",
+      "status": "authored",
+      "observedOn": "2026-07-28",
+      "url": "https://www.3dcontentcentral.com/Terms-of-use.aspx",
+      "summary": "Current provider terms were reviewed for the catalog-publication gate."
+    }
+  ],
+  "readiness": {
+    "visual_ready": {
+      "value": false,
+      "blockers": [
+        "No nonblank web geometry.",
+        "No thumbnail."
+      ]
+    },
+    "placement_ready": {
+      "value": false,
+      "blockers": [
+        "Native units are unknown.",
+        "Canonical local frame is unknown.",
+        "Floor anchor is unknown.",
+        "Footprint is unknown.",
+        "Collision proxy is unknown."
+      ]
+    },
+    "planning_ready": {
+      "value": false,
+      "blockers": [
+        "Connectors are unreviewed.",
+        "Relevant clearances are unknown.",
+        "Loading, utility, and operating-envelope facts are unknown."
+      ]
+    },
+    "public_ready": {
+      "value": false,
+      "blockers": [
+        "No asset-owner redistribution permission is present.",
+        "Observed provider terms restrict distribution and public use."
+      ]
+    }
+  },
+  "verificationBoundary": {
+    "verifiedWithoutCadExtraction": [
+      "Requested-root existence, format by extension, byte length, and primary-data-stream SHA-256.",
+      "Acquisition-package existence, byte length, primary-data-stream SHA-256, and one-entry archive inventory.",
+      "3D ContentCentral source-page association from NTFS acquisition metadata.",
+      "Provider-page display metadata and contributor.",
+      "Absence of ready web, placement, planning, and public-publication evidence in the inspected source set."
+    ],
+    "notVerifiedWithoutCadExtraction": [
+      "CAD-internal units, handedness, up axis, origin, configurations, features, bodies, suppression state, and external references.",
+      "A source-to-canonical transform or alignment residual.",
+      "Floor support plane, floor anchor, facing vector, mounting surfaces, bounds, height, or footprint.",
+      "Collision geometry, mass, support loads, center of gravity, anchoring, clearances, connectors, utilities, capacity, or operating envelope.",
+      "Any safety, clearance, structural, floor-load, or code-compliance claim.",
+      "Archive-entry byte identity with the installed source file.",
+      "Authorization to transform or redistribute the model as an InspectorPro asset."
+    ]
+  },
+  "unresolvedFields": [
+    {
+      "fields": [
+        "/identity/assetId",
+        "/identity/assetDefinitionRevision",
+        "/identity/sourceRevision",
+        "/identity/familyId",
+        "/identity/variantId"
+      ],
+      "reason": "No catalog intake, server identity assignment, canonical semantic revision, or complete source-revision input set exists."
+    },
+    {
+      "fields": [
+        "/sourceBinding/acquisitionPackage/entries/0/contentSha256",
+        "/sourceBinding/dependencies"
+      ],
+      "reason": "Archive-entry stream hashing did not complete, and no CAD reference graph or external-reference audit was run."
+    },
+    {
+      "fields": [
+        "/coordinateFrame",
+        "/geometry",
+        "/rendering",
+        "/collision"
+      ],
+      "reason": "These fields require CAD-aware geometry inspection, normalization, artifact generation, and review."
+    },
+    {
+      "fields": [
+        "/loading",
+        "/clearances",
+        "/connectors",
+        "/utilities",
+        "/mobility",
+        "/capabilities/capacity",
+        "/capabilities/operatingEnvelope",
+        "/capabilities/compatibleProducts",
+        "/capabilities/compatibleFixtures"
+      ],
+      "reason": "No reviewed manufacturer specification, site record, extracted physical property, or authored engineering source was found."
+    },
+    {
+      "fields": [
+        "/provenance/vendor",
+        "/provenance/license/privateNormalizationAuthorization"
+      ],
+      "reason": "The page is a user-library contribution and no equipment-manufacturer identity or separate asset-owner permission was found."
+    }
+  ]
+}

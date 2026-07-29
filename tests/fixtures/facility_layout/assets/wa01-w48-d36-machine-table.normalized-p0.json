@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 1,
+  "documentKind": "industrial_asset_definition",
+  "assetId": "asset-wa01-e773742615b2",
+  "ownerTenantId": "tenant-p0-spike",
+  "status": "reviewed",
+  "displayName": "WA01 W48 D36 Machine Table",
+  "familyId": "family-wa01-machine-table",
+  "variantId": "variant-w48-d36-h34",
+  "category": "workstation",
+  "tags": [
+    "machine-table",
+    "workstation",
+    "p0-private"
+  ],
+  "sourceRevision": "86347f2ae785e59739f21b4c91ab2ecfa1ddfe2a208129a7128a98012b565190",
+  "coordinateFrame": {
+    "nativeSourceUnits": "in",
+    "sourceCoordinateValueUnits": "m",
+    "sourceHandedness": "right",
+    "sourceUpAxis": "+Y",
+    "sourceToCanonical": [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.854075,
+      0.0,
+      1.0
+    ],
+    "canonicalLocalOrigin": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "floorAnchor": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "defaultFacingVector": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.0
+    },
+    "allowedMountingSurfaces": [
+      "floor"
+    ],
+    "alignmentResidualMeters": 0.000001,
+    "evidence": [
+      "ev-wa01-cad-extraction",
+      "ev-wa01-view-review"
+    ],
+    "normalizationMethod": "Center the extracted X/Z AABB on the local origin and translate the minimum Y support datum to zero."
+  },
+  "geometry": {
+    "aabb": {
+      "minimum": {
+        "x": -0.6096,
+        "y": 0.0,
+        "z": -0.52705
+      },
+      "maximum": {
+        "x": 0.6096,
+        "y": 0.8636,
+        "z": 0.52705
+      }
+    },
+    "obb": null,
+    "footprintPolygons": [
+      [
+        {
+          "x": -0.6096,
+          "z": -0.52705
+        },
+        {
+          "x": 0.6096,
+          "z": -0.52705
+        },
+        {
+          "x": 0.6096,
+          "z": 0.52705
+        },
+        {
+          "x": -0.6096,
+          "z": 0.52705
+        }
+      ]
+    ],
+    "heightInterval": {
+      "minimumY": 0.0,
+      "maximumY": 0.8636
+    },
+    "selectionBounds": {
+      "minimum": {
+        "x": -0.6096,
+        "y": 0.0,
+        "z": -0.52705
+      },
+      "maximum": {
+        "x": 0.6096,
+        "y": 0.8636,
+        "z": 0.52705
+      }
+    },
+    "evidence": [
+      "ev-wa01-cad-extraction",
+      "ev-wa01-view-review"
+    ],
+    "footprintMethod": "Conservative counter-clockwise X/Z projection of the complete extracted AABB, including the floor tabs."
+  },
+  "renderingCompatibility": {
+    "renderBundleSchemaVersion": 1,
+    "geometryInterfaceRevision": "c8b9dd44c45266ba501b3116856fae43657ce31f6c7bbf8bedaa357e70a5717d",
+    "artifacts": [
+      {
+        "safeLabel": "WA01 feature-colored GLB",
+        "mediaType": "model/gltf-binary",
+        "byteLength": 350816,
+        "sha256": "dd15e9453916b303c6bef406106bcbbded061302778c3139d1221e8c1f44e590"
+      },
+      {
+        "safeLabel": "WA01 isometric review image",
+        "mediaType": "image/png",
+        "byteLength": 3111802,
+        "sha256": "1b25af4a60bfc0d4714f6e93cb3c8b1ea2bc74e368acbd232b39afb245f7c7d6"
+      },
+      {
+        "safeLabel": "WA01 top review image",
+        "mediaType": "image/png",
+        "byteLength": 3111802,
+        "sha256": "fc5d8767f93449ef950316ec5b19b9337d29b67d2b786fd9c41364d8850cc35f"
+      }
+    ]
+  },
+  "collision": {
+    "model": "footprint_2_5d",
+    "verticalInterval": {
+      "minimumY": 0.0,
+      "maximumY": 0.8636
+    },
+    "geometry": {
+      "footprintIndex": 0,
+      "conservative": true
+    },
+    "evidence": [
+      "ev-wa01-cad-extraction",
+      "ev-wa01-view-review"
+    ]
+  },
+  "loading": {
+    "transportMass": {
+      "value": 20.18477886,
+      "unit": "kg",
+      "evidenceStatus": "derived",
+      "evidence": [
+        "ev-wa01-cad-extraction"
+      ],
+      "qualification": "CAD mass property using the source-assigned Steel material; not a floor contact-load model."
+    },
+    "installedMass": {
+      "value": null,
+      "unit": "kg",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "operatingMass": {
+      "value": null,
+      "unit": "kg",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "centerOfGravity": {
+      "value": {
+        "x": 0.0,
+        "y": 0.655783,
+        "z": 0.0
+      },
+      "unit": "m",
+      "evidenceStatus": "derived",
+      "evidence": [
+        "ev-wa01-cad-extraction"
+      ]
+    },
+    "contactLoads": [],
+    "dynamicLoadFactors": [],
+    "anchoringAssumptions": [],
+    "evidence": [
+      "ev-wa01-cad-extraction"
+    ]
+  },
+  "clearances": [],
+  "connectors": [],
+  "utilities": {},
+  "mobility": {
+    "classification": "static",
+    "footprint": null,
+    "heading": null,
+    "turningRadius": null,
+    "speedLimits": {},
+    "loadLimits": {},
+    "evidence": []
+  },
+  "capabilities": {
+    "processTypes": [],
+    "evidenceStatus": "unknown"
+  },
+  "provenance": {
+    "sourceLabel": "3D ContentCentral catalog 12368",
+    "vendor": null,
+    "model": null,
+    "sourceUrl": "https://www.3dcontentcentral.com/secure/download-model.aspx?catalogid=12368&id=1050942",
+    "licenseStatus": "restricted",
+    "attribution": null,
+    "evidence": [
+      "ev-wa01-provider",
+      "ev-wa01-license"
+    ]
+  },
+  "evidence": [
+    "ev-wa01-source-hash",
+    "ev-wa01-cad-extraction",
+    "ev-wa01-view-review",
+    "ev-wa01-provider",
+    "ev-wa01-license"
+  ],
+  "unresolvedItems": [
+    {
+      "findingId": "finding-wa01-contact-load",
+      "code": "asset_contact_load_unknown",
+      "message": "Support-point load distribution and anchoring capacity are not established."
+    },
+    {
+      "findingId": "finding-wa01-clearance",
+      "code": "asset_clearance_unknown",
+      "message": "Operator, loading, service, and safety clearances require authoritative workstation data."
+    },
+    {
+      "findingId": "finding-wa01-connectors",
+      "code": "asset_connectors_unknown",
+      "message": "Material, operator, utility, and foundation connectors are not reviewed."
+    },
+    {
+      "findingId": "finding-wa01-license",
+      "code": "asset_publication_blocked",
+      "message": "No exact-variant attribution or asset-owner permission covering public InspectorPro distribution is present."
+    }
+  ],
+  "readiness": {
+    "visualReady": {
+      "value": true,
+      "blockers": []
+    },
+    "placementReady": {
+      "value": true,
+      "blockers": []
+    },
+    "planningReady": {
+      "value": false,
+      "blockers": [
+        "contact_load_evidence_missing",
+        "clearance_evidence_missing",
+        "connector_evidence_missing"
+      ]
+    },
+    "publicReady": {
+      "value": false,
+      "blockers": [
+        "attribution_incomplete",
+        "redistribution_permission_missing"
+      ]
+    }
+  },
+  "sourceBinding": {
+    "sourceFileSha256": "e773742615b2d72827d623556051297335a60412e0f5fb50f7455c8992fa61d2",
+    "activeConfiguration": "Default",
+    "extractorExecutableSha256": "c2b2e58d70392f78eb61f2638547d802838fcd9a09a071668c7843f0e763a5c9",
+    "extractionInputs": [
+      "full",
+      "views",
+      "part-glb"
+    ],
+    "extractedJsonSha256": "9851f4475897bd163d8091536cdd466abf260bc5ea6644e83a811d60ec9056fd"
+  },
+  "evidenceRecords": [
+    {
+      "evidenceId": "ev-wa01-source-hash",
+      "status": "derived",
+      "summary": "The source SLDPRT and extraction executable are bound by SHA-256."
+    },
+    {
+      "evidenceId": "ev-wa01-cad-extraction",
+      "status": "derived",
+      "summary": "SolidWorks 2024 full extraction reported SI geometry, inch source units, the selected configuration, mass properties, and complete-body bounds."
+    },
+    {
+      "evidenceId": "ev-wa01-view-review",
+      "status": "derived",
+      "summary": "Front, right, top, and isometric exports were reviewed to confirm +Y vertical, the minimum-Y floor datum, and the conservative plan footprint including floor tabs."
+    },
+    {
+      "evidenceId": "ev-wa01-provider",
+      "status": "inferred",
+      "summary": "The acquisition metadata identifies the exact catalog URL; neighboring family evidence supports workstation categorization only."
+    },
+    {
+      "evidenceId": "ev-wa01-license",
+      "status": "authored",
+      "summary": "Provider terms do not establish public redistribution permission."
+    }
+  ],
+  "fixtureMetadata": {
+    "purpose": "P0 private placement-readiness spike",
+    "safetyAuthority": false,
+    "publicDistributionAllowed": false
+  }
+}

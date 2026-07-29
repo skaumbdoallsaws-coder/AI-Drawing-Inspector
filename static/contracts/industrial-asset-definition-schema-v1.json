@@ -1,0 +1,869 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inspectorp.ro/contracts/industrial-asset-definition-schema-v1.json",
+  "title": "InspectorPro Industrial Asset Definition v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "documentKind",
+    "assetId",
+    "ownerTenantId",
+    "status",
+    "displayName",
+    "category",
+    "sourceRevision",
+    "coordinateFrame",
+    "geometry",
+    "renderingCompatibility",
+    "collision",
+    "loading",
+    "clearances",
+    "connectors",
+    "utilities",
+    "mobility",
+    "capabilities",
+    "provenance",
+    "evidence",
+    "unresolvedItems",
+    "readiness"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "documentKind": {
+      "const": "industrial_asset_definition"
+    },
+    "assetId": {
+      "$ref": "#/$defs/stableId"
+    },
+    "ownerTenantId": {
+      "$ref": "#/$defs/stableId"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "reviewed",
+        "published",
+        "deprecated",
+        "quarantined",
+        "archived"
+      ]
+    },
+    "displayName": {
+      "$ref": "#/$defs/label"
+    },
+    "familyId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "variantId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "category": {
+      "$ref": "#/$defs/stableId"
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stableId"
+      }
+    },
+    "sourceRevision": {
+      "$ref": "#/$defs/revision"
+    },
+    "coordinateFrame": {
+      "$ref": "#/$defs/assetCoordinateFrame"
+    },
+    "geometry": {
+      "$ref": "#/$defs/geometry"
+    },
+    "renderingCompatibility": {
+      "$ref": "#/$defs/renderingCompatibility"
+    },
+    "collision": {
+      "$ref": "#/$defs/collision"
+    },
+    "loading": {
+      "$ref": "#/$defs/loading"
+    },
+    "clearances": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/clearance"
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/connector"
+      }
+    },
+    "utilities": {
+      "type": "object",
+      "maxProperties": 32,
+      "additionalProperties": true
+    },
+    "mobility": {
+      "$ref": "#/$defs/mobility"
+    },
+    "capabilities": {
+      "type": "object",
+      "maxProperties": 64,
+      "additionalProperties": true
+    },
+    "provenance": {
+      "$ref": "#/$defs/safeProvenance"
+    },
+    "evidence": {
+      "$ref": "#/$defs/evidenceRefs"
+    },
+    "unresolvedItems": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/unresolvedItem"
+      }
+    },
+    "readiness": {
+      "$ref": "#/$defs/readiness"
+    },
+    "assetDefinitionRevision": false,
+    "renderBundleRevision": false,
+    "sourcePath": false,
+    "localPath": false,
+    "storageKey": false,
+    "licenseDocumentPath": false
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "note": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "finiteNumber": {
+      "type": "number",
+      "minimum": -1000000,
+      "maximum": 1000000
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "positiveNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000
+    },
+    "vector2": {
+      "type": "object",
+      "required": [
+        "x",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "z": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "vector3": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "y": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "z": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "matrix4": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "description": "Column-major 4x4 matrix applied to column vectors. Inputs are extractor-normalized SI meter coordinates.",
+      "items": {
+        "$ref": "#/$defs/finiteNumber"
+      }
+    },
+    "polygon2": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 2048,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/vector2"
+      }
+    },
+    "evidenceStatus": {
+      "enum": [
+        "authored",
+        "derived",
+        "inferred",
+        "unknown"
+      ]
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stableId"
+      }
+    },
+    "evidencedValue": {
+      "type": "object",
+      "required": [
+        "value",
+        "evidenceStatus",
+        "evidence"
+      ],
+      "properties": {
+        "value": {},
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "evidenceStatus": {
+          "$ref": "#/$defs/evidenceStatus"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "unresolvedItem": {
+      "type": "object",
+      "required": [
+        "findingId",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "findingId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "code": {
+          "$ref": "#/$defs/stableId"
+        },
+        "message": {
+          "$ref": "#/$defs/note"
+        }
+      },
+      "additionalProperties": true
+    },
+    "assetCoordinateFrame": {
+      "type": "object",
+      "required": [
+        "nativeSourceUnits",
+        "sourceHandedness",
+        "sourceUpAxis",
+        "sourceToCanonical",
+        "canonicalLocalOrigin",
+        "floorAnchor",
+        "defaultFacingVector",
+        "allowedMountingSurfaces",
+        "alignmentResidualMeters",
+        "evidence"
+      ],
+      "properties": {
+        "nativeSourceUnits": {
+          "enum": [
+            "m",
+            "mm",
+            "cm",
+            "in",
+            "ft"
+          ]
+        },
+        "sourceHandedness": {
+          "enum": [
+            "left",
+            "right"
+          ]
+        },
+        "sourceUpAxis": {
+          "enum": [
+            "+X",
+            "-X",
+            "+Y",
+            "-Y",
+            "+Z",
+            "-Z"
+          ]
+        },
+        "sourceToCanonical": {
+          "$ref": "#/$defs/matrix4"
+        },
+        "canonicalLocalOrigin": {
+          "$ref": "#/$defs/vector3"
+        },
+        "floorAnchor": {
+          "$ref": "#/$defs/vector3"
+        },
+        "defaultFacingVector": {
+          "$ref": "#/$defs/vector3"
+        },
+        "allowedMountingSurfaces": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "floor",
+              "wall",
+              "ceiling",
+              "platform",
+              "foundation",
+              "mobile"
+            ]
+          }
+        },
+        "alignmentResidualMeters": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "aabb": {
+      "type": "object",
+      "required": [
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "minimum": {
+          "$ref": "#/$defs/vector3"
+        },
+        "maximum": {
+          "$ref": "#/$defs/vector3"
+        }
+      },
+      "additionalProperties": false
+    },
+    "geometry": {
+      "type": "object",
+      "required": [
+        "aabb",
+        "footprintPolygons",
+        "heightInterval",
+        "selectionBounds",
+        "evidence"
+      ],
+      "properties": {
+        "aabb": {
+          "$ref": "#/$defs/aabb"
+        },
+        "obb": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "maxProperties": 16,
+          "additionalProperties": true
+        },
+        "footprintPolygons": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/polygon2"
+          }
+        },
+        "heightInterval": {
+          "type": "object",
+          "required": [
+            "minimumY",
+            "maximumY"
+          ],
+          "properties": {
+            "minimumY": {
+              "$ref": "#/$defs/finiteNumber"
+            },
+            "maximumY": {
+              "$ref": "#/$defs/finiteNumber"
+            }
+          },
+          "additionalProperties": false
+        },
+        "selectionBounds": {
+          "$ref": "#/$defs/aabb"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "renderingCompatibility": {
+      "type": "object",
+      "required": [
+        "renderBundleSchemaVersion",
+        "geometryInterfaceRevision"
+      ],
+      "properties": {
+        "renderBundleSchemaVersion": {
+          "const": 1
+        },
+        "geometryInterfaceRevision": {
+          "$ref": "#/$defs/revision"
+        }
+      },
+      "additionalProperties": true
+    },
+    "collision": {
+      "type": "object",
+      "required": [
+        "model",
+        "verticalInterval",
+        "geometry",
+        "evidence"
+      ],
+      "properties": {
+        "model": {
+          "enum": [
+            "footprint_2_5d",
+            "oriented_rectangle",
+            "compound_box",
+            "convex_proxy"
+          ]
+        },
+        "verticalInterval": {
+          "type": "object",
+          "required": [
+            "minimumY",
+            "maximumY"
+          ],
+          "properties": {
+            "minimumY": {
+              "$ref": "#/$defs/finiteNumber"
+            },
+            "maximumY": {
+              "$ref": "#/$defs/finiteNumber"
+            }
+          },
+          "additionalProperties": false
+        },
+        "geometry": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": true
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "contactLoad": {
+      "type": "object",
+      "required": [
+        "contactId",
+        "contactKind",
+        "geometry",
+        "load",
+        "evidence"
+      ],
+      "properties": {
+        "contactId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "contactKind": {
+          "enum": [
+            "point",
+            "area",
+            "line",
+            "anchor"
+          ]
+        },
+        "geometry": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "load": {
+          "$ref": "#/$defs/evidencedValue"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "loading": {
+      "type": "object",
+      "required": [
+        "transportMass",
+        "installedMass",
+        "operatingMass",
+        "centerOfGravity",
+        "contactLoads",
+        "dynamicLoadFactors",
+        "anchoringAssumptions",
+        "evidence"
+      ],
+      "properties": {
+        "transportMass": {
+          "$ref": "#/$defs/evidencedValue"
+        },
+        "installedMass": {
+          "$ref": "#/$defs/evidencedValue"
+        },
+        "operatingMass": {
+          "$ref": "#/$defs/evidencedValue"
+        },
+        "centerOfGravity": {
+          "$ref": "#/$defs/evidencedValue"
+        },
+        "contactLoads": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/contactLoad"
+          }
+        },
+        "dynamicLoadFactors": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/evidencedValue"
+          }
+        },
+        "anchoringAssumptions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/evidencedValue"
+          }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "clearance": {
+      "type": "object",
+      "required": [
+        "clearanceId",
+        "clearanceKind",
+        "geometry",
+        "enforcement",
+        "evidenceStatus",
+        "evidence"
+      ],
+      "properties": {
+        "clearanceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "clearanceKind": {
+          "enum": [
+            "operating",
+            "loading",
+            "service",
+            "maintenance",
+            "door_swing",
+            "safety",
+            "operator"
+          ]
+        },
+        "geometry": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": true
+        },
+        "enforcement": {
+          "enum": [
+            "advisory",
+            "hard"
+          ]
+        },
+        "evidenceStatus": {
+          "$ref": "#/$defs/evidenceStatus"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "connector": {
+      "type": "object",
+      "required": [
+        "connectorId",
+        "connectorKind",
+        "position",
+        "facing",
+        "role",
+        "interface",
+        "evidenceStatus",
+        "evidence"
+      ],
+      "properties": {
+        "connectorId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "connectorKind": {
+          "enum": [
+            "material",
+            "operator",
+            "forklift",
+            "conveyor",
+            "foundation",
+            "row",
+            "bay",
+            "electrical",
+            "compressed_air",
+            "water",
+            "exhaust",
+            "network",
+            "gas",
+            "drain",
+            "process"
+          ]
+        },
+        "position": {
+          "$ref": "#/$defs/vector3"
+        },
+        "facing": {
+          "$ref": "#/$defs/vector3"
+        },
+        "role": {
+          "enum": [
+            "input",
+            "output",
+            "bidirectional",
+            "mount"
+          ]
+        },
+        "interface": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "evidenceStatus": {
+          "$ref": "#/$defs/evidenceStatus"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "mobility": {
+      "type": "object",
+      "required": [
+        "classification",
+        "footprint",
+        "heading",
+        "turningRadius",
+        "speedLimits",
+        "loadLimits",
+        "evidence"
+      ],
+      "properties": {
+        "classification": {
+          "enum": [
+            "static",
+            "mobile"
+          ]
+        },
+        "footprint": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/vector2"
+          }
+        },
+        "heading": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "turningRadius": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "speedLimits": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "loadLimits": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "safeProvenance": {
+      "type": "object",
+      "required": [
+        "sourceLabel",
+        "vendor",
+        "model",
+        "sourceUrl",
+        "licenseStatus",
+        "attribution",
+        "evidence"
+      ],
+      "properties": {
+        "sourceLabel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "vendor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 120
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 120
+        },
+        "sourceUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1024
+        },
+        "licenseStatus": {
+          "enum": [
+            "verified",
+            "restricted",
+            "review_required",
+            "unknown"
+          ]
+        },
+        "attribution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1000
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        },
+        "sourcePath": false,
+        "localPath": false,
+        "storageKey": false,
+        "licenseDocumentPath": false
+      },
+      "additionalProperties": true
+    },
+    "readinessGate": {
+      "type": "object",
+      "required": [
+        "value",
+        "blockers"
+      ],
+      "properties": {
+        "value": {
+          "type": "boolean"
+        },
+        "blockers": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "readiness": {
+      "type": "object",
+      "required": [
+        "visualReady",
+        "placementReady",
+        "planningReady",
+        "publicReady"
+      ],
+      "properties": {
+        "visualReady": {
+          "$ref": "#/$defs/readinessGate"
+        },
+        "placementReady": {
+          "$ref": "#/$defs/readinessGate"
+        },
+        "planningReady": {
+          "$ref": "#/$defs/readinessGate"
+        },
+        "publicReady": {
+          "$ref": "#/$defs/readinessGate"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

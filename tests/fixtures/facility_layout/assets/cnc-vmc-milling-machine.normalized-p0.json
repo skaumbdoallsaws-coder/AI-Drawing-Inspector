@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "documentKind": "industrial_asset_definition",
+  "assetId": "asset-cnc-vmc-f26678cafa91",
+  "ownerTenantId": "tenant-p0-spike",
+  "status": "reviewed",
+  "displayName": "CNC VMC Milling Machine",
+  "familyId": "family-cnc-vmc",
+  "variantId": "variant-user-library-212592",
+  "category": "cnc_machine",
+  "tags": [
+    "cnc",
+    "milling",
+    "p0-private"
+  ],
+  "sourceRevision": "d8732f527875d4a5404e40700c73212aa9645d56411a0a3e2a18b1e7b271bf0b",
+  "coordinateFrame": {
+    "nativeSourceUnits": "mm",
+    "sourceCoordinateValueUnits": "m",
+    "sourceHandedness": "right",
+    "sourceUpAxis": "+Y",
+    "sourceToCanonical": [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      1.159126,
+      1.0
+    ],
+    "canonicalLocalOrigin": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "floorAnchor": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "defaultFacingVector": {
+      "x": 1.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "allowedMountingSurfaces": [
+      "floor"
+    ],
+    "alignmentResidualMeters": 0.000001,
+    "evidence": [
+      "ev-cnc-cad-extraction",
+      "ev-cnc-view-review"
+    ],
+    "normalizationMethod": "Center the extracted X/Z AABB on the local origin and translate the minimum Y support datum to zero."
+  },
+  "geometry": {
+    "aabb": {
+      "minimum": {
+        "x": -1.5,
+        "y": 0.0,
+        "z": -1.859126
+      },
+      "maximum": {
+        "x": 1.5,
+        "y": 2.7,
+        "z": 1.859126
+      }
+    },
+    "obb": null,
+    "footprintPolygons": [
+      [
+        {
+          "x": -1.5,
+          "z": -1.859126
+        },
+        {
+          "x": 1.5,
+          "z": -1.859126
+        },
+        {
+          "x": 1.5,
+          "z": 1.859126
+        },
+        {
+          "x": -1.5,
+          "z": 1.859126
+        }
+      ]
+    ],
+    "heightInterval": {
+      "minimumY": 0.0,
+      "maximumY": 2.7
+    },
+    "selectionBounds": {
+      "minimum": {
+        "x": -1.5,
+        "y": 0.0,
+        "z": -1.859126
+      },
+      "maximum": {
+        "x": 1.5,
+        "y": 2.7,
+        "z": 1.859126
+      }
+    },
+    "evidence": [
+      "ev-cnc-cad-extraction",
+      "ev-cnc-view-review"
+    ],
+    "footprintMethod": "Conservative counter-clockwise X/Z projection of the complete extracted AABB."
+  },
+  "renderingCompatibility": {
+    "renderBundleSchemaVersion": 1,
+    "geometryInterfaceRevision": "c8b9dd44c45266ba501b3116856fae43657ce31f6c7bbf8bedaa357e70a5717d",
+    "artifacts": [
+      {
+        "safeLabel": "CNC VMC feature-colored GLB",
+        "mediaType": "model/gltf-binary",
+        "byteLength": 525844,
+        "sha256": "7055aceb64674764bac4bdaae187229eead1aa0d877fc12a5b90cca581309a43"
+      },
+      {
+        "safeLabel": "CNC VMC isometric review image",
+        "mediaType": "image/png",
+        "byteLength": 4936374,
+        "sha256": "021c6e9092c02b31da10da7588843b354f460fdaeb3fc39d008c29ddb9c7b179"
+      },
+      {
+        "safeLabel": "CNC VMC top review image",
+        "mediaType": "image/png",
+        "byteLength": 4936374,
+        "sha256": "d2cfb3ae2841adffb8f5980b4ea54668d7d09a2d6f7eab8ee7bbfc8494b2673e"
+      }
+    ]
+  },
+  "collision": {
+    "model": "footprint_2_5d",
+    "verticalInterval": {
+      "minimumY": 0.0,
+      "maximumY": 2.7
+    },
+    "geometry": {
+      "footprintIndex": 0,
+      "conservative": true
+    },
+    "evidence": [
+      "ev-cnc-cad-extraction",
+      "ev-cnc-view-review"
+    ]
+  },
+  "loading": {
+    "transportMass": {
+      "value": 7078.47471,
+      "unit": "kg",
+      "evidenceStatus": "derived",
+      "evidence": [
+        "ev-cnc-cad-extraction"
+      ],
+      "qualification": "CAD mass property using the source-assigned Steel material; not a floor contact-load model."
+    },
+    "installedMass": {
+      "value": null,
+      "unit": "kg",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "operatingMass": {
+      "value": null,
+      "unit": "kg",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "centerOfGravity": {
+      "value": {
+        "x": -0.013148,
+        "y": 0.952916,
+        "z": 0.716287
+      },
+      "unit": "m",
+      "evidenceStatus": "derived",
+      "evidence": [
+        "ev-cnc-cad-extraction"
+      ]
+    },
+    "contactLoads": [],
+    "dynamicLoadFactors": [],
+    "anchoringAssumptions": [],
+    "evidence": [
+      "ev-cnc-cad-extraction"
+    ]
+  },
+  "clearances": [],
+  "connectors": [],
+  "utilities": {},
+  "mobility": {
+    "classification": "static",
+    "footprint": null,
+    "heading": null,
+    "turningRadius": null,
+    "speedLimits": {},
+    "loadLimits": {},
+    "evidence": []
+  },
+  "capabilities": {
+    "processTypes": [
+      "milling"
+    ],
+    "evidenceStatus": "inferred"
+  },
+  "provenance": {
+    "sourceLabel": "3D ContentCentral User Library",
+    "vendor": null,
+    "model": "CNC VMC Milling machine",
+    "sourceUrl": "https://www.3dcontentcentral.com/Download-Model.aspx?catalogid=171&id=212592",
+    "licenseStatus": "restricted",
+    "attribution": "3D ContentCentral User Library; contributor Rafael de Souza Clark",
+    "evidence": [
+      "ev-cnc-provider",
+      "ev-cnc-license"
+    ]
+  },
+  "evidence": [
+    "ev-cnc-source-hash",
+    "ev-cnc-cad-extraction",
+    "ev-cnc-view-review",
+    "ev-cnc-provider",
+    "ev-cnc-license"
+  ],
+  "unresolvedItems": [
+    {
+      "findingId": "finding-cnc-contact-load",
+      "code": "asset_contact_load_unknown",
+      "message": "Support points, contact areas, anchoring, and point loads are not established."
+    },
+    {
+      "findingId": "finding-cnc-clearance",
+      "code": "asset_clearance_unknown",
+      "message": "Operating, loading, service, and safety clearances require authoritative machine data."
+    },
+    {
+      "findingId": "finding-cnc-connectors",
+      "code": "asset_connectors_unknown",
+      "message": "Material, operator, utility, and foundation connectors are not reviewed."
+    },
+    {
+      "findingId": "finding-cnc-license",
+      "code": "asset_publication_blocked",
+      "message": "No asset-owner permission covering public InspectorPro distribution is present."
+    }
+  ],
+  "readiness": {
+    "visualReady": {
+      "value": true,
+      "blockers": []
+    },
+    "placementReady": {
+      "value": true,
+      "blockers": []
+    },
+    "planningReady": {
+      "value": false,
+      "blockers": [
+        "contact_load_evidence_missing",
+        "clearance_evidence_missing",
+        "connector_evidence_missing"
+      ]
+    },
+    "publicReady": {
+      "value": false,
+      "blockers": [
+        "redistribution_permission_missing"
+      ]
+    }
+  },
+  "sourceBinding": {
+    "sourceFileSha256": "f26678cafa91cd752ca0abd3ed2b2373c18941e6240f7132a91a0326129da2f1",
+    "activeConfiguration": "Valor predeterminado",
+    "extractorExecutableSha256": "c2b2e58d70392f78eb61f2638547d802838fcd9a09a071668c7843f0e763a5c9",
+    "extractionInputs": [
+      "full",
+      "views",
+      "part-glb"
+    ],
+    "extractedJsonSha256": "c48808f66cf9e3f2983564870ad2f825d016f1216b6f4dab09c088a4e55f091d"
+  },
+  "evidenceRecords": [
+    {
+      "evidenceId": "ev-cnc-source-hash",
+      "status": "derived",
+      "summary": "The source SLDPRT and extraction executable are bound by SHA-256."
+    },
+    {
+      "evidenceId": "ev-cnc-cad-extraction",
+      "status": "derived",
+      "summary": "SolidWorks 2024 full extraction reported SI geometry, MMGS source units, the selected configuration, mass properties, and complete-body bounds."
+    },
+    {
+      "evidenceId": "ev-cnc-view-review",
+      "status": "derived",
+      "summary": "Front, right, top, and isometric exports were reviewed to confirm +Y vertical, the minimum-Y floor datum, and the conservative plan footprint."
+    },
+    {
+      "evidenceId": "ev-cnc-provider",
+      "status": "authored",
+      "summary": "The provider page supplies the model description and contributor attribution."
+    },
+    {
+      "evidenceId": "ev-cnc-license",
+      "status": "authored",
+      "summary": "Provider terms do not establish public redistribution permission."
+    }
+  ],
+  "fixtureMetadata": {
+    "purpose": "P0 private placement-readiness spike",
+    "safetyAuthority": false,
+    "publicDistributionAllowed": false
+  }
+}

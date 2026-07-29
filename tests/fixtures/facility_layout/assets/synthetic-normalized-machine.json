@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "documentKind": "industrial_asset_definition",
+  "assetId": "asset-synthetic-machine",
+  "ownerTenantId": "tenant-a",
+  "status": "reviewed",
+  "displayName": "Synthetic Normalized Machine",
+  "familyId": null,
+  "variantId": null,
+  "category": "machine",
+  "tags": [
+    "fixture"
+  ],
+  "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "coordinateFrame": {
+    "nativeSourceUnits": "mm",
+    "sourceHandedness": "right",
+    "sourceUpAxis": "+Y",
+    "sourceToCanonical": [
+      0.001,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.001,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.001,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "canonicalLocalOrigin": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "floorAnchor": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "defaultFacingVector": {
+      "x": 1.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "allowedMountingSurfaces": [
+      "floor"
+    ],
+    "alignmentResidualMeters": 0.0002,
+    "evidence": [
+      "ev-synthetic-geometry"
+    ]
+  },
+  "geometry": {
+    "aabb": {
+      "minimum": {
+        "x": -1.0,
+        "y": 0.0,
+        "z": -0.75
+      },
+      "maximum": {
+        "x": 1.0,
+        "y": 2.2,
+        "z": 0.75
+      }
+    },
+    "obb": null,
+    "footprintPolygons": [
+      [
+        {
+          "x": -1.0,
+          "z": -0.75
+        },
+        {
+          "x": 1.0,
+          "z": -0.75
+        },
+        {
+          "x": 1.0,
+          "z": 0.75
+        },
+        {
+          "x": -1.0,
+          "z": 0.75
+        }
+      ]
+    ],
+    "heightInterval": {
+      "minimumY": 0.0,
+      "maximumY": 2.2
+    },
+    "selectionBounds": {
+      "minimum": {
+        "x": -1.0,
+        "y": 0.0,
+        "z": -0.75
+      },
+      "maximum": {
+        "x": 1.0,
+        "y": 2.2,
+        "z": 0.75
+      }
+    },
+    "evidence": [
+      "ev-synthetic-geometry"
+    ]
+  },
+  "renderingCompatibility": {
+    "renderBundleSchemaVersion": 1,
+    "geometryInterfaceRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "collision": {
+    "model": "footprint_2_5d",
+    "verticalInterval": {
+      "minimumY": 0.0,
+      "maximumY": 2.2
+    },
+    "geometry": {
+      "footprintIndex": 0
+    },
+    "evidence": [
+      "ev-synthetic-geometry"
+    ]
+  },
+  "loading": {
+    "transportMass": {
+      "value": null,
+      "unit": "kg",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "installedMass": {
+      "value": null,
+      "unit": "kg",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "operatingMass": {
+      "value": null,
+      "unit": "kg",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "centerOfGravity": {
+      "value": null,
+      "unit": "m",
+      "evidenceStatus": "unknown",
+      "evidence": []
+    },
+    "contactLoads": [],
+    "dynamicLoadFactors": [],
+    "anchoringAssumptions": [],
+    "evidence": []
+  },
+  "clearances": [
+    {
+      "clearanceId": "clearance-service-rear",
+      "clearanceKind": "service",
+      "geometry": {
+        "shape": "rectangle",
+        "minimum": {
+          "x": -1.0,
+          "z": 0.75
+        },
+        "maximum": {
+          "x": 1.0,
+          "z": 1.75
+        }
+      },
+      "enforcement": "advisory",
+      "evidenceStatus": "inferred",
+      "evidence": []
+    }
+  ],
+  "connectors": [
+    {
+      "connectorId": "material-in",
+      "connectorKind": "material",
+      "position": {
+        "x": -1.0,
+        "y": 0.8,
+        "z": 0.0
+      },
+      "facing": {
+        "x": -1.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "role": "input",
+      "interface": {},
+      "evidenceStatus": "inferred",
+      "evidence": []
+    }
+  ],
+  "utilities": {},
+  "mobility": {
+    "classification": "static",
+    "footprint": null,
+    "heading": null,
+    "turningRadius": null,
+    "speedLimits": {},
+    "loadLimits": {},
+    "evidence": []
+  },
+  "capabilities": {
+    "processTypes": [
+      "synthetic-operation"
+    ]
+  },
+  "provenance": {
+    "sourceLabel": "Synthetic P0 fixture",
+    "vendor": null,
+    "model": null,
+    "sourceUrl": null,
+    "licenseStatus": "unknown",
+    "attribution": "Synthetic test data",
+    "evidence": []
+  },
+  "evidence": [
+    "ev-synthetic-geometry"
+  ],
+  "unresolvedItems": [
+    {
+      "findingId": "finding-loading-unknown",
+      "code": "asset_loading_unknown",
+      "message": "Loading data is intentionally unknown in this synthetic fixture."
+    }
+  ],
+  "readiness": {
+    "visualReady": {
+      "value": false,
+      "blockers": [
+        "render_bundle_missing"
+      ]
+    },
+    "placementReady": {
+      "value": true,
+      "blockers": []
+    },
+    "planningReady": {
+      "value": false,
+      "blockers": [
+        "loading_evidence_missing",
+        "connector_evidence_unreviewed"
+      ]
+    },
+    "publicReady": {
+      "value": false,
+      "blockers": [
+        "synthetic_fixture_only"
+      ]
+    }
+  },
+  "fixtureMetadata": {
+    "synthetic": true,
+    "safetyAuthority": false
+  }
+}

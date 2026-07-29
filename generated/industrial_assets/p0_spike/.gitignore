@@ -1,0 +1,4 @@
+# P0 CAD exports are local evidence bound by hashes in source-controlled
+# fixtures. Do not commit proprietary or redistribution-restricted binaries.
+*
+!.gitignore

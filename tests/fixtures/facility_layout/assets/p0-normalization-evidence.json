@@ -1,0 +1,157 @@
+{
+  "schemaVersion": "facility-layout-p0-normalization-evidence-v1",
+  "extractor": {
+    "label": "SolidWorks Data Extractor v1.0",
+    "solidWorksVersion": "SolidWorks 2024 (v32.5.0)",
+    "executableSha256": "c2b2e58d70392f78eb61f2638547d802838fcd9a09a071668c7843f0e763a5c9",
+    "extractionInputs": [
+      "full",
+      "views",
+      "part-glb"
+    ],
+    "coordinateValues": "SI meters"
+  },
+  "assets": [
+    {
+      "assetId": "asset-cnc-vmc-f26678cafa91",
+      "normalizedFixture": "cnc-vmc-milling-machine.normalized-p0.json",
+      "sourceFileSha256": "f26678cafa91cd752ca0abd3ed2b2373c18941e6240f7132a91a0326129da2f1",
+      "activeConfiguration": "Valor predeterminado",
+      "extractedJson": {
+        "byteLength": 41268,
+        "sha256": "c48808f66cf9e3f2983564870ad2f825d016f1216b6f4dab09c088a4e55f091d"
+      },
+      "nativeSourceUnits": "mm",
+      "sourceAabbMeters": {
+        "minimum": {
+          "x": -1.5,
+          "y": -0.00000005,
+          "z": -3.018251521
+        },
+        "maximum": {
+          "x": 1.5,
+          "y": 2.7,
+          "z": 0.700000025
+        }
+      },
+      "sourceCenterOfMassMeters": {
+        "x": -0.01314789186,
+        "y": 0.952916073,
+        "z": -0.4428390621
+      },
+      "sourceMassKilograms": 7078.47471,
+      "review": {
+        "sourceUpAxis": "+Y",
+        "supportDatum": "minimum_y",
+        "footprintMethod": "complete_aabb_xz_projection",
+        "viewsReviewed": [
+          "front",
+          "right",
+          "top",
+          "isometric"
+        ]
+      },
+      "artifacts": [
+        {
+          "kind": "glb",
+          "byteLength": 525844,
+          "sha256": "7055aceb64674764bac4bdaae187229eead1aa0d877fc12a5b90cca581309a43"
+        },
+        {
+          "kind": "front_png",
+          "byteLength": 4936374,
+          "sha256": "7abb980e7bd872b71bdba1a6809d1ae6503f620907a54370a935ba44997491c9"
+        },
+        {
+          "kind": "right_png",
+          "byteLength": 4936374,
+          "sha256": "f1af391506b3cc3f0b4e242e27c1f1793b69bfbc0c30e307170058963a206d4f"
+        },
+        {
+          "kind": "top_png",
+          "byteLength": 4936374,
+          "sha256": "d2cfb3ae2841adffb8f5980b4ea54668d7d09a2d6f7eab8ee7bbfc8494b2673e"
+        },
+        {
+          "kind": "isometric_png",
+          "byteLength": 4936374,
+          "sha256": "021c6e9092c02b31da10da7588843b354f460fdaeb3fc39d008c29ddb9c7b179"
+        }
+      ]
+    },
+    {
+      "assetId": "asset-wa01-e773742615b2",
+      "normalizedFixture": "wa01-w48-d36-machine-table.normalized-p0.json",
+      "sourceFileSha256": "e773742615b2d72827d623556051297335a60412e0f5fb50f7455c8992fa61d2",
+      "activeConfiguration": "Default",
+      "extractedJson": {
+        "byteLength": 185496,
+        "sha256": "9851f4475897bd163d8091536cdd466abf260bc5ea6644e83a811d60ec9056fd"
+      },
+      "nativeSourceUnits": "in",
+      "sourceAabbMeters": {
+        "minimum": {
+          "x": -0.6096001031,
+          "y": -0.8540751031,
+          "z": -0.52705
+        },
+        "maximum": {
+          "x": 0.6096001031,
+          "y": 0.009525,
+          "z": 0.52705
+        }
+      },
+      "sourceCenterOfMassMeters": {
+        "x": 0.0,
+        "y": -0.198292555,
+        "z": 0.0
+      },
+      "sourceMassKilograms": 20.18477886,
+      "review": {
+        "sourceUpAxis": "+Y",
+        "supportDatum": "minimum_y",
+        "footprintMethod": "complete_aabb_xz_projection",
+        "viewsReviewed": [
+          "front",
+          "right",
+          "top",
+          "isometric"
+        ]
+      },
+      "artifacts": [
+        {
+          "kind": "glb",
+          "byteLength": 350816,
+          "sha256": "dd15e9453916b303c6bef406106bcbbded061302778c3139d1221e8c1f44e590"
+        },
+        {
+          "kind": "front_png",
+          "byteLength": 3111802,
+          "sha256": "ac41dedde2de020b1b99ec8147b68a79e49ae4fe1c490abe7b2139fe0793eab9"
+        },
+        {
+          "kind": "right_png",
+          "byteLength": 3111802,
+          "sha256": "60a3d4f10041ba585dc72ebfd11d3509720e754445c78034c884f86011d59c21"
+        },
+        {
+          "kind": "top_png",
+          "byteLength": 3111802,
+          "sha256": "fc5d8767f93449ef950316ec5b19b9337d29b67d2b786fd9c41364d8850cc35f"
+        },
+        {
+          "kind": "isometric_png",
+          "byteLength": 3111802,
+          "sha256": "1b25af4a60bfc0d4714f6e93cb3c8b1ea2bc74e368acbd232b39afb245f7c7d6"
+        }
+      ]
+    }
+  ],
+  "authorityBoundary": {
+    "placementGeometry": "derived_and_reviewed",
+    "safetyClearances": "unknown",
+    "contactLoads": "unknown",
+    "utilities": "unknown",
+    "publicRedistribution": "blocked"
+  }
+}

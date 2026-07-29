@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Facility Layout Renderer Benchmark</title>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: #f4f6f7;
+            color: #1f2a30;
+            font: 13px/1.4 system-ui, sans-serif;
+        }
+
+        #surface {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #surface > svg,
+        #surface > canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #status {
+            position: absolute;
+            right: 8px;
+            bottom: 8px;
+            max-width: 42rem;
+            margin: 0;
+            padding: 6px 8px;
+            border: 1px solid #aeb8bd;
+            background: rgb(255 255 255 / 92%);
+            font: 11px/1.35 Consolas, monospace;
+            white-space: pre-wrap;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="surface"></div>
+    <pre id="status">loading benchmark spec</pre>
+    <script>
+    'use strict';
+
+    (() => {
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+        const surface = document.getElementById('surface');
+        const status = document.getElementById('status');
+        const longTasks = [];
+        let active = null;
+
+        if (typeof PerformanceObserver === 'function') {
+            try {
+                const observer = new PerformanceObserver((list) => {
+                    list.getEntries().forEach((entry) => {
+                        longTasks.push({
+                            startTimeMs: entry.startTime,
+                            durationMs: entry.duration
+                        });
+                    });
+                });
+                observer.observe({ type: 'longtask', buffered: true });
+            } catch (_) {
+                // Long-task observation is optional and reported as unavailable.
+            }
+        }
+
+        function invariant(condition, message) {
+            if (!condition) throw new Error(message);
+        }
+
+        function nextFrame() {
+            return new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+
+        function mulberry32(seed) {
+            let state = seed >>> 0;
+            return () => {
+                state += 0x6D2B79F5;
+                let value = state;
+                value = Math.imul(value ^ (value >>> 15), value | 1);
+                value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+                return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+
+        function hexToRgb(hex) {
+            const value = Number.parseInt(hex.slice(1), 16);
+            return [
+                ((value >>> 16) & 255) / 255,
+                ((value >>> 8) & 255) / 255,
+                (value & 255) / 255
+            ];
+        }
+
+        async function sha256Hex(value) {
+            const bytes = new TextEncoder().encode(value);
+            const digest = await crypto.subtle.digest('SHA-256', bytes);
+            return Array.from(new Uint8Array(digest))
+                .map((byte) => byte.toString(16).padStart(2, '0'))
+                .join('');
+        }
+
+        function generateFixture(spec, scenarioName) {
+            const scenario = spec.scenarios[scenarioName];
+            invariant(scenario, `Unknown scenario: ${scenarioName}`);
+            const generator = spec.generator;
+            const random = mulberry32((spec.seed ^ scenario.placementCount) >>> 0);
+            const prototypes = [];
+
+            for (let index = 0; index < scenario.prototypeCount; index += 1) {
+                prototypes.push({
+                    id: `prototype-${String(index).padStart(2, '0')}`,
+                    width: 1.8 + (index % 5) * 0.65,
+                    depth: 1.5 + ((index * 3) % 7) * 0.42,
+                    color: generator.palette[index % generator.palette.length]
+                });
+            }
+
+            const placements = [];
+            const [spacingX, spacingZ] = generator.cellSpacingMeters;
+            const jitter = generator.positionJitterMeters;
+            let minX = Number.POSITIVE_INFINITY;
+            let minZ = Number.POSITIVE_INFINITY;
+            let maxX = Number.NEGATIVE_INFINITY;
+            let maxZ = Number.NEGATIVE_INFINITY;
+
+            for (let index = 0; index < scenario.placementCount; index += 1) {
+                const prototypeIndex = index % prototypes.length;
+                const prototype = prototypes[prototypeIndex];
+                const column = index % scenario.columns;
+                const row = Math.floor(index / scenario.columns);
+                const x = column * spacingX + (random() * 2 - 1) * jitter;
+                const z = row * spacingZ + (random() * 2 - 1) * jitter;
+                const rotationQuarterTurns = Math.floor(random() * 4);
+                const rotation = rotationQuarterTurns * Math.PI * 0.5;
+                const halfWidth = prototype.width * 0.5;
+                const halfDepth = prototype.depth * 0.5;
+                const extentX = rotationQuarterTurns % 2 ? halfDepth : halfWidth;
+                const extentZ = rotationQuarterTurns % 2 ? halfWidth : halfDepth;
+
+                minX = Math.min(minX, x - extentX);
+                minZ = Math.min(minZ, z - extentZ);
+                maxX = Math.max(maxX, x + extentX);
+                maxZ = Math.max(maxZ, z + extentZ);
+                placements.push({
+                    id: `placement-${String(index).padStart(5, '0')}`,
+                    prototypeIndex,
+                    x,
+                    z,
+                    width: prototype.width,
+                    depth: prototype.depth,
+                    rotation,
+                    cosine: Math.cos(rotation),
+                    sine: Math.sin(rotation),
+                    color: prototype.color
+                });
+            }
+
+            const selectedIndex = Math.floor(scenario.placementCount * 0.371);
+            placements[selectedIndex].color = generator.selectionColor;
+            const margin = Math.max(spacingX, spacingZ);
+            const world = {
+                minX: minX - margin,
+                minZ: minZ - margin,
+                maxX: maxX + margin,
+                maxZ: maxZ + margin
+            };
+            world.width = world.maxX - world.minX;
+            world.depth = world.maxZ - world.minZ;
+            world.centerX = (world.minX + world.maxX) * 0.5;
+            world.centerZ = (world.minZ + world.maxZ) * 0.5;
+
+            return {
+                scenarioName,
+                scenario,
+                prototypes,
+                placements,
+                selectedIndex,
+                selectedOrigin: {
+                    x: placements[selectedIndex].x,
+                    z: placements[selectedIndex].z
+                },
+                world
+            };
+        }
+
+        function fixtureCanonicalValue(fixture) {
+            return JSON.stringify(fixture.placements.map((placement) => [
+                placement.id,
+                placement.prototypeIndex,
+                Number(placement.x.toFixed(9)),
+                Number(placement.z.toFixed(9)),
+                Number(placement.width.toFixed(9)),
+                Number(placement.depth.toFixed(9)),
+                Number(placement.rotation.toFixed(9))
+            ]));
+        }
+
+        function initialCamera(fixture, viewport) {
+            const scale = Math.min(
+                viewport.width / fixture.world.width,
+                viewport.height / fixture.world.depth
+            ) * 0.92;
+            return {
+                x: fixture.world.centerX,
+                z: fixture.world.centerZ,
+                scale
+            };
+        }
+
+        class SvgPlacementRenderer {
+            constructor(fixture, viewport) {
+                this.fixture = fixture;
+                this.viewport = viewport;
+                this.svg = document.createElementNS(SVG_NS, 'svg');
+                this.svg.setAttribute('role', 'img');
+                this.svg.setAttribute('aria-label', 'Synthetic facility placement benchmark');
+                this.svg.setAttribute('preserveAspectRatio', 'none');
+                this.svg.style.background = '#f4f6f7';
+                const fragment = document.createDocumentFragment();
+                this.nodes = [];
+
+                fixture.placements.forEach((placement, index) => {
+                    const rect = document.createElementNS(SVG_NS, 'rect');
+                    rect.setAttribute('x', String(-placement.width * 0.5));
+                    rect.setAttribute('y', String(-placement.depth * 0.5));
+                    rect.setAttribute('width', String(placement.width));
+                    rect.setAttribute('height', String(placement.depth));
+                    rect.setAttribute('fill', placement.color);
+                    rect.setAttribute('data-placement-id', placement.id);
+                    rect.setAttribute('transform', this.transformFor(placement));
+                    this.nodes[index] = rect;
+                    fragment.appendChild(rect);
+                });
+
+                this.svg.appendChild(fragment);
+                surface.appendChild(this.svg);
+            }
+
+            transformFor(placement) {
+                const degrees = placement.rotation * 180 / Math.PI;
+                return `translate(${placement.x} ${placement.z}) rotate(${degrees})`;
+            }
+
+            render(camera) {
+                const selected = this.fixture.placements[this.fixture.selectedIndex];
+                this.nodes[this.fixture.selectedIndex].setAttribute(
+                    'transform',
+                    this.transformFor(selected)
+                );
+                const worldWidth = this.viewport.width / camera.scale;
+                const worldDepth = this.viewport.height / camera.scale;
+                this.svg.setAttribute('viewBox', [
+                    camera.x - worldWidth * 0.5,
+                    camera.z - worldDepth * 0.5,
+                    worldWidth,
+                    worldDepth
+                ].join(' '));
+            }
+
+            metrics() {
+                return {
+                    retainedPlacementNodes: this.nodes.length,
+                    drawCallsPerFrame: null,
+                    trianglesPerFrame: null
+                };
+            }
+
+            dispose() {
+                this.svg.remove();
+            }
+        }
+
+        class CanvasPlacementRenderer {
+            constructor(fixture, viewport) {
+                this.fixture = fixture;
+                this.viewport = viewport;
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = viewport.width * viewport.devicePixelRatio;
+                this.canvas.height = viewport.height * viewport.devicePixelRatio;
+                this.context = this.canvas.getContext('2d', { alpha: false });
+                invariant(this.context, 'Canvas 2D context unavailable');
+                this.groups = new Map();
+
+                fixture.placements.forEach((placement) => {
+                    if (!this.groups.has(placement.color)) {
+                        this.groups.set(placement.color, []);
+                    }
+                    this.groups.get(placement.color).push(placement);
+                });
+                surface.appendChild(this.canvas);
+            }
+
+            render(camera) {
+                const context = this.context;
+                const dpr = this.viewport.devicePixelRatio;
+                context.setTransform(1, 0, 0, 1, 0, 0);
+                context.fillStyle = '#f4f6f7';
+                context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                context.setTransform(
+                    camera.scale * dpr,
+                    0,
+                    0,
+                    camera.scale * dpr,
+                    (this.viewport.width * 0.5 - camera.x * camera.scale) * dpr,
+                    (this.viewport.height * 0.5 - camera.z * camera.scale) * dpr
+                );
+
+                this.groups.forEach((placements, color) => {
+                    context.beginPath();
+                    placements.forEach((placement) => {
+                        const halfWidth = placement.width * 0.5;
+                        const halfDepth = placement.depth * 0.5;
+                        const cos = placement.cosine;
+                        const sin = placement.sine;
+                        const x = placement.x;
+                        const z = placement.z;
+                        const x0 = x + (-halfWidth * cos + halfDepth * sin);
+                        const z0 = z + (-halfWidth * sin - halfDepth * cos);
+                        const x1 = x + (halfWidth * cos + halfDepth * sin);
+                        const z1 = z + (halfWidth * sin - halfDepth * cos);
+                        const x2 = x + (halfWidth * cos - halfDepth * sin);
+                        const z2 = z + (halfWidth * sin + halfDepth * cos);
+                        const x3 = x + (-halfWidth * cos - halfDepth * sin);
+                        const z3 = z + (-halfWidth * sin + halfDepth * cos);
+                        context.moveTo(x0, z0);
+                        context.lineTo(x1, z1);
+                        context.lineTo(x2, z2);
+                        context.lineTo(x3, z3);
+                        context.closePath();
+                    });
+                    context.fillStyle = color;
+                    context.fill();
+                });
+            }
+
+            metrics() {
+                return {
+                    retainedPlacementNodes: 0,
+                    batchedFillGroups: this.groups.size,
+                    drawCallsPerFrame: null,
+                    trianglesPerFrame: null
+                };
+            }
+
+            dispose() {
+                this.canvas.remove();
+            }
+        }
+
+        function compileShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                const message = gl.getShaderInfoLog(shader);
+                gl.deleteShader(shader);
+                throw new Error(`WebGL shader compile failed: ${message}`);
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vertexSource, fragmentSource) {
+            const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
+            const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            gl.deleteShader(vertexShader);
+            gl.deleteShader(fragmentShader);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                const message = gl.getProgramInfoLog(program);
+                gl.deleteProgram(program);
+                throw new Error(`WebGL program link failed: ${message}`);
+            }
+            return program;
+        }
+
+        class WebGlPlacementRenderer {
+            constructor(fixture, viewport) {
+                this.fixture = fixture;
+                this.viewport = viewport;
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = viewport.width * viewport.devicePixelRatio;
+                this.canvas.height = viewport.height * viewport.devicePixelRatio;
+                this.contextLost = false;
+                this.canvas.addEventListener('webglcontextlost', (event) => {
+                    event.preventDefault();
+                    this.contextLost = true;
+                });
+                const gl = this.canvas.getContext('webgl2', {
+                    alpha: false,
+                    antialias: true,
+                    depth: false,
+                    stencil: false,
+                    powerPreference: 'high-performance',
+                    preserveDrawingBuffer: false
+                });
+                invariant(gl, 'WebGL 2 context unavailable');
+                this.gl = gl;
+                this.program = createProgram(gl, `#version 300 es
+                    precision highp float;
+                    layout(location = 0) in vec2 aCorner;
+                    layout(location = 1) in vec4 aTransform;
+                    layout(location = 2) in vec2 aRotation;
+                    layout(location = 3) in vec3 aColor;
+                    uniform vec2 uCamera;
+                    uniform vec2 uViewport;
+                    uniform float uScale;
+                    out vec3 vColor;
+                    void main() {
+                        vec2 local = aCorner * aTransform.zw;
+                        vec2 rotated = vec2(
+                            local.x * aRotation.x - local.y * aRotation.y,
+                            local.x * aRotation.y + local.y * aRotation.x
+                        );
+                        vec2 pixels = (aTransform.xy + rotated - uCamera) * uScale;
+                        vec2 clip = vec2(
+                            pixels.x / (uViewport.x * 0.5),
+                            -pixels.y / (uViewport.y * 0.5)
+                        );
+                        gl_Position = vec4(clip, 0.0, 1.0);
+                        vColor = aColor;
+                    }
+                `, `#version 300 es
+                    precision mediump float;
+                    in vec3 vColor;
+                    out vec4 outColor;
+                    void main() {
+                        outColor = vec4(vColor, 1.0);
+                    }
+                `);
+                this.vertexArray = gl.createVertexArray();
+                gl.bindVertexArray(this.vertexArray);
+                this.buffers = [];
+
+                const corners = new Float32Array([
+                    -1, -1, 1, -1, 1, 1,
+                    -1, -1, 1, 1, -1, 1
+                ]);
+                this.bindBuffer(0, corners, 2, 0, gl.STATIC_DRAW);
+
+                this.transforms = new Float32Array(fixture.placements.length * 4);
+                const rotations = new Float32Array(fixture.placements.length * 2);
+                const colors = new Float32Array(fixture.placements.length * 3);
+                fixture.placements.forEach((placement, index) => {
+                    this.transforms.set([
+                        placement.x,
+                        placement.z,
+                        placement.width * 0.5,
+                        placement.depth * 0.5
+                    ], index * 4);
+                    rotations.set([placement.cosine, placement.sine], index * 2);
+                    colors.set(hexToRgb(placement.color), index * 3);
+                });
+                this.transformBuffer = this.bindBuffer(
+                    1,
+                    this.transforms,
+                    4,
+                    1,
+                    gl.DYNAMIC_DRAW
+                );
+                this.bindBuffer(2, rotations, 2, 1, gl.STATIC_DRAW);
+                this.bindBuffer(3, colors, 3, 1, gl.STATIC_DRAW);
+                gl.bindVertexArray(null);
+
+                this.cameraLocation = gl.getUniformLocation(this.program, 'uCamera');
+                this.viewportLocation = gl.getUniformLocation(this.program, 'uViewport');
+                this.scaleLocation = gl.getUniformLocation(this.program, 'uScale');
+                this.gpuBufferBytes = corners.byteLength
+                    + this.transforms.byteLength
+                    + rotations.byteLength
+                    + colors.byteLength;
+                const debug = gl.getExtension('WEBGL_debug_renderer_info');
+                this.webglInfo = {
+                    version: gl.getParameter(gl.VERSION),
+                    shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+                    vendor: debug
+                        ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL)
+                        : gl.getParameter(gl.VENDOR),
+                    renderer: debug
+                        ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)
+                        : gl.getParameter(gl.RENDERER)
+                };
+                surface.appendChild(this.canvas);
+            }
+
+            bindBuffer(location, values, itemSize, divisor, usage) {
+                const gl = this.gl;
+                const buffer = gl.createBuffer();
+                this.buffers.push(buffer);
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                gl.bufferData(gl.ARRAY_BUFFER, values, usage);
+                gl.enableVertexAttribArray(location);
+                gl.vertexAttribPointer(location, itemSize, gl.FLOAT, false, 0, 0);
+                gl.vertexAttribDivisor(location, divisor);
+                return buffer;
+            }
+
+            render(camera) {
+                const gl = this.gl;
+                invariant(!this.contextLost, 'WebGL context was lost');
+                const selectedIndex = this.fixture.selectedIndex;
+                const selected = this.fixture.placements[selectedIndex];
+                const offset = selectedIndex * 4;
+                this.transforms[offset] = selected.x;
+                this.transforms[offset + 1] = selected.z;
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.transformBuffer);
+                gl.bufferSubData(
+                    gl.ARRAY_BUFFER,
+                    offset * Float32Array.BYTES_PER_ELEMENT,
+                    this.transforms.subarray(offset, offset + 4)
+                );
+                gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+                gl.clearColor(244 / 255, 246 / 255, 247 / 255, 1);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                gl.useProgram(this.program);
+                gl.uniform2f(this.cameraLocation, camera.x, camera.z);
+                gl.uniform2f(
+                    this.viewportLocation,
+                    this.viewport.width,
+                    this.viewport.height
+                );
+                gl.uniform1f(this.scaleLocation, camera.scale);
+                gl.bindVertexArray(this.vertexArray);
+                gl.drawArraysInstanced(
+                    gl.TRIANGLES,
+                    0,
+                    6,
+                    this.fixture.placements.length
+                );
+                gl.bindVertexArray(null);
+            }
+
+            metrics() {
+                return {
+                    retainedPlacementNodes: 0,
+                    drawCallsPerFrame: 1,
+                    trianglesPerFrame: this.fixture.placements.length * 2,
+                    gpuBufferBytes: this.gpuBufferBytes,
+                    contextLost: this.contextLost,
+                    webgl: this.webglInfo
+                };
+            }
+
+            dispose() {
+                const gl = this.gl;
+                this.buffers.forEach((buffer) => gl.deleteBuffer(buffer));
+                gl.deleteVertexArray(this.vertexArray);
+                gl.deleteProgram(this.program);
+                this.canvas.remove();
+            }
+        }
+
+        const rendererFactories = {
+            svg: (fixture, viewport) => new SvgPlacementRenderer(fixture, viewport),
+            canvas2d: (fixture, viewport) => new CanvasPlacementRenderer(fixture, viewport),
+            webgl: (fixture, viewport) => new WebGlPlacementRenderer(fixture, viewport)
+        };
+
+        function updateWorkload(fixture, camera, elapsedMs) {
+            const scenario = fixture.scenario;
+            const phase = elapsedMs * 0.00042;
+            camera.x = fixture.world.centerX
+                + Math.sin(phase) * fixture.world.width * scenario.panAmplitudeFraction[0];
+            camera.z = fixture.world.centerZ
+                + Math.cos(phase * 0.83) * fixture.world.depth * scenario.panAmplitudeFraction[1];
+            const viewport = active.viewport;
+            const fitScale = Math.min(
+                viewport.width / fixture.world.width,
+                viewport.height / fixture.world.depth
+            ) * 0.92;
+            camera.scale = fitScale * (
+                1 + Math.sin(phase * 0.61) * scenario.zoomAmplitudeFraction
+            );
+
+            if (scenario.workload === 'pan-zoom-drag') {
+                const selected = fixture.placements[fixture.selectedIndex];
+                selected.x = fixture.selectedOrigin.x
+                    + Math.sin(elapsedMs * 0.0021) * scenario.dragAmplitudeMeters[0];
+                selected.z = fixture.selectedOrigin.z
+                    + Math.cos(elapsedMs * 0.0017) * scenario.dragAmplitudeMeters[1];
+            }
+        }
+
+        async function runPhase(durationMs, collectSamples) {
+            const frameIntervalsMs = [];
+            const callbackMs = [];
+            let firstTimestamp = null;
+            let previousTimestamp = null;
+            let measuredStart = null;
+            let measuredEnd = null;
+
+            await new Promise((resolve, reject) => {
+                function step(timestamp) {
+                    try {
+                        if (firstTimestamp === null) {
+                            firstTimestamp = timestamp;
+                            measuredStart = performance.now();
+                        }
+                        const elapsedMs = timestamp - firstTimestamp;
+                        const callbackStart = performance.now();
+                        updateWorkload(active.fixture, active.camera, elapsedMs);
+                        active.renderer.render(active.camera);
+                        const callbackDuration = performance.now() - callbackStart;
+
+                        if (collectSamples) {
+                            if (previousTimestamp !== null) {
+                                frameIntervalsMs.push(timestamp - previousTimestamp);
+                            }
+                            callbackMs.push(callbackDuration);
+                            previousTimestamp = timestamp;
+                        }
+
+                        if (elapsedMs < durationMs) {
+                            requestAnimationFrame(step);
+                        } else {
+                            measuredEnd = performance.now();
+                            resolve();
+                        }
+                    } catch (error) {
+                        reject(error);
+                    }
+                }
+                requestAnimationFrame(step);
+            });
+
+            return {
+                frameIntervalsMs,
+                callbackMs,
+                wallDurationMs: measuredEnd - measuredStart
+            };
+        }
+
+        const api = {
+            spec: null,
+            ready: null,
+
+            async setup(options) {
+                invariant(api.spec, 'Benchmark spec has not loaded');
+                invariant(rendererFactories[options.renderer], `Unknown renderer: ${options.renderer}`);
+                invariant(api.spec.scenarios[options.scenario], `Unknown scenario: ${options.scenario}`);
+                if (active && active.renderer) active.renderer.dispose();
+                surface.replaceChildren();
+                longTasks.length = 0;
+
+                const fixture = generateFixture(api.spec, options.scenario);
+                const viewport = api.spec.viewport;
+                const buildStart = performance.now();
+                const renderer = rendererFactories[options.renderer](fixture, viewport);
+                const camera = initialCamera(fixture, viewport);
+                renderer.render(camera);
+                surface.getBoundingClientRect();
+                const buildSyncMs = performance.now() - buildStart;
+                active = { fixture, viewport, renderer, camera };
+                await nextFrame();
+                await nextFrame();
+                const firstPaintReadyMs = performance.now() - buildStart;
+                const placementHash = await sha256Hex(fixtureCanonicalValue(fixture));
+
+                status.textContent = [
+                    `${options.renderer} / ${options.scenario}`,
+                    `${fixture.placements.length} placements`,
+                    `fixture ${placementHash.slice(0, 12)}`
+                ].join('\n');
+                return {
+                    renderer: options.renderer,
+                    scenario: options.scenario,
+                    placementHashSha256: placementHash,
+                    placementCount: fixture.placements.length,
+                    prototypeCount: fixture.prototypes.length,
+                    buildSyncMs,
+                    firstPaintReadyMs,
+                    rendererMetrics: renderer.metrics()
+                };
+            },
+
+            async run(options) {
+                invariant(active, 'Call setup before run');
+                const heapBefore = performance.memory ? {
+                    usedJSHeapSize: performance.memory.usedJSHeapSize,
+                    totalJSHeapSize: performance.memory.totalJSHeapSize
+                } : null;
+                if (options.warmupMs > 0) {
+                    await runPhase(options.warmupMs, false);
+                }
+                const longTaskStartIndex = longTasks.length;
+                const measured = await runPhase(options.durationMs, true);
+                await nextFrame();
+                const heapAfter = performance.memory ? {
+                    usedJSHeapSize: performance.memory.usedJSHeapSize,
+                    totalJSHeapSize: performance.memory.totalJSHeapSize
+                } : null;
+
+                return {
+                    ...measured,
+                    warmupMs: options.warmupMs,
+                    requestedDurationMs: options.durationMs,
+                    longTasks: longTasks.slice(longTaskStartIndex),
+                    heapBefore,
+                    heapAfter,
+                    rendererMetrics: active.renderer.metrics(),
+                    runtime: {
+                        userAgent: navigator.userAgent,
+                        platform: navigator.platform,
+                        hardwareConcurrency: navigator.hardwareConcurrency,
+                        deviceMemoryGiB: navigator.deviceMemory || null,
+                        devicePixelRatio: window.devicePixelRatio,
+                        viewport: {
+                            width: window.innerWidth,
+                            height: window.innerHeight
+                        },
+                        visibilityState: document.visibilityState,
+                        crossOriginIsolated: window.crossOriginIsolated
+                    }
+                };
+            }
+        };
+
+        window.facilityLayoutRendererBenchmark = api;
+        api.ready = fetch('./renderer-benchmark-spec.json', { cache: 'no-store' })
+            .then((response) => {
+                if (!response.ok) throw new Error(`Spec load failed: HTTP ${response.status}`);
+                return response.json();
+            })
+            .then((spec) => {
+                invariant(
+                    spec.schemaVersion === 'facility-layout-renderer-benchmark-v1',
+                    `Unsupported benchmark schema: ${spec.schemaVersion}`
+                );
+                api.spec = spec;
+                status.textContent = 'benchmark ready';
+                return spec;
+            })
+            .catch((error) => {
+                status.textContent = error.stack || String(error);
+                throw error;
+            });
+    })();
+    </script>
+</body>
+</html>

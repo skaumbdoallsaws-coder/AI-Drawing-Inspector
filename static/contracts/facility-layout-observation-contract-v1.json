@@ -1,0 +1,145 @@
+{
+  "contractId": "facility-layout-observation-contract-v1",
+  "contractVersion": 1,
+  "digest": {
+    "digestContractVersion": 1,
+    "tokenizerId": "inspectorpro_utf8_quarter_v1",
+    "tokenizerRevision": 1,
+    "tokenCountAlgorithm": "ceil(canonical_utf8_bytes/4)",
+    "maximumTokens": 4500,
+    "maximumCanonicalUtf8Bytes": 24576,
+    "oversizeBehavior": "deterministic_truncate_then_fail_closed",
+    "priorityOrder": [
+      "errors_and_blocked_findings",
+      "selected_entities",
+      "active_proposal_entities",
+      "unresolved_authority_gaps",
+      "user_named_regions",
+      "warnings",
+      "counts_and_summaries",
+      "remaining_entities"
+    ],
+    "requiredTruncationFields": [
+      "returnedCount",
+      "omittedCount"
+    ]
+  },
+  "readTools": {
+    "names": [
+      "search_industrial_assets",
+      "inspect_facility_entities",
+      "inspect_facility_region",
+      "inspect_facility_findings",
+      "inspect_process_bindings"
+    ],
+    "maximumIdsPerRequest": 50,
+    "maximumSearchTextCharacters": 120,
+    "maximumPageSize": 50,
+    "maximumCanonicalUtf8Bytes": 16384,
+    "maximumTokens": 3000,
+    "maximumExecutionMs": 2000,
+    "maximumCallsPerTurn": 8,
+    "allowModelAuthoredWorldCoordinates": false,
+    "allowScreenRectangles": false,
+    "requiredCursorBindings": [
+      "principalId",
+      "tenantId",
+      "siteId",
+      "layoutId",
+      "layoutRevision",
+      "queryHash",
+      "stableSortKey",
+      "expiresAt"
+    ],
+    "cursorAuthentication": "server_hmac",
+    "cursorExpirySeconds": 300,
+    "invalidCursorBehavior": "fail_closed",
+    "requiredResponseFields": [
+      "layoutRevision",
+      "returnedCount",
+      "omittedCount",
+      "items",
+      "nextCursor"
+    ]
+  },
+  "previewTool": {
+    "name": "build_facility_layout_preview",
+    "lowLevelMutationsExposedToModel": false,
+    "writesFacilityLayout": false,
+    "storesExpiringProposalState": true,
+    "storesAuthorizedUiArtifact": true,
+    "maximumModelReceiptUtf8Bytes": 16384,
+    "maximumModelReceiptTokens": 3000,
+    "requiredModelReceiptFields": [
+      "proposalId",
+      "previewArtifactRef",
+      "dependencyFingerprint",
+      "counts",
+      "assumptions",
+      "unresolvedItems",
+      "findingSummary",
+      "expiresAt"
+    ],
+    "fullGeometryReturnedToModel": false,
+    "fullDiffReturnedToModel": false,
+    "uiArtifactRequiresAuthorization": true
+  },
+  "trustedContext": {
+    "serverObjects": [
+      "facility_layout.state",
+      "facility_layout.evidence"
+    ],
+    "modelAttachment": "facility_layout.digest",
+    "browserMaySupply": [
+      "sanitized_selection",
+      "viewport_mode",
+      "dirty_state"
+    ],
+    "browserMayNotSupply": [
+      "authoritative_geometry",
+      "evidence_authority",
+      "revisions",
+      "policy_rules",
+      "approval",
+      "receipts"
+    ]
+  },
+  "cases": [
+    {
+      "caseId": "digest-within-both-bounds",
+      "canonicalUtf8Bytes": 12000,
+      "estimatedTokens": 3000,
+      "allowed": true,
+      "reason": "within_bounds"
+    },
+    {
+      "caseId": "digest-token-bound-exceeded",
+      "canonicalUtf8Bytes": 20000,
+      "estimatedTokens": 5000,
+      "allowed": false,
+      "reason": "digest_token_budget_exceeded"
+    },
+    {
+      "caseId": "read-tool-page-too-large",
+      "pageSize": 51,
+      "allowed": false,
+      "reason": "page_size_exceeded"
+    },
+    {
+      "caseId": "model-coordinate-query-denied",
+      "query": {
+        "x": 10,
+        "z": 12
+      },
+      "allowed": false,
+      "reason": "model_authored_coordinates_forbidden"
+    },
+    {
+      "caseId": "stale-cursor-denied",
+      "cursorLayoutRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "currentLayoutRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "allowed": false,
+      "reason": "stale_cursor_revision"
+    }
+  ]
+}

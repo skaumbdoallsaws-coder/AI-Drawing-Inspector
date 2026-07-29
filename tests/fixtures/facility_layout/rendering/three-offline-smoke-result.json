@@ -1,0 +1,49 @@
+{
+  "checks": {
+    "completed": true,
+    "corrupt_glb_rejected": true,
+    "no_console_errors": true,
+    "no_external_requests": true,
+    "no_page_errors": true,
+    "nonblank_pixel": true,
+    "official_loader_imported": true,
+    "render_call_recorded": true,
+    "three_revision_184": true,
+    "triangles_recorded": true,
+    "valid_glb_parsed": true,
+    "webgl2_rendered": true
+  },
+  "consoleErrors": [],
+  "environment": {
+    "browser": "150.0.4078.99",
+    "os": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]"
+  },
+  "network": {
+    "blockedExternalRequests": [],
+    "externalRequestsBlocked": true,
+    "failedRequests": [],
+    "failedResponses": [],
+    "servedOrigin": "http://127.0.0.1:56647"
+  },
+  "pageErrors": [],
+  "passed": true,
+  "schemaVersion": "facility-three-offline-smoke-v1",
+  "smoke": {
+    "corruptGlbRejected": true,
+    "nonblankPixel": true,
+    "officialLoaderImported": true,
+    "renderCalls": 1,
+    "state": "complete",
+    "threeRevision": "184",
+    "triangles": 12,
+    "validGlbParsed": true,
+    "webgl2Rendered": true
+  },
+  "source": {
+    "fixtureSha256": "7cb68fa8a90f26f7c5637627272076a9cf5d0590bf73d83b0efd144c571b4a86",
+    "loaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
+    "manifestSha256": "ec95acb83ec267ea7fb4ce5f033f53a1048a130615fb58575f8a487a78f5ffc1",
+    "moduleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a"
+  }
+}

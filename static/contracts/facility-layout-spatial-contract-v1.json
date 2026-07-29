@@ -1,0 +1,235 @@
+{
+  "contractId": "facility-layout-spatial-contract-v1",
+  "contractVersion": 1,
+  "schemaVersion": 1,
+  "spatialEngineVersion": "facility-spatial-v1",
+  "coordinateFrame": {
+    "persistedUnits": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "matrixStorage": "column_major",
+    "matrixVectorConvention": "column_vectors",
+    "assetSourceTransformInputUnits": "m",
+    "assetSourceTransformOrder": [
+      "source_geometry",
+      "sourceToCanonical",
+      "placement_transform",
+      "facility_world"
+    ],
+    "quaternionOrder": "XYZW",
+    "layoutFrameMustEqualShellFrame": true,
+    "shellToLayout": "identity",
+    "screenPixelsPersisted": false,
+    "cameraPersisted": false
+  },
+  "numericCanonicalization": {
+    "roundingMode": "half_even",
+    "meterDecimalPlaces": 6,
+    "quaternionDecimalPlaces": 9,
+    "quaternionNormalizationTolerance": 1e-09,
+    "canonicalQuaternionSign": "w_positive_else_first_nonzero_xyz_positive",
+    "canonicalizeNegativeZero": true,
+    "maximumAbsoluteWorldCoordinateMeters": 1000000,
+    "requireFiniteNumbers": true,
+    "allowNonUniformScale": false,
+    "allowNegativeScale": false,
+    "placementScale": 1
+  },
+  "polygonCanonicalization": {
+    "plane": "X/Z",
+    "winding": "counterclockwise",
+    "closure": "implicit",
+    "rejectDuplicateClosingPoint": true,
+    "minimumDistinctVertices": 3,
+    "rejectRepeatedVertices": true,
+    "rejectSelfIntersection": true
+  },
+  "geometryAuthority": {
+    "backendAuthoritative": true,
+    "browserAdvisoryOnly": true,
+    "renderMeshesAreValidationAuthority": false,
+    "defaultCollisionModel": "footprint_2_5d",
+    "exactModels": [
+      "polygon",
+      "oriented_rectangle",
+      "vertical_interval",
+      "compound_box",
+      "convex_proxy"
+    ],
+    "browserBackendDisagreement": "backend_wins"
+  },
+  "positionOwnership": {
+    "modes": [
+      "auto",
+      "manual",
+      "locked"
+    ],
+    "userDragTransition": {
+      "from": "auto",
+      "to": "manual"
+    },
+    "automaticPlanningMovesByDefault": [
+      "auto"
+    ],
+    "lockedMovementAllowed": false
+  },
+  "identity": {
+    "prefixes": {
+      "proposal": "fp-",
+      "placement": "pl-",
+      "zone": "zn-",
+      "zoneAnchor": "za-",
+      "route": "rt-",
+      "utilityNetwork": "un-",
+      "networkNode": "nn-",
+      "networkSegment": "ns-",
+      "processBinding": "pb-"
+    },
+    "dependencyFingerprintInputs": [
+      "layoutRevision",
+      "referencedAssetDefinitionRevisions",
+      "shellRevision",
+      "policySetRevision",
+      "vehicleProfileRevisions",
+      "processMapRevision",
+      "spatialEngineVersion",
+      "routerVersion",
+      "obstacleFingerprint"
+    ],
+    "proposalIdInputs": [
+      "layoutId",
+      "baseRevision",
+      "proposalType",
+      "semanticPlanHash",
+      "dependencyFingerprint"
+    ],
+    "generatedObjectIdInputs": [
+      "proposalId",
+      "planLocalObjectId"
+    ],
+    "hashAlgorithm": "sha256",
+    "maximumIdLength": 128
+  },
+  "placementPipeline": [
+    "pointer_to_camera_ray",
+    "intersect_trusted_surface",
+    "convert_to_world",
+    "identify_containing_zones",
+    "generate_enabled_candidates",
+    "broad_phase_query",
+    "exact_narrow_phase",
+    "typed_rejection",
+    "lexicographic_ranking",
+    "stable_candidate_ids",
+    "advisory_browser_ghost",
+    "backend_regeneration",
+    "atomic_commit"
+  ],
+  "candidateRanking": [
+    "hardViolations",
+    "physicalCollisions",
+    "sourcedPolicyViolations",
+    "zoneCompatibility",
+    "connectorCompatibility",
+    "clearanceConflicts",
+    "processFlowDistance",
+    "routeFeasibility",
+    "alignmentAndSnapQuality",
+    "existingContentMovement",
+    "requestedAreaDistance",
+    "stableCandidateId"
+  ],
+  "findingCodes": {
+    "identityAndRevision": [
+      "invalid_coordinate_frame",
+      "unsupported_units",
+      "stale_shell_revision",
+      "stale_asset_definition_revision",
+      "incompatible_render_bundle_revision",
+      "stale_process_map_revision",
+      "non_finite_transform",
+      "asset_geometry_missing"
+    ],
+    "placement": [
+      "placement_collision",
+      "placement_outside_floor",
+      "zone_containment_violation",
+      "zone_kind_incompatible",
+      "floor_load_exceeded",
+      "floor_load_unverified",
+      "locked_placement_movement",
+      "unsupported_mounting_surface"
+    ],
+    "clearance": [
+      "safety_clearance_violation",
+      "service_clearance_violation",
+      "loading_clearance_violation",
+      "operator_clearance_violation",
+      "door_swing_obstructed",
+      "egress_obstructed",
+      "clearance_rule_unavailable"
+    ],
+    "utilities": [
+      "utility_type_incompatible",
+      "utility_spec_mismatch",
+      "utility_capacity_exceeded",
+      "connector_direction_invalid",
+      "utility_route_obstructed"
+    ],
+    "routes": [
+      "route_unreachable",
+      "route_width_insufficient",
+      "route_turning_radius_violation",
+      "route_swept_volume_collision",
+      "route_grade_exceeded",
+      "stale_route_geometry"
+    ],
+    "evidence": [
+      "evidence_conflict",
+      "evidence_expired",
+      "evidence_revoked",
+      "evidence_derivation_stale",
+      "trusted_source_scope_mismatch"
+    ]
+  },
+  "limits": {
+    "maximumPlacements": 5000,
+    "maximumZones": 500,
+    "maximumVerticesPerZone": 256,
+    "maximumTotalZoneVertices": 50000,
+    "maximumRoutes": 2000,
+    "maximumPointsPerRoute": 2048,
+    "maximumTotalRoutePoints": 250000,
+    "maximumUtilityNetworks": 100,
+    "maximumNodesPerUtilityNetwork": 2000,
+    "maximumTotalUtilityNodes": 20000,
+    "maximumSegmentsPerUtilityNetwork": 4000,
+    "maximumTotalUtilitySegments": 40000,
+    "maximumPointsPerUtilitySegment": 2048,
+    "maximumTotalUtilityPoints": 250000,
+    "maximumProcessBindings": 5000,
+    "maximumZoneAnchorsPerZone": 128,
+    "maximumTotalZoneAnchors": 10000,
+    "maximumConnectorsPerAssetDefinition": 128,
+    "maximumClearancesPerAssetDefinition": 64,
+    "maximumRequirementsPerTarget": 64,
+    "maximumEvidenceRecordsPerTarget": 64,
+    "maximumPolicyRules": 5000,
+    "maximumShellObjects": 100000,
+    "maximumShellVertices": 1000000,
+    "maximumCanonicalDocumentBytes": 104857600,
+    "maximumJsonDepth": 32,
+    "maximumExtensionFieldsPerObject": 32,
+    "maximumTotalExtensionBytes": 5242880
+  },
+  "performanceTargets": {
+    "backendCandidateGenerationP95Ms": 50,
+    "backendCollisionQueryP95Ms": 16,
+    "backendFullDiagnosticsP95Ms": 250,
+    "browserAdvisoryResponseP95Ms": 50
+  }
+}

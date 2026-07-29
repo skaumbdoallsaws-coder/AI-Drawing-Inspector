@@ -1,0 +1,967 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inspectorp.ro/contracts/facility-layout-schema-v1.json",
+  "title": "InspectorPro Facility Layout Document v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "layoutId",
+    "displayName",
+    "status",
+    "association",
+    "coordinateFrame",
+    "sourceShellRef",
+    "policySetRef",
+    "zones",
+    "placements",
+    "routes",
+    "utilityNetworks",
+    "processBindings",
+    "dismissedSuggestions",
+    "createdAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "layoutId": {
+      "$ref": "#/$defs/layoutId"
+    },
+    "displayName": {
+      "$ref": "#/$defs/label"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "active",
+        "template",
+        "archived"
+      ]
+    },
+    "association": {
+      "type": "object",
+      "required": [
+        "siteId"
+      ],
+      "properties": {
+        "siteId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "areaId": {
+          "$ref": "#/$defs/stableId"
+        }
+      },
+      "additionalProperties": true
+    },
+    "coordinateFrame": {
+      "$ref": "#/$defs/coordinateFrame"
+    },
+    "sourceShellRef": {
+      "$ref": "#/$defs/sourceShellRef"
+    },
+    "catalogSnapshotRevision": {
+      "$ref": "#/$defs/revision"
+    },
+    "policySetRef": {
+      "$ref": "#/$defs/policySetRef"
+    },
+    "zones": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/zone"
+      }
+    },
+    "placements": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/placement"
+      }
+    },
+    "routes": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "$ref": "#/$defs/route"
+      }
+    },
+    "utilityNetworks": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/utilityNetwork"
+      }
+    },
+    "processBindings": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/processBinding"
+      }
+    },
+    "dismissedSuggestions": {
+      "type": "array",
+      "maxItems": 5000,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stableId"
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "updatedAt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "camera": false,
+    "viewport": false,
+    "selection": false,
+    "activeProposal": false
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "layoutId": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 128,
+      "pattern": "^fl-[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "note": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "finiteNumber": {
+      "type": "number",
+      "minimum": -1000000,
+      "maximum": 1000000
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "positiveNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000
+    },
+    "vector2": {
+      "type": "object",
+      "required": [
+        "x",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "z": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "vector3": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "y": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "z": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "quaternion": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z",
+        "w"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "z": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "w": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "coordinateFrame": {
+      "type": "object",
+      "required": [
+        "units",
+        "handedness",
+        "upAxis",
+        "floorAxes",
+        "datumId",
+        "floorElevation"
+      ],
+      "properties": {
+        "units": {
+          "const": "m"
+        },
+        "handedness": {
+          "const": "right"
+        },
+        "upAxis": {
+          "const": "+Y"
+        },
+        "floorAxes": {
+          "const": [
+            "+X",
+            "+Z"
+          ]
+        },
+        "datumId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "floorElevation": {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceShellRef": {
+      "type": "object",
+      "required": [
+        "shellId",
+        "shellRevision",
+        "coordinateFrameFingerprint"
+      ],
+      "properties": {
+        "shellId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "shellRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "coordinateFrameFingerprint": {
+          "$ref": "#/$defs/revision"
+        }
+      },
+      "additionalProperties": false
+    },
+    "policySetRef": {
+      "type": "object",
+      "required": [
+        "policySetId",
+        "policySetRevision"
+      ],
+      "properties": {
+        "policySetId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "policySetRevision": {
+          "$ref": "#/$defs/revision"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stableId"
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "maxProperties": 32,
+        "additionalProperties": true
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "maxProperties": 32,
+      "additionalProperties": true
+    },
+    "zoneAnchor": {
+      "type": "object",
+      "required": [
+        "anchorId",
+        "anchorKind",
+        "position",
+        "facing",
+        "allowedRouteKinds",
+        "evidence"
+      ],
+      "properties": {
+        "anchorId": {
+          "type": "string",
+          "pattern": "^za-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "anchorKind": {
+          "enum": [
+            "material",
+            "operator",
+            "forklift",
+            "conveyor"
+          ]
+        },
+        "position": {
+          "$ref": "#/$defs/vector3"
+        },
+        "facing": {
+          "$ref": "#/$defs/vector3"
+        },
+        "allowedRouteKinds": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "material",
+              "operator",
+              "forklift",
+              "conveyor"
+            ]
+          }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "zone": {
+      "type": "object",
+      "required": [
+        "zoneId",
+        "zoneType",
+        "label",
+        "boundary",
+        "floorElevation",
+        "anchors",
+        "evidence"
+      ],
+      "properties": {
+        "zoneId": {
+          "type": "string",
+          "pattern": "^zn-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "zoneType": {
+          "enum": [
+            "workcell",
+            "storage",
+            "staging",
+            "receiving",
+            "shipping",
+            "inspection",
+            "aisle",
+            "dock",
+            "charging",
+            "safety",
+            "exclusion",
+            "utility",
+            "service",
+            "operator"
+          ]
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "boundary": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/vector2"
+          }
+        },
+        "floorElevation": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "heightLimit": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "allowedAssetCategories": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "gridSpacing": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "edgeSetbacks": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": {
+            "$ref": "#/$defs/nonNegativeNumber"
+          }
+        },
+        "loadLimit": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": true
+        },
+        "policyRefs": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "anchors": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/zoneAnchor"
+          }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "placement": {
+      "type": "object",
+      "required": [
+        "placementId",
+        "assetId",
+        "assetDefinitionRevision",
+        "transform",
+        "positionMode",
+        "snapRelationship",
+        "metadata"
+      ],
+      "properties": {
+        "placementId": {
+          "type": "string",
+          "pattern": "^pl-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "assetId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "assetDefinitionRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "transform": {
+          "type": "object",
+          "required": [
+            "position",
+            "quaternion",
+            "scale"
+          ],
+          "properties": {
+            "position": {
+              "$ref": "#/$defs/vector3"
+            },
+            "quaternion": {
+              "$ref": "#/$defs/quaternion"
+            },
+            "scale": {
+              "const": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "positionMode": {
+          "enum": [
+            "auto",
+            "manual",
+            "locked"
+          ]
+        },
+        "snapRelationship": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "maxProperties": 16,
+          "additionalProperties": true
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
+        }
+      },
+      "additionalProperties": true
+    },
+    "placementConnectorEndpoint": {
+      "type": "object",
+      "required": [
+        "kind",
+        "placementId",
+        "connectorId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "placement_connector"
+        },
+        "placementId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "connectorId": {
+          "$ref": "#/$defs/stableId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "shellConnectorEndpoint": {
+      "type": "object",
+      "required": [
+        "kind",
+        "shellId",
+        "shellRevision",
+        "connectorId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "shell_connector"
+        },
+        "shellId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "shellRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "connectorId": {
+          "$ref": "#/$defs/stableId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "zoneAnchorEndpoint": {
+      "type": "object",
+      "required": [
+        "kind",
+        "zoneId",
+        "anchorId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "zone_anchor"
+        },
+        "zoneId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "anchorId": {
+          "$ref": "#/$defs/stableId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "routeEndpoint": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/placementConnectorEndpoint"
+        },
+        {
+          "$ref": "#/$defs/shellConnectorEndpoint"
+        },
+        {
+          "$ref": "#/$defs/zoneAnchorEndpoint"
+        }
+      ]
+    },
+    "vehicleProfileRef": {
+      "type": "object",
+      "required": [
+        "vehicleProfileId",
+        "vehicleProfileRevision"
+      ],
+      "properties": {
+        "vehicleProfileId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "vehicleProfileRevision": {
+          "$ref": "#/$defs/revision"
+        }
+      },
+      "additionalProperties": false
+    },
+    "route": {
+      "type": "object",
+      "required": [
+        "routeId",
+        "routeKind",
+        "sourceEndpoint",
+        "targetEndpoint",
+        "routingMode",
+        "centerline",
+        "corridorWidth",
+        "routeFingerprint",
+        "sourceRevisions",
+        "requirements",
+        "evidence"
+      ],
+      "properties": {
+        "routeId": {
+          "type": "string",
+          "pattern": "^rt-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "routeKind": {
+          "enum": [
+            "material",
+            "operator",
+            "forklift",
+            "conveyor"
+          ]
+        },
+        "sourceEndpoint": {
+          "$ref": "#/$defs/routeEndpoint"
+        },
+        "targetEndpoint": {
+          "$ref": "#/$defs/routeEndpoint"
+        },
+        "routingMode": {
+          "enum": [
+            "orthogonal",
+            "polyline",
+            "vehicle"
+          ]
+        },
+        "centerline": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2048,
+          "items": {
+            "$ref": "#/$defs/vector3"
+          }
+        },
+        "corridorWidth": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "sweptEnvelope": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "vehicleProfileRef": {
+          "$ref": "#/$defs/vehicleProfileRef"
+        },
+        "routeFingerprint": {
+          "$ref": "#/$defs/revision"
+        },
+        "sourceRevisions": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/revision"
+          }
+        },
+        "requirements": {
+          "$ref": "#/$defs/requirements"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "utilityEndpointNode": {
+      "type": "object",
+      "required": [
+        "networkNodeId",
+        "nodeKind",
+        "networkRole",
+        "endpointRef"
+      ],
+      "properties": {
+        "networkNodeId": {
+          "type": "string",
+          "pattern": "^nn-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "nodeKind": {
+          "const": "endpoint"
+        },
+        "networkRole": {
+          "enum": [
+            "supply",
+            "sink"
+          ]
+        },
+        "endpointRef": {
+          "$ref": "#/$defs/routeEndpoint"
+        },
+        "position": false
+      },
+      "additionalProperties": true
+    },
+    "utilityJunctionNode": {
+      "type": "object",
+      "required": [
+        "networkNodeId",
+        "nodeKind",
+        "networkRole",
+        "position"
+      ],
+      "properties": {
+        "networkNodeId": {
+          "type": "string",
+          "pattern": "^nn-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "nodeKind": {
+          "const": "junction"
+        },
+        "networkRole": {
+          "const": "junction"
+        },
+        "position": {
+          "$ref": "#/$defs/vector3"
+        },
+        "endpointRef": false
+      },
+      "additionalProperties": true
+    },
+    "utilityNode": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/utilityEndpointNode"
+        },
+        {
+          "$ref": "#/$defs/utilityJunctionNode"
+        }
+      ]
+    },
+    "utilitySegment": {
+      "type": "object",
+      "required": [
+        "networkSegmentId",
+        "sourceNetworkNodeId",
+        "targetNetworkNodeId",
+        "centerline",
+        "interface",
+        "capacity",
+        "requirements",
+        "evidence"
+      ],
+      "properties": {
+        "networkSegmentId": {
+          "type": "string",
+          "pattern": "^ns-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "sourceNetworkNodeId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "targetNetworkNodeId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "centerline": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2048,
+          "items": {
+            "$ref": "#/$defs/vector3"
+          }
+        },
+        "interface": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "capacity": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
+        },
+        "requirements": {
+          "$ref": "#/$defs/requirements"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "utilityNetwork": {
+      "type": "object",
+      "required": [
+        "utilityNetworkId",
+        "networkKind",
+        "label",
+        "sourceRevisionRefs",
+        "nodes",
+        "segments",
+        "requirements",
+        "evidence"
+      ],
+      "properties": {
+        "utilityNetworkId": {
+          "type": "string",
+          "pattern": "^un-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "networkKind": {
+          "enum": [
+            "electrical",
+            "compressed_air",
+            "water",
+            "exhaust",
+            "network",
+            "gas",
+            "drain"
+          ]
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "sourceRevisionRefs": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/revision"
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "$ref": "#/$defs/utilityNode"
+          }
+        },
+        "segments": {
+          "type": "array",
+          "maxItems": 4000,
+          "items": {
+            "$ref": "#/$defs/utilitySegment"
+          }
+        },
+        "requirements": {
+          "$ref": "#/$defs/requirements"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "processBinding": {
+      "type": "object",
+      "required": [
+        "processBindingId",
+        "productId",
+        "processMapId",
+        "processMapRevision",
+        "processNodeIds",
+        "processEdgeIds",
+        "placementIds",
+        "routeIds",
+        "bindingRole"
+      ],
+      "properties": {
+        "processBindingId": {
+          "type": "string",
+          "pattern": "^pb-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "productId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "processMapId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "processMapRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "processNodeIds": {
+          "type": "array",
+          "maxItems": 5000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "processEdgeIds": {
+          "type": "array",
+          "maxItems": 5000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "placementIds": {
+          "type": "array",
+          "maxItems": 5000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "routeIds": {
+          "type": "array",
+          "maxItems": 2000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
+        },
+        "bindingRole": {
+          "enum": [
+            "resource",
+            "material_flow",
+            "operator_flow",
+            "inspection",
+            "storage",
+            "staging"
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

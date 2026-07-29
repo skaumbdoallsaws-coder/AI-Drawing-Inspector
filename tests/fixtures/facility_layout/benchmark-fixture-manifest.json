@@ -1,0 +1,163 @@
+{
+  "schemaVersion": "facility-benchmark-fixture-manifest-v1",
+  "governingPlan": "docs/industrial-layout-platform-implementation-plan.md",
+  "measurementProtocolSection": "18.3",
+  "referenceHardware": {
+    "standard": {
+      "status": "named",
+      "machine": "Dell 15 DC15250",
+      "cpu": "13th Gen Intel Core i7-1355U",
+      "ramBytes": 16849256448,
+      "gpu": "Intel UHD Graphics",
+      "display": "1920x1080@120Hz",
+      "browser": "Microsoft Edge 150.0.4078.99"
+    },
+    "minimum": {
+      "status": "unresolved",
+      "releaseGateBlocked": true
+    }
+  },
+  "fixtures": [
+    {
+      "fixtureId": "legacy-heavy",
+      "status": "available_local",
+      "purpose": "Verify refusal, proxy mode, and fallback for the legacy monolithic facility artifact.",
+      "artifacts": [
+        {
+          "path": "generated/training/facility-layout/Assem3_colored.glb",
+          "byteLength": 327184996,
+          "sha256": "da2be02acea430027324857e58db3ddee81713dcf9b54e38d45b830671898ce2",
+          "sourceControlled": false
+        }
+      ],
+      "approvedClaims": [
+        "legacy_payload_identity"
+      ],
+      "forbiddenClaims": [
+        "normal_editor_payload",
+        "placement_authority",
+        "clearance_authority"
+      ]
+    },
+    {
+      "fixtureId": "assem3-instanced",
+      "status": "p0_spike_available",
+      "purpose": "Prove one real rack prototype can represent repeated stable placement occurrences through instance groups.",
+      "artifacts": [
+        {
+          "path": "tests/fixtures/facility_layout/rendering/repeated-rack-instance-spike.json",
+          "sourceControlled": true
+        },
+        {
+          "path": "tests/fixtures/facility_layout/rendering/rack-instancing-smoke-result.json",
+          "sourceControlled": true
+        },
+        {
+          "path": "tests/fixtures/facility_layout/rendering/rack-instancing-smoke.png",
+          "sourceControlled": true
+        },
+        {
+          "path": "generated/industrial_assets/p0_spike/rack_prototypes/Pallet Racking_colored.glb",
+          "byteLength": 13493420,
+          "sha256": "185e9914e28106b14054a8467b941eba1cf31c85593cd566ab40d608cea77c0c",
+          "sourceControlled": false
+        }
+      ],
+      "approvedClaims": [
+        "real_glb_offline_load",
+        "stable_placement_to_instance_mapping",
+        "draw_call_reduction",
+        "instance_aware_raycast"
+      ],
+      "forbiddenClaims": [
+        "placement_authority",
+        "release_scale_performance",
+        "all_rack_configurations_normalized"
+      ]
+    },
+    {
+      "fixtureId": "industrial-cell",
+      "status": "planned",
+      "purpose": "CNC, robot, bar loader, guard, workstation, cart, routes, and zones."
+    },
+    {
+      "fixtureId": "unique-machines-100",
+      "status": "planned",
+      "purpose": "Limited instancing and heavy LOD switching."
+    },
+    {
+      "fixtureId": "warehouse-500",
+      "status": "placement_layer_spike_only",
+      "purpose": "Contract-scale authoring and diagnostics.",
+      "artifacts": [
+        {
+          "path": "tests/fixtures/facility_layout/rendering/renderer-benchmark-spec.json",
+          "scenario": "edit-500",
+          "sourceControlled": true
+        },
+        {
+          "path": "tests/fixtures/facility_layout/rendering/renderer-benchmark-results.json",
+          "sourceControlled": true
+        }
+      ],
+      "forbiddenClaims": [
+        "full_layer_release_performance"
+      ]
+    },
+    {
+      "fixtureId": "warehouse-5000",
+      "status": "placement_layer_spike_only",
+      "purpose": "Large repeated layout and clearance stress.",
+      "artifacts": [
+        {
+          "path": "tests/fixtures/facility_layout/rendering/renderer-benchmark-spec.json",
+          "scenario": "navigate-5000",
+          "sourceControlled": true
+        },
+        {
+          "path": "tests/fixtures/facility_layout/rendering/renderer-benchmark-results.json",
+          "sourceControlled": true
+        }
+      ],
+      "forbiddenClaims": [
+        "full_layer_release_performance",
+        "clearance_stress_performance"
+      ]
+    },
+    {
+      "fixtureId": "forklift-routing",
+      "status": "planned",
+      "purpose": "Straight, turn, narrow, reverse, loaded, and unreachable cases."
+    },
+    {
+      "fixtureId": "utility-network",
+      "status": "contract_fixture_only",
+      "purpose": "Compatible, incompatible, capacity, and obstruction cases.",
+      "artifacts": [
+        {
+          "path": "tests/fixtures/facility_layout/utility_cell.json",
+          "sourceControlled": true
+        }
+      ]
+    },
+    {
+      "fixtureId": "lifecycle-churn",
+      "status": "planned",
+      "purpose": "Remounts, cancellation, LOD transitions, failed chunks, and context loss."
+    },
+    {
+      "fixtureId": "degraded-runtime",
+      "status": "offline_dependency_slice_only",
+      "purpose": "WebGL unavailable, low memory, corrupt hash, and offline operation.",
+      "artifacts": [
+        {
+          "path": "tests/fixtures/facility_layout/rendering/three-offline-smoke-result.json",
+          "sourceControlled": true
+        }
+      ],
+      "forbiddenClaims": [
+        "complete_degraded_runtime_coverage"
+      ]
+    }
+  ]
+}

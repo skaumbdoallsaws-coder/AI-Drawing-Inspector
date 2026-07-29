@@ -1,0 +1,70 @@
+{
+  "checks": {
+    "all_geometry_instances_present": true,
+    "completed": true,
+    "draw_call_reduction_at_least_5x": true,
+    "draw_calls_reduced": true,
+    "instance_raycast_resolves_placement": true,
+    "no_console_errors": true,
+    "no_external_requests": true,
+    "no_page_errors": true,
+    "nonblank_scene": true,
+    "official_loader_imported": true,
+    "one_instance_group_per_mesh": true,
+    "placement_count": true,
+    "prototype_mesh_count": true,
+    "stable_placement_ids_unique": true,
+    "three_revision_184": true,
+    "webgl2_rendered": true
+  },
+  "consoleErrors": [],
+  "environment": {
+    "browser": "150.0.4078.99",
+    "os": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]"
+  },
+  "network": {
+    "blockedExternalRequests": [],
+    "externalRequestsBlocked": true,
+    "failedRequests": [],
+    "failedResponses": [],
+    "servedOrigin": "http://127.0.0.1:62111"
+  },
+  "pageErrors": [],
+  "passed": true,
+  "schemaVersion": "facility-rack-instancing-smoke-v1",
+  "screenshot": {
+    "bytes": 115283,
+    "path": "tests/fixtures/facility_layout/rendering/rack-instancing-smoke.png",
+    "sha256": "3a7890d049d29c6d5d9cc3a1bb2292230677796d96803f44d1e0bce75f651d58"
+  },
+  "smoke": {
+    "changedPixelCount": 63461,
+    "drawCallReductionRatio": 6,
+    "instancedDrawCalls": 10,
+    "instancedMeshCount": 10,
+    "naiveDrawCalls": 60,
+    "officialLoaderImported": true,
+    "placementCount": 6,
+    "prototypeId": "proto-rack-8x16",
+    "prototypeMeshCount": 10,
+    "raycast": {
+      "instanceId": 5,
+      "placementId": "pl-c4990f316a583b6d"
+    },
+    "raycastResolvedStablePlacement": true,
+    "renderedTriangles": 968880,
+    "state": "complete",
+    "threeRevision": "184",
+    "totalGeometryInstances": 60,
+    "uniquePlacementIds": 6,
+    "webgl2Rendered": true
+  },
+  "source": {
+    "extractionSha256": "af69542c91bea6b163422622b8c3c241fdfd04454514524eef3e327eb449e364",
+    "fixtureSha256": "fe92f74878049811ffe8be395accd2eff102eb538aeef649de22d1863564e6b3",
+    "pageSha256": "48427a03f59de4deefc563a8405ba9a68d8cdfd6d0976d8b4c007aa874aeaa81",
+    "prototypeSha256": "185e9914e28106b14054a8467b941eba1cf31c85593cd566ab40d608cea77c0c",
+    "scriptSha256": "99ab65a116cbcd11ee606c5c12210790506fc638eb791aab2c2803b8694b83ca"
+  }
+}

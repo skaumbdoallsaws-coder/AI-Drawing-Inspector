@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "documentKind": "facility_shell",
+  "shellId": "shell-legacy-cc6490e95e7c50f92ed1",
+  "tenantId": "tenant-fixture",
+  "siteId": "site-fixture",
+  "status": "draft",
+  "coordinateFrame": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "datumId": "legacy-assem3-origin",
+    "floorElevation": -1.566829
+  },
+  "features": [],
+  "shellConnectors": [],
+  "sourceDocuments": [],
+  "evidence": [],
+  "unresolvedItems": [
+    {
+      "findingId": "finding-legacy-frame-demo-only",
+      "code": "legacy_coordinate_alignment_demo_only",
+      "message": "The 0.06131 m legacy alignment residual exceeds the 0.001 m placement-readiness target."
+    },
+    {
+      "findingId": "finding-legacy-floor-inferred",
+      "code": "legacy_floor_elevation_inferred",
+      "message": "The compatibility floor elevation is inferred from the minimum rack occurrence Y value."
+    },
+    {
+      "findingId": "finding-legacy-shell-missing",
+      "code": "legacy_shell_geometry_unavailable",
+      "message": "No reviewed floor surface, boundary, wall, door, dock, or fixed-obstacle geometry is available."
+    }
+  ],
+  "extensions": {
+    "inspectorproLegacyMigration": {
+      "compatibilityOnly": true,
+      "coordinateFrameFingerprint": "cca6e5480e44494e9e35aff98140e0297c0a0ff70bd1bddacd850bc8c34c1027",
+      "evidenceStatus": "inferred",
+      "readOnly": true
+    }
+  }
+}

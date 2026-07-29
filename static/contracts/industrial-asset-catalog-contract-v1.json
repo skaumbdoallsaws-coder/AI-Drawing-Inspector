@@ -1,0 +1,239 @@
+{
+  "contractId": "industrial-asset-catalog-contract-v1",
+  "contractVersion": 1,
+  "registryAuthority": {
+    "registryUpdatedLast": true,
+    "directoryScanIsAuthoritative": false,
+    "assetDefinitionDirectoriesImmutable": true,
+    "renderBundleDirectoriesImmutable": true,
+    "assetDefinitionRevisionStoredInDefinition": false,
+    "renderBundleRevisionStoredInBundle": false
+  },
+  "visibility": {
+    "levels": [
+      "private",
+      "site_shared",
+      "tenant_shared",
+      "common"
+    ],
+    "registryEntryRequiredFields": [
+      "assetId",
+      "ownerTenantId",
+      "visibility",
+      "allowedSiteIds",
+      "publishedAssetDefinitionRevision",
+      "defaultRenderBundleRevision"
+    ],
+    "crossTenantPrivateAssetBehavior": "not_found",
+    "crossSitePrivateAssetBehavior": "not_found",
+    "commonAssetsRequirePublicReady": true
+  },
+  "revisionSeparation": {
+    "sourceRevisionInputs": [
+      "sourceFileHashes",
+      "configuration",
+      "extractionInputs"
+    ],
+    "assetDefinitionRevisionInputs": [
+      "coordinateFrame",
+      "semanticCapabilities",
+      "connectors",
+      "collision",
+      "footprints",
+      "clearances",
+      "loading"
+    ],
+    "renderBundleRevisionInputs": [
+      "lodArtifacts",
+      "thumbnail",
+      "textures",
+      "overviewGeometry"
+    ],
+    "renderOnlyUpdateInvalidatesLayout": false,
+    "semanticDefinitionUpdateInvalidatesBoundProposal": true
+  },
+  "clientProjections": {
+    "viewerAndEditorAllowed": [
+      "assetId",
+      "displayName",
+      "category",
+      "tags",
+      "status",
+      "publishedAssetDefinitionRevision",
+      "defaultRenderBundleRevision",
+      "readiness",
+      "safeProvenance"
+    ],
+    "protected": [
+      "sourcePath",
+      "localPath",
+      "storageKey",
+      "licenseDocumentPath",
+      "rawLicenseDocument",
+      "internalNotes"
+    ],
+    "curatorEndpointRequiredForProtectedFields": true
+  },
+  "authority": {
+    "evidenceStatuses": [
+      "authored",
+      "derived",
+      "inferred",
+      "unknown"
+    ],
+    "modelMayUpgradeEvidenceStatus": false,
+    "inferredClearanceMayBeHardRule": false,
+    "missingSafetyEvidenceFinding": "clearance_rule_unavailable",
+    "missingFloorLoadEvidenceFinding": "floor_load_unverified"
+  },
+  "readiness": {
+    "visualReadyRequires": [
+      "nonblankCompatibleRenderBundle",
+      "thumbnail"
+    ],
+    "placementReadyRequires": [
+      "canonicalLocalFrame",
+      "alignmentWithinTolerance",
+      "floorAnchor",
+      "footprint",
+      "collisionProxy"
+    ],
+    "planningReadyRequires": [
+      "placementReady",
+      "reviewedApplicableClearances",
+      "reviewedApplicableConnectors",
+      "reviewedApplicableLoading"
+    ],
+    "publicReadyRequires": [
+      "safeClientProvenance",
+      "redistributionPermission",
+      "requiredAttribution"
+    ]
+  },
+  "floorLoadDecisionTable": [
+    {
+      "caseId": "floor-and-contact-load-authoritative-exceeded",
+      "floorCapacityStatus": "authored",
+      "contactLoadStatus": "derived",
+      "comparison": "exceeded",
+      "finding": "floor_load_exceeded",
+      "safeVerdictAllowed": false
+    },
+    {
+      "caseId": "floor-and-contact-load-authoritative-within",
+      "floorCapacityStatus": "authored",
+      "contactLoadStatus": "authored",
+      "comparison": "within",
+      "finding": null,
+      "safeVerdictAllowed": true
+    },
+    {
+      "caseId": "floor-capacity-unknown",
+      "floorCapacityStatus": "unknown",
+      "contactLoadStatus": "authored",
+      "comparison": "unknown",
+      "finding": "floor_load_unverified",
+      "safeVerdictAllowed": false
+    },
+    {
+      "caseId": "contact-load-inferred",
+      "floorCapacityStatus": "authored",
+      "contactLoadStatus": "inferred",
+      "comparison": "unknown",
+      "finding": "floor_load_unverified",
+      "safeVerdictAllowed": false
+    }
+  ],
+  "visibilityCases": [
+    {
+      "caseId": "owner-private-visible",
+      "principalTenantId": "tenant-a",
+      "principalSiteIds": [
+        "site-a"
+      ],
+      "ownerTenantId": "tenant-a",
+      "visibility": "private",
+      "allowedSiteIds": [],
+      "siteId": "site-a",
+      "visible": true
+    },
+    {
+      "caseId": "cross-tenant-private-hidden",
+      "principalTenantId": "tenant-b",
+      "principalSiteIds": [
+        "site-b"
+      ],
+      "ownerTenantId": "tenant-a",
+      "visibility": "private",
+      "allowedSiteIds": [],
+      "siteId": "site-b",
+      "visible": false
+    },
+    {
+      "caseId": "site-shared-granted",
+      "principalTenantId": "tenant-a",
+      "principalSiteIds": [
+        "site-b"
+      ],
+      "ownerTenantId": "tenant-a",
+      "visibility": "site_shared",
+      "allowedSiteIds": [
+        "site-b"
+      ],
+      "siteId": "site-b",
+      "visible": true
+    },
+    {
+      "caseId": "site-shared-not-granted",
+      "principalTenantId": "tenant-a",
+      "principalSiteIds": [
+        "site-c"
+      ],
+      "ownerTenantId": "tenant-a",
+      "visibility": "site_shared",
+      "allowedSiteIds": [
+        "site-b"
+      ],
+      "siteId": "site-c",
+      "visible": false
+    },
+    {
+      "caseId": "tenant-shared-visible",
+      "principalTenantId": "tenant-a",
+      "principalSiteIds": [
+        "site-c"
+      ],
+      "ownerTenantId": "tenant-a",
+      "visibility": "tenant_shared",
+      "allowedSiteIds": [],
+      "siteId": "site-c",
+      "visible": true
+    },
+    {
+      "caseId": "common-public-ready-visible",
+      "principalTenantId": "tenant-b",
+      "principalSiteIds": [
+        "site-b"
+      ],
+      "ownerTenantId": "tenant-common",
+      "visibility": "common",
+      "allowedSiteIds": [],
+      "siteId": "site-b",
+      "publicReady": true,
+      "visible": true
+    },
+    {
+      "caseId": "common-not-public-ready-hidden",
+      "principalTenantId": "tenant-b",
+      "principalSiteIds": [
+        "site-b"
+      ],
+      "ownerTenantId": "tenant-common",
+      "visibility": "common",
+      "allowedSiteIds": [],
+      "siteId": "site-b",
+      "publicReady": false,
+      "visible": false
+    }
+  ]
+}

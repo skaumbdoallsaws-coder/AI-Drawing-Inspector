@@ -23,6 +23,8 @@ function fixture() {
     const transport = {
         previewOperations: async () => ({}),
         applyOperations: async () => ({}),
+        placementCandidates: async () => ({}),
+        placementCandidatePreview: async () => ({}),
         reloadLayout: async () => {
             calls.push('reload');
             return receipt;
@@ -101,6 +103,51 @@ test('destroy is idempotent and prevents late workspace mount', async () => {
     assert.strictEqual(value.calls.some(item => (
         Array.isArray(item) && item[0] === 'workspace'
     )), false);
+});
+
+test('wires candidate transport and owned advisory into the workspace', async () => {
+    const value = fixture();
+    const advisorCalls = [];
+    const advisor = {
+        getState: () => ({ activeRequestId: null }),
+        destroy: () => {
+            advisorCalls.push('destroy');
+            return true;
+        },
+    };
+    let sessionConfig = null;
+    value.options.session = null;
+    value.options.sessionRuntime = {
+        createSession(config) {
+            sessionConfig = config;
+            return value.session;
+        },
+    };
+    value.options.spatialAdvisorRuntime = {
+        createSpatialAdvisor() {
+            advisorCalls.push('create');
+            return advisor;
+        },
+    };
+    const app = App.createFacilityLayoutApp(value.options);
+    await app.ready;
+    assert.strictEqual(
+        sessionConfig.placementCandidates,
+        value.options.transport.placementCandidates
+    );
+    assert.strictEqual(
+        sessionConfig.placementCandidatePreview,
+        value.options.transport.placementCandidatePreview
+    );
+    const workspaceOptions = value.calls.find(
+        item => Array.isArray(item) && item[0] === 'workspace'
+    )[1];
+    assert.strictEqual(workspaceOptions.spatialAdvisor, advisor);
+    assert.deepStrictEqual(app.getState().spatialAdvisor, {
+        activeRequestId: null,
+    });
+    app.destroy();
+    assert.deepStrictEqual(advisorCalls, ['create', 'destroy']);
 });
 
 (async () => {

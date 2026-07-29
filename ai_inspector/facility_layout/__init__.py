@@ -49,7 +49,23 @@ from .repository import FacilityLayoutRepository
 from .service import (
     FacilityDependencySnapshot,
     FacilityLayoutService,
+    FacilitySpatialContext,
     coordinate_frame_fingerprint,
+)
+from .spatial import (
+    CANDIDATE_POLICY_VERSION,
+    SPATIAL_ENGINE_VERSION,
+    SpatialRecord,
+    UniformGridSpatialIndex,
+    diagnose_layout,
+    generate_placement_candidates,
+    spatial_fingerprint,
+)
+from .spatial_executor import (
+    FacilitySpatialExecutor,
+    SpatialCancellationToken,
+    SpatialExecutionCancelled,
+    SpatialJob,
 )
 from .validate import validate_layout
 
@@ -68,12 +84,21 @@ __all__ = [
     "FacilityLayoutService",
     "FacilityNotFoundError",
     "FacilityPrincipal",
+    "FacilitySpatialContext",
+    "FacilitySpatialExecutor",
     "FacilityShellRepository",
     "FacilityValidationError",
     "MigrationBundle",
     "PolicySetRepository",
     "RevisionedAuthorityRepository",
     "VehicleProfileRepository",
+    "CANDIDATE_POLICY_VERSION",
+    "SPATIAL_ENGINE_VERSION",
+    "SpatialCancellationToken",
+    "SpatialExecutionCancelled",
+    "SpatialJob",
+    "SpatialRecord",
+    "UniformGridSpatialIndex",
     "apply_facility_layout_operations",
     "authority_revision",
     "authorize_facility_action",
@@ -87,10 +112,13 @@ __all__ = [
     "create_layout_document",
     "detect_layout_compatibility",
     "facility_layout_diff_hash",
+    "diagnose_layout",
+    "generate_placement_candidates",
     "layout_revision",
     "local_facility_principal",
     "migrate_legacy_semantic_v02",
     "require_facility_action",
     "supported_facility_layout_operations",
+    "spatial_fingerprint",
     "validate_layout",
 ]

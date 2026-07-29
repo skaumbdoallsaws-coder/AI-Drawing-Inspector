@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "facility-layout-p6-performance-spec-v1",
+  "fixtureId": "p6-500-placement-candidate-generation",
+  "placementCount": 500,
+  "grid": {
+    "columns": 25,
+    "rowSpacingMeters": 4.0,
+    "columnSpacingMeters": 4.0
+  },
+  "candidateRequest": {
+    "position": {
+      "x": 102.0,
+      "y": 0.0,
+      "z": 42.0
+    },
+    "maximumCandidates": 8
+  },
+  "measurement": {
+    "warmupRuns": 2,
+    "sampleRuns": 20,
+    "maximumP95Milliseconds": 50.0
+  }
+}

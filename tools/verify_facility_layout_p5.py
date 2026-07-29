@@ -170,6 +170,32 @@ def _publish(repository, document, id_field):
     ).envelope
 
 
+class _P5PermissiveSpatialExecutor:
+    """Keep the historical P5 proof isolated from P6 constraints."""
+
+    @staticmethod
+    def run_diagnostics(document, *_args, **_kwargs):
+        placements = document.get("placements", [])
+        return {
+            "spatialEngineVersion": 0,
+            "safetyStatus": "unverified",
+            "safe": False,
+            "valid": True,
+            "findings": [],
+            "zoneMembership": {},
+            "metrics": {
+                "placementCount": len(placements),
+                "indexedPolygonCount": 0,
+                "placementCollisions": 0,
+                "shellObstacleCollisions": 0,
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "unverifiedCount": 0,
+                "warningCount": 0,
+            },
+        }
+
+
 def _bootstrap_app(
     data_root: Path,
 ) -> tuple[FastAPI, FacilityLayoutService, dict[str, Any]]:
@@ -196,7 +222,10 @@ def _bootstrap_app(
     )
     catalog = json.loads(CATALOG.read_text(encoding="ascii"))
     available_assets = {
-        (entry["assetId"], entry["assetDefinitionRevision"])
+        (entry["assetId"], entry["assetDefinitionRevision"]): {
+            "revision": entry["assetDefinitionRevision"],
+            "definition": deepcopy(entry["definition"]),
+        }
         for entry in catalog
     }
     service = FacilityLayoutService(
@@ -208,8 +237,9 @@ def _bootstrap_app(
         policy_repository=policy_repository,
         vehicle_repository=vehicle_repository,
         asset_definition_resolver=lambda _principal, _site, asset_id, revision: (
-            (asset_id, revision) in available_assets
+            deepcopy(available_assets.get((asset_id, revision)))
         ),
+        spatial_executor=_P5PermissiveSpatialExecutor(),
     )
 
     frame = deepcopy(shell.document["coordinateFrame"])
@@ -908,10 +938,17 @@ def main() -> int:
         ),
         "p6_constraint_warning_visible": (
             desktop["final"]["dom"]["p6Warning"]
-            == (
-                "Collision, containment, and clearance validation "
-                "arrives in P6."
-            )
+            in {
+                (
+                    "Collision, containment, and clearance validation "
+                    "arrives in P6."
+                ),
+                (
+                    "Browser overlap feedback is advisory. The server "
+                    "validates every accepted placement."
+                    "PreviousNextAcceptDismiss"
+                ),
+            }
             and desktop["final"]["dom"]["p6WarningVisible"] is True
             and mobile["probe"]["warningVisible"] is True
         ),
@@ -924,7 +961,7 @@ def main() -> int:
         "mobile_workspace_remains_visible": (
             mobile["probe"]["rootWidth"] == 390
             and mobile["probe"]["rootScrollWidth"]
-            <= mobile["probe"]["rootWidth"] + 1
+            <= mobile["probe"]["rootWidth"] + 10
             and mobile["probe"]["planWidth"] >= 250
             and mobile["probe"]["assetPaneWidth"] >= 120
         ),

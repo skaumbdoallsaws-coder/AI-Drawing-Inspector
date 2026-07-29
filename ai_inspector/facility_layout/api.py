@@ -6,6 +6,7 @@ from typing import Any, Callable, Mapping
 
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from .authority_repository import RevisionedAuthorityRepository
 from .authorization import FacilityPrincipal
@@ -35,6 +36,13 @@ def _error_response(error: FacilityLayoutError) -> JSONResponse:
 def _result(call: Callable[[], Any]) -> Any:
     try:
         return call()
+    except FacilityLayoutError as exc:
+        return _error_response(exc)
+
+
+async def _thread_result(call: Callable[[], Any]) -> Any:
+    try:
+        return await run_in_threadpool(call)
     except FacilityLayoutError as exc:
         return _error_response(exc)
 
@@ -323,6 +331,104 @@ def create_facility_layout_router(
                 layout_id,
                 str(payload.get("baseRevision") or ""),
                 operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/spatial/diagnostics"
+    )
+    async def spatial_diagnostics(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.diagnose_spatial(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                operations=operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/spatial/candidates"
+    )
+    async def spatial_candidates(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            candidate_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.generate_spatial_candidates(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                candidate_request,
+                operations=operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/spatial/candidates/preview"
+    )
+    async def preview_spatial_candidate(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            candidate_request = _body_mapping(payload.get("request"))
+            candidate_id = payload.get("candidateId")
+            operations = payload.get("operations", [])
+            if not isinstance(candidate_id, str) or not candidate_id:
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "candidateId is required.",
+                )
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.preview_spatial_candidate(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                candidate_request,
+                candidate_id,
+                operations=operations,
             )
         )
 

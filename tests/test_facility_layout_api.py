@@ -25,6 +25,27 @@ FIXTURES = Path(__file__).parent / "fixtures" / "facility_layout"
 NOW = datetime(2026, 7, 28, tzinfo=timezone.utc)
 
 
+def _resolved_asset(asset_id, revision):
+    return {
+        "revision": revision,
+        "definition": {
+            "assetId": asset_id,
+            "assetDefinitionRevision": revision,
+            "category": "machine",
+            "geometry": {
+                "footprintPolygons": [[
+                    {"x": -0.5, "z": -0.5},
+                    {"x": 0.5, "z": -0.5},
+                    {"x": 0.5, "z": 0.5},
+                    {"x": -0.5, "z": 0.5},
+                ]],
+                "heightInterval": {"minimumY": 0, "maximumY": 1},
+            },
+            "clearances": [],
+        },
+    }
+
+
 def _principal(role="admin"):
     return FacilityPrincipal(
         principal_id=f"principal-{role}",
@@ -107,7 +128,12 @@ def _client(tmp_path):
         shell_repository=shell_repository,
         policy_repository=policy_repository,
         vehicle_repository=vehicle_repository,
-        asset_definition_resolver=lambda *_args: True,
+        asset_definition_resolver=(
+            lambda _principal, _site, asset_id, revision: _resolved_asset(
+                asset_id,
+                revision,
+            )
+        ),
     )
 
     def resolve_principal(request: Request):

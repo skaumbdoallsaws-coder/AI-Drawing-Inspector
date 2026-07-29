@@ -1,0 +1,203 @@
+{
+  "assetCatalog": [
+    {
+      "assetId": "asset-machine",
+      "assetDefinitionRevision": "revision-asset-machine",
+      "category": "Machines",
+      "definition": {
+        "assetId": "asset-machine",
+        "category": "Machines",
+        "geometry": {
+          "footprintPolygons": [
+            [
+              {
+                "x": -1,
+                "z": -1
+              },
+              {
+                "x": 1,
+                "z": -1
+              },
+              {
+                "x": 1,
+                "z": 1
+              },
+              {
+                "x": -1,
+                "z": 1
+              }
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "layout": {
+    "schemaVersion": 1,
+    "layoutId": "fl-browser-advisory",
+    "zones": [
+      {
+        "zoneId": "zn-machines",
+        "zoneType": "workcell",
+        "label": "Machine cell",
+        "allowedAssetCategories": [
+          "Machines"
+        ],
+        "boundary": [
+          {
+            "x": 0,
+            "z": 0
+          },
+          {
+            "x": 10,
+            "z": 0
+          },
+          {
+            "x": 10,
+            "z": 10
+          },
+          {
+            "x": 0,
+            "z": 10
+          }
+        ]
+      }
+    ],
+    "placements": [
+      {
+        "placementId": "pl-existing",
+        "assetId": "asset-machine",
+        "assetDefinitionRevision": "revision-asset-machine",
+        "transform": {
+          "position": {
+            "x": 3,
+            "y": 0,
+            "z": 3
+          },
+          "quaternion": {
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "w": 1
+          },
+          "scale": 1
+        },
+        "positionMode": "manual"
+      }
+    ],
+    "routes": []
+  },
+  "candidateReceipt": {
+    "baseRevision": "rev-1",
+    "layoutFingerprint": "layout-fingerprint-p6",
+    "obstacleFingerprint": "obstacle-fingerprint-p6",
+    "spatialEngineVersion": 1,
+    "candidatePolicyVersion": 1,
+    "selectedCandidateId": "fsc-grid",
+    "candidates": [
+      {
+        "candidateId": "fsc-grid",
+        "family": "grid",
+        "safe": true,
+        "safetyStatus": "safe",
+        "transform": {
+          "position": {
+            "x": 7,
+            "y": 0,
+            "z": 3
+          },
+          "quaternion": {
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "w": 1
+          },
+          "scale": 1
+        },
+        "operations": [
+          {
+            "op": "place_asset",
+            "placement": {
+              "placementId": "pl-candidate-grid",
+              "assetId": "asset-machine",
+              "assetDefinitionRevision": "revision-asset-machine",
+              "transform": {
+                "position": {
+                  "x": 7,
+                  "y": 0,
+                  "z": 3
+                },
+                "quaternion": {
+                  "x": 0,
+                  "y": 0,
+                  "z": 0,
+                  "w": 1
+                },
+                "scale": 1
+              },
+              "positionMode": "manual",
+              "snapRelationship": {
+                "family": "grid"
+              },
+              "metadata": {
+                "instanceLabel": "Machine candidate"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "candidateId": "fsc-boundary",
+        "family": "boundary",
+        "safe": true,
+        "safetyStatus": "safe",
+        "transform": {
+          "position": {
+            "x": 8,
+            "y": 0,
+            "z": 7
+          },
+          "quaternion": {
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "w": 1
+          },
+          "scale": 1
+        },
+        "operations": [
+          {
+            "op": "place_asset",
+            "placement": {
+              "placementId": "pl-candidate-boundary",
+              "assetId": "asset-machine",
+              "assetDefinitionRevision": "revision-asset-machine",
+              "transform": {
+                "position": {
+                  "x": 8,
+                  "y": 0,
+                  "z": 7
+                },
+                "quaternion": {
+                  "x": 0,
+                  "y": 0,
+                  "z": 0,
+                  "w": 1
+                },
+                "scale": 1
+              },
+              "positionMode": "manual",
+              "snapRelationship": {
+                "family": "boundary",
+                "zoneId": "zn-machines"
+              },
+              "metadata": {
+                "instanceLabel": "Machine candidate"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

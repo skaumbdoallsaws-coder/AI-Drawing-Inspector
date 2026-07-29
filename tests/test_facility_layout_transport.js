@@ -85,6 +85,85 @@ test('preserves structured conflict details for the session', async () => {
     );
 });
 
+test('exposes revision-bound authoritative spatial requests', async () => {
+    const calls = [];
+    const signal = new AbortController().signal;
+    const transport = Transport.createHttpTransport({
+        siteId: 'site-a',
+        layoutId: 'fl-a',
+        fetch: async (url, init) => {
+            calls.push({ url, init });
+            return response(200, { ok: true });
+        },
+    });
+    await transport.spatialDiagnostics({
+        baseRevision: 'e'.repeat(64),
+        operations: [{ op: 'move_placement', placementId: 'pl-a' }],
+    }, { signal });
+    await transport.placementCandidates({
+        baseRevision: 'e'.repeat(64),
+        operations: [],
+        assetId: 'asset-machine',
+        assetDefinitionRevision: 'f'.repeat(64),
+        requestedPosition: { x: 4, z: 7 },
+        enabledFamilies: ['grid', 'boundary'],
+        maximumCandidates: 8,
+    });
+    await transport.placementCandidatePreview({
+        baseRevision: 'e'.repeat(64),
+        operations: [{ op: 'delete_zone', zoneId: 'zone-old' }],
+        request: {
+            assetId: 'asset-machine',
+            assetDefinitionRevision: 'f'.repeat(64),
+            requestedPosition: { x: 8, y: 0, z: 9 },
+            positionMode: 'manual',
+            metadata: { instanceLabel: 'Machine 4' },
+        },
+        candidateId: 'candidate-safe',
+    }, { signal });
+    assert.strictEqual(
+        calls[0].url,
+        '/api/facility-layouts/site-a/fl-a/spatial/diagnostics'
+    );
+    assert.strictEqual(calls[0].init.signal, signal);
+    assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+        baseRevision: 'e'.repeat(64),
+        operations: [{ op: 'move_placement', placementId: 'pl-a' }],
+    });
+    assert.strictEqual(
+        calls[1].url,
+        '/api/facility-layouts/site-a/fl-a/spatial/candidates'
+    );
+    assert.deepStrictEqual(JSON.parse(calls[1].init.body), {
+        baseRevision: 'e'.repeat(64),
+        operations: [],
+        request: {
+            assetId: 'asset-machine',
+            assetDefinitionRevision: 'f'.repeat(64),
+            requestedPosition: { x: 4, y: 0, z: 7 },
+            enabledFamilies: ['grid', 'boundary'],
+            maximumCandidates: 8,
+        },
+    });
+    assert.strictEqual(
+        calls[2].url,
+        '/api/facility-layouts/site-a/fl-a/spatial/candidates/preview'
+    );
+    assert.strictEqual(calls[2].init.signal, signal);
+    assert.deepStrictEqual(JSON.parse(calls[2].init.body), {
+        baseRevision: 'e'.repeat(64),
+        operations: [{ op: 'delete_zone', zoneId: 'zone-old' }],
+        request: {
+            assetId: 'asset-machine',
+            assetDefinitionRevision: 'f'.repeat(64),
+            requestedPosition: { x: 8, y: 0, z: 9 },
+            positionMode: 'manual',
+            metadata: { instanceLabel: 'Machine 4' },
+        },
+        candidateId: 'candidate-safe',
+    });
+});
+
 test('validates stable identity and revision inputs before fetch', async () => {
     assert.throws(
         () => Transport.createHttpTransport({
@@ -109,6 +188,28 @@ test('validates stable identity and revision inputs before fetch', async () => {
             operations: {},
         }),
         /operations must be an array/
+    );
+    assert.throws(
+        () => transport.placementCandidates({
+            baseRevision: 'a'.repeat(64),
+            operations: [],
+            assetId: 'asset-a',
+            assetDefinitionRevision: 'b'.repeat(64),
+            requestedPosition: { x: 'not-a-number', z: 0 },
+        }),
+        /requestedPosition/
+    );
+    assert.throws(
+        () => transport.placementCandidatePreview({
+            baseRevision: 'a'.repeat(64),
+            operations: [],
+            request: {
+                assetId: 'asset-a',
+                assetDefinitionRevision: 'b'.repeat(64),
+                requestedPosition: { x: 1, z: 2 },
+            },
+        }),
+        /candidateId/
     );
 });
 

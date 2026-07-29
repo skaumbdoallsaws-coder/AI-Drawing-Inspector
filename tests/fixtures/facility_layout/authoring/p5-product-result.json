@@ -3,26 +3,26 @@
   "camera": {
     "after": {
       "position": {
-        "x": -0.894438902763497,
-        "y": 0.11228735642733323,
-        "z": 8.834022917076714
+        "x": 7.165936264323042,
+        "y": 2.5962446386303646,
+        "z": 99.74244590559896
       },
       "target": {
-        "x": 0,
-        "y": 1.35,
-        "z": 0
+        "x": 19.25,
+        "y": 0,
+        "z": 14.075000000000001
       }
     },
     "before": {
       "position": {
-        "x": 5.175967363313932,
-        "y": 6.525967363313935,
-        "z": 5.175967363313933
+        "x": 68.76819445267239,
+        "y": 50.868194452672405,
+        "z": 63.5931944526724
       },
       "target": {
-        "x": 0,
-        "y": 1.35,
-        "z": 0
+        "x": 19.25,
+        "y": 0,
+        "z": 14.075000000000001
       }
     }
   },
@@ -44,19 +44,21 @@
     "roots": 0
   },
   "drop": {
+    "acceptedCandidateId": "fsc-fa39f435601e1d0a56d159c2",
+    "acceptedSafetyStatus": "unverified",
     "after": 2,
     "afterUndo": 1,
     "before": 1,
     "createdWorld": {
-      "x": 0.5,
+      "x": 19.5,
       "y": 0,
-      "z": 3.5
+      "z": 13.5
     },
     "dirtyAfterUndo": false,
     "ghostWorld": {
-      "x": 0.5,
+      "x": 19.5,
       "y": 0,
-      "z": 3.5
+      "z": 13.5
     }
   },
   "errors": {
@@ -70,14 +72,14 @@
       "assetGroupCount": 1,
       "camera": {
         "position": {
-          "x": 5.175967363313932,
-          "y": 6.525967363313935,
-          "z": 5.175967363313933
+          "x": 68.76819445267239,
+          "y": 50.868194452672405,
+          "z": 63.5931944526724
         },
         "target": {
-          "x": 0,
-          "y": 1.35,
-          "z": 0
+          "x": 19.25,
+          "y": 0,
+          "z": 14.075000000000001
         }
       },
       "contextLost": false,
@@ -92,15 +94,15 @@
       "ghostActive": false,
       "lastFit": {
         "center": {
-          "x": 0,
+          "x": 19.25,
           "y": 1.35,
-          "z": 0
+          "z": 14.075
         },
         "rootUnchanged": true,
         "size": {
-          "x": 3,
+          "x": 41.5,
           "y": 2.7,
-          "z": 3.7
+          "z": 31.85
         }
       },
       "lifecycle": {
@@ -227,9 +229,9 @@
       "warnings": [],
       "worldBounds": {
         "maximum": {
-          "x": 1.5,
+          "x": 40,
           "y": 2.7,
-          "z": 1.85
+          "z": 30
         },
         "minimum": {
           "x": -1.5,
@@ -252,33 +254,33 @@
   "schemaVersion": "facility-layout-p5-product-evidence-v1",
   "screenshots": {
     "plan": {
-      "bytes": 175972,
+      "bytes": 177934,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-integration.png",
-      "sha256": "94f61194b6668e92fe2c98bfa12cb5e8c2f6ed66b00a784dc08581dee3215bee",
+      "sha256": "073cb87ba5a2c1a25cc034bb4f4b76c2823319828550999e26fdedbca06bb1a2",
       "width": 1920
     },
     "three": {
-      "bytes": 178077,
+      "bytes": 178219,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-three-integration.png",
-      "sha256": "bac639cbe010be3bd8acde8f6085e741a8bdd6b4bd838be65da572fedf5bddeb",
+      "sha256": "b1c57af4c8a653cfcaebd9f39fa03cef302960e363a2f4d314f1df121b2ae0ef",
       "width": 1920
     }
   },
   "source": {
-    "appSha256": "c4dd058c21d8a49e3478973d8e134d2c9bd2c3bdf246b9ddb3e7a7c821fa7f93",
+    "appSha256": "6b758d2b8ad58a65ae234e5f9d4f7df08a9721616a42b597ddda3f6ef39e1095",
     "editorSha256": "a332c05763f2cd7ba672e53d9cec96c76c01598437fee9cf404429baba4736c5",
-    "hostSha256": "5f8f8a6851b4ad188cdbfdc9b4820802da7eca0dff838b7b95ea2f53f24c93b3",
-    "indexSha256": "1f2647d5e9dc0a88acfac1f21ea04e97a3b22faca1b349e602d28123d6ff04e6",
+    "hostSha256": "841a2acc145c6a8a7f5a1e91efeec2524e2f0fad52098de27cfe37f858026126",
+    "indexSha256": "a6a388635c5c043c7e9dd3636c981c9aefb768cb3af82743547f1b940b754826",
     "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
-    "threeAdapterSha256": "4bc577bca01355d68972fe59c221be2e497efefb1dd70a0e70bc3af383d0ab66",
+    "threeAdapterSha256": "b3a1627de9cc50d4f5c75bb444b79422ce3225a3145e5f51d7b877fec57e192e",
     "threeClassicSha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2",
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
-    "transportSha256": "b9114f15f91e24fce3a354363d80ee0fe2f4deb91bfa551446c1964e9a5419df",
-    "verifierSha256": "ffc00972b8ef5275299a36d56879b38479d2a56b6e890b061e5e3379a0bd6881",
-    "workspaceSha256": "29ee73d04bf744f248e3856a7adb3650438f6ffa5b5052737224b3148e4b1227"
+    "transportSha256": "97de85cc6be1f69f2148ca460c0c38169a2d3f9ad6c71b0e4ea1d6bede1601ab",
+    "verifierSha256": "c5b48108fc57a6077f060f204f04a811ae8e767fb1a43fc55d19a9c3c4e52251",
+    "workspaceSha256": "9973b8011a659616f58a70285e693c95a27f9c6661569d1d6224a49c981e5196"
   }
 }

@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "layoutId": "fl-p6-native-spatial",
+  "displayName": "P6 Native Spatial Contract",
+  "status": "draft",
+  "association": {
+    "siteId": "site-p6",
+    "areaId": "area-p6"
+  },
+  "coordinateFrame": {
+    "units": "m",
+    "handedness": "right",
+    "upAxis": "+Y",
+    "floorAxes": [
+      "+X",
+      "+Z"
+    ],
+    "datumId": "datum-p6",
+    "floorElevation": 0
+  },
+  "sourceShellRef": {
+    "shellId": "shell-p6",
+    "shellRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "coordinateFrameFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "catalogSnapshotRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "policySetRef": {
+    "policySetId": "policy-p6",
+    "policySetRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "zones": [
+    {
+      "zoneId": "zn-p6-workcell",
+      "zoneType": "workcell",
+      "label": "P6 Workcell",
+      "boundary": [
+        {
+          "x": 0,
+          "z": 0
+        },
+        {
+          "x": 20,
+          "z": 0
+        },
+        {
+          "x": 20,
+          "z": 20
+        },
+        {
+          "x": 0,
+          "z": 20
+        }
+      ],
+      "floorElevation": 0,
+      "heightLimit": 8,
+      "gridSpacing": 0.5,
+      "allowedAssetCategories": [
+        "machine",
+        "workstation"
+      ],
+      "loadLimit": {
+        "maximumKgPerSquareMeter": 2500.0,
+        "ruleType": "maximum_floor_load",
+        "policyRuleRef": "rule-p6-floor-capacity",
+        "evidenceStatus": "authored",
+        "evidence": [
+          "ev-p6-floor-capacity"
+        ]
+      },
+      "anchors": [],
+      "evidence": [
+        "ev-p6-floor-capacity"
+      ]
+    },
+    {
+      "zoneId": "zn-p6-exclusion",
+      "zoneType": "exclusion",
+      "label": "Column Keep-Out",
+      "boundary": [
+        {
+          "x": 8,
+          "z": 8
+        },
+        {
+          "x": 12,
+          "z": 8
+        },
+        {
+          "x": 12,
+          "z": 12
+        },
+        {
+          "x": 8,
+          "z": 12
+        }
+      ],
+      "floorElevation": 0,
+      "anchors": [],
+      "evidence": [
+        "ev-p6-shell-obstacle"
+      ]
+    }
+  ],
+  "placements": [
+    {
+      "placementId": "pl-p6-locked",
+      "assetId": "asset-p6-machine",
+      "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transform": {
+        "position": {
+          "x": 4,
+          "y": 0,
+          "z": 4
+        },
+        "quaternion": {
+          "x": 0,
+          "y": 0,
+          "z": 0,
+          "w": 1
+        },
+        "scale": 1
+      },
+      "positionMode": "locked",
+      "snapRelationship": null,
+      "metadata": {
+        "instanceLabel": "Locked P6 Machine"
+      }
+    }
+  ],
+  "routes": [],
+  "utilityNetworks": [],
+  "processBindings": [],
+  "dismissedSuggestions": [],
+  "createdAt": "2026-07-29T00:00:00Z",
+  "updatedAt": "2026-07-29T00:00:00Z"
+}

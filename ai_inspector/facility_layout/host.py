@@ -260,6 +260,11 @@ class LocalFacilityLayoutHost:
     def principal() -> FacilityPrincipal:
         return local_facility_principal(site_id=LOCAL_SITE_ID)
 
+    def close(self) -> None:
+        """Release bounded background spatial workers."""
+
+        self.service.spatial_executor.close(wait=True)
+
     def _resolve_asset_definition(
         self,
         _principal: FacilityPrincipal,
@@ -383,12 +388,20 @@ class LocalFacilityLayoutHost:
                     "minZ": 0,
                     "maxX": 40,
                     "maxZ": 30,
+                    "floorY": float(
+                        shell.document["coordinateFrame"].get(
+                            "floorElevation",
+                            0,
+                        )
+                    ),
                 },
                 "capabilities": {
                     "manualAuthoring": True,
                     "authoritativePreview": True,
                     "casSave": True,
-                    "collisionValidation": False,
+                    "collisionValidation": True,
+                    "candidateSnapping": True,
+                    "coarseAdvisoryWorker": True,
                 },
             }
 
@@ -398,6 +411,7 @@ class LocalFacilityLayoutHost:
 
     def create_router(self) -> APIRouter:
         router = APIRouter()
+        router.add_event_handler("shutdown", self.close)
 
         @router.get("/api/facility-layout-bootstrap")
         async def bootstrap():

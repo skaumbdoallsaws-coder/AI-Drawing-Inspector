@@ -8,6 +8,14 @@ const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
 const MODULE_PATH = path.join(ROOT, 'static', 'facility_layout_workspace.js');
 const workspaceModule = require(MODULE_PATH);
+const SPATIAL_FIXTURE = JSON.parse(fs.readFileSync(path.join(
+    ROOT,
+    'tests',
+    'fixtures',
+    'facility_layout',
+    'spatial',
+    'p6-browser-advisory.json'
+), 'utf8'));
 
 let checks = 0;
 async function check(name, fn) {
@@ -308,6 +316,7 @@ class FakeSession {
             selection: [],
             camera: null,
             ghostPlacement: null,
+            placementAlternatives: null,
             lastError: null,
         };
     }
@@ -395,6 +404,91 @@ class FakeSession {
         this.state.ghostPlacement = null;
         this._notify();
         return this.getState();
+    }
+
+    installPlacementAlternatives(receipt) {
+        this.calls.push(['installPlacementAlternatives', clone(receipt)]);
+        this.state.placementAlternatives = {
+            authority: 'server-authoritative',
+            authoritative: true,
+            baseRevision: receipt.baseRevision,
+            selectedIndex: 0,
+            candidates: clone(receipt.candidates),
+        };
+        const candidate = this.state.placementAlternatives.candidates[0];
+        this.state.ghostPlacement = {
+            assetId: candidate.operations[0].placement.assetId,
+            assetDefinitionRevision:
+                candidate.operations[0].placement.assetDefinitionRevision,
+            worldPosition: clone(candidate.transform.position),
+            valid: true,
+            metadata: {
+                previewKind: 'authoritative-placement-candidate',
+                candidateId: candidate.candidateId,
+                candidateIndex: 0,
+                candidateCount: receipt.candidates.length,
+                family: candidate.family,
+                safetyStatus: candidate.safetyStatus,
+                findings: clone(candidate.findings || []),
+                metrics: clone(candidate.metrics || {}),
+            },
+        };
+        this._notify();
+        return this.getState();
+    }
+
+    requestPlacementAlternatives(request) {
+        this.calls.push(['requestPlacementAlternatives', clone(request)]);
+        return Promise.resolve(
+            this.installPlacementAlternatives(
+                clone(SPATIAL_FIXTURE.candidateReceipt)
+            )
+        );
+    }
+
+    cyclePlacementAlternative(offset) {
+        this.calls.push(['cyclePlacementAlternative', offset]);
+        const proposal = this.state.placementAlternatives;
+        const count = proposal.candidates.length;
+        proposal.selectedIndex = (
+            (proposal.selectedIndex + offset) % count + count
+        ) % count;
+        const candidate = proposal.candidates[proposal.selectedIndex];
+        this.state.ghostPlacement.worldPosition =
+            clone(candidate.transform.position);
+        this.state.ghostPlacement.metadata.candidateId =
+            candidate.candidateId;
+        this.state.ghostPlacement.metadata.candidateIndex =
+            proposal.selectedIndex;
+        this.state.ghostPlacement.metadata.family = candidate.family;
+        this.state.ghostPlacement.metadata.safetyStatus =
+            candidate.safetyStatus;
+        this.state.ghostPlacement.metadata.findings =
+            clone(candidate.findings || []);
+        this.state.ghostPlacement.metadata.metrics =
+            clone(candidate.metrics || {});
+        this._notify();
+        return this.getState();
+    }
+
+    dismissPlacementAlternatives() {
+        this.calls.push(['dismissPlacementAlternatives']);
+        this.state.placementAlternatives = null;
+        this.state.ghostPlacement = null;
+        this._notify();
+        return this.getState();
+    }
+
+    acceptPlacementAlternative() {
+        this.calls.push(['acceptPlacementAlternative']);
+        const proposal = this.state.placementAlternatives;
+        const candidate = proposal.candidates[proposal.selectedIndex];
+        const placed = clone(candidate.operations[0].placement);
+        this.state.layout.placements.push(placed);
+        this.state.selection = [placed.placementId];
+        this.state.placementAlternatives = null;
+        this.state.ghostPlacement = null;
+        return this._gesture('Accept placement alternative');
     }
 
     commitGhostPlacement() {
@@ -712,6 +806,45 @@ class FakeController {
     }
 }
 
+class FakeSpatialAdvisor {
+    constructor() {
+        this.requests = [];
+        this.active = null;
+        this.cancelCount = 0;
+        this.destroyCount = 0;
+    }
+
+    request(payload) {
+        if (this.active) this.cancel('superseded');
+        this.requests.push(clone(payload));
+        return new Promise((resolve, reject) => {
+            this.active = { resolve, reject };
+        });
+    }
+
+    cancel(reason) {
+        if (!this.active) return false;
+        this.cancelCount += 1;
+        const error = new Error(reason || 'cancelled');
+        error.name = 'AbortError';
+        this.active.reject(error);
+        this.active = null;
+        return true;
+    }
+
+    resolve(advisory) {
+        const active = this.active;
+        this.active = null;
+        active.resolve(clone(advisory));
+    }
+
+    destroy() {
+        this.destroyCount += 1;
+        this.cancel('destroyed');
+        return true;
+    }
+}
+
 function catalog() {
     return [
         {
@@ -769,6 +902,11 @@ function fixture(options) {
         marqueeResolver: options && options.marqueeResolver,
         keyboardPlacementPoint: options && options.keyboardPlacementPoint,
         createDragSessionId: () => 'drag-stable-001',
+        spatialAdvisor: options && options.spatialAdvisor,
+        ownsSpatialAdvisor: options && options.ownsSpatialAdvisor,
+        useAuthoritativePlacementCandidates: Boolean(
+            options && options.useAuthoritativePlacementCandidates
+        ),
     });
     return {
         documentRef,
@@ -840,7 +978,7 @@ async function main() {
         );
     });
 
-    await check('builds accessible CAD workspace, categorized tree, and P6 warning',
+    await check('builds accessible CAD workspace with advisory authority notice',
         async () => {
             const data = fixture();
             assert.strictEqual(
@@ -853,8 +991,16 @@ async function main() {
             );
             assert.ok(data.root.textContent === '' || data.root.children.length > 0);
             assert.strictEqual(data.root.querySelectorAll('.ip-flw-asset-group').length, 3);
-            assert.ok(data.root.querySelector('.ip-flw-validation-notice')
-                .textContent.includes('arrives in P6'));
+            assert.ok(data.root.querySelector('.ip-flw-advisory-authority')
+                .textContent.includes('server validates'));
+            assert.strictEqual(
+                data.workspace.advisoryLiveRegion.getAttribute('aria-live'),
+                'polite'
+            );
+            assert.strictEqual(
+                data.workspace.ghostOverlay.getAttribute('aria-hidden'),
+                'true'
+            );
             assert.strictEqual(
                 data.root.querySelector('[data-view="plan"]').getAttribute('aria-selected'),
                 'true'
@@ -872,6 +1018,212 @@ async function main() {
                 toolbarButton(data, 'delete').getAttribute('aria-pressed'),
                 null
             );
+            data.workspace.destroy();
+        });
+
+    await check('latest drag advisory is visible and never controls validity',
+        async () => {
+            const advisor = new FakeSpatialAdvisor();
+            const data = fixture({ spatialAdvisor: advisor });
+            const transfer = new FakeDataTransfer();
+            assetRow(data, 'asset-machine').dispatch('dragstart', {
+                dataTransfer: transfer,
+            });
+            data.workspace.viewportStack.dispatch('dragover', {
+                dataTransfer: transfer,
+                world: { x: 3, y: 0, z: 3 },
+            });
+            data.workspace.viewportStack.dispatch('dragover', {
+                dataTransfer: transfer,
+                world: { x: 7, y: 0, z: 3 },
+            });
+            assert.strictEqual(advisor.requests.length, 2);
+            assert.ok(advisor.cancelCount >= 1);
+            assert.strictEqual(
+                data.workspace.ghostOverlay.getAttribute(
+                    'data-advisory-state'
+                ),
+                'pending'
+            );
+            advisor.resolve({
+                authority: 'browser-advisory',
+                authoritative: false,
+                status: 'attention',
+                summary: 'Possible overlap with one placed object.',
+                overlapPlacementIds: ['pl-a'],
+            });
+            await Promise.resolve();
+            await Promise.resolve();
+            assert.strictEqual(
+                data.workspace.ghostOverlay.getAttribute(
+                    'data-advisory-state'
+                ),
+                'attention'
+            );
+            assert.ok(data.workspace.ghostOverlay.textContent.includes(
+                'Advisory: Possible overlap'
+            ));
+            assert.ok(data.workspace.advisoryLiveRegion.textContent.includes(
+                'Placement advisory: Possible overlap'
+            ));
+            assert.strictEqual(
+                data.session.getState().ghostPlacement.valid,
+                true
+            );
+            assert.strictEqual(data.workspace.getState().dragAdvisory.authoritative,
+                false);
+            data.workspace.destroy();
+        });
+
+    await check('authoritative alternatives cycle, dismiss, and accept from controls',
+        async () => {
+            const data = fixture();
+            const before = JSON.stringify(data.session.getState().layout);
+            data.session.installPlacementAlternatives(
+                SPATIAL_FIXTURE.candidateReceipt
+            );
+            assert.strictEqual(data.workspace.candidateControls.hidden, false);
+            assert.ok(data.workspace.candidateSummary.textContent.includes(
+                'Authoritatively validated'
+            ));
+            assert.ok(!data.workspace.candidateSummary.textContent.includes(
+                'Server validated'
+            ));
+            assert.strictEqual(
+                data.workspace.candidateControls.getAttribute(
+                    'data-safety-status'
+                ),
+                'safe'
+            );
+            assert.strictEqual(
+                data.workspace.ghostOverlay.getAttribute(
+                    'data-advisory-state'
+                ),
+                'server-authoritative'
+            );
+            data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="next"]'
+            ).dispatch('click');
+            assert.strictEqual(
+                data.session.getState().placementAlternatives.selectedIndex,
+                1
+            );
+            assert.strictEqual(JSON.stringify(data.session.getState().layout), before);
+            data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="dismiss"]'
+            ).dispatch('click');
+            assert.strictEqual(data.workspace.candidateControls.hidden, true);
+            assert.strictEqual(JSON.stringify(data.session.getState().layout), before);
+
+            data.session.installPlacementAlternatives(
+                SPATIAL_FIXTURE.candidateReceipt
+            );
+            data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="accept"]'
+            ).dispatch('click');
+            await data.workspace.whenIdle();
+            assert.ok(data.session.getState().layout.placements.some(
+                item => item.placementId === 'pl-candidate-grid'
+            ));
+            assert.strictEqual(
+                data.session.calls.filter(
+                    call => call[0] === 'acceptPlacementAlternative'
+                ).length,
+                1
+            );
+            data.workspace.destroy();
+        });
+
+    await check('candidate safety copy is distinct and summary stays bounded',
+        async () => {
+            const data = fixture();
+            const unverified = clone(SPATIAL_FIXTURE.candidateReceipt);
+            unverified.candidates[0].safe = false;
+            unverified.candidates[0].safetyStatus = 'unverified';
+            unverified.candidates[0].findings = [
+                { code: 'missing-egress', message: 'Egress evidence missing' },
+                { code: 'missing-load', message: 'Floor load not verified' },
+                { code: 'missing-power', message: 'Power drop not verified' },
+                { code: 'missing-air', message: 'Air supply not verified' },
+            ];
+            unverified.candidates[0].metrics = {
+                errorCount: 0,
+                unverifiedCount: 4,
+                warningCount: 1,
+                physicalCollisions: 0,
+                clearanceConflicts: 0,
+            };
+            data.session.installPlacementAlternatives(unverified);
+            const summary = data.workspace.candidateSummary.textContent;
+            assert.ok(summary.includes('Engineering evidence incomplete'));
+            assert.ok(summary.includes('Egress evidence missing'));
+            assert.ok(summary.includes('Floor load not verified'));
+            assert.ok(summary.includes('+2 more'));
+            assert.ok(summary.includes('errorCount 0'));
+            assert.ok(summary.includes('unverifiedCount 4'));
+            assert.ok(summary.includes('warningCount 1'));
+            assert.ok(!summary.includes('physicalCollisions'));
+            assert.strictEqual(
+                data.workspace.candidateControls.querySelector(
+                    '[data-candidate-action="accept"]'
+                ).disabled,
+                false
+            );
+
+            const unsafe = clone(SPATIAL_FIXTURE.candidateReceipt);
+            unsafe.candidates[0].safe = false;
+            unsafe.candidates[0].valid = false;
+            unsafe.candidates[0].safetyStatus = 'unsafe';
+            unsafe.candidates[0].findings = [{
+                code: 'placement_collision',
+                message: 'Placement intersects an existing machine',
+            }];
+            data.session.installPlacementAlternatives(unsafe);
+            assert.ok(data.workspace.candidateSummary.textContent.includes(
+                'Invalid placement'
+            ));
+            assert.strictEqual(
+                data.workspace.candidateControls.getAttribute(
+                    'data-safety-status'
+                ),
+                'unsafe'
+            );
+            assert.strictEqual(
+                data.workspace.candidateControls.querySelector(
+                    '[data-candidate-action="accept"]'
+                ).disabled,
+                true
+            );
+            data.workspace.destroy();
+        });
+
+    await check('opt-in drop requests server candidates instead of direct commit',
+        async () => {
+            const data = fixture({
+                useAuthoritativePlacementCandidates: true,
+            });
+            const transfer = new FakeDataTransfer();
+            assetRow(data, 'asset-machine').dispatch('dragstart', {
+                dataTransfer: transfer,
+            });
+            data.workspace.viewportStack.dispatch('drop', {
+                dataTransfer: transfer,
+                world: { x: 7, y: 0, z: 3 },
+            });
+            await data.workspace.whenIdle();
+            assert.strictEqual(
+                data.session.calls.filter(
+                    call => call[0] === 'requestPlacementAlternatives'
+                ).length,
+                1
+            );
+            assert.strictEqual(
+                data.session.calls.filter(
+                    call => call[0] === 'commitGhostPlacement'
+                ).length,
+                0
+            );
+            assert.ok(data.session.getState().placementAlternatives);
             data.workspace.destroy();
         });
 

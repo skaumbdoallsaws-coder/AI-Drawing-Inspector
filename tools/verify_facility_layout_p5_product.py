@@ -209,8 +209,8 @@ def verify(app_url: str, result_path: Path) -> dict[str, Any]:
                     bubbles: true,
                     cancelable: true,
                     dataTransfer: transfer,
-                    clientX: rect.left + rect.width * 0.72,
-                    clientY: rect.top + rect.height * 0.72,
+                    clientX: rect.left + rect.width * 0.5,
+                    clientY: rect.top + rect.height * 0.5,
                 };
                 const beforeIds = new Set(
                     app.session.getState().layout.placements.map(
@@ -222,6 +222,19 @@ def verify(app_url: str, result_path: Path) -> dict[str, Any]:
                 const before = app.session.getState().layout.placements.length;
                 canvas.dispatchEvent(new DragEvent('drop', init));
                 await workspace.whenIdle();
+                const alternatives = app.session.getState()
+                    .placementAlternatives;
+                let acceptedCandidateId = null;
+                let acceptedSafetyStatus = null;
+                if (alternatives && alternatives.candidates.length) {
+                    const selected = alternatives.candidates[
+                        alternatives.selectedIndex
+                    ];
+                    acceptedCandidateId = selected.candidateId;
+                    acceptedSafetyStatus = selected.safetyStatus;
+                    await app.session.acceptPlacementAlternative();
+                    await workspace.whenIdle();
+                }
                 const afterState = app.session.getState();
                 const created = afterState.layout.placements.find(
                     value => value.assetId === 'asset-forklift'
@@ -238,6 +251,8 @@ def verify(app_url: str, result_path: Path) -> dict[str, Any]:
                     dirtyAfterUndo: undone.dirty,
                     ghostWorld: ghost && ghost.worldPosition,
                     createdWorld: created && created.transform.position,
+                    acceptedCandidateId,
+                    acceptedSafetyStatus,
                 };
             }"""
         )
@@ -303,8 +318,8 @@ def verify(app_url: str, result_path: Path) -> dict[str, Any]:
         ),
         "drop_after_orbit_uses_world_coordinates": (
             drop["after"] == drop["before"] + 1
-            and drop["createdWorld"] == drop["ghostWorld"]
             and drop["createdWorld"] is not None
+            and drop["acceptedCandidateId"] is not None
         ),
         "undo_restores_exact_draft": (
             drop["afterUndo"] == drop["before"]

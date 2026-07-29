@@ -31,6 +31,88 @@
             : fallback;
     }
 
+    function boundedText(value, maximum) {
+        const text = cleanString(value, '');
+        const limit = maximum || 120;
+        return text.length <= limit
+            ? text
+            : text.slice(0, Math.max(0, limit - 3)) + '...';
+    }
+
+    function candidateSafetyStatus(value) {
+        return value === 'safe' || value === 'unsafe'
+            ? value
+            : 'unverified';
+    }
+
+    function candidateSafetyLabel(value) {
+        const status = candidateSafetyStatus(value);
+        if (status === 'safe') return 'Authoritatively validated';
+        if (status === 'unsafe') return 'Invalid placement';
+        return 'Engineering evidence incomplete';
+    }
+
+    function candidateFindingSummary(findings) {
+        if (!Array.isArray(findings) || !findings.length) return '';
+        const maximum = 2;
+        const visible = findings.slice(0, maximum).map(function (finding) {
+            if (typeof finding === 'string') return boundedText(finding, 100);
+            if (!finding || typeof finding !== 'object') return '';
+            return boundedText(
+                finding.message || finding.label || finding.code,
+                100
+            );
+        }).filter(Boolean);
+        if (!visible.length) return '';
+        const remaining = findings.length - visible.length;
+        return 'Findings: ' + visible.join('; ')
+            + (remaining > 0 ? '; +' + remaining + ' more' : '');
+    }
+
+    function candidateMetricSummary(metrics) {
+        if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) {
+            return '';
+        }
+        const preferred = [
+            'errorCount',
+            'unverifiedCount',
+            'warningCount',
+            'physicalCollisions',
+            'clearanceConflicts',
+            'distanceFromRequested',
+        ];
+        const keys = preferred.filter(function (key) {
+            return Object.prototype.hasOwnProperty.call(metrics, key);
+        }).concat(Object.keys(metrics).sort().filter(function (key) {
+            return !preferred.includes(key);
+        })).slice(0, 3);
+        const values = keys.map(function (key) {
+            const value = metrics[key];
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                return key + ' ' + Number(value.toFixed(3));
+            }
+            if (typeof value === 'string' || typeof value === 'boolean') {
+                return key + ' ' + boundedText(String(value), 40);
+            }
+            return '';
+        }).filter(Boolean);
+        return values.length ? 'Metrics: ' + values.join(', ') : '';
+    }
+
+    function candidateAssessment(candidate) {
+        const source = candidate || {};
+        const status = candidateSafetyStatus(source.safetyStatus);
+        const details = [
+            candidateFindingSummary(source.findings),
+            candidateMetricSummary(source.metrics),
+        ].filter(Boolean);
+        return {
+            status: status,
+            label: candidateSafetyLabel(status),
+            summary: details.join('. '),
+        };
+    }
+
     function assertObject(value, label) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) {
             throw new TypeError(label + ' must be an object');
@@ -332,6 +414,11 @@
         this.pending = Promise.resolve();
         this.lastError = null;
         this.activeDrag = null;
+        this.dragAdvisory = null;
+        this.spatialAdvisor = options.spatialAdvisor || null;
+        this.ownsSpatialAdvisor = options.ownsSpatialAdvisor === true;
+        this.useAuthoritativePlacementCandidates =
+            options.useAuthoritativePlacementCandidates === true;
         this.pointerGesture = null;
         this.pointerCaptureId = null;
         this.pointerFallbackCleanup = null;
@@ -484,6 +571,12 @@
             hidden: true,
             'aria-hidden': 'true',
         });
+        this.advisoryLiveRegion = element(this.document, 'div', {
+            className: 'ip-flw-visually-hidden',
+            role: 'status',
+            'aria-live': 'polite',
+            'aria-atomic': 'true',
+        });
         this.gestureOverlay = element(this.document, 'div', {
             className: 'ip-flw-gesture-overlay',
             hidden: true,
@@ -493,13 +586,65 @@
             this.planView,
             this.threeView,
             this.ghostOverlay,
+            this.advisoryLiveRegion,
             this.gestureOverlay
         );
         this.validationNotice = element(this.document, 'div', {
             className: 'ip-flw-validation-notice',
             role: 'note',
-        }, 'Collision, containment, and clearance validation arrives in P6.');
-        append(this.viewportPane, this.viewTabs, this.viewportStack, this.validationNotice);
+        });
+        this.validationNotice.appendChild(element(this.document, 'span', {
+            className: 'ip-flw-advisory-authority',
+        }, 'Browser overlap feedback is advisory. The server validates every accepted placement.'));
+        this.candidateControls = element(this.document, 'div', {
+            className: 'ip-flw-view-tabs ip-flw-candidate-controls',
+            role: 'group',
+            'aria-label': 'Authoritative placement alternatives',
+            hidden: true,
+        });
+        this.candidateSummary = element(this.document, 'span', {
+            className: 'ip-flw-candidate-summary',
+            role: 'status',
+            'aria-live': 'polite',
+            'aria-atomic': 'true',
+        });
+        append(this.candidateControls,
+            this.candidateSummary,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-view-tab',
+                'data-candidate-action': 'previous',
+                'aria-label': 'Previous placement alternative',
+                title: 'Previous placement alternative',
+            }, 'Previous'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-view-tab',
+                'data-candidate-action': 'next',
+                'aria-label': 'Next placement alternative',
+                title: 'Next placement alternative',
+            }, 'Next'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-view-tab',
+                'data-candidate-action': 'accept',
+                'aria-label': 'Accept placement alternative',
+                title: 'Accept placement alternative',
+            }, 'Accept'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-view-tab',
+                'data-candidate-action': 'dismiss',
+                'aria-label': 'Dismiss placement alternatives',
+                title: 'Dismiss placement alternatives',
+            }, 'Dismiss')
+        );
+        this.validationNotice.appendChild(this.candidateControls);
+        append(this.viewportPane,
+            this.viewTabs,
+            this.viewportStack,
+            this.validationNotice
+        );
 
         this.propertiesPane = element(this.document, 'aside', {
             className: 'ip-flw-properties',
@@ -608,6 +753,11 @@
         this._listen(this.viewportStack, 'dragover', this._handleDragOver.bind(this));
         this._listen(this.viewportStack, 'drop', this._handleDrop.bind(this));
         this._listen(this.viewportStack, 'dragleave', this._handleDragLeave.bind(this));
+        this._listen(
+            this.candidateControls,
+            'click',
+            this._handleCandidateAction.bind(this)
+        );
         this._listen(this.planView, 'pointerdown', this._handlePlanPointerDown.bind(this));
         this._listen(this.planView, 'pointermove', this._handlePlanPointerMove.bind(this));
         this._listen(this.planView, 'pointerup', this._handlePlanPointerUp.bind(this));
@@ -710,6 +860,7 @@
             payload: parseAssetDragPayload(text),
             asset: asset,
         };
+        this._clearDragAdvisory();
         this.session.beginGhostPlacement({
             assetId: asset.assetId,
             assetDefinitionRevision: asset.assetDefinitionRevision,
@@ -867,11 +1018,12 @@
             this._showGesture('No valid facility-floor point');
             return;
         }
-        this.session.updateGhostPlacement(world, true);
         this.activeDrag = {
             payload: payload,
             asset: this.activeDrag && this.activeDrag.asset || null,
         };
+        this.session.updateGhostPlacement(world, true);
+        this._requestDragAdvisory(payload, world);
         this._renderGhost(world, payload.assetId);
         this._setCoordinates(world);
     };
@@ -890,10 +1042,28 @@
             return;
         }
         this.session.updateGhostPlacement(world, true);
-        this._invoke('Place asset', function () {
-            return this.session.commitGhostPlacement({ positionMode: 'manual' });
-        }.bind(this));
+        this._cancelAdvisoryRequest('Drop completed.');
+        if (this.useAuthoritativePlacementCandidates
+                && typeof this.session.requestPlacementAlternatives
+                    === 'function') {
+            this._invoke('Find placement alternatives', function () {
+                return this.session.requestPlacementAlternatives({
+                    assetId: payload.assetId,
+                    assetDefinitionRevision:
+                        payload.assetDefinitionRevision,
+                    requestedPosition: world,
+                    maximumCandidates: 8,
+                });
+            }.bind(this));
+        } else {
+            this._invoke('Place asset', function () {
+                return this.session.commitGhostPlacement({
+                    positionMode: 'manual',
+                });
+            }.bind(this));
+        }
         this.activeDrag = null;
+        this.dragAdvisory = null;
         this._hideGhost();
     };
 
@@ -906,21 +1076,117 @@
 
     Workspace.prototype._cancelGhost = function () {
         if (this.destroyed) return;
+        this._cancelAdvisoryRequest('Drag cancelled.');
         if (this.session.getState().ghostPlacement) {
             this.session.cancelGhostPlacement();
         }
         this.activeDrag = null;
+        this.dragAdvisory = null;
         this._hideGhost();
+    };
+
+    Workspace.prototype._cancelAdvisoryRequest = function (reason) {
+        if (this.spatialAdvisor
+                && typeof this.spatialAdvisor.cancel === 'function') {
+            this.spatialAdvisor.cancel(reason);
+        }
+    };
+
+    Workspace.prototype._clearDragAdvisory = function () {
+        this._cancelAdvisoryRequest('A new drag started.');
+        this.dragAdvisory = null;
+    };
+
+    Workspace.prototype._requestDragAdvisory = function (payload, world) {
+        if (!this.spatialAdvisor
+                || typeof this.spatialAdvisor.request !== 'function'
+                || !this.state.layout) {
+            this.dragAdvisory = null;
+            return;
+        }
+        const dragSessionId = payload.dragSessionId;
+        const positionKey = [
+            world.x,
+            world.y,
+            world.z,
+        ].join('|');
+        this.dragAdvisory = {
+            authority: 'browser-advisory',
+            authoritative: false,
+            status: 'pending',
+            summary: 'Checking coarse overlap and zone placement.',
+            dragSessionId: dragSessionId,
+            positionKey: positionKey,
+        };
+        this._renderGhost(world, payload.assetId);
+        const catalog = this.assetCatalog.map(function (record) {
+            return clone(record.source || record);
+        });
+        this.spatialAdvisor.request({
+            layoutRevision: this.state.baseRevision,
+            layout: this.state.layout,
+            assetCatalog: catalog,
+            ghost: {
+                assetId: payload.assetId,
+                assetDefinitionRevision: payload.assetDefinitionRevision,
+                worldPosition: world,
+            },
+        }).then(function (advisory) {
+            if (this.destroyed || !this.activeDrag
+                    || this.activeDrag.payload.dragSessionId !== dragSessionId) {
+                return;
+            }
+            const current = this.session.getState().ghostPlacement;
+            if (!current || !current.worldPosition
+                    || [
+                        current.worldPosition.x,
+                        current.worldPosition.y,
+                        current.worldPosition.z,
+                    ].join('|') !== positionKey) {
+                return;
+            }
+            this.dragAdvisory = Object.assign({}, clone(advisory), {
+                dragSessionId: dragSessionId,
+                positionKey: positionKey,
+            });
+            this._renderGhost(current.worldPosition, payload.assetId);
+        }.bind(this)).catch(function (error) {
+            if (error && error.name === 'AbortError') return;
+            if (this.destroyed || !this.activeDrag
+                    || this.activeDrag.payload.dragSessionId !== dragSessionId) {
+                return;
+            }
+            const current = this.session.getState().ghostPlacement;
+            this.dragAdvisory = {
+                authority: 'browser-advisory',
+                authoritative: false,
+                status: 'unavailable',
+                summary: 'Coarse advisory is unavailable. The server remains authoritative.',
+                dragSessionId: dragSessionId,
+                positionKey: positionKey,
+            };
+            if (current && current.worldPosition) {
+                this._renderGhost(current.worldPosition, payload.assetId);
+            }
+        }.bind(this));
     };
 
     Workspace.prototype._renderGhost = function (world, assetId) {
         const active = this.session.getState().ghostPlacement || {};
+        const candidate = active.metadata
+            && active.metadata.previewKind
+                === 'authoritative-placement-candidate'
+            ? active.metadata
+            : null;
+        const advisory = candidate ? null : this.dragAdvisory;
         const ghost = {
             assetId: active.assetId || assetId,
             assetDefinitionRevision: active.assetDefinitionRevision || '',
             worldPosition: world,
             valid: active.valid !== false,
-            metadata: clone(active.metadata || {}),
+            metadata: Object.assign({}, clone(active.metadata || {}), {
+                spatialAdvisory: clone(advisory),
+            }),
         };
         [this.topAdapter, this.threeAdapter].filter(Boolean).forEach(
             function (adapter) {
@@ -931,8 +1197,58 @@
         );
         this.ghostOverlay.hidden = false;
         this.ghostOverlay.setAttribute('data-active', 'true');
-        this.ghostOverlay.textContent = cleanString(assetId, 'Asset')
-            + '  X ' + world.x.toFixed(2) + '  Z ' + world.z.toFixed(2);
+        if (candidate) {
+            const assessment = candidateAssessment(candidate);
+            this.ghostOverlay.setAttribute(
+                'data-advisory-state',
+                'server-authoritative'
+            );
+            this.ghostOverlay.setAttribute(
+                'data-safety-status',
+                assessment.status
+            );
+            this.ghostOverlay.textContent = cleanString(assetId, 'Asset')
+                + ' | Authoritative option '
+                + (finite(candidate.candidateIndex, 0) + 1)
+                + ' of ' + finite(candidate.candidateCount, 1)
+                + (candidate.family ? ' | ' + candidate.family : '')
+                + ' | ' + assessment.label
+                + (assessment.summary ? ' | ' + assessment.summary : '')
+                + ' | X ' + world.x.toFixed(2)
+                + ' Z ' + world.z.toFixed(2);
+            const announcement = 'Authoritative placement option '
+                + (finite(candidate.candidateIndex, 0) + 1)
+                + ' of ' + finite(candidate.candidateCount, 1)
+                + (candidate.family ? ', ' + candidate.family : '')
+                + '. ' + assessment.label
+                + (assessment.summary ? '. ' + assessment.summary : '')
+                + '. Not yet applied.';
+            if (this.advisoryLiveRegion.textContent !== announcement) {
+                this.advisoryLiveRegion.textContent = announcement;
+            }
+        } else {
+            this.ghostOverlay.removeAttribute('data-safety-status');
+            const status = advisory && advisory.status || 'unavailable';
+            this.ghostOverlay.setAttribute('data-advisory-state', status);
+            this.ghostOverlay.textContent = cleanString(assetId, 'Asset')
+                + ' | X ' + world.x.toFixed(2)
+                + ' Z ' + world.z.toFixed(2)
+                + (advisory
+                    ? ' | Advisory: ' + cleanString(
+                        advisory.summary,
+                        status
+                    )
+                    : ' | Advisory: server check on placement');
+            const announcement = advisory
+                ? 'Placement advisory: ' + cleanString(
+                    advisory.summary,
+                    status
+                )
+                : 'Placement advisory will be confirmed by the server.';
+            if (this.advisoryLiveRegion.textContent !== announcement) {
+                this.advisoryLiveRegion.textContent = announcement;
+            }
+        }
     };
 
     Workspace.prototype._hideGhost = function () {
@@ -945,7 +1261,72 @@
         );
         this.ghostOverlay.hidden = true;
         this.ghostOverlay.removeAttribute('data-active');
+        this.ghostOverlay.removeAttribute('data-advisory-state');
+        this.ghostOverlay.removeAttribute('data-safety-status');
         this.ghostOverlay.textContent = '';
+        this.advisoryLiveRegion.textContent = '';
+    };
+
+    Workspace.prototype._handleCandidateAction = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-candidate-action',
+            this.candidateControls
+        );
+        if (!action || this.state.busy) return;
+        if (action === 'previous') {
+            this.session.cyclePlacementAlternative(-1);
+        } else if (action === 'next') {
+            this.session.cyclePlacementAlternative(1);
+        } else if (action === 'dismiss') {
+            this.session.dismissPlacementAlternatives();
+        } else if (action === 'accept') {
+            this._invoke('Accept placement alternative', function () {
+                return this.session.acceptPlacementAlternative();
+            }.bind(this));
+        }
+    };
+
+    Workspace.prototype._renderCandidateControls = function () {
+        const proposal = this.state.placementAlternatives;
+        if (!proposal || !Array.isArray(proposal.candidates)
+                || !proposal.candidates.length) {
+            this.candidateControls.hidden = true;
+            this.candidateControls.removeAttribute('data-safety-status');
+            this.candidateSummary.textContent = '';
+            return;
+        }
+        const candidate = proposal.candidates[proposal.selectedIndex];
+        const assessment = candidateAssessment(candidate);
+        this.candidateControls.hidden = false;
+        this.candidateControls.setAttribute(
+            'data-safety-status',
+            assessment.status
+        );
+        this.candidateSummary.textContent = 'Placement option '
+            + (proposal.selectedIndex + 1)
+            + ' of ' + proposal.candidates.length
+            + (candidate.family ? ': ' + candidate.family : '')
+            + '. ' + assessment.label
+            + (assessment.summary ? '. ' + assessment.summary : '')
+            + '. Not yet applied.';
+        const cycleDisabled = proposal.candidates.length < 2 || this.state.busy;
+        ['previous', 'next'].forEach(function (action) {
+            const button = this.candidateControls.querySelector(
+                '[data-candidate-action="' + action + '"]'
+            );
+            if (button) button.disabled = cycleDisabled;
+        }, this);
+        ['accept', 'dismiss'].forEach(function (action) {
+            const button = this.candidateControls.querySelector(
+                '[data-candidate-action="' + action + '"]'
+            );
+            if (button) {
+                button.disabled = this.state.busy
+                    || (action === 'accept'
+                        && assessment.status === 'unsafe');
+            }
+        }, this);
     };
 
     Workspace.prototype._handleAdapterSelection = function (placementId) {
@@ -1546,6 +1927,9 @@
         parts.push(this.viewMode === '3d' ? '3D view' : 'Plan view');
         parts.push(this.toolMode.replace(/-/g, ' '));
         if (this.lastError) parts.push('Error: ' + this.lastError.message);
+        if (this.state.placementAlternatives) {
+            parts.push('Authoritative placement preview');
+        }
         this.statusText.textContent = parts.join(' | ');
         this.root.setAttribute('aria-busy', this.state.busy ? 'true' : 'false');
     };
@@ -1594,6 +1978,7 @@
         }
         this._renderProperties();
         this._renderToolbarState();
+        this._renderCandidateControls();
         this._renderStatus();
         if (typeof this.options.onStateChange === 'function') {
             this.options.onStateChange(clone(this.state));
@@ -1652,7 +2037,13 @@
         } else if (key === 'escape') {
             this.polygonPoints = [];
             this._cancelPointerGesture();
-            this._cancelGhost();
+            if (this.state.placementAlternatives
+                    && typeof this.session.dismissPlacementAlternatives
+                        === 'function') {
+                this.session.dismissPlacementAlternatives();
+            } else {
+                this._cancelGhost();
+            }
             this._setToolMode('select');
             if (typeof event.preventDefault === 'function') event.preventDefault();
             return;
@@ -1671,6 +2062,7 @@
             gridSize: this.gridSize,
             session: clone(this.state),
             activeDrag: clone(this.activeDrag && this.activeDrag.payload),
+            dragAdvisory: clone(this.dragAdvisory),
             polygonPointCount: this.polygonPoints.length,
             lastError: this.lastError,
         };
@@ -1684,6 +2076,12 @@
         if (this.marqueeCleanup) this.marqueeCleanup();
         this.marqueeCleanup = null;
         this._releasePointerCapture();
+        this._cancelAdvisoryRequest('Workspace destroyed.');
+        if (this.ownsSpatialAdvisor && this.spatialAdvisor
+                && typeof this.spatialAdvisor.destroy === 'function') {
+            this.spatialAdvisor.destroy();
+        }
+        this.spatialAdvisor = null;
         this.listeners.splice(0).forEach(function (remove) { remove(); });
         if (this.ownsController && this.controller
                 && typeof this.controller.dispose === 'function') {

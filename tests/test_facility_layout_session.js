@@ -8,6 +8,14 @@ const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
 const MODULE_PATH = path.join(ROOT, 'static', 'facility_layout_session.js');
 const facilitySession = require(MODULE_PATH);
+const SPATIAL_FIXTURE = JSON.parse(fs.readFileSync(path.join(
+    ROOT,
+    'tests',
+    'fixtures',
+    'facility_layout',
+    'spatial',
+    'p6-browser-advisory.json'
+), 'utf8'));
 
 let checks = 0;
 async function check(name, fn) {
@@ -186,6 +194,7 @@ function fakeAuthority(initialLayout, options) {
     const previewCalls = [];
     const applyCalls = [];
     const reloadCalls = [];
+    const candidatePreviewCalls = [];
 
     function receipt(document, createdIds, currentRevision, changed) {
         return {
@@ -205,6 +214,7 @@ function fakeAuthority(initialLayout, options) {
         previewCalls,
         applyCalls,
         reloadCalls,
+        candidatePreviewCalls,
         get revision() { return revision; },
         get layout() { return clone(canonical); },
         makeSession() {
@@ -241,6 +251,66 @@ function fakeAuthority(initialLayout, options) {
                 reloadLayout: async () => {
                     reloadCalls.push(true);
                     return receipt(canonical, [], revision);
+                },
+                placementCandidates: config.placementCandidates,
+                placementCandidatePreview: async request => {
+                    candidatePreviewCalls.push(clone(request));
+                    if (request.baseRevision !== revision) {
+                        throw operationError(
+                            'revision_conflict',
+                            'Stale candidate preview',
+                            { currentRevision: revision }
+                        );
+                    }
+                    if (config.candidatePreviewFailure) {
+                        throw config.candidatePreviewFailure;
+                    }
+                    if (typeof config.placementCandidatePreview === 'function') {
+                        return config.placementCandidatePreview(
+                            clone(request),
+                            clone(canonical)
+                        );
+                    }
+                    const sourceReceipt = clone(
+                        config.candidateReceipt
+                        || SPATIAL_FIXTURE.candidateReceipt
+                    );
+                    const sourceCandidate = sourceReceipt.candidates.find(
+                        item => item.candidateId === request.candidateId
+                    );
+                    if (!sourceCandidate) {
+                        throw operationError(
+                            'spatial_candidate_stale',
+                            'Candidate is unavailable'
+                        );
+                    }
+                    const operationSource = sourceCandidate.operations
+                        || SPATIAL_FIXTURE.candidateReceipt.candidates.find(
+                            item => item.candidateId === request.candidateId
+                        ).operations;
+                    const operation = clone(operationSource[0]);
+                    const candidate = clone(sourceCandidate);
+                    delete candidate.operations;
+                    const result = applyFakeOperations(
+                        canonical,
+                        request.operations.concat([operation])
+                    );
+                    return {
+                        baseRevision: config.candidatePreviewRevision
+                            || revision,
+                        candidate,
+                        operation,
+                        preview: {
+                            document: result.document,
+                            createdIds: result.createdIds,
+                            spatialDiagnostics: {
+                                valid: true,
+                                safetyStatus: candidate.safetyStatus,
+                                findings: clone(candidate.findings || []),
+                                metrics: clone(candidate.metrics || {}),
+                            },
+                        },
+                    };
                 },
             });
         },
@@ -340,6 +410,221 @@ async function main() {
             assert.strictEqual(after.ghostPlacement, null);
             assert.strictEqual(after.history.length, 0);
             assert.strictEqual(authority.previewCalls.length, 0);
+        });
+
+    await check('authoritative alternatives cycle and dismiss byte-identically',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const before = JSON.stringify(session.getState().layout);
+            session.installPlacementAlternatives(
+                SPATIAL_FIXTURE.candidateReceipt
+            );
+            let state = session.getState();
+            assert.strictEqual(
+                state.placementAlternatives.authority,
+                'server-authoritative'
+            );
+            assert.strictEqual(
+                state.ghostPlacement.metadata.candidateId,
+                'fsc-grid'
+            );
+            session.cyclePlacementAlternative(1);
+            state = session.getState();
+            assert.strictEqual(
+                state.ghostPlacement.metadata.candidateId,
+                'fsc-boundary'
+            );
+            assert.strictEqual(JSON.stringify(state.layout), before);
+            assert.strictEqual(state.history.length, 0);
+            assert.strictEqual(state.dirty, false);
+            session.dismissPlacementAlternatives();
+            state = session.getState();
+            assert.strictEqual(state.placementAlternatives, null);
+            assert.strictEqual(state.ghostPlacement, null);
+            assert.strictEqual(JSON.stringify(state.layout), before);
+        });
+
+    await check('selected candidate preview supplies one exact undoable gesture',
+        async () => {
+            const candidateReceipt = clone(SPATIAL_FIXTURE.candidateReceipt);
+            candidateReceipt.candidates.forEach(candidate => {
+                delete candidate.operations;
+            });
+            const authority = fakeAuthority(layout(), {
+                candidateReceipt,
+                placementCandidates: async () => clone(candidateReceipt),
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.requestPlacementAlternatives({
+                assetId: 'asset-machine',
+                assetDefinitionRevision: 'revision-asset-machine',
+                requestedPosition: { x: 7, y: 0, z: 3 },
+                positionMode: 'manual',
+            });
+            session.cyclePlacementAlternative(1);
+            await session.acceptPlacementAlternative();
+            let state = session.getState();
+            assert.strictEqual(authority.candidatePreviewCalls.length, 1);
+            assert.deepStrictEqual(authority.candidatePreviewCalls[0], {
+                baseRevision: 'rev-1',
+                operations: [],
+                request: {
+                    assetId: 'asset-machine',
+                    assetDefinitionRevision: 'revision-asset-machine',
+                    requestedPosition: { x: 7, y: 0, z: 3 },
+                    positionMode: 'manual',
+                },
+                candidateId: 'fsc-boundary',
+            });
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(
+                state.history[0].label,
+                'Accept placement alternative'
+            );
+            assert.strictEqual(state.operations.length, 1);
+            assert.strictEqual(state.operations[0].op, 'place_asset');
+            assert.ok(byId(state.layout, 'pl-candidate-boundary'));
+            assert.deepStrictEqual(state.selection, ['pl-candidate-boundary']);
+            assert.strictEqual(state.placementAlternatives, null);
+            assert.strictEqual(state.ghostPlacement, null);
+            await session.undo();
+            state = session.getState();
+            assert.strictEqual(
+                byId(state.layout, 'pl-candidate-boundary'),
+                undefined
+            );
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(state.historyCursor, 0);
+        });
+
+    await check('candidate lists may omit operations but supplied operations stay ordinary',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const before = JSON.stringify(session.getState().layout);
+            const stale = clone(SPATIAL_FIXTURE.candidateReceipt);
+            stale.baseRevision = 'rev-stale';
+            assert.throws(
+                () => session.installPlacementAlternatives(stale),
+                error => error.code === 'stale_revision'
+            );
+            const missingOperations = clone(
+                SPATIAL_FIXTURE.candidateReceipt
+            );
+            missingOperations.candidates.forEach(candidate => {
+                delete candidate.operations;
+            });
+            session.installPlacementAlternatives(
+                missingOperations,
+                {
+                    assetId: 'asset-machine',
+                    assetDefinitionRevision: 'revision-asset-machine',
+                    requestedPosition: { x: 7, y: 0, z: 3 },
+                }
+            );
+            assert.strictEqual(
+                session.getState().placementAlternatives
+                    .candidates[0].operations,
+                null
+            );
+            session.dismissPlacementAlternatives();
+            const candidateOnlyOperation = clone(
+                SPATIAL_FIXTURE.candidateReceipt
+            );
+            candidateOnlyOperation.candidates[0].operations = [{
+                op: 'accept_spatial_candidate',
+                candidateId: 'fsc-grid',
+            }];
+            assert.throws(
+                () => session.installPlacementAlternatives(
+                    candidateOnlyOperation
+                ),
+                /ordinary operation/
+            );
+            assert.strictEqual(JSON.stringify(session.getState().layout), before);
+            assert.strictEqual(session.getState().dirty, false);
+        });
+
+    await check('failed or stale candidate preview cannot mutate the draft',
+        async () => {
+            const candidateReceipt = clone(SPATIAL_FIXTURE.candidateReceipt);
+            candidateReceipt.candidates.forEach(candidate => {
+                delete candidate.operations;
+            });
+            for (const previewConfig of [
+                {
+                    candidateReceipt,
+                    candidatePreviewFailure: operationError(
+                        'spatial_preview_failed',
+                        'Preview unavailable'
+                    ),
+                },
+                {
+                    candidateReceipt,
+                    candidatePreviewRevision: 'rev-stale',
+                },
+            ]) {
+                previewConfig.placementCandidates =
+                    async () => clone(candidateReceipt);
+                const authority = fakeAuthority(layout(), previewConfig);
+                const session = authority.makeSession();
+                session.load(authority.initialReceipt());
+                await session.requestPlacementAlternatives({
+                    assetId: 'asset-machine',
+                    assetDefinitionRevision: 'revision-asset-machine',
+                    requestedPosition: { x: 7, y: 0, z: 3 },
+                });
+                const before = session.getState();
+                await assert.rejects(
+                    session.acceptPlacementAlternative(),
+                    error => error.code === 'spatial_preview_failed'
+                        || error.code === 'stale_revision'
+                );
+                const after = session.getState();
+                assert.strictEqual(
+                    JSON.stringify(after.layout),
+                    JSON.stringify(before.layout)
+                );
+                assert.deepStrictEqual(after.operations, before.operations);
+                assert.deepStrictEqual(after.history, before.history);
+                assert.strictEqual(after.historyCursor, before.historyCursor);
+                assert.strictEqual(after.dirty, before.dirty);
+                assert.strictEqual(authority.previewCalls.length, 0);
+            }
+        });
+
+    await check('candidate request includes current unsaved operations and revision',
+        async () => {
+            const requests = [];
+            const authority = fakeAuthority(layout(), {
+                placementCandidates: async request => {
+                    requests.push(clone(request));
+                    return clone(SPATIAL_FIXTURE.candidateReceipt);
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.select('pl-a');
+            await session.moveSelected({ x: 1, y: 0, z: 0 });
+            await session.requestPlacementAlternatives({
+                assetId: 'asset-machine',
+                assetDefinitionRevision: 'revision-asset-machine',
+                requestedPosition: { x: 7, y: 0, z: 3 },
+            });
+            assert.strictEqual(requests.length, 1);
+            assert.strictEqual(requests[0].baseRevision, 'rev-1');
+            assert.strictEqual(requests[0].operations.length, 1);
+            assert.strictEqual(requests[0].operations[0].op, 'move_placement');
+            assert.deepStrictEqual(requests[0].request, {
+                assetId: 'asset-machine',
+                assetDefinitionRevision: 'revision-asset-machine',
+                requestedPosition: { x: 7, y: 0, z: 3 },
+            });
+            assert.ok(session.getState().placementAlternatives);
         });
 
     await check('one multi-move gesture is one undo entry and marks auto manual',

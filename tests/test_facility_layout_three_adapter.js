@@ -811,6 +811,39 @@ test('Fit mutates only camera and controls while model and scene roots stay fixe
     data.adapter.dispose();
 });
 
+test('Fit uses authoritative facility bounds even when the layout is empty', async () => {
+    const data = fixture({
+        worldBounds: {
+            minX: 0,
+            minZ: 0,
+            maxX: 40,
+            maxZ: 30,
+            floorY: 0,
+        },
+    });
+    data.adapter.mount(data.host);
+    const controls = FakeControls.instances.at(-1);
+    assert.strictEqual(controls.minPolarAngle, 0.03);
+    assert.strictEqual(controls.maxPolarAngle, Math.PI / 2 - 0.03);
+    await data.adapter.setScene({
+        layout: { placements: [] },
+        assetCatalog: [],
+    });
+    assert.strictEqual(data.adapter.fit(), true);
+    data.scheduler.flush();
+    const diagnostics = data.adapter.getDiagnostics();
+    assert.deepStrictEqual(diagnostics.worldBounds, {
+        minimum: { x: 0, y: 0, z: 0 },
+        maximum: { x: 40, y: 0.01, z: 30 },
+    });
+    assert.deepStrictEqual(diagnostics.camera.target, {
+        x: 20,
+        y: 0,
+        z: 15,
+    });
+    data.adapter.dispose();
+});
+
 test('facility-floor projection and transient ghost remain outside picking state', async () => {
     const data = fixture();
     data.adapter.mount(data.host);

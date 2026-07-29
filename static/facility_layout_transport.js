@@ -29,6 +29,58 @@
         return clone(value);
     }
 
+    function object(value, label) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            throw new TypeError(label + ' must be an object');
+        }
+        return value;
+    }
+
+    function worldPosition(value, label) {
+        const source = object(value, label);
+        const result = {
+            x: Number(source.x),
+            y: source.y === undefined ? 0 : Number(source.y),
+            z: Number(source.z),
+        };
+        if (!Object.keys(result).every(function (key) {
+            return Number.isFinite(result[key]);
+        })) {
+            throw new TypeError(label + ' must contain finite x, y, and z');
+        }
+        return result;
+    }
+
+    function spatialCandidateRequest(value) {
+        const container = object(value, 'placement candidate payload');
+        const source = object(
+            container.request || container,
+            'placement candidate request'
+        );
+        const request = {
+            assetId: nonEmptyString(source.assetId, 'assetId'),
+            assetDefinitionRevision: nonEmptyString(
+                source.assetDefinitionRevision,
+                'assetDefinitionRevision'
+            ),
+            requestedPosition: worldPosition(
+                source.requestedPosition,
+                'requestedPosition'
+            ),
+        };
+        [
+            'requestedQuaternion',
+            'targetPlacementId',
+            'enabledFamilies',
+            'maximumCandidates',
+            'positionMode',
+            'metadata',
+        ].forEach(function (key) {
+            if (source[key] !== undefined) request[key] = clone(source[key]);
+        });
+        return request;
+    }
+
     function errorFromResponse(response, body) {
         const envelope = body && typeof body === 'object'
             ? (body.error || body)
@@ -64,13 +116,15 @@
         const layoutUrl = baseUrl + '/api/facility-layouts/'
             + encodedSite + '/' + encodedLayout;
 
-        async function request(path, method, body) {
+        async function request(path, method, body, requestOptions) {
+            const requestConfig = requestOptions || {};
             const init = {
                 method: method || 'GET',
                 cache: 'no-store',
                 credentials: options.credentials || 'same-origin',
                 headers: Object.assign({}, headers),
             };
+            if (requestConfig.signal) init.signal = requestConfig.signal;
             if (body !== undefined) {
                 init.headers['Content-Type'] = 'application/json';
                 init.body = JSON.stringify(body);
@@ -110,6 +164,52 @@
             },
             reloadLayout: function () {
                 return request('', 'GET');
+            },
+            spatialDiagnostics: function (payload, requestOptions) {
+                const value = payload || {};
+                return request('/spatial/diagnostics', 'POST', {
+                    baseRevision: nonEmptyString(
+                        value.baseRevision,
+                        'baseRevision'
+                    ),
+                    operations: operationBatch(value.operations || []),
+                }, requestOptions);
+            },
+            placementCandidates: function (payload, requestOptions) {
+                const value = payload || {};
+                return request(
+                    '/spatial/candidates',
+                    'POST',
+                    {
+                        baseRevision: nonEmptyString(
+                            value.baseRevision,
+                            'baseRevision'
+                        ),
+                        operations: operationBatch(value.operations || []),
+                        request: spatialCandidateRequest(value),
+                    },
+                    requestOptions
+                );
+            },
+            placementCandidatePreview: function (payload, requestOptions) {
+                const value = payload || {};
+                return request(
+                    '/spatial/candidates/preview',
+                    'POST',
+                    {
+                        baseRevision: nonEmptyString(
+                            value.baseRevision,
+                            'baseRevision'
+                        ),
+                        operations: operationBatch(value.operations || []),
+                        request: spatialCandidateRequest(value),
+                        candidateId: nonEmptyString(
+                            value.candidateId,
+                            'candidateId'
+                        ),
+                    },
+                    requestOptions
+                );
             },
         });
     }

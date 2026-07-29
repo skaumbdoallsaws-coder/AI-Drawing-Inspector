@@ -42,6 +42,28 @@
         return error;
     }
 
+    async function resolveSpatialAdvisorRuntime(options) {
+        let runtime = options.spatialAdvisorRuntime
+            || (root && root.InspectorProFacilitySpatialAdvisor)
+            || null;
+        if (runtime || options.enableSpatialAdvisory === false
+                || !(options.Worker || (root && root.Worker))) {
+            return runtime;
+        }
+        try {
+            await import(
+                options.spatialAdvisorModuleUrl
+                || '/static/facility_layout_spatial_advisor.js'
+            );
+            runtime = root && root.InspectorProFacilitySpatialAdvisor || null;
+        } catch (error) {
+            if (typeof options.onAdvisoryUnavailable === 'function') {
+                options.onAdvisoryUnavailable(error);
+            }
+        }
+        return runtime;
+    }
+
     function createFacilityLayoutApp(inputOptions) {
         const options = inputOptions || {};
         const host = requireRoot(options.root);
@@ -82,9 +104,14 @@
                 previewOperations: transport.previewOperations,
                 applyOperations: transport.applyOperations,
                 reloadLayout: transport.reloadLayout,
+                placementCandidates: transport.placementCandidates,
+                placementCandidatePreview:
+                    transport.placementCandidatePreview,
             });
 
         let workspace = null;
+        let spatialAdvisor = options.spatialAdvisor || null;
+        let ownsSpatialAdvisor = false;
         let destroyed = false;
         let loadReceipt = null;
         let error = null;
@@ -94,6 +121,20 @@
             const receipt = options.initialReceipt
                 || await transport.reloadLayout();
             if (destroyed) throw destroyedError();
+            if (!spatialAdvisor) {
+                const SpatialAdvisor = await resolveSpatialAdvisorRuntime(options);
+                if (destroyed) throw destroyedError();
+                if (SpatialAdvisor
+                        && typeof SpatialAdvisor.createSpatialAdvisor
+                            === 'function') {
+                    spatialAdvisor = SpatialAdvisor.createSpatialAdvisor({
+                        Worker: options.Worker,
+                        workerFactory: options.spatialWorkerFactory,
+                        workerUrl: options.spatialWorkerUrl,
+                    });
+                    ownsSpatialAdvisor = true;
+                }
+            }
             loadReceipt = receipt;
             session.load(loadReceipt);
             workspace = requireFunction(
@@ -113,6 +154,10 @@
                 marqueeResolver: options.marqueeResolver,
                 installPlanMarquee: options.installPlanMarquee,
                 commandIcons: options.commandIcons,
+                spatialAdvisor: spatialAdvisor,
+                ownsSpatialAdvisor: false,
+                useAuthoritativePlacementCandidates:
+                    options.useAuthoritativePlacementCandidates === true,
                 onStateChange: options.onStateChange,
                 onError: options.onError,
             });
@@ -139,6 +184,10 @@
                     loaded: Boolean(workspace),
                     error: error,
                     loadReceipt: clone(loadReceipt),
+                    spatialAdvisor: spatialAdvisor
+                        && typeof spatialAdvisor.getState === 'function'
+                        ? clone(spatialAdvisor.getState())
+                        : null,
                     workspace: workspace ? workspace.getState() : null,
                 };
             },
@@ -147,6 +196,12 @@
                 destroyed = true;
                 if (workspace) workspace.destroy();
                 workspace = null;
+                if (ownsSpatialAdvisor && spatialAdvisor
+                        && typeof spatialAdvisor.destroy === 'function') {
+                    spatialAdvisor.destroy();
+                }
+                spatialAdvisor = null;
+                ownsSpatialAdvisor = false;
                 loadReceipt = null;
                 return true;
             },

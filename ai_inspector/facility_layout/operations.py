@@ -583,6 +583,34 @@ def _op_set_position_mode(
     return [], [placement_id]
 
 
+def _op_set_snap_relationship(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    placement_id = _clean_id(operation.get("placementId"), "placementId", "pl")
+    placement = _find(
+        document,
+        "placements",
+        "placementId",
+        placement_id,
+        "Placement",
+    )
+    if placement.get("positionMode") == "locked":
+        _fail(
+            "locked_placement_movement",
+            f"Placement '{placement_id}' is locked.",
+        )
+    relationship = operation.get("snapRelationship")
+    placement["snapRelationship"] = (
+        None
+        if relationship is None
+        else _mapping(relationship, "snapRelationship")
+    )
+    return [], [placement_id]
+
+
 _Handler = Callable[
     [Dict[str, Any], Mapping[str, Any], int, str],
     Tuple[List[str], List[str]],
@@ -600,6 +628,7 @@ _HANDLERS: Dict[str, _Handler] = {
     "duplicate_placement": _op_duplicate_placement,
     "delete_placement": _op_delete_placement,
     "set_position_mode": _op_set_position_mode,
+    "set_snap_relationship": _op_set_snap_relationship,
 }
 
 

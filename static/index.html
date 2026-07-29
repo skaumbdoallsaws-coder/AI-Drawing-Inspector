@@ -27605,7 +27605,14 @@
                             THREE: facilityThree.THREE,
                             OrbitControls: facilityThree.OrbitControls,
                             GLTFLoader: facilityThree.GLTFLoader,
+                            worldBounds: bootstrap.worldBounds || null,
                         },
+                        spatialWorkerUrl:
+                            '/static/facility_layout_spatial_worker.js',
+                        useAuthoritativePlacementCandidates: Boolean(
+                            bootstrap.capabilities
+                            && bootstrap.capabilities.candidateSnapping
+                        ),
                         onError: error => {
                             console.warn('Facility Layout authoring error:', error);
                         },

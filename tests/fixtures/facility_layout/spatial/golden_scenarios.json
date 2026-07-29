@@ -1,0 +1,580 @@
+{
+  "assetDefinitions": [
+    {
+      "assetId": "asset-machine-golden",
+      "category": "machine",
+      "coordinateFrame": {
+        "allowedMountingSurfaces": [
+          "floor",
+          "foundation"
+        ],
+        "floorAnchor": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "geometry": {
+        "footprintPolygons": [
+          [
+            {
+              "x": -1.0,
+              "z": -1.0
+            },
+            {
+              "x": 1.0,
+              "z": -1.0
+            },
+            {
+              "x": 1.0,
+              "z": 1.0
+            },
+            {
+              "x": -1.0,
+              "z": 1.0
+            }
+          ]
+        ],
+        "heightInterval": {
+          "maximumY": 2.0,
+          "minimumY": 0.0
+        }
+      },
+      "collision": {
+        "geometry": {
+          "footprintIndex": 0
+        },
+        "verticalInterval": {
+          "maximumY": 2.0,
+          "minimumY": 0.0
+        }
+      },
+      "clearances": [
+        {
+          "clearanceId": "clearance-machine-safety",
+          "clearanceKind": "safety",
+          "enforcement": "hard",
+          "evidence": [
+            "ev-machine-clearance"
+          ],
+          "evidenceStatus": "authored",
+          "geometry": {
+            "maximum": {
+              "x": 1.5,
+              "z": 1.25
+            },
+            "minimum": {
+              "x": -1.25,
+              "z": -1.25
+            },
+            "shape": "rectangle"
+          }
+        }
+      ],
+      "loading": {
+        "contactLoads": [
+          {
+            "areaSquareMeters": 1.0,
+            "loadDistribution": "uniform",
+            "loadFraction": 1.0,
+            "evidence": [
+              "ev-machine-contact"
+            ],
+            "evidenceStatus": "derived"
+          }
+        ],
+        "supportPoints": [
+          {
+            "supportId": "support-machine-base",
+            "position": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "evidence": [
+              "ev-machine-support"
+            ],
+            "evidenceStatus": "derived"
+          }
+        ],
+        "dynamicLoadFactors": [
+          {
+            "loadCase": "operating",
+            "factor": 1.25,
+            "evidence": [
+              "ev-machine-dynamic-load"
+            ],
+            "evidenceStatus": "authored"
+          }
+        ],
+        "anchoringAssumptions": [
+          {
+            "assumption": "Rigidly anchored to the reviewed foundation.",
+            "evidence": [
+              "ev-machine-support"
+            ],
+            "evidenceStatus": "authored"
+          }
+        ],
+        "evidence": [
+          "ev-machine-mass",
+          "ev-machine-contact",
+          "ev-machine-support",
+          "ev-machine-dynamic-load"
+        ],
+        "installedMass": {
+          "evidence": [
+            "ev-machine-mass"
+          ],
+          "evidenceStatus": "authored",
+          "unit": "kg",
+          "value": 1000.0
+        },
+        "operatingMass": {
+          "evidence": [
+            "ev-machine-mass"
+          ],
+          "evidenceStatus": "authored",
+          "unit": "kg",
+          "value": 1200.0
+        }
+      }
+    },
+    {
+      "assetId": "asset-workstation-golden",
+      "category": "workstation",
+      "coordinateFrame": {
+        "allowedMountingSurfaces": [
+          "floor"
+        ],
+        "floorAnchor": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "geometry": {
+        "footprintPolygons": [
+          [
+            {
+              "x": -1.0,
+              "z": -1.0
+            },
+            {
+              "x": 1.0,
+              "z": -1.0
+            },
+            {
+              "x": 1.0,
+              "z": 1.0
+            },
+            {
+              "x": -1.0,
+              "z": 1.0
+            }
+          ]
+        ],
+        "heightInterval": {
+          "maximumY": 1.5,
+          "minimumY": 0.0
+        }
+      },
+      "collision": {
+        "geometry": {
+          "footprintIndex": 0
+        },
+        "verticalInterval": {
+          "maximumY": 1.5,
+          "minimumY": 0.0
+        }
+      },
+      "clearances": [
+        {
+          "clearanceId": "clearance-workstation-safety",
+          "clearanceKind": "safety",
+          "enforcement": "hard",
+          "evidence": [
+            "ev-workstation-clearance"
+          ],
+          "evidenceStatus": "derived",
+          "geometry": {
+            "maximum": {
+              "x": 1.1,
+              "z": 1.1
+            },
+            "minimum": {
+              "x": -1.1,
+              "z": -1.1
+            },
+            "shape": "rectangle"
+          }
+        }
+      ],
+      "loading": {
+        "contactLoads": [
+          {
+            "areaSquareMeters": 1.0,
+            "loadDistribution": "uniform",
+            "loadFraction": 1.0,
+            "evidence": [
+              "ev-workstation-contact"
+            ],
+            "evidenceStatus": "derived"
+          }
+        ],
+        "supportPoints": [
+          {
+            "supportId": "support-workstation-base",
+            "position": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "evidence": [
+              "ev-workstation-support"
+            ],
+            "evidenceStatus": "derived"
+          }
+        ],
+        "dynamicLoadFactors": [
+          {
+            "loadCase": "operating",
+            "factor": 1.0,
+            "evidence": [
+              "ev-workstation-dynamic-load"
+            ],
+            "evidenceStatus": "authored"
+          }
+        ],
+        "anchoringAssumptions": [
+          {
+            "assumption": "Freestanding on the reviewed floor surface.",
+            "evidence": [
+              "ev-workstation-support"
+            ],
+            "evidenceStatus": "authored"
+          }
+        ],
+        "evidence": [
+          "ev-workstation-mass",
+          "ev-workstation-contact",
+          "ev-workstation-support",
+          "ev-workstation-dynamic-load"
+        ],
+        "installedMass": {
+          "evidence": [
+            "ev-workstation-mass"
+          ],
+          "evidenceStatus": "authored",
+          "unit": "kg",
+          "value": 200.0
+        },
+        "operatingMass": {
+          "evidence": [
+            "ev-workstation-mass"
+          ],
+          "evidenceStatus": "authored",
+          "unit": "kg",
+          "value": 250.0
+        }
+      }
+    }
+  ],
+  "authority": {
+    "ev-floor-limit": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "authored"
+    },
+    "ev-machine-clearance": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "authored"
+    },
+    "ev-machine-contact": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "derived"
+    },
+    "ev-machine-dynamic-load": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "authored"
+    },
+    "ev-machine-mass": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "authored"
+    },
+    "ev-machine-support": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "derived"
+    },
+    "ev-workstation-clearance": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "derived"
+    },
+    "ev-workstation-contact": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "derived"
+    },
+    "ev-workstation-dynamic-load": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "authored"
+    },
+    "ev-workstation-mass": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "authored"
+    },
+    "ev-workstation-support": {
+      "authoritative": true,
+      "blockers": [],
+      "current": true,
+      "status": "derived"
+    }
+  },
+  "baseLayout": {
+    "coordinateFrame": {
+      "datumId": "golden-origin",
+      "floorAxes": [
+        "+X",
+        "+Z"
+      ],
+      "floorElevation": 0.0,
+      "handedness": "right",
+      "units": "m",
+      "upAxis": "+Y"
+    },
+    "layoutId": "fl-spatial-golden",
+    "placements": [
+      {
+        "assetDefinitionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "assetId": "asset-workstation-golden",
+        "metadata": {},
+        "placementId": "pl-obstacle",
+        "positionMode": "manual",
+        "snapRelationship": null,
+        "transform": {
+          "position": {
+            "x": 6.0,
+            "y": 0.0,
+            "z": 5.0
+          },
+          "quaternion": {
+            "w": 1.0,
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": 1
+        }
+      }
+    ],
+    "zones": [
+      {
+        "allowedAssetCategories": [
+          "machine",
+          "workstation"
+        ],
+        "anchors": [
+          {
+            "anchorId": "za-row-01",
+            "anchorKind": "row",
+            "position": {
+              "x": 3.0,
+              "y": 0.0,
+              "z": 12.0
+            }
+          },
+          {
+            "anchorId": "za-bay-01",
+            "anchorKind": "bay",
+            "position": {
+              "x": 12.0,
+              "y": 0.0,
+              "z": 3.0
+            }
+          },
+          {
+            "anchorId": "za-foundation-01",
+            "anchorKind": "foundation",
+            "position": {
+              "x": 15.0,
+              "y": 0.0,
+              "z": 15.0
+            }
+          }
+        ],
+        "boundary": [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 20.0,
+            "z": 0.0
+          },
+          {
+            "x": 20.0,
+            "z": 20.0
+          },
+          {
+            "x": 0.0,
+            "z": 20.0
+          }
+        ],
+        "evidence": [
+          "ev-floor-limit"
+        ],
+        "floorElevation": 0.0,
+        "gridSpacing": 0.5,
+        "heightLimit": 8.0,
+        "loadLimit": {
+          "evidence": [
+            "ev-floor-limit"
+          ],
+          "evidenceStatus": "authored",
+          "maximumKgPerSquareMeter": 2000.0,
+          "policyRuleRef": "rule-floor-load-capacity",
+          "ruleType": "maximum_floor_load"
+        },
+        "zoneId": "zn-golden-cell",
+        "zoneType": "workcell"
+      }
+    ]
+  },
+  "expected": {
+    "candidateFamilies": [
+      "alignment",
+      "bay",
+      "boundary",
+      "foundation",
+      "grid",
+      "row"
+    ],
+    "clearanceCollisionCodes": [
+      "safety_clearance_violation"
+    ],
+    "physicalCollisionCodes": [
+      "placement_collision"
+    ],
+    "unknownEvidenceCodes": [
+      "clearance_rule_unavailable",
+      "floor_load_unverified"
+    ]
+  },
+  "policySet": {
+    "policySetId": "policy-spatial-golden",
+    "deterministicRules": [
+      {
+        "ruleId": "rule-floor-load-capacity",
+        "ruleType": "maximum_floor_load",
+        "applicability": {
+          "assetCategories": [
+            "machine",
+            "workstation"
+          ],
+          "zoneTypes": [
+            "workcell"
+          ]
+        },
+        "parameters": {},
+        "evidence": [
+          "ev-floor-limit"
+        ]
+      }
+    ]
+  },
+  "shell": {
+    "coordinateFrame": {
+      "datumId": "golden-origin",
+      "floorAxes": [
+        "+X",
+        "+Z"
+      ],
+      "floorElevation": 0.0,
+      "handedness": "right",
+      "units": "m",
+      "upAxis": "+Y"
+    },
+    "features": [
+      {
+        "evidence": [
+          "ev-floor-limit"
+        ],
+        "featureId": "shell-floor-golden",
+        "featureKind": "floor_surface",
+        "geometry": {
+          "boundary": [
+            {
+              "x": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 20.0,
+              "z": 0.0
+            },
+            {
+              "x": 20.0,
+              "z": 20.0
+            },
+            {
+              "x": 0.0,
+              "z": 20.0
+            }
+          ],
+          "elevation": 0.0
+        }
+      },
+      {
+        "evidence": [
+          "ev-floor-limit"
+        ],
+        "featureId": "shell-foundation-golden",
+        "featureKind": "foundation",
+        "geometry": {
+          "boundary": [
+            {
+              "x": 14.0,
+              "z": 14.0
+            },
+            {
+              "x": 16.0,
+              "z": 14.0
+            },
+            {
+              "x": 16.0,
+              "z": 16.0
+            },
+            {
+              "x": 14.0,
+              "z": 16.0
+            }
+          ],
+          "elevation": 0.0,
+          "position": {
+            "x": 15.0,
+            "y": 0.0,
+            "z": 15.0
+          }
+        }
+      }
+    ],
+    "shellId": "shell-spatial-golden"
+  }
+}

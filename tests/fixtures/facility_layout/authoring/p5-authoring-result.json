@@ -180,19 +180,19 @@
           224,
           230
         ],
-        "changedPixelCount": 73571,
-        "changedPixelFraction": 0.10987306,
-        "height": 720,
+        "changedPixelCount": 66366,
+        "changedPixelFraction": 0.10372281,
+        "height": 688,
         "maximumDelta": 669,
         "nonblank": true,
         "width": 930
       },
-      "elementScreenshotSha256": "9333fbcf108e116387bdbf3fb1f246afa0b5981bc1df9b5e8b23d9fa58be3ced",
+      "elementScreenshotSha256": "434048fe81d81446f0952410cb4943768a0ef2cbcde5aecf21edd31e64160440",
       "webglReadback": {
         "available": true,
-        "changedPixelCount": 66830,
-        "changedPixelFraction": 0.09980585424133812,
-        "height": 720,
+        "changedPixelCount": 59625,
+        "changedPixelFraction": 0.09318735933983496,
+        "height": 688,
         "maximumDelta": 669,
         "width": 930
       }
@@ -213,7 +213,7 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 299,
+            "renderRequests": 300,
             "renderedFrames": 75
           },
           "disposed": true,
@@ -222,13 +222,13 @@
             "center": {
               "x": 8.674699992333519,
               "y": 2.43840003,
-              "z": 6
+              "z": 5.75
             },
             "rootUnchanged": true,
             "size": {
               "x": 11.877799927332962,
               "y": 4.87680006,
-              "z": 8.528399944
+              "z": 9.028399944
             }
           },
           "lifecycle": {
@@ -328,7 +328,7 @@
             "minimum": {
               "x": 2.7358000286670374,
               "y": 0,
-              "z": 1.735800028
+              "z": 1.235800028
             }
           }
         }
@@ -337,7 +337,7 @@
         "dom": {
           "assetRows": 1,
           "canvasCount": 1,
-          "p6Warning": "Collision, containment, and clearance validation arrives in P6.",
+          "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
           "p6WarningVisible": true,
           "planGhostCount": 0,
           "planSvgCount": 1,
@@ -483,14 +483,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -572,7 +572,7 @@
               }
             ]
           },
-          "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+          "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
           "busy": false,
           "camera": null,
           "canRedo": false,
@@ -709,14 +709,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -800,6 +800,7 @@
           },
           "loaded": true,
           "operations": [],
+          "placementAlternatives": null,
           "selection": []
         },
         "theme": {
@@ -811,14 +812,14 @@
           "assetGroupCount": 1,
           "camera": {
             "position": {
-              "x": 10.388260632886624,
-              "y": 8.229177482366296,
-              "z": 30.505058831187537
+              "x": 9.591983102068944,
+              "y": 7.887524688039356,
+              "z": 30.849133784747583
             },
             "target": {
               "x": 8.674699992333519,
               "y": 2.43840003,
-              "z": 6
+              "z": 5.75
             }
           },
           "contextLost": false,
@@ -826,7 +827,7 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 298,
+            "renderRequests": 299,
             "renderedFrames": 75
           },
           "disposed": false,
@@ -835,13 +836,13 @@
             "center": {
               "x": 8.674699992333519,
               "y": 2.43840003,
-              "z": 6
+              "z": 5.75
             },
             "rootUnchanged": true,
             "size": {
               "x": 11.877799927332962,
               "y": 4.87680006,
-              "z": 8.528399944
+              "z": 9.028399944
             }
           },
           "lifecycle": {
@@ -952,8 +953,8 @@
                 {
                   "meshIndex": 0,
                   "placementIds": [
-                    "pl-40067d443b44e5065a836edf",
                     "pl-78809c3ad22201fbb027e6ff",
+                    "pl-9cd3a1d36e081c7c182969b9",
                     "pl-p5-auto",
                     "pl-p5-locked",
                     "pl-p5-manual"
@@ -964,8 +965,8 @@
               "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|proxy",
               "meshCount": 1,
               "placementIds": [
-                "pl-40067d443b44e5065a836edf",
                 "pl-78809c3ad22201fbb027e6ff",
+                "pl-9cd3a1d36e081c7c182969b9",
                 "pl-p5-auto",
                 "pl-p5-locked",
                 "pl-p5-manual"
@@ -986,7 +987,7 @@
             "minimum": {
               "x": 2.7358000286670374,
               "y": 0,
-              "z": 1.735800028
+              "z": 1.235800028
             }
           }
         },
@@ -1000,18 +1001,18 @@
             "pl-p5-manual",
             "pl-p5-locked",
             "pl-78809c3ad22201fbb027e6ff",
-            "pl-40067d443b44e5065a836edf"
+            "pl-9cd3a1d36e081c7c182969b9"
           ],
           "projection": {
-            "height": 720,
+            "height": 688,
             "maxX": 15,
             "maxZ": 18,
             "minX": -1,
-            "minZ": 1.735800028,
-            "offsetX": 134.45807299128307,
+            "minZ": 1.235800028,
+            "offsetX": 159.58727475504014,
             "offsetY": 24,
             "padding": 24,
-            "scale": 41.317740876089616,
+            "scale": 38.17659065561998,
             "width": 930
           },
           "renderCount": 139,
@@ -1028,18 +1029,18 @@
           "applyCount": 1,
           "lastApplyCreatedIds": [
             "pl-0017606be9475906ff398b16",
-            "pl-40067d443b44e5065a836edf",
             "pl-78809c3ad22201fbb027e6ff",
             "pl-8eb6126cc5ef3bbb75b2cca7",
+            "pl-9cd3a1d36e081c7c182969b9",
             "zn-962c24c2f8b75b86b29490bd",
             "zn-99f3c010752345a7e7a4299f"
           ],
-          "lastApplyRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+          "lastApplyRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
           "lastPreviewCreatedIds": [
             "pl-0017606be9475906ff398b16",
-            "pl-40067d443b44e5065a836edf",
             "pl-78809c3ad22201fbb027e6ff",
             "pl-8eb6126cc5ef3bbb75b2cca7",
+            "pl-9cd3a1d36e081c7c182969b9",
             "zn-962c24c2f8b75b86b29490bd",
             "zn-99f3c010752345a7e7a4299f"
           ],
@@ -1058,6 +1059,7 @@
           "activeDrag": null,
           "apiVersion": 1,
           "destroyed": false,
+          "dragAdvisory": null,
           "gridSize": 0.5,
           "lastError": null,
           "polygonPointCount": 0,
@@ -1189,14 +1191,14 @@
                     "dragSessionId": "p5-browser-drag-002",
                     "instanceLabel": "Pallet Racking"
                   },
-                  "placementId": "pl-40067d443b44e5065a836edf",
+                  "placementId": "pl-9cd3a1d36e081c7c182969b9",
                   "positionMode": "manual",
                   "snapRelationship": null,
                   "transform": {
                     "position": {
                       "x": 9.5,
                       "y": 0,
-                      "z": 3
+                      "z": 2.5
                     },
                     "quaternion": {
                       "w": 1,
@@ -1278,7 +1280,7 @@
                 }
               ]
             },
-            "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+            "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
             "busy": false,
             "camera": null,
             "canRedo": false,
@@ -1415,14 +1417,14 @@
                     "dragSessionId": "p5-browser-drag-002",
                     "instanceLabel": "Pallet Racking"
                   },
-                  "placementId": "pl-40067d443b44e5065a836edf",
+                  "placementId": "pl-9cd3a1d36e081c7c182969b9",
                   "positionMode": "manual",
                   "snapRelationship": null,
                   "transform": {
                     "position": {
                       "x": 9.5,
                       "y": 0,
-                      "z": 3
+                      "z": 2.5
                     },
                     "quaternion": {
                       "w": 1,
@@ -1506,6 +1508,7 @@
             },
             "loaded": true,
             "operations": [],
+            "placementAlternatives": null,
             "selection": []
           },
           "toolMode": "polygon-zone",
@@ -1517,7 +1520,7 @@
       "dom": {
         "assetRows": 1,
         "canvasCount": 1,
-        "p6Warning": "Collision, containment, and clearance validation arrives in P6.",
+        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
         "p6WarningVisible": true,
         "planGhostCount": 0,
         "planSvgCount": 1,
@@ -1663,14 +1666,14 @@
                 "dragSessionId": "p5-browser-drag-002",
                 "instanceLabel": "Pallet Racking"
               },
-              "placementId": "pl-40067d443b44e5065a836edf",
+              "placementId": "pl-9cd3a1d36e081c7c182969b9",
               "positionMode": "manual",
               "snapRelationship": null,
               "transform": {
                 "position": {
                   "x": 9.5,
                   "y": 0,
-                  "z": 3
+                  "z": 2.5
                 },
                 "quaternion": {
                   "w": 1,
@@ -1752,7 +1755,7 @@
             }
           ]
         },
-        "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+        "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
         "busy": false,
         "camera": null,
         "canRedo": false,
@@ -1889,14 +1892,14 @@
                 "dragSessionId": "p5-browser-drag-002",
                 "instanceLabel": "Pallet Racking"
               },
-              "placementId": "pl-40067d443b44e5065a836edf",
+              "placementId": "pl-9cd3a1d36e081c7c182969b9",
               "positionMode": "manual",
               "snapRelationship": null,
               "transform": {
                 "position": {
                   "x": 9.5,
                   "y": 0,
-                  "z": 3
+                  "z": 2.5
                 },
                 "quaternion": {
                   "w": 1,
@@ -1980,6 +1983,7 @@
         },
         "loaded": true,
         "operations": [],
+        "placementAlternatives": null,
         "selection": []
       },
       "theme": {
@@ -1991,14 +1995,14 @@
         "assetGroupCount": 1,
         "camera": {
           "position": {
-            "x": 10.388260632886624,
-            "y": 8.229177482366296,
-            "z": 30.505058831187537
+            "x": 9.591983102068944,
+            "y": 7.887524688039356,
+            "z": 30.849133784747583
           },
           "target": {
             "x": 8.674699992333519,
             "y": 2.43840003,
-            "z": 6
+            "z": 5.75
           }
         },
         "contextLost": false,
@@ -2006,7 +2010,7 @@
         "degraded": false,
         "demandRendering": {
           "pendingFrame": false,
-          "renderRequests": 298,
+          "renderRequests": 299,
           "renderedFrames": 75
         },
         "disposed": false,
@@ -2015,13 +2019,13 @@
           "center": {
             "x": 8.674699992333519,
             "y": 2.43840003,
-            "z": 6
+            "z": 5.75
           },
           "rootUnchanged": true,
           "size": {
             "x": 11.877799927332962,
             "y": 4.87680006,
-            "z": 8.528399944
+            "z": 9.028399944
           }
         },
         "lifecycle": {
@@ -2132,8 +2136,8 @@
               {
                 "meshIndex": 0,
                 "placementIds": [
-                  "pl-40067d443b44e5065a836edf",
                   "pl-78809c3ad22201fbb027e6ff",
+                  "pl-9cd3a1d36e081c7c182969b9",
                   "pl-p5-auto",
                   "pl-p5-locked",
                   "pl-p5-manual"
@@ -2144,8 +2148,8 @@
             "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|proxy",
             "meshCount": 1,
             "placementIds": [
-              "pl-40067d443b44e5065a836edf",
               "pl-78809c3ad22201fbb027e6ff",
+              "pl-9cd3a1d36e081c7c182969b9",
               "pl-p5-auto",
               "pl-p5-locked",
               "pl-p5-manual"
@@ -2166,7 +2170,7 @@
           "minimum": {
             "x": 2.7358000286670374,
             "y": 0,
-            "z": 1.735800028
+            "z": 1.235800028
           }
         }
       },
@@ -2180,18 +2184,18 @@
           "pl-p5-manual",
           "pl-p5-locked",
           "pl-78809c3ad22201fbb027e6ff",
-          "pl-40067d443b44e5065a836edf"
+          "pl-9cd3a1d36e081c7c182969b9"
         ],
         "projection": {
-          "height": 720,
+          "height": 688,
           "maxX": 15,
           "maxZ": 18,
           "minX": -1,
-          "minZ": 1.735800028,
-          "offsetX": 134.45807299128307,
+          "minZ": 1.235800028,
+          "offsetX": 159.58727475504014,
           "offsetY": 24,
           "padding": 24,
-          "scale": 41.317740876089616,
+          "scale": 38.17659065561998,
           "width": 930
         },
         "renderCount": 139,
@@ -2208,18 +2212,18 @@
         "applyCount": 1,
         "lastApplyCreatedIds": [
           "pl-0017606be9475906ff398b16",
-          "pl-40067d443b44e5065a836edf",
           "pl-78809c3ad22201fbb027e6ff",
           "pl-8eb6126cc5ef3bbb75b2cca7",
+          "pl-9cd3a1d36e081c7c182969b9",
           "zn-962c24c2f8b75b86b29490bd",
           "zn-99f3c010752345a7e7a4299f"
         ],
-        "lastApplyRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+        "lastApplyRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
         "lastPreviewCreatedIds": [
           "pl-0017606be9475906ff398b16",
-          "pl-40067d443b44e5065a836edf",
           "pl-78809c3ad22201fbb027e6ff",
           "pl-8eb6126cc5ef3bbb75b2cca7",
+          "pl-9cd3a1d36e081c7c182969b9",
           "zn-962c24c2f8b75b86b29490bd",
           "zn-99f3c010752345a7e7a4299f"
         ],
@@ -2238,6 +2242,7 @@
         "activeDrag": null,
         "apiVersion": 1,
         "destroyed": false,
+        "dragAdvisory": null,
         "gridSize": 0.5,
         "lastError": null,
         "polygonPointCount": 0,
@@ -2369,14 +2374,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -2458,7 +2463,7 @@
               }
             ]
           },
-          "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+          "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
           "busy": false,
           "camera": null,
           "canRedo": false,
@@ -2595,14 +2600,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -2686,6 +2691,7 @@
           },
           "loaded": true,
           "operations": [],
+          "placementAlternatives": null,
           "selection": []
         },
         "toolMode": "polygon-zone",
@@ -2696,7 +2702,7 @@
       "dom": {
         "assetRows": 1,
         "canvasCount": 1,
-        "p6Warning": "Collision, containment, and clearance validation arrives in P6.",
+        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
         "p6WarningVisible": true,
         "planGhostCount": 0,
         "planSvgCount": 1,
@@ -2953,6 +2959,7 @@
         },
         "loaded": true,
         "operations": [],
+        "placementAlternatives": null,
         "selection": []
       },
       "theme": {
@@ -3150,13 +3157,13 @@
           "pl-p5-locked"
         ],
         "projection": {
-          "height": 720,
+          "height": 688,
           "maxX": 14.613599956,
           "maxZ": 9.264199972,
           "minX": 2.386400044,
           "minZ": 1.735800028,
           "offsetX": 23.999999999999943,
-          "offsetY": 88.47222592266058,
+          "offsetY": 72.47222592266058,
           "padding": 24,
           "scale": 72.13425856678674,
           "width": 930
@@ -3185,6 +3192,7 @@
         "activeDrag": null,
         "apiVersion": 1,
         "destroyed": false,
+        "dragAdvisory": null,
         "gridSize": 0.5,
         "lastError": null,
         "polygonPointCount": 0,
@@ -3427,6 +3435,7 @@
           },
           "loaded": true,
           "operations": [],
+          "placementAlternatives": null,
           "selection": []
         },
         "toolMode": "select",
@@ -3443,7 +3452,7 @@
     "persistence": {
       "appliedOperationCount": 14,
       "applyCalls": 1,
-      "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+      "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
       "before": {
         "association": {
           "areaId": "p5-cell",
@@ -3570,14 +3579,14 @@
               "dragSessionId": "p5-browser-drag-002",
               "instanceLabel": "Pallet Racking"
             },
-            "placementId": "pl-40067d443b44e5065a836edf",
+            "placementId": "pl-9cd3a1d36e081c7c182969b9",
             "positionMode": "manual",
             "snapRelationship": null,
             "transform": {
               "position": {
                 "x": 9.5,
                 "y": 0,
-                "z": 3
+                "z": 2.5
               },
               "quaternion": {
                 "w": 1,
@@ -3661,7 +3670,7 @@
       },
       "exact": true,
       "operationCount": 14,
-      "receiptRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+      "receiptRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
       "reopened": {
         "association": {
           "areaId": "p5-cell",
@@ -3788,14 +3797,14 @@
               "dragSessionId": "p5-browser-drag-002",
               "instanceLabel": "Pallet Racking"
             },
-            "placementId": "pl-40067d443b44e5065a836edf",
+            "placementId": "pl-9cd3a1d36e081c7c182969b9",
             "positionMode": "manual",
             "snapRelationship": null,
             "transform": {
               "position": {
                 "x": 9.5,
                 "y": 0,
-                "z": 3
+                "z": 2.5
               },
               "quaternion": {
                 "w": 1,
@@ -3948,10 +3957,10 @@
         ]
       },
       "fitChangedLayout": false,
-      "projectionDelta": 155.2129616092724,
+      "projectionDelta": 155.17607124147636,
       "viewport": {
-        "bottom": 706,
-        "height": 580,
+        "bottom": 673.5,
+        "height": 547.5,
         "left": 240,
         "right": 910,
         "top": 126,
@@ -4132,12 +4141,12 @@
         "z": 8.26
       },
       "targetClient": {
-        "x": 880.18722131462,
-        "y": 552.4347961331129
+        "x": 871.8449726805904,
+        "y": 532.9752524107352
       },
       "viewport": {
-        "bottom": 846,
-        "height": 720,
+        "bottom": 813.5,
+        "height": 687.5,
         "left": 240,
         "right": 1170,
         "top": 126,
@@ -4148,8 +4157,8 @@
     },
     "three": {
       "canvasRect": {
-        "bottom": 726,
-        "height": 600,
+        "bottom": 693.5,
+        "height": 567.5,
         "left": 240,
         "right": 990,
         "top": 126,
@@ -4161,12 +4170,12 @@
         "actualWorld": {
           "x": 9.5,
           "y": 0,
-          "z": 3
+          "z": 2.5
         },
         "expectedWorld": {
           "x": 9.5,
           "y": 0,
-          "z": 3
+          "z": 2.5
         },
         "ghost": {
           "layoutUnchanged": true,
@@ -4188,7 +4197,7 @@
             "worldPosition": {
               "x": 9.5,
               "y": 0,
-              "z": 3
+              "z": 2.5
             }
           },
           "threeGhostActive": true,
@@ -4204,43 +4213,43 @@
           "assetId": "asset-pallet-rack-185e9914e281",
           "dragSessionId": "p5-browser-drag-002"
         },
-        "placementId": "pl-40067d443b44e5065a836edf",
+        "placementId": "pl-9cd3a1d36e081c7c182969b9",
         "placementIdWasClientSupplied": false,
         "positionMode": "manual",
         "previewCreatedIds": [
           "pl-0017606be9475906ff398b16",
-          "pl-40067d443b44e5065a836edf",
           "pl-78809c3ad22201fbb027e6ff",
           "pl-8eb6126cc5ef3bbb75b2cca7",
+          "pl-9cd3a1d36e081c7c182969b9",
           "zn-962c24c2f8b75b86b29490bd",
           "zn-99f3c010752345a7e7a4299f"
         ]
       },
       "floorPoint": {
-        "x": 9.506601932270215,
+        "x": 9.667634685046615,
         "y": 0,
-        "z": 2.8902402873159367
+        "z": 2.677861685054147
       },
       "floorRoundTripError": 0,
-      "projectionDelta": 188.37058795880296,
+      "projectionDelta": 186.55272589290738,
       "renderedFrameDelta": 17,
       "stableClientAfterOrbit": {
-        "clientX": 460.56375703481285,
-        "clientY": 471.2085667273597,
+        "clientX": 464.78226505712075,
+        "clientY": 455.7190757030893,
         "ndc": {
-          "x": -0.411829981240499,
-          "y": -0.15069522242453243,
-          "z": 0.9984570940044324
+          "x": -0.4005806265143447,
+          "y": -0.16200555313864062,
+          "z": 0.998444587244833
         },
         "visible": true,
-        "x": 460.56375703481285,
-        "y": 471.2085667273597
+        "x": 464.78226505712075,
+        "y": 455.7190757030893
       }
     },
     "threePrepared": {
       "canvasRect": {
-        "bottom": 846,
-        "height": 720,
+        "bottom": 813.5,
+        "height": 687.5,
         "left": 240,
         "right": 1170,
         "top": 126,
@@ -4250,16 +4259,16 @@
       },
       "renderedFrames": 47,
       "stableClient": {
-        "clientX": 645.9033122068613,
-        "clientY": 437.5525465144419,
+        "clientX": 648.5298316643341,
+        "clientY": 423.48941073427613,
         "ndc": {
-          "x": -0.12708965116804025,
+          "x": -0.12144122222723845,
           "y": 0.13457625968210588,
           "z": 0.9985973292677561
         },
         "visible": true,
-        "x": 645.9033122068613,
-        "y": 437.5525465144419
+        "x": 648.5298316643341,
+        "y": 423.48941073427613
       },
       "stableWorld": {
         "x": 3,
@@ -4272,9 +4281,9 @@
     "desktop: Failed to load resource: the server responded with a status of 422 (Unprocessable Content)"
   ],
   "final": {
-    "layoutRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+    "layoutRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
     "placementCount": 5,
-    "revision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+    "revision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
     "zoneCount": 2
   },
   "finalLayout": {
@@ -4403,14 +4412,14 @@
           "dragSessionId": "p5-browser-drag-002",
           "instanceLabel": "Pallet Racking"
         },
-        "placementId": "pl-40067d443b44e5065a836edf",
+        "placementId": "pl-9cd3a1d36e081c7c182969b9",
         "positionMode": "manual",
         "snapRelationship": null,
         "transform": {
           "position": {
             "x": 9.5,
             "y": 0,
-            "z": 3
+            "z": 2.5
           },
           "quaternion": {
             "w": 1,
@@ -4527,13 +4536,13 @@
             "center": {
               "x": 8.674699992333519,
               "y": 2.43840003,
-              "z": 6
+              "z": 5.75
             },
             "rootUnchanged": true,
             "size": {
               "x": 11.877799927332962,
               "y": 4.87680006,
-              "z": 8.528399944
+              "z": 9.028399944
             }
           },
           "lifecycle": {
@@ -4633,7 +4642,7 @@
             "minimum": {
               "x": 2.7358000286670374,
               "y": 0,
-              "z": 1.735800028
+              "z": 1.235800028
             }
           }
         }
@@ -4642,7 +4651,7 @@
         "dom": {
           "assetRows": 1,
           "canvasCount": 1,
-          "p6Warning": "Collision, containment, and clearance validation arrives in P6.",
+          "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
           "p6WarningVisible": true,
           "planGhostCount": 0,
           "planSvgCount": 1,
@@ -4788,14 +4797,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -4877,7 +4886,7 @@
               }
             ]
           },
-          "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+          "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
           "busy": false,
           "camera": null,
           "canRedo": false,
@@ -5014,14 +5023,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -5105,6 +5114,7 @@
           },
           "loaded": true,
           "operations": [],
+          "placementAlternatives": null,
           "selection": []
         },
         "theme": {
@@ -5116,14 +5126,14 @@
           "assetGroupCount": 1,
           "camera": {
             "position": {
-              "x": 23.24598799181671,
-              "y": 17.009688029483193,
-              "z": 20.571287999483197
+              "x": 23.512724171076854,
+              "y": 17.276424208743343,
+              "z": 20.588024178743343
             },
             "target": {
               "x": 8.674699992333519,
               "y": 2.43840003,
-              "z": 6
+              "z": 5.75
             }
           },
           "contextLost": false,
@@ -5140,13 +5150,13 @@
             "center": {
               "x": 8.674699992333519,
               "y": 2.43840003,
-              "z": 6
+              "z": 5.75
             },
             "rootUnchanged": true,
             "size": {
               "x": 11.877799927332962,
               "y": 4.87680006,
-              "z": 8.528399944
+              "z": 9.028399944
             }
           },
           "lifecycle": {
@@ -5257,8 +5267,8 @@
                 {
                   "meshIndex": 0,
                   "placementIds": [
-                    "pl-40067d443b44e5065a836edf",
                     "pl-78809c3ad22201fbb027e6ff",
+                    "pl-9cd3a1d36e081c7c182969b9",
                     "pl-p5-auto",
                     "pl-p5-locked",
                     "pl-p5-manual"
@@ -5269,8 +5279,8 @@
               "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|proxy",
               "meshCount": 1,
               "placementIds": [
-                "pl-40067d443b44e5065a836edf",
                 "pl-78809c3ad22201fbb027e6ff",
+                "pl-9cd3a1d36e081c7c182969b9",
                 "pl-p5-auto",
                 "pl-p5-locked",
                 "pl-p5-manual"
@@ -5291,7 +5301,7 @@
             "minimum": {
               "x": 2.7358000286670374,
               "y": 0,
-              "z": 1.735800028
+              "z": 1.235800028
             }
           }
         },
@@ -5305,19 +5315,19 @@
             "pl-p5-manual",
             "pl-p5-locked",
             "pl-78809c3ad22201fbb027e6ff",
-            "pl-40067d443b44e5065a836edf"
+            "pl-9cd3a1d36e081c7c182969b9"
           ],
           "projection": {
-            "height": 654,
+            "height": 620,
             "maxX": 15,
             "maxZ": 18,
             "minX": -1,
-            "minZ": 1.735800028,
+            "minZ": 1.235800028,
             "offsetX": 24,
-            "offsetY": 214.16711269425,
+            "offsetY": 188.983431452125,
             "padding": 24,
-            "scale": 13.875,
-            "width": 270
+            "scale": 14.4375,
+            "width": 279
           },
           "renderCount": 16,
           "selection": null,
@@ -5343,6 +5353,7 @@
           "activeDrag": null,
           "apiVersion": 1,
           "destroyed": false,
+          "dragAdvisory": null,
           "gridSize": 0.5,
           "lastError": null,
           "polygonPointCount": 0,
@@ -5474,14 +5485,14 @@
                     "dragSessionId": "p5-browser-drag-002",
                     "instanceLabel": "Pallet Racking"
                   },
-                  "placementId": "pl-40067d443b44e5065a836edf",
+                  "placementId": "pl-9cd3a1d36e081c7c182969b9",
                   "positionMode": "manual",
                   "snapRelationship": null,
                   "transform": {
                     "position": {
                       "x": 9.5,
                       "y": 0,
-                      "z": 3
+                      "z": 2.5
                     },
                     "quaternion": {
                       "w": 1,
@@ -5563,7 +5574,7 @@
                 }
               ]
             },
-            "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+            "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
             "busy": false,
             "camera": null,
             "canRedo": false,
@@ -5700,14 +5711,14 @@
                     "dragSessionId": "p5-browser-drag-002",
                     "instanceLabel": "Pallet Racking"
                   },
-                  "placementId": "pl-40067d443b44e5065a836edf",
+                  "placementId": "pl-9cd3a1d36e081c7c182969b9",
                   "positionMode": "manual",
                   "snapRelationship": null,
                   "transform": {
                     "position": {
                       "x": 9.5,
                       "y": 0,
-                      "z": 3
+                      "z": 2.5
                     },
                     "quaternion": {
                       "w": 1,
@@ -5791,6 +5802,7 @@
             },
             "loaded": true,
             "operations": [],
+            "placementAlternatives": null,
             "selection": []
           },
           "toolMode": "select",
@@ -5829,14 +5841,14 @@
       },
       "pixels": {
         "available": true,
-        "changedPixelCount": 57157,
-        "changedPixelFraction": 0.323688979499377,
-        "height": 654,
+        "changedPixelCount": 51403,
+        "changedPixelFraction": 0.2971615215631865,
+        "height": 620,
         "maximumDelta": 375,
-        "width": 270
+        "width": 279
       },
-      "planWidth": 270,
-      "rootScrollWidth": 390,
+      "planWidth": 279.28125,
+      "rootScrollWidth": 399,
       "rootWidth": 390,
       "theme": {
         "background": "rgb(23, 32, 42)",
@@ -5849,7 +5861,7 @@
       "dom": {
         "assetRows": 1,
         "canvasCount": 1,
-        "p6Warning": "Collision, containment, and clearance validation arrives in P6.",
+        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
         "p6WarningVisible": true,
         "planGhostCount": 0,
         "planSvgCount": 1,
@@ -5995,14 +6007,14 @@
                 "dragSessionId": "p5-browser-drag-002",
                 "instanceLabel": "Pallet Racking"
               },
-              "placementId": "pl-40067d443b44e5065a836edf",
+              "placementId": "pl-9cd3a1d36e081c7c182969b9",
               "positionMode": "manual",
               "snapRelationship": null,
               "transform": {
                 "position": {
                   "x": 9.5,
                   "y": 0,
-                  "z": 3
+                  "z": 2.5
                 },
                 "quaternion": {
                   "w": 1,
@@ -6084,7 +6096,7 @@
             }
           ]
         },
-        "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+        "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
         "busy": false,
         "camera": null,
         "canRedo": false,
@@ -6221,14 +6233,14 @@
                 "dragSessionId": "p5-browser-drag-002",
                 "instanceLabel": "Pallet Racking"
               },
-              "placementId": "pl-40067d443b44e5065a836edf",
+              "placementId": "pl-9cd3a1d36e081c7c182969b9",
               "positionMode": "manual",
               "snapRelationship": null,
               "transform": {
                 "position": {
                   "x": 9.5,
                   "y": 0,
-                  "z": 3
+                  "z": 2.5
                 },
                 "quaternion": {
                   "w": 1,
@@ -6312,6 +6324,7 @@
         },
         "loaded": true,
         "operations": [],
+        "placementAlternatives": null,
         "selection": []
       },
       "theme": {
@@ -6323,14 +6336,14 @@
         "assetGroupCount": 1,
         "camera": {
           "position": {
-            "x": 23.24598799181671,
-            "y": 17.009688029483193,
-            "z": 20.571287999483197
+            "x": 23.512724171076854,
+            "y": 17.276424208743343,
+            "z": 20.588024178743343
           },
           "target": {
             "x": 8.674699992333519,
             "y": 2.43840003,
-            "z": 6
+            "z": 5.75
           }
         },
         "contextLost": false,
@@ -6347,13 +6360,13 @@
           "center": {
             "x": 8.674699992333519,
             "y": 2.43840003,
-            "z": 6
+            "z": 5.75
           },
           "rootUnchanged": true,
           "size": {
             "x": 11.877799927332962,
             "y": 4.87680006,
-            "z": 8.528399944
+            "z": 9.028399944
           }
         },
         "lifecycle": {
@@ -6464,8 +6477,8 @@
               {
                 "meshIndex": 0,
                 "placementIds": [
-                  "pl-40067d443b44e5065a836edf",
                   "pl-78809c3ad22201fbb027e6ff",
+                  "pl-9cd3a1d36e081c7c182969b9",
                   "pl-p5-auto",
                   "pl-p5-locked",
                   "pl-p5-manual"
@@ -6476,8 +6489,8 @@
             "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|proxy",
             "meshCount": 1,
             "placementIds": [
-              "pl-40067d443b44e5065a836edf",
               "pl-78809c3ad22201fbb027e6ff",
+              "pl-9cd3a1d36e081c7c182969b9",
               "pl-p5-auto",
               "pl-p5-locked",
               "pl-p5-manual"
@@ -6498,7 +6511,7 @@
           "minimum": {
             "x": 2.7358000286670374,
             "y": 0,
-            "z": 1.735800028
+            "z": 1.235800028
           }
         }
       },
@@ -6512,19 +6525,19 @@
           "pl-p5-manual",
           "pl-p5-locked",
           "pl-78809c3ad22201fbb027e6ff",
-          "pl-40067d443b44e5065a836edf"
+          "pl-9cd3a1d36e081c7c182969b9"
         ],
         "projection": {
-          "height": 654,
+          "height": 620,
           "maxX": 15,
           "maxZ": 18,
           "minX": -1,
-          "minZ": 1.735800028,
+          "minZ": 1.235800028,
           "offsetX": 24,
-          "offsetY": 214.16711269425,
+          "offsetY": 188.983431452125,
           "padding": 24,
-          "scale": 13.875,
-          "width": 270
+          "scale": 14.4375,
+          "width": 279
         },
         "renderCount": 16,
         "selection": null,
@@ -6550,6 +6563,7 @@
         "activeDrag": null,
         "apiVersion": 1,
         "destroyed": false,
+        "dragAdvisory": null,
         "gridSize": 0.5,
         "lastError": null,
         "polygonPointCount": 0,
@@ -6681,14 +6695,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -6770,7 +6784,7 @@
               }
             ]
           },
-          "baseRevision": "d0489bf4833fdc0b5eff1081c55672fc688e00e0ad0783bb5b4b5e91a6698bc6",
+          "baseRevision": "ad05eb79be0d4ff89ca5605552a9287cda2062c37e2df1ed4405e8f2aae969fc",
           "busy": false,
           "camera": null,
           "canRedo": false,
@@ -6907,14 +6921,14 @@
                   "dragSessionId": "p5-browser-drag-002",
                   "instanceLabel": "Pallet Racking"
                 },
-                "placementId": "pl-40067d443b44e5065a836edf",
+                "placementId": "pl-9cd3a1d36e081c7c182969b9",
                 "positionMode": "manual",
                 "snapRelationship": null,
                 "transform": {
                   "position": {
                     "x": 9.5,
                     "y": 0,
-                    "z": 3
+                    "z": 2.5
                   },
                   "quaternion": {
                     "w": 1,
@@ -6998,6 +7012,7 @@
           },
           "loaded": true,
           "operations": [],
+          "placementAlternatives": null,
           "selection": []
         },
         "toolMode": "select",
@@ -7011,7 +7026,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:58175/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:65100/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "failedRequests": [],
@@ -7019,7 +7034,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:58175/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:65100/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "offlineOnly": true,
@@ -7042,7 +7057,7 @@
   },
   "screenshots": {
     "desktop": {
-      "bytes": 37269,
+      "bytes": 41324,
       "channelSpans": [
         249,
         238,
@@ -7050,11 +7065,11 @@
       ],
       "height": 900,
       "path": "tests/fixtures/facility_layout/authoring/p5-authoring-desktop.png",
-      "sha256": "863a7d8a861eae65812c67559491c352a48831ec6b8b92e7973854ceead5ff62",
+      "sha256": "6ea8bd0af3c148c665040dda4083d00b6c379d92d9f5654081e814b70cbe23ef",
       "width": 1440
     },
     "mobile": {
-      "bytes": 16835,
+      "bytes": 19555,
       "channelSpans": [
         249,
         238,
@@ -7062,19 +7077,19 @@
       ],
       "height": 844,
       "path": "tests/fixtures/facility_layout/authoring/p5-authoring-mobile.png",
-      "sha256": "f602bf2164aae09cb698f45828342589e9f0c67850ce193abff1b5e7f55ec315",
+      "sha256": "46d3c97d569e4b1b4c4ffc418bbed900efe7b326679dda63a8f6f56e5ea83b20",
       "width": 390
     },
     "three": {
-      "bytes": 10705,
+      "bytes": 10208,
       "channelSpans": [
         251,
         252,
         253
       ],
-      "height": 720,
+      "height": 688,
       "path": "tests/fixtures/facility_layout/authoring/p5-authoring-three.png",
-      "sha256": "9333fbcf108e116387bdbf3fb1f246afa0b5981bc1df9b5e8b23d9fa58be3ced",
+      "sha256": "434048fe81d81446f0952410cb4943768a0ef2cbcde5aecf21edd31e64160440",
       "width": 930
     }
   },
@@ -7082,10 +7097,10 @@
     "assetCatalogSha256": "9dd60d2f319615c7107c60132eb88d1cc59c1103707b71aacf431ebce7975369",
     "authorityFixtureSha256": "9f199d55082a29b5ee415d68352f9d01d5688cddea3c4e24dac59e4a824f3e87",
     "facilityLayoutEditorSha256": "a332c05763f2cd7ba672e53d9cec96c76c01598437fee9cf404429baba4736c5",
-    "facilityLayoutSessionSha256": "94e211157c1bb29a604f2aae0981ac102067a98de1de5b7216a584553571e4ae",
+    "facilityLayoutSessionSha256": "7cca324888c53ac583d1636369de978994ae1dea9f7f1391f73219966c44f82b",
     "facilityLayoutWorkspaceCssSha256": "4d0c4cb6fb1ef1725a2de0a7789644158dc4d09892c59899326d415b43286b77",
-    "facilityLayoutWorkspaceSha256": "29ee73d04bf744f248e3856a7adb3650438f6ffa5b5052737224b3148e4b1227",
-    "facilityThreeAdapterSha256": "4bc577bca01355d68972fe59c221be2e497efefb1dd70a0e70bc3af383d0ab66",
+    "facilityLayoutWorkspaceSha256": "9973b8011a659616f58a70285e693c95a27f9c6661569d1d6224a49c981e5196",
+    "facilityThreeAdapterSha256": "b3a1627de9cc50d4f5c75bb444b79422ce3225a3145e5f51d7b877fec57e192e",
     "fixturePageSha256": "a078d77d2b6d64b8f85911198323eb7c35764b03da92a0cd59e6290ab7d7153a",
     "fixtureScriptSha256": "a6ee0561b19bdae8f42841b0b4d40815407e8a9d3984c43a02155a0ffac32920",
     "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
@@ -7093,7 +7108,7 @@
     "overviewGlbSha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14",
     "p4LayoutSeedSha256": "60892cb1ec25ba7f9b39446af4deea7c05868279063c181bfd68e54d22f3f772",
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
-    "verifierSha256": "af5152ecaad99dd90c93df4fa5361d0b42144b69d923093c1b35843d310aa7a6"
+    "verifierSha256": "6cfc0fccce3c0b344497e14612714d2e95dea5e2f149be9539b90213381b00e1"
   },
   "unexpectedConsoleErrors": []
 }

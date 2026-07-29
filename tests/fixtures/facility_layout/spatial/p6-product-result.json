@@ -1,0 +1,1741 @@
+{
+  "appUrl": "http://127.0.0.1:8036/",
+  "applied": {
+    "acceptedDirty": true,
+    "created": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "metadata": {},
+      "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+      "positionMode": "manual",
+      "snapRelationship": {
+        "family": "grid",
+        "gridSpacing": 0.25,
+        "spatialCandidate": {
+          "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+          "assetId": "asset-forklift",
+          "candidateId": "fsc-635601c0411412af0d81b416",
+          "candidatePolicyVersion": 1,
+          "enabledFamilies": [
+            "grid",
+            "boundary",
+            "row",
+            "bay",
+            "alignment",
+            "foundation"
+          ],
+          "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+          "maximumCandidates": 8,
+          "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+          "requestedPosition": {
+            "x": 12,
+            "y": 0,
+            "z": 10
+          },
+          "requestedQuaternion": null,
+          "spatialEngineVersion": 1
+        }
+      },
+      "transform": {
+        "position": {
+          "x": 12,
+          "y": 0,
+          "z": 10
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    },
+    "operation": {
+      "op": "place_asset",
+      "placement": {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "metadata": {},
+        "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+        "positionMode": "manual",
+        "snapRelationship": {
+          "family": "grid",
+          "gridSpacing": 0.25,
+          "spatialCandidate": {
+            "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+            "assetId": "asset-forklift",
+            "candidateId": "fsc-635601c0411412af0d81b416",
+            "candidatePolicyVersion": 1,
+            "enabledFamilies": [
+              "grid",
+              "boundary",
+              "row",
+              "bay",
+              "alignment",
+              "foundation"
+            ],
+            "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+            "maximumCandidates": 8,
+            "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+            "requestedPosition": {
+              "x": 12,
+              "y": 0,
+              "z": 10
+            },
+            "requestedQuaternion": null,
+            "spatialEngineVersion": 1
+          }
+        },
+        "transform": {
+          "position": {
+            "x": 12,
+            "y": 0,
+            "z": 10
+          },
+          "quaternion": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1
+        }
+      }
+    },
+    "operationCount": 1,
+    "reopenedBytes": "{\"association\":{\"areaId\":\"main\",\"siteId\":\"site-local\"},\"coordinateFrame\":{\"datumId\":\"local-origin\",\"floorAxes\":[\"+X\",\"+Z\"],\"floorElevation\":0,\"handedness\":\"right\",\"units\":\"m\",\"upAxis\":\"+Y\"},\"createdAt\":\"2026-07-29T17:40:07.141730Z\",\"dismissedSuggestions\":[],\"displayName\":\"Main Facility Layout\",\"layoutId\":\"fl-main\",\"placements\":[{\"assetDefinitionRevision\":\"553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6\",\"assetId\":\"asset-forklift\",\"metadata\":{},\"placementId\":\"pl-0acedb84d7e18d25eb50d9b2\",\"positionMode\":\"manual\",\"snapRelationship\":{\"family\":\"grid\",\"gridSpacing\":0.25,\"spatialCandidate\":{\"assetDefinitionRevision\":\"553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6\",\"assetId\":\"asset-forklift\",\"candidateId\":\"fsc-635601c0411412af0d81b416\",\"candidatePolicyVersion\":1,\"enabledFamilies\":[\"grid\",\"boundary\",\"row\",\"bay\",\"alignment\",\"foundation\"],\"layoutFingerprint\":\"1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a\",\"maximumCandidates\":8,\"obstacleFingerprint\":\"119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f\",\"requestedPosition\":{\"x\":12,\"y\":0,\"z\":10},\"requestedQuaternion\":null,\"spatialEngineVersion\":1}},\"transform\":{\"position\":{\"x\":12,\"y\":0,\"z\":10},\"quaternion\":{\"w\":1,\"x\":0,\"y\":0,\"z\":0},\"scale\":1}}],\"policySetRef\":{\"policySetId\":\"policy-local\",\"policySetRevision\":\"46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0\"},\"processBindings\":[],\"routes\":[],\"schemaVersion\":1,\"sourceShellRef\":{\"coordinateFrameFingerprint\":\"4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d\",\"shellId\":\"shell-local\",\"shellRevision\":\"736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f\"},\"status\":\"draft\",\"updatedAt\":\"2026-07-29T17:40:08.493732Z\",\"utilityNetworks\":[],\"zones\":[]}",
+    "reopenedDirty": false,
+    "reopenedLayout": {
+      "association": {
+        "areaId": "main",
+        "siteId": "site-local"
+      },
+      "coordinateFrame": {
+        "datumId": "local-origin",
+        "floorAxes": [
+          "+X",
+          "+Z"
+        ],
+        "floorElevation": 0,
+        "handedness": "right",
+        "units": "m",
+        "upAxis": "+Y"
+      },
+      "createdAt": "2026-07-29T17:40:07.141730Z",
+      "dismissedSuggestions": [],
+      "displayName": "Main Facility Layout",
+      "layoutId": "fl-main",
+      "placements": [
+        {
+          "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+          "assetId": "asset-forklift",
+          "metadata": {},
+          "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+          "positionMode": "manual",
+          "snapRelationship": {
+            "family": "grid",
+            "gridSpacing": 0.25,
+            "spatialCandidate": {
+              "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+              "assetId": "asset-forklift",
+              "candidateId": "fsc-635601c0411412af0d81b416",
+              "candidatePolicyVersion": 1,
+              "enabledFamilies": [
+                "grid",
+                "boundary",
+                "row",
+                "bay",
+                "alignment",
+                "foundation"
+              ],
+              "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+              "maximumCandidates": 8,
+              "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+              "requestedPosition": {
+                "x": 12,
+                "y": 0,
+                "z": 10
+              },
+              "requestedQuaternion": null,
+              "spatialEngineVersion": 1
+            }
+          },
+          "transform": {
+            "position": {
+              "x": 12,
+              "y": 0,
+              "z": 10
+            },
+            "quaternion": {
+              "w": 1,
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "scale": 1
+          }
+        }
+      ],
+      "policySetRef": {
+        "policySetId": "policy-local",
+        "policySetRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0"
+      },
+      "processBindings": [],
+      "routes": [],
+      "schemaVersion": 1,
+      "sourceShellRef": {
+        "coordinateFrameFingerprint": "4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d",
+        "shellId": "shell-local",
+        "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f"
+      },
+      "status": "draft",
+      "updatedAt": "2026-07-29T17:40:08.493732Z",
+      "utilityNetworks": [],
+      "zones": []
+    },
+    "reopenedPlacement": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "metadata": {},
+      "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+      "positionMode": "manual",
+      "snapRelationship": {
+        "family": "grid",
+        "gridSpacing": 0.25,
+        "spatialCandidate": {
+          "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+          "assetId": "asset-forklift",
+          "candidateId": "fsc-635601c0411412af0d81b416",
+          "candidatePolicyVersion": 1,
+          "enabledFamilies": [
+            "grid",
+            "boundary",
+            "row",
+            "bay",
+            "alignment",
+            "foundation"
+          ],
+          "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+          "maximumCandidates": 8,
+          "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+          "requestedPosition": {
+            "x": 12,
+            "y": 0,
+            "z": 10
+          },
+          "requestedQuaternion": null,
+          "spatialEngineVersion": 1
+        }
+      },
+      "transform": {
+        "position": {
+          "x": 12,
+          "y": 0,
+          "z": 10
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      }
+    },
+    "reopenedRevision": "7c3bc37db9a81a0875e4ba59786c58098e9c0e45090ad45a5331c82c533fb8b0",
+    "saveReceipt": {
+      "changed": true,
+      "dependencies": {
+        "assetRevisions": [
+          {
+            "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+            "assetId": "asset-forklift"
+          }
+        ],
+        "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+        "processMapRevisions": [],
+        "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+        "vehicleRevisions": []
+      },
+      "findings": [],
+      "isDefault": true,
+      "layout": {
+        "association": {
+          "areaId": "main",
+          "siteId": "site-local"
+        },
+        "coordinateFrame": {
+          "datumId": "local-origin",
+          "floorAxes": [
+            "+X",
+            "+Z"
+          ],
+          "floorElevation": 0,
+          "handedness": "right",
+          "units": "m",
+          "upAxis": "+Y"
+        },
+        "createdAt": "2026-07-29T17:40:07.141730Z",
+        "dismissedSuggestions": [],
+        "displayName": "Main Facility Layout",
+        "layoutId": "fl-main",
+        "placements": [
+          {
+            "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+            "assetId": "asset-forklift",
+            "metadata": {},
+            "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+            "positionMode": "manual",
+            "snapRelationship": {
+              "family": "grid",
+              "gridSpacing": 0.25,
+              "spatialCandidate": {
+                "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+                "assetId": "asset-forklift",
+                "candidateId": "fsc-635601c0411412af0d81b416",
+                "candidatePolicyVersion": 1,
+                "enabledFamilies": [
+                  "grid",
+                  "boundary",
+                  "row",
+                  "bay",
+                  "alignment",
+                  "foundation"
+                ],
+                "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+                "maximumCandidates": 8,
+                "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+                "requestedPosition": {
+                  "x": 12,
+                  "y": 0,
+                  "z": 10
+                },
+                "requestedQuaternion": null,
+                "spatialEngineVersion": 1
+              }
+            },
+            "transform": {
+              "position": {
+                "x": 12,
+                "y": 0,
+                "z": 10
+              },
+              "quaternion": {
+                "w": 1,
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "scale": 1
+            }
+          }
+        ],
+        "policySetRef": {
+          "policySetId": "policy-local",
+          "policySetRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0"
+        },
+        "processBindings": [],
+        "routes": [],
+        "schemaVersion": 1,
+        "sourceShellRef": {
+          "coordinateFrameFingerprint": "4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d",
+          "shellId": "shell-local",
+          "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f"
+        },
+        "status": "draft",
+        "updatedAt": "2026-07-29T17:40:08.493732Z",
+        "utilityNetworks": [],
+        "zones": []
+      },
+      "operationResult": {
+        "affectedIds": [
+          "pl-0acedb84d7e18d25eb50d9b2"
+        ],
+        "canonicalDiff": {
+          "afterRevision": "297d7928f360f83fb58a1a5e7fa5e9f07ebe1f11270ddd1dcef39706ff47c6f0",
+          "beforeRevision": "043607205df28bf2b3cde2a2c457226ca6b9850521809ac079c6fdb7bdf8e22d",
+          "changed": true,
+          "entries": [
+            {
+              "after": [
+                {
+                  "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+                  "assetId": "asset-forklift",
+                  "metadata": {},
+                  "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+                  "positionMode": "manual",
+                  "snapRelationship": {
+                    "family": "grid",
+                    "gridSpacing": 0.25,
+                    "spatialCandidate": {
+                      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+                      "assetId": "asset-forklift",
+                      "candidateId": "fsc-635601c0411412af0d81b416",
+                      "candidatePolicyVersion": 1,
+                      "enabledFamilies": [
+                        "grid",
+                        "boundary",
+                        "row",
+                        "bay",
+                        "alignment",
+                        "foundation"
+                      ],
+                      "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+                      "maximumCandidates": 8,
+                      "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+                      "requestedPosition": {
+                        "x": 12,
+                        "y": 0,
+                        "z": 10
+                      },
+                      "requestedQuaternion": null,
+                      "spatialEngineVersion": 1
+                    }
+                  },
+                  "transform": {
+                    "position": {
+                      "x": 12,
+                      "y": 0,
+                      "z": 10
+                    },
+                    "quaternion": {
+                      "w": 1,
+                      "x": 0,
+                      "y": 0,
+                      "z": 0
+                    },
+                    "scale": 1
+                  }
+                }
+              ],
+              "before": [],
+              "op": "replace",
+              "path": "/placements"
+            }
+          ],
+          "schemaVersion": 1
+        },
+        "changed": true,
+        "createdIds": [
+          "pl-0acedb84d7e18d25eb50d9b2"
+        ],
+        "diffHash": "56b3cbb7ae209e96e16990835b82f162b8b2ee66dd96640cbabb97746b9eba87",
+        "document": {
+          "association": {
+            "areaId": "main",
+            "siteId": "site-local"
+          },
+          "coordinateFrame": {
+            "datumId": "local-origin",
+            "floorAxes": [
+              "+X",
+              "+Z"
+            ],
+            "floorElevation": 0,
+            "handedness": "right",
+            "units": "m",
+            "upAxis": "+Y"
+          },
+          "createdAt": "2026-07-29T17:40:07.141730Z",
+          "dismissedSuggestions": [],
+          "displayName": "Main Facility Layout",
+          "layoutId": "fl-main",
+          "placements": [
+            {
+              "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+              "assetId": "asset-forklift",
+              "metadata": {},
+              "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+              "positionMode": "manual",
+              "snapRelationship": {
+                "family": "grid",
+                "gridSpacing": 0.25,
+                "spatialCandidate": {
+                  "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+                  "assetId": "asset-forklift",
+                  "candidateId": "fsc-635601c0411412af0d81b416",
+                  "candidatePolicyVersion": 1,
+                  "enabledFamilies": [
+                    "grid",
+                    "boundary",
+                    "row",
+                    "bay",
+                    "alignment",
+                    "foundation"
+                  ],
+                  "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+                  "maximumCandidates": 8,
+                  "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+                  "requestedPosition": {
+                    "x": 12,
+                    "y": 0,
+                    "z": 10
+                  },
+                  "requestedQuaternion": null,
+                  "spatialEngineVersion": 1
+                }
+              },
+              "transform": {
+                "position": {
+                  "x": 12,
+                  "y": 0,
+                  "z": 10
+                },
+                "quaternion": {
+                  "w": 1,
+                  "x": 0,
+                  "y": 0,
+                  "z": 0
+                },
+                "scale": 1
+              }
+            }
+          ],
+          "policySetRef": {
+            "policySetId": "policy-local",
+            "policySetRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0"
+          },
+          "processBindings": [],
+          "routes": [],
+          "schemaVersion": 1,
+          "sourceShellRef": {
+            "coordinateFrameFingerprint": "4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d",
+            "shellId": "shell-local",
+            "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f"
+          },
+          "status": "draft",
+          "updatedAt": "2026-07-29T17:40:07.141730Z",
+          "utilityNetworks": [],
+          "zones": []
+        },
+        "findings": [],
+        "operationResults": [
+          {
+            "affectedIds": [
+              "pl-0acedb84d7e18d25eb50d9b2"
+            ],
+            "createdIds": [
+              "pl-0acedb84d7e18d25eb50d9b2"
+            ],
+            "index": 0,
+            "op": "place_asset"
+          }
+        ],
+        "schemaVersion": 1,
+        "spatialDiagnostics": {
+          "findings": [
+            {
+              "code": "asset_planning_evidence_unavailable",
+              "details": {
+                "blockers": [
+                  "clearance_evidence_missing"
+                ]
+              },
+              "findingId": "fsf-79c0fcc8f273c7ccd73ccb50",
+              "findingType": "facility_spatial",
+              "message": "Asset is placement-ready but lacks reviewed planning evidence.",
+              "severity": "unverified",
+              "subjectRefs": [
+                "asset-forklift",
+                "pl-0acedb84d7e18d25eb50d9b2"
+              ]
+            },
+            {
+              "code": "clearance_rule_unavailable",
+              "details": {
+                "definedClearanceCount": 0
+              },
+              "findingId": "fsf-c6b7382196a37ab48a30b531",
+              "findingType": "facility_spatial",
+              "message": "Authoritative safety-clearance evidence is unavailable.",
+              "severity": "unverified",
+              "subjectRefs": [
+                "pl-0acedb84d7e18d25eb50d9b2"
+              ]
+            },
+            {
+              "code": "floor_load_unverified",
+              "details": {
+                "reason": "floor_capacity_missing"
+              },
+              "findingId": "fsf-f6f46ecaefa941e994b1eb8e",
+              "findingType": "facility_spatial",
+              "message": "Applicable floor capacity is not established.",
+              "severity": "unverified",
+              "subjectRefs": [
+                "pl-0acedb84d7e18d25eb50d9b2"
+              ]
+            },
+            {
+              "code": "policy_rule_unavailable",
+              "details": {
+                "sourceCode": "facility_policy_not_configured"
+              },
+              "findingId": "fsf-94a3361399c8d314c47b641d",
+              "findingType": "facility_spatial",
+              "message": "Site-specific clearance, egress, and safety policy has not been configured.",
+              "severity": "unverified",
+              "subjectRefs": [
+                "finding-local-policy-review",
+                "policy-local"
+              ]
+            },
+            {
+              "code": "policy_rule_unavailable",
+              "details": {
+                "reason": "applicable_policy_missing"
+              },
+              "findingId": "fsf-0400f8c839130ec33af827f1",
+              "findingType": "facility_spatial",
+              "message": "No supported authoritative policy rule applies to this placement.",
+              "severity": "unverified",
+              "subjectRefs": [
+                "pl-0acedb84d7e18d25eb50d9b2"
+              ]
+            },
+            {
+              "code": "shell_evidence_unavailable",
+              "details": {
+                "sourceCode": "local_shell_requires_site_review"
+              },
+              "findingId": "fsf-566fd99578594878b3056587",
+              "findingType": "facility_spatial",
+              "message": "Replace the starter floor boundary with reviewed site data before safety or installation decisions.",
+              "severity": "unverified",
+              "subjectRefs": [
+                "finding-local-shell-review",
+                "shell-local"
+              ]
+            }
+          ],
+          "metrics": {
+            "clearanceConflicts": 0,
+            "errorCount": 0,
+            "indexedPolygonCount": 1,
+            "placementCollisions": 0,
+            "placementCount": 1,
+            "shellObstacleCollisions": 0,
+            "unverifiedCount": 6,
+            "warningCount": 0
+          },
+          "safe": false,
+          "safetyStatus": "unverified",
+          "spatialEngineVersion": 1,
+          "valid": true,
+          "zoneMembership": {
+            "pl-0acedb84d7e18d25eb50d9b2": []
+          }
+        }
+      },
+      "readOnly": false,
+      "revision": "7c3bc37db9a81a0875e4ba59786c58098e9c0e45090ad45a5331c82c533fb8b0",
+      "spatialDiagnostics": {
+        "findings": [
+          {
+            "code": "asset_planning_evidence_unavailable",
+            "details": {
+              "blockers": [
+                "clearance_evidence_missing"
+              ]
+            },
+            "findingId": "fsf-79c0fcc8f273c7ccd73ccb50",
+            "findingType": "facility_spatial",
+            "message": "Asset is placement-ready but lacks reviewed planning evidence.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "asset-forklift",
+              "pl-0acedb84d7e18d25eb50d9b2"
+            ]
+          },
+          {
+            "code": "clearance_rule_unavailable",
+            "details": {
+              "definedClearanceCount": 0
+            },
+            "findingId": "fsf-c6b7382196a37ab48a30b531",
+            "findingType": "facility_spatial",
+            "message": "Authoritative safety-clearance evidence is unavailable.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-0acedb84d7e18d25eb50d9b2"
+            ]
+          },
+          {
+            "code": "floor_load_unverified",
+            "details": {
+              "reason": "floor_capacity_missing"
+            },
+            "findingId": "fsf-f6f46ecaefa941e994b1eb8e",
+            "findingType": "facility_spatial",
+            "message": "Applicable floor capacity is not established.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-0acedb84d7e18d25eb50d9b2"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "sourceCode": "facility_policy_not_configured"
+            },
+            "findingId": "fsf-94a3361399c8d314c47b641d",
+            "findingType": "facility_spatial",
+            "message": "Site-specific clearance, egress, and safety policy has not been configured.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-policy-review",
+              "policy-local"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "reason": "applicable_policy_missing"
+            },
+            "findingId": "fsf-0400f8c839130ec33af827f1",
+            "findingType": "facility_spatial",
+            "message": "No supported authoritative policy rule applies to this placement.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-0acedb84d7e18d25eb50d9b2"
+            ]
+          },
+          {
+            "code": "shell_evidence_unavailable",
+            "details": {
+              "sourceCode": "local_shell_requires_site_review"
+            },
+            "findingId": "fsf-566fd99578594878b3056587",
+            "findingType": "facility_spatial",
+            "message": "Replace the starter floor boundary with reviewed site data before safety or installation decisions.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-shell-review",
+              "shell-local"
+            ]
+          }
+        ],
+        "metrics": {
+          "clearanceConflicts": 0,
+          "errorCount": 0,
+          "indexedPolygonCount": 1,
+          "placementCollisions": 0,
+          "placementCount": 1,
+          "shellObstacleCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        },
+        "safe": false,
+        "safetyStatus": "unverified",
+        "spatialEngineVersion": 1,
+        "valid": true,
+        "zoneMembership": {
+          "pl-0acedb84d7e18d25eb50d9b2": []
+        }
+      }
+    },
+    "savedBytes": "{\"association\":{\"areaId\":\"main\",\"siteId\":\"site-local\"},\"coordinateFrame\":{\"datumId\":\"local-origin\",\"floorAxes\":[\"+X\",\"+Z\"],\"floorElevation\":0,\"handedness\":\"right\",\"units\":\"m\",\"upAxis\":\"+Y\"},\"createdAt\":\"2026-07-29T17:40:07.141730Z\",\"dismissedSuggestions\":[],\"displayName\":\"Main Facility Layout\",\"layoutId\":\"fl-main\",\"placements\":[{\"placementId\":\"pl-0acedb84d7e18d25eb50d9b2\",\"assetId\":\"asset-forklift\",\"assetDefinitionRevision\":\"553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6\",\"transform\":{\"position\":{\"x\":12,\"y\":0,\"z\":10},\"quaternion\":{\"x\":0,\"y\":0,\"z\":0,\"w\":1},\"scale\":1},\"positionMode\":\"manual\",\"snapRelationship\":{\"family\":\"grid\",\"gridSpacing\":0.25,\"spatialCandidate\":{\"candidateId\":\"fsc-635601c0411412af0d81b416\",\"layoutFingerprint\":\"1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a\",\"obstacleFingerprint\":\"119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f\",\"assetId\":\"asset-forklift\",\"assetDefinitionRevision\":\"553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6\",\"requestedPosition\":{\"x\":12,\"y\":0,\"z\":10},\"requestedQuaternion\":null,\"enabledFamilies\":[\"grid\",\"boundary\",\"row\",\"bay\",\"alignment\",\"foundation\"],\"maximumCandidates\":8,\"spatialEngineVersion\":1,\"candidatePolicyVersion\":1}},\"metadata\":{}}],\"policySetRef\":{\"policySetId\":\"policy-local\",\"policySetRevision\":\"46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0\"},\"processBindings\":[],\"routes\":[],\"schemaVersion\":1,\"sourceShellRef\":{\"coordinateFrameFingerprint\":\"4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d\",\"shellId\":\"shell-local\",\"shellRevision\":\"736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f\"},\"status\":\"draft\",\"updatedAt\":\"2026-07-29T17:40:08.493732Z\",\"utilityNetworks\":[],\"zones\":[]}",
+    "savedLayout": {
+      "association": {
+        "areaId": "main",
+        "siteId": "site-local"
+      },
+      "coordinateFrame": {
+        "datumId": "local-origin",
+        "floorAxes": [
+          "+X",
+          "+Z"
+        ],
+        "floorElevation": 0,
+        "handedness": "right",
+        "units": "m",
+        "upAxis": "+Y"
+      },
+      "createdAt": "2026-07-29T17:40:07.141730Z",
+      "dismissedSuggestions": [],
+      "displayName": "Main Facility Layout",
+      "layoutId": "fl-main",
+      "placements": [
+        {
+          "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+          "assetId": "asset-forklift",
+          "metadata": {},
+          "placementId": "pl-0acedb84d7e18d25eb50d9b2",
+          "positionMode": "manual",
+          "snapRelationship": {
+            "family": "grid",
+            "gridSpacing": 0.25,
+            "spatialCandidate": {
+              "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+              "assetId": "asset-forklift",
+              "candidateId": "fsc-635601c0411412af0d81b416",
+              "candidatePolicyVersion": 1,
+              "enabledFamilies": [
+                "grid",
+                "boundary",
+                "row",
+                "bay",
+                "alignment",
+                "foundation"
+              ],
+              "layoutFingerprint": "1490bf9ba5a6e5e78b993ba7117b0a5215b89a0a68a6939ad6c7fab74837880a",
+              "maximumCandidates": 8,
+              "obstacleFingerprint": "119ea7be2488f25ca57ef98437995dea52f88198579790c1563ab67876dc670f",
+              "requestedPosition": {
+                "x": 12,
+                "y": 0,
+                "z": 10
+              },
+              "requestedQuaternion": null,
+              "spatialEngineVersion": 1
+            }
+          },
+          "transform": {
+            "position": {
+              "x": 12,
+              "y": 0,
+              "z": 10
+            },
+            "quaternion": {
+              "w": 1,
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "scale": 1
+          }
+        }
+      ],
+      "policySetRef": {
+        "policySetId": "policy-local",
+        "policySetRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0"
+      },
+      "processBindings": [],
+      "routes": [],
+      "schemaVersion": 1,
+      "sourceShellRef": {
+        "coordinateFrameFingerprint": "4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d",
+        "shellId": "shell-local",
+        "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f"
+      },
+      "status": "draft",
+      "updatedAt": "2026-07-29T17:40:08.493732Z",
+      "utilityNetworks": [],
+      "zones": []
+    },
+    "savedRevision": "7c3bc37db9a81a0875e4ba59786c58098e9c0e45090ad45a5331c82c533fb8b0",
+    "selected": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "beforeAfterMetrics": {
+        "after": {
+          "clearanceConflicts": 0,
+          "distanceFromRequested": 0,
+          "errorCount": 0,
+          "physicalCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        },
+        "before": {
+          "clearanceConflicts": 0,
+          "distanceFromRequested": 0,
+          "errorCount": 0,
+          "physicalCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        }
+      },
+      "candidateId": "fsc-635601c0411412af0d81b416",
+      "family": "grid",
+      "findings": [
+        {
+          "code": "asset_planning_evidence_unavailable",
+          "details": {
+            "blockers": [
+              "clearance_evidence_missing"
+            ]
+          },
+          "findingId": "fsf-bd86a8c9c0e84d0ad72bbc1a",
+          "findingType": "facility_spatial",
+          "message": "Asset is placement-ready but lacks reviewed planning evidence.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "asset-forklift",
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "clearance_rule_unavailable",
+          "details": {
+            "definedClearanceCount": 0
+          },
+          "findingId": "fsf-d1279269a71f6f70746e0e8b",
+          "findingType": "facility_spatial",
+          "message": "Authoritative safety-clearance evidence is unavailable.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "floor_load_unverified",
+          "details": {
+            "reason": "floor_capacity_missing"
+          },
+          "findingId": "fsf-f82acfcf9afb394fceacff36",
+          "findingType": "facility_spatial",
+          "message": "Applicable floor capacity is not established.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "policy_rule_unavailable",
+          "details": {
+            "sourceCode": "facility_policy_not_configured"
+          },
+          "findingId": "fsf-94a3361399c8d314c47b641d",
+          "findingType": "facility_spatial",
+          "message": "Site-specific clearance, egress, and safety policy has not been configured.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "finding-local-policy-review",
+            "policy-local"
+          ]
+        },
+        {
+          "code": "policy_rule_unavailable",
+          "details": {
+            "reason": "applicable_policy_missing"
+          },
+          "findingId": "fsf-90c2d38e547f83fcadf5ea15",
+          "findingType": "facility_spatial",
+          "message": "No supported authoritative policy rule applies to this placement.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "shell_evidence_unavailable",
+          "details": {
+            "sourceCode": "local_shell_requires_site_review"
+          },
+          "findingId": "fsf-566fd99578594878b3056587",
+          "findingType": "facility_spatial",
+          "message": "Replace the starter floor boundary with reviewed site data before safety or installation decisions.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "finding-local-shell-review",
+            "shell-local"
+          ]
+        }
+      ],
+      "metrics": {
+        "clearanceConflicts": 0,
+        "distanceFromRequested": 0,
+        "errorCount": 0,
+        "physicalCollisions": 0,
+        "unverifiedCount": 6,
+        "warningCount": 0
+      },
+      "operations": null,
+      "safe": false,
+      "safetyStatus": "unverified",
+      "summary": "",
+      "transform": {
+        "position": {
+          "x": 12,
+          "y": 0,
+          "z": 10
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      },
+      "valid": true
+    }
+  },
+  "checks": {
+    "accept_is_one_exact_operation": true,
+    "alternatives_cycle": true,
+    "candidate_ids_are_deterministic": true,
+    "dismiss_is_byte_identical": true,
+    "ghost_preview_is_transient": true,
+    "no_console_errors": true,
+    "no_failed_responses": true,
+    "no_page_errors": true,
+    "safety_is_explicitly_unverified": true,
+    "save_is_one_atomic_apply": true,
+    "save_reopen_is_exact": true,
+    "three_uses_facility_world_bounds": true
+  },
+  "dismissed": {
+    "afterBytes": "{\"association\":{\"areaId\":\"main\",\"siteId\":\"site-local\"},\"coordinateFrame\":{\"datumId\":\"local-origin\",\"floorAxes\":[\"+X\",\"+Z\"],\"floorElevation\":0,\"handedness\":\"right\",\"units\":\"m\",\"upAxis\":\"+Y\"},\"createdAt\":\"2026-07-29T17:40:07.141730Z\",\"dismissedSuggestions\":[],\"displayName\":\"Main Facility Layout\",\"layoutId\":\"fl-main\",\"placements\":[],\"policySetRef\":{\"policySetId\":\"policy-local\",\"policySetRevision\":\"46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0\"},\"processBindings\":[],\"routes\":[],\"schemaVersion\":1,\"sourceShellRef\":{\"coordinateFrameFingerprint\":\"4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d\",\"shellId\":\"shell-local\",\"shellRevision\":\"736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f\"},\"status\":\"draft\",\"updatedAt\":\"2026-07-29T17:40:07.141730Z\",\"utilityNetworks\":[],\"zones\":[]}",
+    "baseRevision": "043607205df28bf2b3cde2a2c457226ca6b9850521809ac079c6fdb7bdf8e22d",
+    "beforeBytes": "{\"association\":{\"areaId\":\"main\",\"siteId\":\"site-local\"},\"coordinateFrame\":{\"datumId\":\"local-origin\",\"floorAxes\":[\"+X\",\"+Z\"],\"floorElevation\":0,\"handedness\":\"right\",\"units\":\"m\",\"upAxis\":\"+Y\"},\"createdAt\":\"2026-07-29T17:40:07.141730Z\",\"dismissedSuggestions\":[],\"displayName\":\"Main Facility Layout\",\"layoutId\":\"fl-main\",\"placements\":[],\"policySetRef\":{\"policySetId\":\"policy-local\",\"policySetRevision\":\"46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0\"},\"processBindings\":[],\"routes\":[],\"schemaVersion\":1,\"sourceShellRef\":{\"coordinateFrameFingerprint\":\"4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d\",\"shellId\":\"shell-local\",\"shellRevision\":\"736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f\"},\"status\":\"draft\",\"updatedAt\":\"2026-07-29T17:40:07.141730Z\",\"utilityNetworks\":[],\"zones\":[]}",
+    "cycledGhost": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "metadata": {
+        "authority": "server-authoritative",
+        "candidateCount": 1,
+        "candidateId": "fsc-635601c0411412af0d81b416",
+        "candidateIndex": 0,
+        "family": "grid",
+        "findings": [
+          {
+            "code": "asset_planning_evidence_unavailable",
+            "details": {
+              "blockers": [
+                "clearance_evidence_missing"
+              ]
+            },
+            "findingId": "fsf-bd86a8c9c0e84d0ad72bbc1a",
+            "findingType": "facility_spatial",
+            "message": "Asset is placement-ready but lacks reviewed planning evidence.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "asset-forklift",
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "clearance_rule_unavailable",
+            "details": {
+              "definedClearanceCount": 0
+            },
+            "findingId": "fsf-d1279269a71f6f70746e0e8b",
+            "findingType": "facility_spatial",
+            "message": "Authoritative safety-clearance evidence is unavailable.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "floor_load_unverified",
+            "details": {
+              "reason": "floor_capacity_missing"
+            },
+            "findingId": "fsf-f82acfcf9afb394fceacff36",
+            "findingType": "facility_spatial",
+            "message": "Applicable floor capacity is not established.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "sourceCode": "facility_policy_not_configured"
+            },
+            "findingId": "fsf-94a3361399c8d314c47b641d",
+            "findingType": "facility_spatial",
+            "message": "Site-specific clearance, egress, and safety policy has not been configured.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-policy-review",
+              "policy-local"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "reason": "applicable_policy_missing"
+            },
+            "findingId": "fsf-90c2d38e547f83fcadf5ea15",
+            "findingType": "facility_spatial",
+            "message": "No supported authoritative policy rule applies to this placement.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "shell_evidence_unavailable",
+            "details": {
+              "sourceCode": "local_shell_requires_site_review"
+            },
+            "findingId": "fsf-566fd99578594878b3056587",
+            "findingType": "facility_spatial",
+            "message": "Replace the starter floor boundary with reviewed site data before safety or installation decisions.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-shell-review",
+              "shell-local"
+            ]
+          }
+        ],
+        "metrics": {
+          "clearanceConflicts": 0,
+          "distanceFromRequested": 0,
+          "errorCount": 0,
+          "physicalCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        },
+        "previewKind": "authoritative-placement-candidate",
+        "safetyStatus": "unverified",
+        "summary": ""
+      },
+      "quaternion": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": 1,
+      "valid": true,
+      "worldPosition": {
+        "x": 12,
+        "y": 0,
+        "z": 10
+      }
+    },
+    "dirtyAfter": false,
+    "dirtyBefore": false,
+    "firstGhost": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "metadata": {
+        "authority": "server-authoritative",
+        "candidateCount": 1,
+        "candidateId": "fsc-635601c0411412af0d81b416",
+        "candidateIndex": 0,
+        "family": "grid",
+        "findings": [
+          {
+            "code": "asset_planning_evidence_unavailable",
+            "details": {
+              "blockers": [
+                "clearance_evidence_missing"
+              ]
+            },
+            "findingId": "fsf-bd86a8c9c0e84d0ad72bbc1a",
+            "findingType": "facility_spatial",
+            "message": "Asset is placement-ready but lacks reviewed planning evidence.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "asset-forklift",
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "clearance_rule_unavailable",
+            "details": {
+              "definedClearanceCount": 0
+            },
+            "findingId": "fsf-d1279269a71f6f70746e0e8b",
+            "findingType": "facility_spatial",
+            "message": "Authoritative safety-clearance evidence is unavailable.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "floor_load_unverified",
+            "details": {
+              "reason": "floor_capacity_missing"
+            },
+            "findingId": "fsf-f82acfcf9afb394fceacff36",
+            "findingType": "facility_spatial",
+            "message": "Applicable floor capacity is not established.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "sourceCode": "facility_policy_not_configured"
+            },
+            "findingId": "fsf-94a3361399c8d314c47b641d",
+            "findingType": "facility_spatial",
+            "message": "Site-specific clearance, egress, and safety policy has not been configured.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-policy-review",
+              "policy-local"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "reason": "applicable_policy_missing"
+            },
+            "findingId": "fsf-90c2d38e547f83fcadf5ea15",
+            "findingType": "facility_spatial",
+            "message": "No supported authoritative policy rule applies to this placement.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "shell_evidence_unavailable",
+            "details": {
+              "sourceCode": "local_shell_requires_site_review"
+            },
+            "findingId": "fsf-566fd99578594878b3056587",
+            "findingType": "facility_spatial",
+            "message": "Replace the starter floor boundary with reviewed site data before safety or installation decisions.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-shell-review",
+              "shell-local"
+            ]
+          }
+        ],
+        "metrics": {
+          "clearanceConflicts": 0,
+          "distanceFromRequested": 0,
+          "errorCount": 0,
+          "physicalCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        },
+        "previewKind": "authoritative-placement-candidate",
+        "safetyStatus": "unverified",
+        "summary": ""
+      },
+      "quaternion": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": 1,
+      "valid": true,
+      "worldPosition": {
+        "x": 12,
+        "y": 0,
+        "z": 10
+      }
+    },
+    "firstIds": [
+      "fsc-635601c0411412af0d81b416"
+    ],
+    "request": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "maximumCandidates": 8,
+      "requestedPosition": {
+        "x": 12,
+        "y": 0,
+        "z": 10
+      }
+    }
+  },
+  "errors": {
+    "console": [],
+    "page": []
+  },
+  "network": {
+    "failedResponses": [],
+    "mutationResponses": [
+      {
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:8036/api/facility-layouts/site-local/fl-main/spatial/candidates"
+      },
+      {
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:8036/api/facility-layouts/site-local/fl-main/spatial/candidates"
+      },
+      {
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:8036/api/facility-layouts/site-local/fl-main/spatial/candidates/preview"
+      },
+      {
+        "method": "POST",
+        "status": 200,
+        "url": "http://127.0.0.1:8036/api/facility-layouts/site-local/fl-main/preview"
+      },
+      {
+        "method": "PUT",
+        "status": 200,
+        "url": "http://127.0.0.1:8036/api/facility-layouts/site-local/fl-main"
+      }
+    ]
+  },
+  "passed": true,
+  "proposal": {
+    "candidateIds": [
+      "fsc-635601c0411412af0d81b416"
+    ],
+    "dirty": false,
+    "ghost": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "metadata": {
+        "authority": "server-authoritative",
+        "candidateCount": 1,
+        "candidateId": "fsc-635601c0411412af0d81b416",
+        "candidateIndex": 0,
+        "family": "grid",
+        "findings": [
+          {
+            "code": "asset_planning_evidence_unavailable",
+            "details": {
+              "blockers": [
+                "clearance_evidence_missing"
+              ]
+            },
+            "findingId": "fsf-bd86a8c9c0e84d0ad72bbc1a",
+            "findingType": "facility_spatial",
+            "message": "Asset is placement-ready but lacks reviewed planning evidence.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "asset-forklift",
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "clearance_rule_unavailable",
+            "details": {
+              "definedClearanceCount": 0
+            },
+            "findingId": "fsf-d1279269a71f6f70746e0e8b",
+            "findingType": "facility_spatial",
+            "message": "Authoritative safety-clearance evidence is unavailable.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "floor_load_unverified",
+            "details": {
+              "reason": "floor_capacity_missing"
+            },
+            "findingId": "fsf-f82acfcf9afb394fceacff36",
+            "findingType": "facility_spatial",
+            "message": "Applicable floor capacity is not established.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "sourceCode": "facility_policy_not_configured"
+            },
+            "findingId": "fsf-94a3361399c8d314c47b641d",
+            "findingType": "facility_spatial",
+            "message": "Site-specific clearance, egress, and safety policy has not been configured.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-policy-review",
+              "policy-local"
+            ]
+          },
+          {
+            "code": "policy_rule_unavailable",
+            "details": {
+              "reason": "applicable_policy_missing"
+            },
+            "findingId": "fsf-90c2d38e547f83fcadf5ea15",
+            "findingType": "facility_spatial",
+            "message": "No supported authoritative policy rule applies to this placement.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "pl-spatial-candidate"
+            ]
+          },
+          {
+            "code": "shell_evidence_unavailable",
+            "details": {
+              "sourceCode": "local_shell_requires_site_review"
+            },
+            "findingId": "fsf-566fd99578594878b3056587",
+            "findingType": "facility_spatial",
+            "message": "Replace the starter floor boundary with reviewed site data before safety or installation decisions.",
+            "severity": "unverified",
+            "subjectRefs": [
+              "finding-local-shell-review",
+              "shell-local"
+            ]
+          }
+        ],
+        "metrics": {
+          "clearanceConflicts": 0,
+          "distanceFromRequested": 0,
+          "errorCount": 0,
+          "physicalCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        },
+        "previewKind": "authoritative-placement-candidate",
+        "safetyStatus": "unverified",
+        "summary": ""
+      },
+      "quaternion": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": 1,
+      "valid": true,
+      "worldPosition": {
+        "x": 12,
+        "y": 0,
+        "z": 10
+      }
+    },
+    "layoutBytes": "{\"association\":{\"areaId\":\"main\",\"siteId\":\"site-local\"},\"coordinateFrame\":{\"datumId\":\"local-origin\",\"floorAxes\":[\"+X\",\"+Z\"],\"floorElevation\":0,\"handedness\":\"right\",\"units\":\"m\",\"upAxis\":\"+Y\"},\"createdAt\":\"2026-07-29T17:40:07.141730Z\",\"dismissedSuggestions\":[],\"displayName\":\"Main Facility Layout\",\"layoutId\":\"fl-main\",\"placements\":[],\"policySetRef\":{\"policySetId\":\"policy-local\",\"policySetRevision\":\"46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0\"},\"processBindings\":[],\"routes\":[],\"schemaVersion\":1,\"sourceShellRef\":{\"coordinateFrameFingerprint\":\"4ebe173419c97d5673cccbbf31ae447e0f761b85bc4eae82ca11f80be00bb13d\",\"shellId\":\"shell-local\",\"shellRevision\":\"736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f\"},\"status\":\"draft\",\"updatedAt\":\"2026-07-29T17:40:07.141730Z\",\"utilityNetworks\":[],\"zones\":[]}",
+    "selected": {
+      "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+      "assetId": "asset-forklift",
+      "beforeAfterMetrics": {
+        "after": {
+          "clearanceConflicts": 0,
+          "distanceFromRequested": 0,
+          "errorCount": 0,
+          "physicalCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        },
+        "before": {
+          "clearanceConflicts": 0,
+          "distanceFromRequested": 0,
+          "errorCount": 0,
+          "physicalCollisions": 0,
+          "unverifiedCount": 6,
+          "warningCount": 0
+        }
+      },
+      "candidateId": "fsc-635601c0411412af0d81b416",
+      "family": "grid",
+      "findings": [
+        {
+          "code": "asset_planning_evidence_unavailable",
+          "details": {
+            "blockers": [
+              "clearance_evidence_missing"
+            ]
+          },
+          "findingId": "fsf-bd86a8c9c0e84d0ad72bbc1a",
+          "findingType": "facility_spatial",
+          "message": "Asset is placement-ready but lacks reviewed planning evidence.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "asset-forklift",
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "clearance_rule_unavailable",
+          "details": {
+            "definedClearanceCount": 0
+          },
+          "findingId": "fsf-d1279269a71f6f70746e0e8b",
+          "findingType": "facility_spatial",
+          "message": "Authoritative safety-clearance evidence is unavailable.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "floor_load_unverified",
+          "details": {
+            "reason": "floor_capacity_missing"
+          },
+          "findingId": "fsf-f82acfcf9afb394fceacff36",
+          "findingType": "facility_spatial",
+          "message": "Applicable floor capacity is not established.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "policy_rule_unavailable",
+          "details": {
+            "sourceCode": "facility_policy_not_configured"
+          },
+          "findingId": "fsf-94a3361399c8d314c47b641d",
+          "findingType": "facility_spatial",
+          "message": "Site-specific clearance, egress, and safety policy has not been configured.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "finding-local-policy-review",
+            "policy-local"
+          ]
+        },
+        {
+          "code": "policy_rule_unavailable",
+          "details": {
+            "reason": "applicable_policy_missing"
+          },
+          "findingId": "fsf-90c2d38e547f83fcadf5ea15",
+          "findingType": "facility_spatial",
+          "message": "No supported authoritative policy rule applies to this placement.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "pl-spatial-candidate"
+          ]
+        },
+        {
+          "code": "shell_evidence_unavailable",
+          "details": {
+            "sourceCode": "local_shell_requires_site_review"
+          },
+          "findingId": "fsf-566fd99578594878b3056587",
+          "findingType": "facility_spatial",
+          "message": "Replace the starter floor boundary with reviewed site data before safety or installation decisions.",
+          "severity": "unverified",
+          "subjectRefs": [
+            "finding-local-shell-review",
+            "shell-local"
+          ]
+        }
+      ],
+      "metrics": {
+        "clearanceConflicts": 0,
+        "distanceFromRequested": 0,
+        "errorCount": 0,
+        "physicalCollisions": 0,
+        "unverifiedCount": 6,
+        "warningCount": 0
+      },
+      "operations": null,
+      "safe": false,
+      "safetyStatus": "unverified",
+      "summary": "",
+      "transform": {
+        "position": {
+          "x": 12,
+          "y": 0,
+          "z": 10
+        },
+        "quaternion": {
+          "w": 1,
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": 1
+      },
+      "valid": true
+    },
+    "uiText": "S\nSelect\nP\nPan\nR\nRectangle zone\nP\nPolygon zone\nR\nRotate 90\nD\nDuplicate\nD\nDelete\nL\nLock\nU\nUndo\nR\nRedo\nF\nFit\nS\nSave\nAssets\nSearch assets\nMACHINES\nA\nCNC Milling Machine\nasset-cnc-mill\n::\nMATERIAL HANDLING\nA\nElectric Forklift\nasset-forklift\n::\nSTORAGE\nA\nPallet Rack\nasset-pallet-rack\n::\nWORKSTATIONS\nA\nAssembly Workbench\nasset-workbench\n::\nPlan\n3D\nasset-forklift | Authoritative option 1 of 1 | grid | Engineering evidence incomplete | Findings: Asset is placement-ready but lacks reviewed planning evidence.; Authoritative safety-clearance evidence is unavailable.; +4 more. Metrics: errorCount 0, unverifiedCount 6, warningCount 0 | X 12.00 Z 10.00\nAuthoritative placement option 1 of 1, grid. Engineering evidence incomplete. Findings: Asset is placement-ready but lacks reviewed planning evidence.; Authoritative safety-clearance evidence is unavailable.; +4 more. Metrics: errorCount 0, unverifiedCount 6, warningCount 0. Not yet applied.\nBrowser overlap feedback is advisory. The server validates every accepted placement.\nPlacement option 1 of 1: grid. Engineering evidence incomplete. Findings: Asset is placement-ready but lacks reviewed planning evidence.; Authoritative safety-clearance evidence is unavailable.; +4 more. Metrics: errorCount 0, unverifiedCount 6, warningCount 0. Not yet applied.\nPrevious\nNext\nAccept\nDismiss\nProperties\n\nSelect an asset or zone.\n\nSaved | 0 selected | Plan view | select | Authoritative placement preview\nX 0.00 Z 0.00"
+  },
+  "schemaVersion": "facility-layout-p6-product-evidence-v1",
+  "screenshots": {
+    "ghost": {
+      "bytes": 197136,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/spatial/p6-product-ghost.png",
+      "sha256": "10934c5d459e0ad36361c8e3be3253839adfae2c78e0b32b8eb18f37f98b7790",
+      "width": 1920
+    },
+    "three": {
+      "bytes": 178247,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/spatial/p6-product-three.png",
+      "sha256": "d02e33cb6df0fdf57d1a1a72a1b86185cb879422dccdc8fd6bf396d5985d9ed4",
+      "width": 1920
+    }
+  },
+  "source": {
+    "appSha256": "6b758d2b8ad58a65ae234e5f9d4f7df08a9721616a42b597ddda3f6ef39e1095",
+    "hostSha256": "841a2acc145c6a8a7f5a1e91efeec2524e2f0fad52098de27cfe37f858026126",
+    "indexSha256": "a6a388635c5c043c7e9dd3636c981c9aefb768cb3af82743547f1b940b754826",
+    "serviceSha256": "ff0acbd8c16e2cbdd72c8f9bba00e717f2823dc4a453d386100fb647a802f99a",
+    "sessionSha256": "7cca324888c53ac583d1636369de978994ae1dea9f7f1391f73219966c44f82b",
+    "spatialSha256": "183c3cd9a427505736842d756a69263a37d569bbd384a311d17eb4be9731bc1e",
+    "threeAdapterSha256": "b3a1627de9cc50d4f5c75bb444b79422ce3225a3145e5f51d7b877fec57e192e",
+    "transportSha256": "97de85cc6be1f69f2148ca460c0c38169a2d3f9ad6c71b0e4ea1d6bede1601ab",
+    "verifierSha256": "38de5ba9eee8c3769ae01162ef36bc4d13c82cbc3a03ffec84356b4ad00eece5",
+    "workspaceSha256": "9973b8011a659616f58a70285e693c95a27f9c6661569d1d6224a49c981e5196"
+  },
+  "three": {
+    "assetGroupCount": 1,
+    "camera": {
+      "position": {
+        "x": 68.07543225565237,
+        "y": 49.18051791743075,
+        "z": 63.0754322556524
+      },
+      "target": {
+        "x": 20,
+        "y": 0,
+        "z": 15
+      }
+    },
+    "contextLost": false,
+    "controlsActive": true,
+    "degraded": false,
+    "demandRendering": {
+      "pendingFrame": false,
+      "renderRequests": 70,
+      "renderedFrames": 14
+    },
+    "disposed": false,
+    "ghostActive": false,
+    "lastFit": {
+      "center": {
+        "x": 20,
+        "y": 1.1,
+        "z": 15
+      },
+      "rootUnchanged": true,
+      "size": {
+        "x": 40,
+        "y": 2.2,
+        "z": 30
+      }
+    },
+    "lifecycle": {
+      "canvasCount": 1,
+      "listenerCount": 4,
+      "mountCount": 1,
+      "observerActive": true,
+      "teardownCount": 0
+    },
+    "loadTrace": [
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "manifest",
+        "status": "started"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "manifest",
+        "status": "resolved"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "footprint",
+        "status": "started"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "footprint",
+        "status": "resolved"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "proxy",
+        "status": "started"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "proxy",
+        "status": "skipped"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "overview",
+        "status": "started"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "overview",
+        "status": "skipped"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "detail",
+        "status": "started"
+      },
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "detail": null,
+        "stage": "detail",
+        "status": "skipped"
+      }
+    ],
+    "modelRootTransform": {
+      "position": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "quaternion": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    "mounted": true,
+    "pendingLoads": 0,
+    "placementCount": 1,
+    "representationGroups": [
+      {
+        "assetDefinitionRevision": "553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6",
+        "assetId": "asset-forklift",
+        "instanceMappings": [
+          {
+            "placementId": "pl-0acedb84d7e18d25eb50d9b2"
+          }
+        ],
+        "instanced": false,
+        "key": "asset-forklift|553f949f6236dc10a81f65450d32cf0508a387894618f9d4f4f167502f679fd6|footprint",
+        "meshCount": 1,
+        "placementIds": [
+          "pl-0acedb84d7e18d25eb50d9b2"
+        ],
+        "representation": "footprint"
+      }
+    ],
+    "selectedPlacementIds": [],
+    "status": "ready",
+    "statusReason": null,
+    "warnings": [],
+    "worldBounds": {
+      "maximum": {
+        "x": 40,
+        "y": 2.2,
+        "z": 30
+      },
+      "minimum": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    }
+  }
+}

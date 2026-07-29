@@ -555,6 +555,8 @@
 
             if (typeof OrbitControls === 'function') {
                 state.controls = new OrbitControls(state.camera, state.canvas);
+                state.controls.minPolarAngle = 0.03;
+                state.controls.maxPolarAngle = Math.PI / 2 - 0.03;
                 state.controlChangeHandler = invalidate;
                 addListener(state.controls, 'change', state.controlChangeHandler);
             }
@@ -1560,11 +1562,32 @@
         }
 
         function computeWorldBounds() {
-            if (!state.placements.length) return null;
-            const output = {
+            const configured = options.worldBounds;
+            const hasConfigured = configured
+                && Number.isFinite(Number(configured.minX))
+                && Number.isFinite(Number(configured.minZ))
+                && Number.isFinite(Number(configured.maxX))
+                && Number.isFinite(Number(configured.maxZ))
+                && Number(configured.maxX) > Number(configured.minX)
+                && Number(configured.maxZ) > Number(configured.minZ);
+            const floorY = Number.isFinite(Number(configured && configured.floorY))
+                ? Number(configured.floorY) : 0;
+            const output = hasConfigured ? {
+                minimum: {
+                    x: Number(configured.minX),
+                    y: floorY,
+                    z: Number(configured.minZ),
+                },
+                maximum: {
+                    x: Number(configured.maxX),
+                    y: floorY + 0.01,
+                    z: Number(configured.maxZ),
+                },
+            } : {
                 minimum: { x: Infinity, y: Infinity, z: Infinity },
                 maximum: { x: -Infinity, y: -Infinity, z: -Infinity },
             };
+            if (!state.placements.length) return hasConfigured ? output : null;
             state.placements.forEach(function (placement) {
                 const group = state.baseGroups.get(
                     placement.assetId + '|' + placement.assetDefinitionRevision
@@ -1608,6 +1631,14 @@
                 y: (bounds.minimum.y + bounds.maximum.y) / 2,
                 z: (bounds.minimum.z + bounds.maximum.z) / 2,
             };
+            const fitTarget = options.worldBounds
+                && Number.isFinite(Number(options.worldBounds.floorY))
+                ? {
+                    x: center.x,
+                    y: Number(options.worldBounds.floorY),
+                    z: center.z,
+                }
+                : center;
             const size = {
                 x: Math.max(0.01, bounds.maximum.x - bounds.minimum.x),
                 y: Math.max(0.01, bounds.maximum.y - bounds.minimum.y),
@@ -1681,12 +1712,16 @@
                 state.camera.far = Math.max(100, distance + span * 20);
             }
             if (state.controls && state.controls.target) {
-                setVector(state.controls.target, center);
+                setVector(state.controls.target, fitTarget);
                 if (typeof state.controls.update === 'function') {
                     state.controls.update();
                 }
             } else if (typeof state.camera.lookAt === 'function') {
-                state.camera.lookAt(center.x, center.y, center.z);
+                state.camera.lookAt(
+                    fitTarget.x,
+                    fitTarget.y,
+                    fitTarget.z
+                );
             }
             if (typeof state.camera.updateProjectionMatrix === 'function') {
                 state.camera.updateProjectionMatrix();

@@ -28,6 +28,31 @@ FIXTURES = Path(__file__).parent / "fixtures" / "facility_layout"
 NOW = datetime(2026, 7, 28, tzinfo=timezone.utc)
 
 
+def _resolved_asset(asset_id, revision):
+    return {
+        "revision": revision,
+        "definition": {
+            "assetId": asset_id,
+            "assetDefinitionRevision": revision,
+            "category": "machine",
+            "geometry": {
+                "footprintPolygons": [[
+                    {"x": -0.5, "z": -0.5},
+                    {"x": 0.5, "z": -0.5},
+                    {"x": 0.5, "z": 0.5},
+                    {"x": -0.5, "z": 0.5},
+                ]],
+                "heightInterval": {"minimumY": 0, "maximumY": 1},
+            },
+            "clearances": [],
+        },
+    }
+
+
+def _default_asset_resolver(_principal, _site_id, asset_id, revision):
+    return _resolved_asset(asset_id, revision)
+
+
 def _principal(
     *,
     tenant_id="tenant-a",
@@ -76,7 +101,7 @@ def _publish(repository, principal, document, id_field):
     ).envelope
 
 
-def _service(tmp_path, *, asset_resolver=lambda *_args: True):
+def _service(tmp_path, *, asset_resolver=_default_asset_resolver):
     principal = _principal()
     documents = _authority_documents()
     authority_root = tmp_path / "authority"
@@ -190,7 +215,7 @@ def test_service_applies_one_atomic_operation_batch(tmp_path):
 
     def resolve_asset(principal, site_id, asset_id, revision):
         calls.append((principal.tenant_id, site_id, asset_id, revision))
-        return {"revision": revision}
+        return _resolved_asset(asset_id, revision)
 
     service, principal, shell, policy, _ = _service(
         tmp_path,

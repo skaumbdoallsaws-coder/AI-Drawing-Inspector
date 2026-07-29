@@ -1,28 +1,28 @@
 {
-  "appUrl": "http://127.0.0.1:8023/",
+  "appUrl": "http://127.0.0.1:8036/",
   "camera": {
     "after": {
       "position": {
-        "x": 7.165936264323042,
-        "y": 2.5962446386303646,
-        "z": 99.74244590559896
+        "x": 8.570027836286304,
+        "y": 2.4557139550765084,
+        "z": 96.03040032357019
       },
       "target": {
-        "x": 19.25,
+        "x": 20,
         "y": 0,
-        "z": 14.075000000000001
+        "z": 15
       }
     },
     "before": {
       "position": {
-        "x": 68.76819445267239,
-        "y": 50.868194452672405,
-        "z": 63.5931944526724
+        "x": 67.26566015508834,
+        "y": 47.27066015508838,
+        "z": 62.26566015508837
       },
       "target": {
-        "x": 19.25,
+        "x": 20,
         "y": 0,
-        "z": 14.075000000000001
+        "z": 15
       }
     }
   },
@@ -44,21 +44,21 @@
     "roots": 0
   },
   "drop": {
-    "acceptedCandidateId": "fsc-fa39f435601e1d0a56d159c2",
+    "acceptedCandidateId": "fsc-e2be94a8351ab1b743b51969",
     "acceptedSafetyStatus": "unverified",
-    "after": 2,
-    "afterUndo": 1,
-    "before": 1,
+    "after": 1,
+    "afterUndo": 0,
+    "before": 0,
     "createdWorld": {
-      "x": 19.5,
+      "x": 20,
       "y": 0,
-      "z": 13.5
+      "z": 14.5
     },
     "dirtyAfterUndo": false,
     "ghostWorld": {
-      "x": 19.5,
+      "x": 20,
       "y": 0,
-      "z": 13.5
+      "z": 14.5
     }
   },
   "errors": {
@@ -69,17 +69,17 @@
     "assetRows": 4,
     "canvases": 1,
     "diagnostics": {
-      "assetGroupCount": 1,
+      "assetGroupCount": 0,
       "camera": {
         "position": {
-          "x": 68.76819445267239,
-          "y": 50.868194452672405,
-          "z": 63.5931944526724
+          "x": 67.26566015508834,
+          "y": 47.27066015508838,
+          "z": 62.26566015508837
         },
         "target": {
-          "x": 19.25,
+          "x": 20,
           "y": 0,
-          "z": 14.075000000000001
+          "z": 15
         }
       },
       "contextLost": false,
@@ -87,22 +87,22 @@
       "degraded": false,
       "demandRendering": {
         "pendingFrame": false,
-        "renderRequests": 15,
+        "renderRequests": 9,
         "renderedFrames": 2
       },
       "disposed": false,
       "ghostActive": false,
       "lastFit": {
         "center": {
-          "x": 19.25,
-          "y": 1.35,
-          "z": 14.075
+          "x": 20,
+          "y": 0.005,
+          "z": 15
         },
         "rootUnchanged": true,
         "size": {
-          "x": 41.5,
-          "y": 2.7,
-          "z": 31.85
+          "x": 40,
+          "y": 0.01,
+          "z": 30
         }
       },
       "lifecycle": {
@@ -112,78 +112,7 @@
         "observerActive": true,
         "teardownCount": 0
       },
-      "loadTrace": [
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "manifest",
-          "status": "started"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "manifest",
-          "status": "resolved"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "footprint",
-          "status": "started"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "footprint",
-          "status": "resolved"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "proxy",
-          "status": "started"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "proxy",
-          "status": "skipped"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "overview",
-          "status": "started"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "overview",
-          "status": "skipped"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "detail",
-          "status": "started"
-        },
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "detail": null,
-          "stage": "detail",
-          "status": "skipped"
-        }
-      ],
+      "loadTrace": [],
       "modelRootTransform": {
         "position": {
           "x": 0,
@@ -204,25 +133,8 @@
       },
       "mounted": true,
       "pendingLoads": 0,
-      "placementCount": 1,
-      "representationGroups": [
-        {
-          "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
-          "assetId": "asset-cnc-mill",
-          "instanceMappings": [
-            {
-              "placementId": "pl-32e304a5c324ed41b565d813"
-            }
-          ],
-          "instanced": false,
-          "key": "asset-cnc-mill|a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c|footprint",
-          "meshCount": 1,
-          "placementIds": [
-            "pl-32e304a5c324ed41b565d813"
-          ],
-          "representation": "footprint"
-        }
-      ],
+      "placementCount": 0,
+      "representationGroups": [],
       "selectedPlacementIds": [],
       "status": "ready",
       "statusReason": null,
@@ -230,17 +142,17 @@
       "worldBounds": {
         "maximum": {
           "x": 40,
-          "y": 2.7,
+          "y": 0.01,
           "z": 30
         },
         "minimum": {
-          "x": -1.5,
+          "x": 0,
           "y": 0,
-          "z": -1.85
+          "z": 0
         }
       }
     },
-    "placements": 1,
+    "placements": 0,
     "planSvgs": 1,
     "roots": 1,
     "threeDisabled": false
@@ -254,26 +166,26 @@
   "schemaVersion": "facility-layout-p5-product-evidence-v1",
   "screenshots": {
     "plan": {
-      "bytes": 177934,
+      "bytes": 177791,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-integration.png",
-      "sha256": "073cb87ba5a2c1a25cc034bb4f4b76c2823319828550999e26fdedbca06bb1a2",
+      "sha256": "6216dce3bf7827ec74840b4c099266742ba9132495ad714ebbd5c0df6e9d6400",
       "width": 1920
     },
     "three": {
-      "bytes": 178219,
+      "bytes": 178103,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-three-integration.png",
-      "sha256": "b1c57af4c8a653cfcaebd9f39fa03cef302960e363a2f4d314f1df121b2ae0ef",
+      "sha256": "c9a39ca0cdaf4747591878688917eecb5faaafa77dd3525de07509659fff7818",
       "width": 1920
     }
   },
   "source": {
     "appSha256": "6b758d2b8ad58a65ae234e5f9d4f7df08a9721616a42b597ddda3f6ef39e1095",
     "editorSha256": "a332c05763f2cd7ba672e53d9cec96c76c01598437fee9cf404429baba4736c5",
-    "hostSha256": "841a2acc145c6a8a7f5a1e91efeec2524e2f0fad52098de27cfe37f858026126",
+    "hostSha256": "96f00bb0974421ab8ff3f4ad59317fe029d81c7468a4ddb35216207a672d646a",
     "indexSha256": "a6a388635c5c043c7e9dd3636c981c9aefb768cb3af82743547f1b940b754826",
     "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
     "threeAdapterSha256": "b3a1627de9cc50d4f5c75bb444b79422ce3225a3145e5f51d7b877fec57e192e",

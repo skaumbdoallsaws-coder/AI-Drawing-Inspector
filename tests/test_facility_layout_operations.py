@@ -423,3 +423,156 @@ def test_create_layout_document_is_deterministic_and_empty() -> None:
     assert first["zones"] == []
     assert first["placements"] == []
     assert first["futureTopLevel"] == {"retained": True}
+
+
+def test_route_and_process_binding_operations_are_atomic_and_reference_safe():
+    layout = _fixture("two_asset_cell.json")
+    route = deepcopy(layout["routes"][0])
+    route.pop("routeId")
+    layout["routes"] = []
+
+    added = apply_facility_layout_operations(
+        layout,
+        [{"op": "add_route", "route": route}],
+        base_revision="4" * 64,
+    )
+    route_id = added["createdIds"][0]
+    assert route_id.startswith("rt-")
+    assert added["document"]["routes"][0]["routeId"] == route_id
+
+    edited = apply_facility_layout_operations(
+        added["document"],
+        [
+            {
+                "op": "edit_route",
+                "routeId": route_id,
+                "patch": {"corridorWidth": 1.25},
+            },
+            {
+                "op": "attach_process_binding",
+                "processBinding": {
+                    "productId": "product-demo",
+                    "processMapId": "pm-demo",
+                    "processMapRevision": "5" * 64,
+                    "processNodeIds": ["node-operation"],
+                    "processEdgeIds": ["edge-flow"],
+                    "placementIds": ["pl-machine-01"],
+                    "routeIds": [route_id],
+                    "bindingRole": "material_flow",
+                },
+            },
+        ],
+        base_revision=layout_revision(added["document"]),
+    )
+    binding_id = next(
+        item
+        for item in edited["createdIds"]
+        if item.startswith("pb-")
+    )
+    assert edited["document"]["routes"][0]["corridorWidth"] == 1.25
+
+    with pytest.raises(FacilityLayoutOperationError) as referenced:
+        apply_facility_layout_operations(
+            edited["document"],
+            [{"op": "delete_route", "routeId": route_id}],
+        )
+    assert referenced.value.code == "referenced_object_in_use"
+
+    removed = apply_facility_layout_operations(
+        edited["document"],
+        [
+            {
+                "op": "detach_process_binding",
+                "processBindingId": binding_id,
+            },
+            {"op": "delete_route", "routeId": route_id},
+        ],
+    )
+    assert removed["document"]["routes"] == []
+    assert removed["document"]["processBindings"] == []
+
+
+def test_utility_topology_operations_preserve_referential_integrity():
+    layout = _fixture("utility_cell.json")
+    network_id = "un-compressed-air"
+    added = apply_facility_layout_operations(
+        layout,
+        [
+            {
+                "op": "add_utility_network_node",
+                "utilityNetworkId": network_id,
+                "node": {
+                    "networkNodeId": "nn-air-review-drop",
+                    "nodeKind": "junction",
+                    "networkRole": "junction",
+                    "position": {"x": 6.0, "y": 3.0, "z": 3.0},
+                },
+            },
+            {
+                "op": "add_utility_network_segment",
+                "utilityNetworkId": network_id,
+                "segment": {
+                    "networkSegmentId": "ns-air-review-drop",
+                    "sourceNetworkNodeId": "nn-air-branch",
+                    "targetNetworkNodeId": "nn-air-review-drop",
+                    "centerline": [
+                        {"x": 4.0, "y": 3.0, "z": 3.0},
+                        {"x": 6.0, "y": 3.0, "z": 3.0},
+                    ],
+                    "interface": {"nominalDiameterMm": 12},
+                    "capacity": {"maximumFlowCfm": 35},
+                    "requirements": [],
+                    "evidence": [],
+                },
+            },
+        ],
+    )
+    network = added["document"]["utilityNetworks"][0]
+    assert any(
+        item["networkNodeId"] == "nn-air-review-drop"
+        for item in network["nodes"]
+    )
+
+    with pytest.raises(FacilityLayoutOperationError) as referenced:
+        apply_facility_layout_operations(
+            added["document"],
+            [
+                {
+                    "op": "delete_utility_network_node",
+                    "utilityNetworkId": network_id,
+                    "networkNodeId": "nn-air-review-drop",
+                }
+            ],
+        )
+    assert referenced.value.code == "referenced_object_in_use"
+
+    removed = apply_facility_layout_operations(
+        added["document"],
+        [
+            {
+                "op": "edit_utility_network_segment",
+                "utilityNetworkId": network_id,
+                "networkSegmentId": "ns-air-review-drop",
+                "patch": {"capacity": {"maximumFlowCfm": 30}},
+            },
+            {
+                "op": "delete_utility_network_segment",
+                "utilityNetworkId": network_id,
+                "networkSegmentId": "ns-air-review-drop",
+            },
+            {
+                "op": "delete_utility_network_node",
+                "utilityNetworkId": network_id,
+                "networkNodeId": "nn-air-review-drop",
+            },
+        ],
+    )
+    network = removed["document"]["utilityNetworks"][0]
+    assert not any(
+        item["networkNodeId"] == "nn-air-review-drop"
+        for item in network["nodes"]
+    )
+    assert not any(
+        item["networkSegmentId"] == "ns-air-review-drop"
+        for item in network["segments"]
+    )

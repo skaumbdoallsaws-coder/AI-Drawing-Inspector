@@ -168,6 +168,19 @@ def _all_object_ids(document: Dict[str, Any]) -> Set[str]:
             for record in _collection(document, collection)
             if isinstance(record.get(key), str)
         )
+    for network in _collection(document, "utilityNetworks"):
+        for collection, key in (
+            (network.get("nodes"), "networkNodeId"),
+            (network.get("segments"), "networkSegmentId"),
+        ):
+            if not isinstance(collection, list):
+                continue
+            result.update(
+                str(record[key])
+                for record in collection
+                if isinstance(record, Mapping)
+                and isinstance(record.get(key), str)
+            )
     return result
 
 
@@ -611,6 +624,495 @@ def _op_set_snap_relationship(
     return [], [placement_id]
 
 
+def _insert_top_level_object(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+    *,
+    collection: str,
+    value_field: str,
+    id_field: str,
+    prefix: str,
+) -> Tuple[List[str], List[str]]:
+    value = _mapping(operation.get(value_field), value_field)
+    requested = value.get(id_field, operation.get(id_field))
+    if requested is None:
+        identity_operation = deepcopy(dict(operation))
+        identity_value = deepcopy(value)
+        identity_value.pop(id_field, None)
+        identity_operation[value_field] = identity_value
+        identifier = _deterministic_id(
+            document,
+            prefix=prefix,
+            operation=identity_operation,
+            operation_index=index,
+            base_revision=base_revision,
+        )
+    else:
+        identifier = _clean_id(requested, id_field, prefix)
+    if identifier in _all_object_ids(document):
+        _fail("duplicate_id", f"{id_field} '{identifier}' is already in use.")
+    value[id_field] = identifier
+    _collection(document, collection).append(value)
+    return [identifier], [identifier]
+
+
+def _edit_top_level_object(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    *,
+    collection: str,
+    id_field: str,
+    prefix: str,
+    label: str,
+) -> Tuple[List[str], List[str]]:
+    identifier = _clean_id(operation.get(id_field), id_field, prefix)
+    patch = _mapping(operation.get("patch"), "patch")
+    if id_field in patch:
+        _fail("immutable_identity", f"{operation.get('op')} cannot change {id_field}.")
+    target = _find(document, collection, id_field, identifier, label)
+    for key, value in patch.items():
+        target[str(key)] = deepcopy(value)
+    return [], [identifier]
+
+
+def _op_add_route(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _insert_top_level_object(
+        document,
+        operation,
+        index,
+        base_revision,
+        collection="routes",
+        value_field="route",
+        id_field="routeId",
+        prefix="rt",
+    )
+
+
+def _op_edit_route(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _edit_top_level_object(
+        document,
+        operation,
+        collection="routes",
+        id_field="routeId",
+        prefix="rt",
+        label="Route",
+    )
+
+
+def _op_delete_route(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    route_id = _clean_id(operation.get("routeId"), "routeId", "rt")
+    _find(document, "routes", "routeId", route_id, "Route")
+    references = sorted(
+        str(binding.get("processBindingId") or "processBindings")
+        for binding in _collection(document, "processBindings")
+        if route_id in (
+            binding.get("routeIds")
+            if isinstance(binding.get("routeIds"), list)
+            else []
+        )
+    )
+    if references:
+        _fail(
+            "referenced_object_in_use",
+            f"Route '{route_id}' is still referenced.",
+            details={"targetId": route_id, "references": references},
+        )
+    document["routes"] = [
+        route
+        for route in _collection(document, "routes")
+        if route.get("routeId") != route_id
+    ]
+    return [], [route_id]
+
+
+def _op_add_utility_network(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _insert_top_level_object(
+        document,
+        operation,
+        index,
+        base_revision,
+        collection="utilityNetworks",
+        value_field="utilityNetwork",
+        id_field="utilityNetworkId",
+        prefix="un",
+    )
+
+
+def _op_edit_utility_network(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _edit_top_level_object(
+        document,
+        operation,
+        collection="utilityNetworks",
+        id_field="utilityNetworkId",
+        prefix="un",
+        label="Utility network",
+    )
+
+
+def _op_delete_utility_network(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    network_id = _clean_id(
+        operation.get("utilityNetworkId"),
+        "utilityNetworkId",
+        "un",
+    )
+    _find(
+        document,
+        "utilityNetworks",
+        "utilityNetworkId",
+        network_id,
+        "Utility network",
+    )
+    document["utilityNetworks"] = [
+        network
+        for network in _collection(document, "utilityNetworks")
+        if network.get("utilityNetworkId") != network_id
+    ]
+    return [], [network_id]
+
+
+def _network(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+) -> Tuple[Dict[str, Any], str]:
+    network_id = _clean_id(
+        operation.get("utilityNetworkId"),
+        "utilityNetworkId",
+        "un",
+    )
+    network = _find(
+        document,
+        "utilityNetworks",
+        "utilityNetworkId",
+        network_id,
+        "Utility network",
+    )
+    return network, network_id
+
+
+def _nested_collection(
+    network: Dict[str, Any],
+    field: str,
+) -> List[Dict[str, Any]]:
+    value = network.get(field)
+    if not isinstance(value, list) or not all(
+        isinstance(item, Mapping) for item in value
+    ):
+        _fail("invalid_layout_shape", f"utilityNetwork.{field} must be an array.")
+    return value
+
+
+def _find_nested(
+    network: Dict[str, Any],
+    *,
+    collection: str,
+    id_field: str,
+    identifier: str,
+    label: str,
+) -> Dict[str, Any]:
+    match = next(
+        (
+            item
+            for item in _nested_collection(network, collection)
+            if item.get(id_field) == identifier
+        ),
+        None,
+    )
+    if match is None:
+        _fail(
+            "operation_target_not_found",
+            f"{label} '{identifier}' was not found.",
+            details={"targetId": identifier},
+        )
+    return match
+
+
+def _insert_network_object(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+    *,
+    collection: str,
+    value_field: str,
+    id_field: str,
+    prefix: str,
+) -> Tuple[List[str], List[str]]:
+    network, network_id = _network(document, operation)
+    value = _mapping(operation.get(value_field), value_field)
+    requested = value.get(id_field, operation.get(id_field))
+    identifier = (
+        _clean_id(requested, id_field, prefix)
+        if requested is not None
+        else _deterministic_id(
+            document,
+            prefix=prefix,
+            operation=operation,
+            operation_index=index,
+            base_revision=base_revision,
+        )
+    )
+    if identifier in _all_object_ids(document):
+        _fail("duplicate_id", f"{id_field} '{identifier}' is already in use.")
+    value[id_field] = identifier
+    _nested_collection(network, collection).append(value)
+    return [identifier], [network_id, identifier]
+
+
+def _edit_network_object(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    *,
+    collection: str,
+    id_field: str,
+    prefix: str,
+    label: str,
+) -> Tuple[List[str], List[str]]:
+    network, network_id = _network(document, operation)
+    identifier = _clean_id(operation.get(id_field), id_field, prefix)
+    patch = _mapping(operation.get("patch"), "patch")
+    if id_field in patch:
+        _fail("immutable_identity", f"{operation.get('op')} cannot change {id_field}.")
+    target = _find_nested(
+        network,
+        collection=collection,
+        id_field=id_field,
+        identifier=identifier,
+        label=label,
+    )
+    for key, value in patch.items():
+        target[str(key)] = deepcopy(value)
+    return [], [network_id, identifier]
+
+
+def _op_add_utility_network_node(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _insert_network_object(
+        document,
+        operation,
+        index,
+        base_revision,
+        collection="nodes",
+        value_field="node",
+        id_field="networkNodeId",
+        prefix="nn",
+    )
+
+
+def _op_edit_utility_network_node(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _edit_network_object(
+        document,
+        operation,
+        collection="nodes",
+        id_field="networkNodeId",
+        prefix="nn",
+        label="Utility network node",
+    )
+
+
+def _op_delete_utility_network_node(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    network, network_id = _network(document, operation)
+    node_id = _clean_id(
+        operation.get("networkNodeId"),
+        "networkNodeId",
+        "nn",
+    )
+    _find_nested(
+        network,
+        collection="nodes",
+        id_field="networkNodeId",
+        identifier=node_id,
+        label="Utility network node",
+    )
+    references = sorted(
+        str(segment.get("networkSegmentId") or "segments")
+        for segment in _nested_collection(network, "segments")
+        if node_id
+        in {
+            segment.get("sourceNetworkNodeId"),
+            segment.get("targetNetworkNodeId"),
+        }
+    )
+    if references:
+        _fail(
+            "referenced_object_in_use",
+            f"Utility network node '{node_id}' is still referenced.",
+            details={"targetId": node_id, "references": references},
+        )
+    network["nodes"] = [
+        node
+        for node in _nested_collection(network, "nodes")
+        if node.get("networkNodeId") != node_id
+    ]
+    return [], [network_id, node_id]
+
+
+def _op_add_utility_network_segment(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _insert_network_object(
+        document,
+        operation,
+        index,
+        base_revision,
+        collection="segments",
+        value_field="segment",
+        id_field="networkSegmentId",
+        prefix="ns",
+    )
+
+
+def _op_edit_utility_network_segment(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _edit_network_object(
+        document,
+        operation,
+        collection="segments",
+        id_field="networkSegmentId",
+        prefix="ns",
+        label="Utility network segment",
+    )
+
+
+def _op_delete_utility_network_segment(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    network, network_id = _network(document, operation)
+    segment_id = _clean_id(
+        operation.get("networkSegmentId"),
+        "networkSegmentId",
+        "ns",
+    )
+    _find_nested(
+        network,
+        collection="segments",
+        id_field="networkSegmentId",
+        identifier=segment_id,
+        label="Utility network segment",
+    )
+    network["segments"] = [
+        segment
+        for segment in _nested_collection(network, "segments")
+        if segment.get("networkSegmentId") != segment_id
+    ]
+    return [], [network_id, segment_id]
+
+
+def _op_attach_process_binding(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _insert_top_level_object(
+        document,
+        operation,
+        index,
+        base_revision,
+        collection="processBindings",
+        value_field="processBinding",
+        id_field="processBindingId",
+        prefix="pb",
+    )
+
+
+def _op_edit_process_binding(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    return _edit_top_level_object(
+        document,
+        operation,
+        collection="processBindings",
+        id_field="processBindingId",
+        prefix="pb",
+        label="Process binding",
+    )
+
+
+def _op_detach_process_binding(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    binding_id = _clean_id(
+        operation.get("processBindingId"),
+        "processBindingId",
+        "pb",
+    )
+    _find(
+        document,
+        "processBindings",
+        "processBindingId",
+        binding_id,
+        "Process binding",
+    )
+    document["processBindings"] = [
+        binding
+        for binding in _collection(document, "processBindings")
+        if binding.get("processBindingId") != binding_id
+    ]
+    return [], [binding_id]
+
+
 _Handler = Callable[
     [Dict[str, Any], Mapping[str, Any], int, str],
     Tuple[List[str], List[str]],
@@ -629,6 +1131,21 @@ _HANDLERS: Dict[str, _Handler] = {
     "delete_placement": _op_delete_placement,
     "set_position_mode": _op_set_position_mode,
     "set_snap_relationship": _op_set_snap_relationship,
+    "add_route": _op_add_route,
+    "edit_route": _op_edit_route,
+    "delete_route": _op_delete_route,
+    "add_utility_network": _op_add_utility_network,
+    "edit_utility_network": _op_edit_utility_network,
+    "delete_utility_network": _op_delete_utility_network,
+    "add_utility_network_node": _op_add_utility_network_node,
+    "edit_utility_network_node": _op_edit_utility_network_node,
+    "delete_utility_network_node": _op_delete_utility_network_node,
+    "add_utility_network_segment": _op_add_utility_network_segment,
+    "edit_utility_network_segment": _op_edit_utility_network_segment,
+    "delete_utility_network_segment": _op_delete_utility_network_segment,
+    "attach_process_binding": _op_attach_process_binding,
+    "edit_process_binding": _op_edit_process_binding,
+    "detach_process_binding": _op_detach_process_binding,
 }
 
 

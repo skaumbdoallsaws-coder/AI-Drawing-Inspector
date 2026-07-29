@@ -228,9 +228,19 @@ def _policy_document() -> dict[str, Any]:
 class LocalFacilityLayoutHost:
     """Own the local-mode repositories, bootstrap, and product router."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        process_map_root: str | Path | None = None,
+    ) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.process_map_root = (
+            Path(process_map_root).resolve()
+            if process_map_root is not None
+            else None
+        )
         authority_root = self.root / "authorities"
         self.layout_repository = FacilityLayoutRepository(self.root / "layouts")
         self.shell_repository = FacilityShellRepository(
@@ -252,6 +262,11 @@ class LocalFacilityLayoutHost:
             policy_repository=self.policy_repository,
             vehicle_repository=self.vehicle_repository,
             asset_definition_resolver=self._resolve_asset_definition,
+            process_map_resolver=(
+                self._resolve_process_map
+                if self.process_map_root is not None
+                else None
+            ),
         )
         self._lock = threading.RLock()
         self._bootstrapped = False
@@ -278,6 +293,34 @@ class LocalFacilityLayoutHost:
         return {
             "revision": entry["assetDefinitionRevision"],
             "definition": deepcopy(entry["definition"]),
+        }
+
+    def _resolve_process_map(
+        self,
+        _principal: FacilityPrincipal,
+        _site_id: str,
+        product_id: str,
+        map_id: str,
+        _revision: str,
+    ) -> Mapping[str, Any] | None:
+        if self.process_map_root is None:
+            return None
+        from ai_inspector.process_map.repository import (
+            ProcessMapAssetError,
+            load_named_process_map,
+        )
+
+        try:
+            result = load_named_process_map(
+                self.process_map_root,
+                product_id,
+                map_id,
+            )
+        except ProcessMapAssetError:
+            return None
+        return {
+            "revision": result["revision"],
+            "document": deepcopy(result["map"]),
         }
 
     def _ensure_published(
@@ -441,10 +484,22 @@ class LocalFacilityLayoutHost:
         return router
 
 
-def create_local_facility_layout_router(root: str | Path) -> APIRouter:
+def create_local_facility_layout_router(
+    root: str | Path,
+    *,
+    process_map_root: str | Path | None = None,
+) -> APIRouter:
     """Create the local-mode product router for the host FastAPI app."""
 
-    return LocalFacilityLayoutHost(root).create_router()
+    effective_process_map_root = (
+        Path(process_map_root)
+        if process_map_root is not None
+        else Path(__file__).resolve().parents[2] / "generated" / "training"
+    )
+    return LocalFacilityLayoutHost(
+        root,
+        process_map_root=effective_process_map_root,
+    ).create_router()
 
 
 __all__ = [

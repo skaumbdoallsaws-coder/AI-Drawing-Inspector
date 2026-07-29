@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -111,3 +112,56 @@ def test_local_host_rejects_unknown_asset_and_cross_site_scope(tmp_path):
         params={"siteId": "site-other"},
     )
     assert hidden_assets.status_code == 404
+
+
+def test_local_host_resolves_revision_bound_named_process_maps(tmp_path):
+    process_root = tmp_path / "training"
+    product_dir = process_root / "fixture-product"
+    product_dir.mkdir(parents=True)
+    legacy_asset = product_dir / "fixture_process_map_working_draft.json"
+    legacy_asset.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "fixture-process-map-1",
+                "productId": "fixture-product",
+                "productName": "Fixture Product",
+                "nodes": [
+                    {
+                        "nodeId": "root",
+                        "level": 0,
+                        "name": "Fixture Product",
+                        "parentNodeId": None,
+                        "partIds": [],
+                    },
+                    {
+                        "nodeId": "part",
+                        "level": 1,
+                        "name": "Fixture Part",
+                        "parentNodeId": "root",
+                        "partIds": ["P-001"],
+                    },
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    host = LocalFacilityLayoutHost(
+        tmp_path / "facility",
+        process_map_root=process_root,
+    )
+    try:
+        resolved = host._resolve_process_map(
+            host.principal(),
+            LOCAL_SITE_ID,
+            "fixture-product",
+            "default",
+            "ignored-by-resolver",
+        )
+    finally:
+        host.close()
+    assert resolved is not None
+    assert len(resolved["revision"]) == 64
+    assert resolved["document"]["mapId"] == "default"
+    assert resolved["document"]["association"]["productId"] == "fixture-product"

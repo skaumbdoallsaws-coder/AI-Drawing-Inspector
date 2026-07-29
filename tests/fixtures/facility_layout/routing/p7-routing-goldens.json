@@ -1,0 +1,420 @@
+{
+  "vehicleProfile": {
+    "vehicleProfileId": "vehicle-p7-golden",
+    "vehicleProfileRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "displayName": "P7 Golden Forklift",
+    "overallDimensions": {
+      "length": 1.2,
+      "width": 0.8,
+      "height": 1.8
+    },
+    "footprint": [
+      {
+        "x": -0.6,
+        "z": -0.4
+      },
+      {
+        "x": 0.6,
+        "z": -0.4
+      },
+      {
+        "x": 0.6,
+        "z": 0.4
+      },
+      {
+        "x": -0.6,
+        "z": 0.4
+      }
+    ],
+    "wheelbase": 0.8,
+    "steeringLimits": {
+      "minimumTurningRadiusMeters": 1.0
+    },
+    "speedLimits": {
+      "maximumMetersPerSecond": 2.0
+    },
+    "loadLimits": {
+      "maximumKilograms": 1000
+    },
+    "gradeLimits": {
+      "maximumPercent": 8
+    },
+    "reversePolicy": "allowed"
+  },
+  "sourceRevisions": {
+    "layout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "vehicle": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "scenarios": [
+    {
+      "caseId": "straight",
+      "start": {
+        "x": 1.0,
+        "z": 2.0,
+        "heading": 0.0
+      },
+      "goal": {
+        "x": 9.0,
+        "z": 2.0,
+        "heading": 0.0
+      },
+      "traversablePolygons": [
+        [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 4.0
+          },
+          {
+            "x": 0.0,
+            "z": 4.0
+          }
+        ]
+      ],
+      "allowReverse": false,
+      "expected": {
+        "accepted": true,
+        "distanceMeters": 8.0,
+        "reverseUsed": false,
+        "loaded": false,
+        "findingCodes": [],
+        "findingIds": [],
+        "routeFingerprint": "7c5ca7b73e373e8f961dc76fec49f473cf37d599d1390a5977b94e8961fcb963"
+      }
+    },
+    {
+      "caseId": "90-degree",
+      "start": {
+        "x": 1.0,
+        "z": 2.0,
+        "heading": 0.0
+      },
+      "goal": {
+        "x": 8.0,
+        "z": 8.0,
+        "heading": 1.5707963267948966
+      },
+      "traversablePolygons": [
+        [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 4.0
+          },
+          {
+            "x": 0.0,
+            "z": 4.0
+          }
+        ],
+        [
+          {
+            "x": 6.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 10.0
+          },
+          {
+            "x": 6.0,
+            "z": 10.0
+          }
+        ]
+      ],
+      "allowReverse": false,
+      "expected": {
+        "accepted": true,
+        "distanceMeters": 12.570796,
+        "reverseUsed": false,
+        "loaded": false,
+        "findingCodes": [],
+        "findingIds": [],
+        "routeFingerprint": "a4c1b093c88748502fa9eaa44389c96c3e2bb6865faf6358584c2754fbaa494b"
+      }
+    },
+    {
+      "caseId": "narrow-aisle",
+      "start": {
+        "x": 1.0,
+        "z": 0.35,
+        "heading": 0.0
+      },
+      "goal": {
+        "x": 9.0,
+        "z": 0.35,
+        "heading": 0.0
+      },
+      "traversablePolygons": [
+        [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.7
+          },
+          {
+            "x": 0.0,
+            "z": 0.7
+          }
+        ]
+      ],
+      "allowReverse": false,
+      "expected": {
+        "accepted": false,
+        "distanceMeters": null,
+        "reverseUsed": false,
+        "loaded": false,
+        "findingCodes": [
+          "route_width_insufficient"
+        ],
+        "findingIds": [
+          "flr-fc21dd7b561bd1808fffd55d"
+        ],
+        "routeFingerprint": null
+      }
+    },
+    {
+      "caseId": "cul-de-sac",
+      "start": {
+        "x": 8.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "goal": {
+        "x": 2.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "traversablePolygons": [
+        [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 2.0
+          },
+          {
+            "x": 0.0,
+            "z": 2.0
+          }
+        ]
+      ],
+      "allowReverse": false,
+      "expected": {
+        "accepted": false,
+        "distanceMeters": null,
+        "reverseUsed": false,
+        "loaded": false,
+        "findingCodes": [
+          "route_unreachable"
+        ],
+        "findingIds": [
+          "flr-8c49eeaf6c1fba78bb7e3a38"
+        ],
+        "routeFingerprint": null
+      }
+    },
+    {
+      "caseId": "reverse-required",
+      "start": {
+        "x": 8.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "goal": {
+        "x": 2.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "traversablePolygons": [
+        [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 2.0
+          },
+          {
+            "x": 0.0,
+            "z": 2.0
+          }
+        ]
+      ],
+      "allowReverse": true,
+      "expected": {
+        "accepted": true,
+        "distanceMeters": 6.0,
+        "reverseUsed": true,
+        "loaded": false,
+        "findingCodes": [],
+        "findingIds": [],
+        "routeFingerprint": "e2bbde30f8a44e552e4de557ba7a252eba97740a37b2328ddfc5230c25012976"
+      }
+    },
+    {
+      "caseId": "loaded",
+      "start": {
+        "x": 1.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "goal": {
+        "x": 9.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "traversablePolygons": [
+        [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 2.0
+          },
+          {
+            "x": 0.0,
+            "z": 2.0
+          }
+        ]
+      ],
+      "allowReverse": false,
+      "load": {
+        "massKilograms": 500,
+        "footprint": [
+          {
+            "x": -0.8,
+            "z": -0.55
+          },
+          {
+            "x": 0.8,
+            "z": -0.55
+          },
+          {
+            "x": 0.8,
+            "z": 0.55
+          },
+          {
+            "x": -0.8,
+            "z": 0.55
+          }
+        ]
+      },
+      "expected": {
+        "accepted": true,
+        "distanceMeters": 8.0,
+        "reverseUsed": false,
+        "loaded": true,
+        "findingCodes": [],
+        "findingIds": [],
+        "routeFingerprint": "36e8d60b789031cc4b31f0d6317313a4140b6f5cb1dcadc71423ebefa1ce768a"
+      }
+    },
+    {
+      "caseId": "unreachable",
+      "start": {
+        "x": 1.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "goal": {
+        "x": 9.0,
+        "z": 1.0,
+        "heading": 0.0
+      },
+      "traversablePolygons": [
+        [
+          {
+            "x": 0.0,
+            "z": 0.0
+          },
+          {
+            "x": 3.0,
+            "z": 0.0
+          },
+          {
+            "x": 3.0,
+            "z": 2.0
+          },
+          {
+            "x": 0.0,
+            "z": 2.0
+          }
+        ],
+        [
+          {
+            "x": 7.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 0.0
+          },
+          {
+            "x": 10.0,
+            "z": 2.0
+          },
+          {
+            "x": 7.0,
+            "z": 2.0
+          }
+        ]
+      ],
+      "allowReverse": true,
+      "expected": {
+        "accepted": false,
+        "distanceMeters": null,
+        "reverseUsed": false,
+        "loaded": false,
+        "findingCodes": [
+          "route_unreachable"
+        ],
+        "findingIds": [
+          "flr-7303f5916800d86a6c5ceb4c"
+        ],
+        "routeFingerprint": null
+      }
+    }
+  ]
+}

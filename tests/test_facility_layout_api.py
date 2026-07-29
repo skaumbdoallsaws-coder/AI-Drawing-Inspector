@@ -233,6 +233,52 @@ def test_layout_http_round_trip_and_operation_batch(tmp_path):
     assert validated.json()["valid"] is True
 
 
+def test_routing_http_surface_is_revision_bound_and_read_only(tmp_path):
+    client, _, shell, policy = _client(tmp_path)
+    created = client.post(
+        "/api/facility-layouts/site-a",
+        json={"layout": _layout(shell, policy)},
+    ).json()
+    before = _file_snapshot(tmp_path)
+
+    diagnosed = client.post(
+        "/api/facility-layouts/site-a/fl-api-cell/routing/diagnostics",
+        json={
+            "baseRevision": created["revision"],
+            "operations": [],
+        },
+    )
+    assert diagnosed.status_code == 200
+    assert diagnosed.json()["valid"] is True
+    assert diagnosed.json()["metrics"]["routeCount"] == 0
+
+    unresolved = client.post(
+        "/api/facility-layouts/site-a/fl-api-cell/routing/connectors",
+        json={
+            "baseRevision": created["revision"],
+            "request": {
+                "routeKind": "material",
+                "sourceEndpoint": {
+                    "kind": "zone_anchor",
+                    "zoneId": "zn-missing",
+                    "anchorId": "za-missing",
+                },
+            },
+        },
+    )
+    assert unresolved.status_code == 200
+    assert unresolved.json()["candidates"] == []
+    assert unresolved.json()["findings"][0]["code"] == "dangling_zone_anchor"
+    assert _file_snapshot(tmp_path) == before
+
+    stale = client.post(
+        "/api/facility-layouts/site-a/fl-api-cell/routing/diagnostics",
+        json={"baseRevision": "f" * 64, "operations": []},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "revision_conflict"
+
+
 def test_http_operation_preview_is_read_only_and_matches_put(tmp_path):
     client, _, shell, policy = _client(tmp_path)
     created = client.post(

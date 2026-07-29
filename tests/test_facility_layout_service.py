@@ -16,8 +16,15 @@ from ai_inspector.facility_layout.errors import (
     FacilityLayoutError,
     FacilityValidationError,
 )
-from ai_inspector.facility_layout.operations import create_layout_document
+from ai_inspector.facility_layout.operations import (
+    apply_facility_layout_operations,
+    create_layout_document,
+)
 from ai_inspector.facility_layout.repository import FacilityLayoutRepository
+from ai_inspector.facility_layout.routing import (
+    persisted_route_fingerprint,
+    routing_layout_fingerprint,
+)
 from ai_inspector.facility_layout.service import (
     FacilityLayoutService,
     coordinate_frame_fingerprint,
@@ -101,7 +108,12 @@ def _publish(repository, principal, document, id_field):
     ).envelope
 
 
-def _service(tmp_path, *, asset_resolver=_default_asset_resolver):
+def _service(
+    tmp_path,
+    *,
+    asset_resolver=_default_asset_resolver,
+    process_map_resolver=None,
+):
     principal = _principal()
     documents = _authority_documents()
     authority_root = tmp_path / "authority"
@@ -145,6 +157,7 @@ def _service(tmp_path, *, asset_resolver=_default_asset_resolver):
         policy_repository=policy_repository,
         vehicle_repository=vehicle_repository,
         asset_definition_resolver=asset_resolver,
+        process_map_resolver=process_map_resolver,
     )
     return service, principal, shell, policy, vehicle
 
@@ -462,3 +475,496 @@ def test_reviewed_authority_is_not_eligible_for_layout_reference(tmp_path):
         service.create_layout(principal, "site-a", _layout(shell, policy))
 
     assert raised.value.code == "not_found"
+
+
+def _routing_asset(asset_id, revision):
+    value = _resolved_asset(asset_id, revision)
+    value["definition"]["documentKind"] = "industrial_asset_definition"
+    value["definition"]["connectors"] = [
+        {
+            "connectorId": "material-in",
+            "connectorKind": "material",
+            "position": {"x": -0.5, "y": 0.5, "z": 0.0},
+            "facing": {"x": -1.0, "y": 0.0, "z": 0.0},
+            "role": "input",
+            "allowedRouteKinds": ["material"],
+            "interface": {"carrier": "pallet"},
+            "evidenceStatus": "authored",
+            "evidence": ["ev-material-in"],
+        }
+    ]
+    return value
+
+
+def _material_route_operations(asset_revision, base_layout):
+    operations = [
+        {
+            "op": "add_zone",
+            "zone": {
+                "zoneId": "zn-inbound-route",
+                "zoneType": "staging",
+                "label": "Inbound route",
+                "boundary": [
+                    {"x": 0.0, "z": 0.0},
+                    {"x": 5.0, "z": 0.0},
+                    {"x": 5.0, "z": 4.0},
+                    {"x": 0.0, "z": 4.0},
+                ],
+                "floorElevation": 0.0,
+                "anchors": [
+                    {
+                        "anchorId": "za-material-source",
+                        "anchorKind": "material",
+                        "position": {"x": 0.0, "y": 0.5, "z": 2.0},
+                        "facing": {"x": 1.0, "y": 0.0, "z": 0.0},
+                        "allowedRouteKinds": ["material"],
+                        "evidence": ["ev-staging-anchor"],
+                    }
+                ],
+                "evidence": [],
+            },
+        },
+        {
+            "op": "place_asset",
+            "placement": {
+                "placementId": "pl-route-machine",
+                "assetId": "asset-route-machine",
+                "assetDefinitionRevision": asset_revision,
+                "transform": {
+                    "position": {"x": 4.0, "y": 0.0, "z": 2.0},
+                    "quaternion": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 1.0,
+                    },
+                    "scale": 1,
+                },
+                "positionMode": "manual",
+                "snapRelationship": None,
+                "metadata": {},
+            },
+        },
+        {
+            "op": "add_route",
+            "route": {
+                "routeId": "rt-inbound-machine",
+                "routeKind": "material",
+                "sourceEndpoint": {
+                    "kind": "zone_anchor",
+                    "zoneId": "zn-inbound-route",
+                    "anchorId": "za-material-source",
+                },
+                "targetEndpoint": {
+                    "kind": "placement_connector",
+                    "placementId": "pl-route-machine",
+                    "connectorId": "material-in",
+                },
+                "routingMode": "polyline",
+                "centerline": [
+                    {"x": 0.0, "y": 0.5, "z": 2.0},
+                    {"x": 3.5, "y": 0.5, "z": 2.0},
+                ],
+                "corridorWidth": 1.0,
+                "routeFingerprint": "7" * 64,
+                "sourceRevisions": {},
+                "requirements": [],
+                "evidence": [],
+            },
+        },
+    ]
+    staged = apply_facility_layout_operations(
+        base_layout,
+        operations[:2],
+    )["document"]
+    route = operations[-1]["route"]
+    route["sourceRevisions"] = {
+        "layout": routing_layout_fingerprint(staged),
+        "shell": staged["sourceShellRef"]["shellRevision"],
+        "policy": staged["policySetRef"]["policySetRevision"],
+    }
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+    return operations
+
+
+def test_route_transaction_connector_candidates_and_process_binding(tmp_path):
+    process_state = {"revision": "6" * 64}
+
+    def resolve_process(_principal, _site, _product, _map_id, _revision):
+        return {
+            "revision": process_state["revision"],
+            "document": {
+                "canvasNodes": [{"id": "node-op"}],
+                "canvasEdges": [{"id": "edge-flow"}],
+            },
+        }
+
+    service, principal, shell, policy, _ = _service(
+        tmp_path,
+        asset_resolver=(
+            lambda _p, _s, asset_id, revision: _routing_asset(
+                asset_id,
+                revision,
+            )
+        ),
+        process_map_resolver=resolve_process,
+    )
+    created = service.create_layout(
+        principal,
+        "site-a",
+        _layout(shell, policy),
+    )
+    asset_revision = "e" * 64
+    applied = service.apply_operations(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        created["revision"],
+        _material_route_operations(asset_revision, created["layout"]),
+    )
+    assert applied["routingDiagnostics"]["valid"] is True
+    assert applied["routingDiagnostics"]["metrics"]["routeCount"] == 1
+
+    candidates = service.connector_candidates(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        applied["revision"],
+        {
+            "routeKind": "material",
+            "sourceEndpoint": {
+                "kind": "zone_anchor",
+                "zoneId": "zn-inbound-route",
+                "anchorId": "za-material-source",
+            },
+        },
+    )
+    assert [
+        item["targetQualifiedEndpointId"]
+        for item in candidates["candidates"]
+    ] == ["placement:pl-route-machine:material-in"]
+
+    bound = service.apply_operations(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        applied["revision"],
+        [
+            {
+                "op": "attach_process_binding",
+                "processBinding": {
+                    "processBindingId": "pb-route-machine",
+                    "productId": "product-demo",
+                    "processMapId": "pm-demo",
+                    "processMapRevision": process_state["revision"],
+                    "processNodeIds": ["node-op"],
+                    "processEdgeIds": ["edge-flow"],
+                    "placementIds": ["pl-route-machine"],
+                    "routeIds": ["rt-inbound-machine"],
+                    "bindingRole": "material_flow",
+                },
+            }
+        ],
+    )
+    assert bound["routingDiagnostics"]["valid"] is True
+    assert bound["dependencies"]["processMapRevisions"] == [
+        {
+            "productId": "product-demo",
+            "processMapId": "pm-demo",
+            "processMapRevision": "6" * 64,
+        }
+    ]
+
+    process_state["revision"] = "9" * 64
+    with pytest.raises(FacilityConflictError) as stale:
+        service.preview_operations(
+            principal,
+            "site-a",
+            "fl-service-cell",
+            bound["revision"],
+            [{"op": "rename_layout", "displayName": "Must not preview"}],
+        )
+    assert stale.value.code == "stale_process_map_revision"
+
+
+def test_process_binding_missing_targets_and_route_geometry_fail_closed(tmp_path):
+    def resolve_process(_principal, _site, _product, _map_id, revision):
+        return {
+            "revision": revision,
+            "document": {
+                "canvasNodes": [{"id": "node-existing"}],
+                "canvasEdges": [],
+            },
+        }
+
+    service, principal, shell, policy, _ = _service(
+        tmp_path,
+        asset_resolver=(
+            lambda _p, _s, asset_id, revision: _routing_asset(
+                asset_id,
+                revision,
+            )
+        ),
+        process_map_resolver=resolve_process,
+    )
+    created = service.create_layout(
+        principal,
+        "site-a",
+        _layout(shell, policy),
+    )
+    operations = _material_route_operations(
+        "e" * 64,
+        created["layout"],
+    )
+    operations[-1]["route"]["centerline"][0]["x"] = 1.0
+    operations[-1]["route"]["routeFingerprint"] = (
+        persisted_route_fingerprint(operations[-1]["route"])
+    )
+    with pytest.raises(FacilityValidationError) as route_error:
+        service.preview_operations(
+            principal,
+            "site-a",
+            "fl-service-cell",
+            created["revision"],
+            operations,
+        )
+    assert route_error.value.code == "routing_validation_failed"
+    assert {
+        item["code"] for item in route_error.value.details["findings"]
+    } == {"route_endpoint_geometry_mismatch"}
+
+    applied = service.apply_operations(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        created["revision"],
+        _material_route_operations("e" * 64, created["layout"]),
+    )
+    with pytest.raises(FacilityValidationError) as binding_error:
+        service.preview_operations(
+            principal,
+            "site-a",
+            "fl-service-cell",
+            applied["revision"],
+            [
+                {
+                    "op": "attach_process_binding",
+                    "processBinding": {
+                        "processBindingId": "pb-bad-target",
+                        "productId": "product-demo",
+                        "processMapId": "pm-demo",
+                        "processMapRevision": "6" * 64,
+                        "processNodeIds": ["node-missing"],
+                        "processEdgeIds": ["edge-missing"],
+                        "placementIds": ["pl-route-machine"],
+                        "routeIds": ["rt-inbound-machine"],
+                        "bindingRole": "material_flow",
+                    },
+                }
+            ],
+        )
+    assert binding_error.value.code == "routing_validation_failed"
+    assert {
+        item["code"] for item in binding_error.value.details["findings"]
+    } == {
+        "dangling_process_binding_node",
+        "dangling_process_binding_edge",
+    }
+
+
+def test_service_plans_forklift_route_from_trusted_zone_anchors(tmp_path):
+    service, principal, shell, policy, vehicle = _service(tmp_path)
+    layout = _layout(shell, policy)
+    aisle = {
+        "zoneId": "zn-forklift-aisle",
+        "zoneType": "aisle",
+        "label": "Main forklift aisle",
+        "boundary": [
+            {"x": 0.0, "z": 0.0},
+            {"x": 15.0, "z": 0.0},
+            {"x": 15.0, "z": 6.0},
+            {"x": 0.0, "z": 6.0},
+        ],
+        "floorElevation": 0.0,
+        "anchors": [
+            {
+                "anchorId": "za-forklift-start",
+                "anchorKind": "forklift",
+                "position": {"x": 2.0, "y": 0.0, "z": 3.0},
+                "facing": {"x": 1.0, "y": 0.0, "z": 0.0},
+                "allowedRouteKinds": ["forklift"],
+                "evidence": ["ev-aisle"],
+            },
+            {
+                "anchorId": "za-forklift-end",
+                "anchorKind": "forklift",
+                "position": {"x": 12.0, "y": 0.0, "z": 3.0},
+                "facing": {"x": -1.0, "y": 0.0, "z": 0.0},
+                "allowedRouteKinds": ["forklift"],
+                "evidence": ["ev-aisle"],
+            },
+        ],
+        "evidence": ["ev-aisle"],
+    }
+    layout["zones"].append(aisle)
+    created = service.create_layout(principal, "site-a", layout)
+
+    result = service.plan_forklift_route(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        created["revision"],
+        {
+            "sourceEndpoint": {
+                "kind": "zone_anchor",
+                "zoneId": "zn-forklift-aisle",
+                "anchorId": "za-forklift-start",
+            },
+            "targetEndpoint": {
+                "kind": "zone_anchor",
+                "zoneId": "zn-forklift-aisle",
+                "anchorId": "za-forklift-end",
+            },
+            "vehicleProfileRef": {
+                "vehicleProfileId": vehicle.document["vehicleProfileId"],
+                "vehicleProfileRevision": vehicle.revision,
+            },
+            "allowReverse": False,
+        },
+    )
+    assert result["accepted"] is True
+    assert result["sweptVolume"]["valid"] is True
+    assert result["sourceEndpoint"]["anchorId"] == "za-forklift-start"
+    assert result["sourceRevisions"]["layout"] == created["revision"]
+
+
+def test_routing_differential_keeps_distinct_subjects():
+    baseline = {
+        "findings": [
+            {
+                "code": "route_endpoint_geometry_mismatch",
+                "severity": "error",
+                "subjects": ["rt-existing", "source"],
+            }
+        ]
+    }
+    candidate = {
+        "findings": [
+            *baseline["findings"],
+            {
+                "code": "route_endpoint_geometry_mismatch",
+                "severity": "error",
+                "subjects": ["rt-new", "source"],
+            },
+        ]
+    }
+    with pytest.raises(FacilityValidationError) as caught:
+        FacilityLayoutService._require_no_new_routing_errors(
+            baseline,
+            candidate,
+        )
+    assert caught.value.code == "routing_validation_failed"
+    assert caught.value.details["findings"][0]["subjects"] == [
+        "rt-new",
+        "source",
+    ]
+
+
+def test_process_map_dependency_requires_reported_revision(tmp_path):
+    service, principal, shell, policy, _ = _service(
+        tmp_path,
+        process_map_resolver=lambda *_args: True,
+    )
+    created = service.create_layout(
+        principal,
+        "site-a",
+        _layout(shell, policy),
+    )
+    with pytest.raises(FacilityValidationError) as caught:
+        service.preview_operations(
+            principal,
+            "site-a",
+            "fl-service-cell",
+            created["revision"],
+            [
+                {
+                    "op": "attach_process_binding",
+                    "processBinding": {
+                        "processBindingId": "pb-unverified",
+                        "productId": "product-demo",
+                        "processMapId": "pm-demo",
+                        "processMapRevision": "6" * 64,
+                        "processNodeIds": ["node-op"],
+                        "processEdgeIds": [],
+                        "placementIds": [],
+                        "routeIds": [],
+                        "bindingRole": "resource",
+                    },
+                }
+            ],
+        )
+    assert caught.value.code == "process_map_revision_unverified"
+
+
+def test_process_binding_role_rejects_junction_as_assigned_work(tmp_path):
+    revision = "6" * 64
+
+    def resolve_process(_principal, _site, _product, _map_id, _revision):
+        return {
+            "revision": revision,
+            "document": {
+                "canvasNodes": [{"id": "node-junction", "type": "junction"}],
+                "canvasEdges": [],
+            },
+        }
+
+    service, principal, shell, policy, _ = _service(
+        tmp_path,
+        asset_resolver=(
+            lambda _p, _s, asset_id, asset_revision: _routing_asset(
+                asset_id,
+                asset_revision,
+            )
+        ),
+        process_map_resolver=resolve_process,
+    )
+    created = service.create_layout(
+        principal,
+        "site-a",
+        _layout(shell, policy),
+    )
+    asset_revision = "e" * 64
+    placed = service.apply_operations(
+        principal,
+        "site-a",
+        "fl-service-cell",
+        created["revision"],
+        _material_route_operations(asset_revision, created["layout"])[:2],
+    )
+    with pytest.raises(FacilityValidationError) as caught:
+        service.preview_operations(
+            principal,
+            "site-a",
+            "fl-service-cell",
+            placed["revision"],
+            [
+                {
+                    "op": "attach_process_binding",
+                    "processBinding": {
+                        "processBindingId": "pb-junction-work",
+                        "productId": "product-demo",
+                        "processMapId": "pm-demo",
+                        "processMapRevision": revision,
+                        "processNodeIds": ["node-junction"],
+                        "processEdgeIds": [],
+                        "placementIds": ["pl-route-machine"],
+                        "routeIds": [],
+                        "bindingRole": "resource",
+                    },
+                }
+            ],
+        )
+    assert caught.value.code == "routing_validation_failed"
+    assert {
+        item["code"] for item in caught.value.details["findings"]
+    } == {"process_binding_semantics_invalid"}

@@ -22,9 +22,19 @@ from .errors import (
 )
 from .operations import apply_facility_layout_operations
 from .repository import FacilityLayoutRepository
+from .routing import (
+    ROUTING_ENGINE_VERSION,
+    generate_connector_candidates,
+    plan_forklift_route,
+    resolve_endpoint,
+    validate_route,
+    validate_utility_network,
+)
 from .spatial import (
     CANDIDATE_POLICY_VERSION,
     SPATIAL_ENGINE_VERSION,
+    placement_spatial_records,
+    shell_obstacle_records,
 )
 from .spatial_executor import FacilitySpatialExecutor
 from .validate import validate_layout
@@ -108,10 +118,28 @@ def _require_resolved(
             "Facility resource was not found.",
         )
     if not isinstance(value, Mapping):
+        if kind == "process_map":
+            raise FacilityValidationError(
+                "process_map_revision_unverified",
+                "Process Map dependency did not return revision-bearing data.",
+                details={
+                    "dependencyId": identifier,
+                    "expectedRevision": revision,
+                },
+            )
         return
     reported_revision = value.get("revision")
     if reported_revision is None:
         reported_revision = value.get(f"{kind}Revision")
+    if reported_revision is None and kind == "process_map":
+        raise FacilityValidationError(
+            "process_map_revision_unverified",
+            "Process Map dependency did not report its current revision.",
+            details={
+                "dependencyId": identifier,
+                "expectedRevision": revision,
+            },
+        )
     if reported_revision is not None and reported_revision != revision:
         raise FacilityConflictError(
             f"stale_{kind}_revision",
@@ -495,6 +523,497 @@ class FacilityLayoutService:
                 },
             )
 
+    @staticmethod
+    def _routing_finding(
+        code: str,
+        severity: str,
+        message: str,
+        *subjects: str,
+        details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        subject_refs = sorted(str(item) for item in subjects if item)
+        finding_id = (
+            "frf-"
+            + hashlib.sha256(
+                _canonical_value_bytes(
+                    {
+                        "code": code,
+                        "severity": severity,
+                        "subjectRefs": subject_refs,
+                        "details": dict(details or {}),
+                    }
+                )
+            ).hexdigest()[:24]
+        )
+        result = {
+            "findingId": finding_id,
+            "findingType": "facility_routing",
+            "code": code,
+            "severity": severity,
+            "message": message,
+            "subjectRefs": subject_refs,
+        }
+        if details:
+            result["details"] = deepcopy(dict(details))
+        return result
+
+    @staticmethod
+    def _routing_error_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
+        raw_subjects = finding.get("subjectRefs")
+        if not isinstance(raw_subjects, list):
+            raw_subjects = finding.get("subjects", [])
+        return (
+            str(finding.get("code") or ""),
+            tuple(
+                sorted(
+                    str(item)
+                    for item in raw_subjects
+                    if isinstance(item, str)
+                )
+            ),
+        )
+
+    @classmethod
+    def _require_no_new_routing_errors(
+        cls,
+        baseline: Mapping[str, Any],
+        candidate: Mapping[str, Any],
+    ) -> None:
+        baseline_keys = {
+            cls._routing_error_key(item)
+            for item in baseline.get("findings", [])
+            if isinstance(item, Mapping)
+            and item.get("severity") in {"error", "blocked"}
+        }
+        introduced = [
+            deepcopy(dict(item))
+            for item in candidate.get("findings", [])
+            if isinstance(item, Mapping)
+            and item.get("severity") in {"error", "blocked"}
+            and cls._routing_error_key(item) not in baseline_keys
+        ]
+        if introduced:
+            raise FacilityValidationError(
+                "routing_validation_failed",
+                "Facility Layout transaction introduces routing violations.",
+                details={
+                    "findings": introduced,
+                    "baselineErrorCount": len(baseline_keys),
+                },
+            )
+
+    @staticmethod
+    def _require_routing_valid(diagnostics: Mapping[str, Any]) -> None:
+        errors = [
+            deepcopy(dict(item))
+            for item in diagnostics.get("findings", [])
+            if isinstance(item, Mapping)
+            and item.get("severity") in {"error", "blocked"}
+        ]
+        if errors:
+            raise FacilityValidationError(
+                "routing_validation_failed",
+                "Facility Layout violates authoritative routing constraints.",
+                details={"findings": errors},
+            )
+
+    @staticmethod
+    def _process_map_document(value: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        for key in ("document", "processMap", "map", "layout"):
+            candidate = value.get(key)
+            if isinstance(candidate, Mapping):
+                return candidate
+        if any(key in value for key in ("canvasNodes", "nodes", "canvasEdges", "edges")):
+            return value
+        return None
+
+    def _process_binding_findings(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        binding: Mapping[str, Any],
+        facility_document: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        binding_id = str(binding.get("processBindingId") or "")
+        if self.process_map_resolver is None:
+            return [
+                self._routing_finding(
+                    "process_map_structure_unavailable",
+                    "blocked",
+                    "Process Map structure cannot be verified.",
+                    binding_id,
+                )
+            ]
+        resolved = self.process_map_resolver(
+            principal,
+            site_id,
+            str(binding.get("productId") or ""),
+            str(binding.get("processMapId") or ""),
+            str(binding.get("processMapRevision") or ""),
+        )
+        if not isinstance(resolved, Mapping):
+            return [
+                self._routing_finding(
+                    "process_map_structure_unavailable",
+                    "blocked",
+                    "Process Map resolver did not return revision-bound structure.",
+                    binding_id,
+                )
+            ]
+        reported_revision = resolved.get("revision")
+        if reported_revision is None:
+            reported_revision = resolved.get("processMapRevision")
+        requested_revision = str(binding.get("processMapRevision") or "")
+        if reported_revision is None:
+            return [
+                self._routing_finding(
+                    "process_map_revision_unverified",
+                    "blocked",
+                    "Process Map resolver did not report its current revision.",
+                    binding_id,
+                    details={"expectedRevision": requested_revision},
+                )
+            ]
+        if reported_revision != requested_revision:
+            return [
+                self._routing_finding(
+                    "stale_process_map_revision",
+                    "blocked",
+                    "Process Map binding revision is stale.",
+                    binding_id,
+                    details={
+                        "expectedRevision": requested_revision,
+                        "currentRevision": reported_revision,
+                    },
+                )
+            ]
+        document = self._process_map_document(resolved)
+        if document is None:
+            return [
+                self._routing_finding(
+                    "process_map_structure_unavailable",
+                    "blocked",
+                    "Process Map resolver did not return revision-bound structure.",
+                    binding_id,
+                )
+            ]
+        raw_nodes = document.get("canvasNodes", document.get("nodes", []))
+        raw_edges = document.get("canvasEdges", document.get("edges", []))
+        node_ids = {
+            str(item.get("id"))
+            for item in raw_nodes
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+        } if isinstance(raw_nodes, list) else set()
+        edge_ids = {
+            str(item.get("id"))
+            for item in raw_edges
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+        } if isinstance(raw_edges, list) else set()
+        findings: list[dict[str, Any]] = []
+        missing_nodes = sorted(
+            str(item)
+            for item in binding.get("processNodeIds", [])
+            if str(item) not in node_ids
+        )
+        missing_edges = sorted(
+            str(item)
+            for item in binding.get("processEdgeIds", [])
+            if str(item) not in edge_ids
+        )
+        if missing_nodes:
+            findings.append(
+                self._routing_finding(
+                    "dangling_process_binding_node",
+                    "error",
+                    "Process binding references unknown Process Map nodes.",
+                    binding_id,
+                    *missing_nodes,
+                    details={"missingNodeIds": missing_nodes},
+                )
+            )
+        if missing_edges:
+            findings.append(
+                self._routing_finding(
+                    "dangling_process_binding_edge",
+                    "error",
+                    "Process binding references unknown Process Map edges.",
+                    binding_id,
+                    *missing_edges,
+                    details={"missingEdgeIds": missing_edges},
+                )
+            )
+        binding_role = str(binding.get("bindingRole") or "")
+        node_by_id = {
+            str(item.get("id")): item
+            for item in raw_nodes
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+        } if isinstance(raw_nodes, list) else {}
+        route_by_id = {
+            str(item.get("routeId")): item
+            for item in facility_document.get("routes", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("routeId"), str)
+        }
+        bound_node_ids = [
+            str(item) for item in binding.get("processNodeIds", [])
+        ]
+        bound_edge_ids = [
+            str(item) for item in binding.get("processEdgeIds", [])
+        ]
+        bound_placement_ids = [
+            str(item) for item in binding.get("placementIds", [])
+        ]
+        bound_route_ids = [
+            str(item) for item in binding.get("routeIds", [])
+        ]
+        node_roles = {"resource", "inspection", "storage", "staging"}
+        edge_roles = {"material_flow", "operator_flow"}
+        if binding_role in node_roles:
+            if not bound_node_ids or not bound_placement_ids:
+                findings.append(
+                    self._routing_finding(
+                        "process_binding_semantics_invalid",
+                        "error",
+                        "This binding role requires Process Map nodes and facility placements.",
+                        binding_id,
+                        binding_role,
+                    )
+                )
+            junction_ids = sorted(
+                node_id
+                for node_id in bound_node_ids
+                if (
+                    node_id in node_by_id
+                    and str(node_by_id[node_id].get("type") or "")
+                    == "junction"
+                )
+            )
+            if junction_ids:
+                findings.append(
+                    self._routing_finding(
+                        "process_binding_semantics_invalid",
+                        "error",
+                        "Routing junctions cannot represent assigned work or resources.",
+                        binding_id,
+                        *junction_ids,
+                    )
+                )
+        if binding_role in edge_roles:
+            if not bound_edge_ids or not bound_route_ids:
+                findings.append(
+                    self._routing_finding(
+                        "process_binding_semantics_invalid",
+                        "error",
+                        "Flow bindings require Process Map edges and facility routes.",
+                        binding_id,
+                        binding_role,
+                    )
+                )
+            expected_route_kinds = (
+                {"material", "conveyor", "forklift"}
+                if binding_role == "material_flow"
+                else {"operator"}
+            )
+            incompatible_routes = sorted(
+                route_id
+                for route_id in bound_route_ids
+                if route_id in route_by_id
+                and str(route_by_id[route_id].get("routeKind") or "")
+                not in expected_route_kinds
+            )
+            if incompatible_routes:
+                findings.append(
+                    self._routing_finding(
+                        "process_binding_semantics_invalid",
+                        "error",
+                        "Bound facility route kind is incompatible with the binding role.",
+                        binding_id,
+                        *incompatible_routes,
+                        details={
+                            "bindingRole": binding_role,
+                            "allowedRouteKinds": sorted(
+                                expected_route_kinds
+                            ),
+                        },
+                    )
+                )
+        return findings
+
+    @staticmethod
+    def _route_obstacles(
+        document: Mapping[str, Any],
+        asset_definitions: Mapping[tuple[str, str], Mapping[str, Any]],
+        shell: Mapping[str, Any],
+        *,
+        excluded_placement_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        excluded = excluded_placement_ids or set()
+        result: list[dict[str, Any]] = []
+        for placement in document.get("placements", []):
+            if (
+                not isinstance(placement, Mapping)
+                or placement.get("placementId") in excluded
+            ):
+                continue
+            key = (
+                str(placement.get("assetId") or ""),
+                str(placement.get("assetDefinitionRevision") or ""),
+            )
+            asset = asset_definitions.get(key)
+            if asset is None:
+                continue
+            for record in placement_spatial_records(placement, asset):
+                result.append(
+                    {
+                        "obstacleId": record.record_id,
+                        "polygon": [
+                            {"x": point[0], "z": point[1]}
+                            for point in record.polygon
+                        ],
+                    }
+                )
+        for record in shell_obstacle_records(shell):
+            result.append(
+                {
+                    "obstacleId": record.record_id,
+                    "polygon": [
+                        {"x": point[0], "z": point[1]}
+                        for point in record.polygon
+                    ],
+                }
+            )
+        result.sort(key=lambda item: item["obstacleId"])
+        return result
+
+    def _diagnose_routing(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        document: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        context = self._spatial_context(principal, site_id, document)
+        traversable = [
+            deepcopy(zone.get("boundary"))
+            for zone in document.get("zones", [])
+            if isinstance(zone, Mapping)
+            and zone.get("zoneType") == "aisle"
+            and isinstance(zone.get("boundary"), list)
+        ]
+        findings: list[dict[str, Any]] = []
+        route_results = []
+        for route in sorted(
+            (
+                item
+                for item in document.get("routes", [])
+                if isinstance(item, Mapping)
+            ),
+            key=lambda item: str(item.get("routeId") or ""),
+        ):
+            vehicle_profile = None
+            vehicle_ref = route.get("vehicleProfileRef")
+            if isinstance(vehicle_ref, Mapping):
+                envelope = self.vehicle_repository.get_published(
+                    principal,
+                    site_id=site_id,
+                    authority_id=str(vehicle_ref.get("vehicleProfileId") or ""),
+                    revision=str(vehicle_ref.get("vehicleProfileRevision") or ""),
+                )
+                vehicle_profile = envelope.document
+            result = validate_route(
+                document,
+                route,
+                asset_definitions=context.asset_definitions,
+                shell={"document": context.shell, "revision": context.shell.get("revision")},
+                shell_revision=str(
+                    document.get("sourceShellRef", {}).get("shellRevision") or ""
+                ),
+                vehicle_profile=vehicle_profile,
+                traversable_polygons=traversable,
+                obstacles=self._route_obstacles(
+                    document,
+                    context.asset_definitions,
+                    context.shell,
+                    excluded_placement_ids=set(),
+                ),
+            )
+            route_results.append(result)
+            findings.extend(result["findings"])
+        utility_results = []
+        for network in sorted(
+            (
+                item
+                for item in document.get("utilityNetworks", [])
+                if isinstance(item, Mapping)
+            ),
+            key=lambda item: str(item.get("utilityNetworkId") or ""),
+        ):
+            result = validate_utility_network(
+                document,
+                network,
+                asset_definitions=context.asset_definitions,
+                shell={"document": context.shell, "revision": (
+                    document.get("sourceShellRef", {}).get("shellRevision")
+                )},
+                shell_revision=str(
+                    document.get("sourceShellRef", {}).get("shellRevision") or ""
+                ),
+                obstacles=self._route_obstacles(
+                    document,
+                    context.asset_definitions,
+                    context.shell,
+                    excluded_placement_ids=set(),
+                ),
+            )
+            utility_results.append(result)
+            findings.extend(result["findings"])
+        for binding in sorted(
+            (
+                item
+                for item in document.get("processBindings", [])
+                if isinstance(item, Mapping)
+            ),
+            key=lambda item: str(item.get("processBindingId") or ""),
+        ):
+            findings.extend(
+                self._process_binding_findings(
+                    principal,
+                    site_id,
+                    binding,
+                    document,
+                )
+            )
+        ordered = sorted(
+            (deepcopy(dict(item)) for item in findings),
+            key=lambda item: (
+                {"error": 0, "blocked": 1, "warning": 2, "info": 3}.get(
+                    str(item.get("severity")),
+                    9,
+                ),
+                str(item.get("code") or ""),
+                str(item.get("findingId") or ""),
+            ),
+        )
+        return {
+            "routingEngineVersion": ROUTING_ENGINE_VERSION,
+            "valid": not any(
+                item.get("severity") in {"error", "blocked"}
+                for item in ordered
+            ),
+            "findings": ordered,
+            "routes": route_results,
+            "utilityNetworks": utility_results,
+            "metrics": {
+                "routeCount": len(route_results),
+                "utilityNetworkCount": len(utility_results),
+                "processBindingCount": len(document.get("processBindings", [])),
+                "errorCount": sum(
+                    item.get("severity") == "error" for item in ordered
+                ),
+                "blockedCount": sum(
+                    item.get("severity") == "blocked" for item in ordered
+                ),
+            },
+        }
     def validate_dependencies(
         self,
         principal: FacilityPrincipal,
@@ -685,6 +1204,8 @@ class FacilityLayoutService:
         )
         spatial = self._diagnose_spatial(principal, site_id, document)
         self._require_spatially_valid(spatial)
+        routing = self._diagnose_routing(principal, site_id, document)
+        self._require_routing_valid(routing)
         result = self.layout_repository.create_layout(
             principal,
             site_id,
@@ -693,6 +1214,7 @@ class FacilityLayoutService:
         )
         result["dependencies"] = dependencies.to_dict()
         result["spatialDiagnostics"] = spatial
+        result["routingDiagnostics"] = routing
         return result
 
     def save_layout(
@@ -710,6 +1232,18 @@ class FacilityLayoutService:
         )
         spatial = self._diagnose_spatial(principal, site_id, document)
         self._require_spatially_valid(spatial)
+        current = self.layout_repository.get_layout(
+            principal,
+            site_id,
+            layout_id,
+        )
+        baseline_routing = self._diagnose_routing(
+            principal,
+            site_id,
+            current["layout"],
+        )
+        routing = self._diagnose_routing(principal, site_id, document)
+        self._require_no_new_routing_errors(baseline_routing, routing)
         result = self.layout_repository.save_layout(
             principal,
             site_id,
@@ -719,6 +1253,7 @@ class FacilityLayoutService:
         )
         result["dependencies"] = dependencies.to_dict()
         result["spatialDiagnostics"] = spatial
+        result["routingDiagnostics"] = routing
         return result
 
     def apply_operations(
@@ -749,6 +1284,9 @@ class FacilityLayoutService:
             "operationResult": deepcopy(operation_result),
             "spatialDiagnostics": deepcopy(
                 operation_result["spatialDiagnostics"]
+            ),
+            "routingDiagnostics": deepcopy(
+                operation_result["routingDiagnostics"]
             ),
         }
 
@@ -810,6 +1348,11 @@ class FacilityLayoutService:
             site_id,
             current["layout"],
         )
+        baseline_routing = self._diagnose_routing(
+            principal,
+            site_id,
+            current["layout"],
+        )
         operation_result = apply_facility_layout_operations(
             current["layout"],
             operations,
@@ -827,6 +1370,13 @@ class FacilityLayoutService:
         )
         self._require_no_new_spatial_errors(baseline_spatial, spatial)
         operation_result["spatialDiagnostics"] = spatial
+        routing = self._diagnose_routing(
+            principal,
+            site_id,
+            operation_result["document"],
+        )
+        self._require_no_new_routing_errors(baseline_routing, routing)
+        operation_result["routingDiagnostics"] = routing
         return operation_result, dependencies
 
     @staticmethod
@@ -1082,6 +1632,279 @@ class FacilityLayoutService:
             "dependencies": dependencies.to_dict(),
         }
 
+    def diagnose_routing(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        *,
+        operations: list[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="layout.read",
+        )
+        current = self.layout_repository.get_layout(
+            principal,
+            site_id,
+            layout_id,
+        )
+        if current["revision"] != base_revision:
+            raise FacilityConflictError(
+                "revision_conflict",
+                "Facility Layout revision conflict.",
+                details={"currentRevision": current["revision"]},
+            )
+        pending = list(operations or [])
+        draft = apply_facility_layout_operations(
+            current["layout"],
+            pending,
+            base_revision=base_revision,
+        )["document"]
+        dependencies = self.validate_dependencies(principal, site_id, draft)
+        diagnostics = self._diagnose_routing(principal, site_id, draft)
+        return {
+            **diagnostics,
+            "baseRevision": base_revision,
+            "dependencies": dependencies.to_dict(),
+        }
+
+    def connector_candidates(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        request: Mapping[str, Any],
+        *,
+        operations: list[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="layout.edit",
+        )
+        current = self.layout_repository.get_layout(
+            principal,
+            site_id,
+            layout_id,
+        )
+        if current["revision"] != base_revision:
+            raise FacilityConflictError(
+                "revision_conflict",
+                "Facility Layout revision conflict.",
+                details={"currentRevision": current["revision"]},
+            )
+        pending = list(operations or [])
+        draft = apply_facility_layout_operations(
+            current["layout"],
+            pending,
+            base_revision=base_revision,
+        )["document"]
+        self.validate_dependencies(principal, site_id, draft)
+        endpoint = request.get("sourceEndpoint")
+        route_kind = request.get("routeKind")
+        if not isinstance(endpoint, Mapping) or not isinstance(route_kind, str):
+            raise FacilityValidationError(
+                "invalid_route_request",
+                "sourceEndpoint and routeKind are required.",
+            )
+        context = self._spatial_context(principal, site_id, draft)
+        result = generate_connector_candidates(
+            draft,
+            endpoint,
+            route_kind=route_kind,
+            asset_definitions=context.asset_definitions,
+            shell={
+                "document": context.shell,
+                "revision": draft["sourceShellRef"]["shellRevision"],
+            },
+            shell_revision=draft["sourceShellRef"]["shellRevision"],
+            maximum_distance_meters=request.get("maximumDistanceMeters"),
+            maximum_candidates=request.get("maximumCandidates", 64),
+        )
+        return {
+            **result,
+            "baseRevision": base_revision,
+        }
+
+    def plan_forklift_route(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        request: Mapping[str, Any],
+        *,
+        operations: list[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="layout.edit",
+        )
+        current = self.layout_repository.get_layout(
+            principal,
+            site_id,
+            layout_id,
+        )
+        if current["revision"] != base_revision:
+            raise FacilityConflictError(
+                "revision_conflict",
+                "Facility Layout revision conflict.",
+                details={"currentRevision": current["revision"]},
+            )
+        pending = list(operations or [])
+        draft = apply_facility_layout_operations(
+            current["layout"],
+            pending,
+            base_revision=base_revision,
+        )["document"]
+        self.validate_dependencies(principal, site_id, draft)
+        source_endpoint = request.get("sourceEndpoint")
+        target_endpoint = request.get("targetEndpoint")
+        vehicle_ref = request.get("vehicleProfileRef")
+        if (
+            not isinstance(source_endpoint, Mapping)
+            or not isinstance(target_endpoint, Mapping)
+            or not isinstance(vehicle_ref, Mapping)
+        ):
+            raise FacilityValidationError(
+                "invalid_route_request",
+                "Source, target, and vehicle profile references are required.",
+            )
+        context = self._spatial_context(principal, site_id, draft)
+        endpoint_kwargs = {
+            "asset_definitions": context.asset_definitions,
+            "shell": {
+                "document": context.shell,
+                "revision": draft["sourceShellRef"]["shellRevision"],
+            },
+            "shell_revision": draft["sourceShellRef"]["shellRevision"],
+            "route_kind": "forklift",
+        }
+        source = resolve_endpoint(
+            draft,
+            source_endpoint,
+            direction="source",
+            **endpoint_kwargs,
+        )
+        target = resolve_endpoint(
+            draft,
+            target_endpoint,
+            direction="target",
+            **endpoint_kwargs,
+        )
+        endpoint_findings = [
+            *source.get("findings", []),
+            *target.get("findings", []),
+        ]
+        if not source.get("resolved") or not target.get("resolved"):
+            return {
+                "accepted": False,
+                "baseRevision": base_revision,
+                "findings": endpoint_findings,
+                "processSemantics": {
+                    "precedenceDerived": False,
+                    "policy": (
+                        "spatial_proximity_never_implies_process_precedence"
+                    ),
+                },
+            }
+        vehicle_id = str(vehicle_ref.get("vehicleProfileId") or "")
+        vehicle_revision = str(
+            vehicle_ref.get("vehicleProfileRevision") or ""
+        )
+        envelope = self.vehicle_repository.get_published(
+            principal,
+            site_id=site_id,
+            authority_id=vehicle_id,
+            revision=vehicle_revision,
+        )
+        requested_zone_ids = request.get("traversableZoneIds")
+        if requested_zone_ids is not None and (
+            not isinstance(requested_zone_ids, list)
+            or not all(isinstance(item, str) for item in requested_zone_ids)
+        ):
+            raise FacilityValidationError(
+                "invalid_route_request",
+                "traversableZoneIds must be an array of stable IDs.",
+            )
+        allowed_ids = (
+            None if requested_zone_ids is None else set(requested_zone_ids)
+        )
+        traversable = [
+            deepcopy(zone["boundary"])
+            for zone in draft.get("zones", [])
+            if isinstance(zone, Mapping)
+            and zone.get("zoneType") == "aisle"
+            and (allowed_ids is None or zone.get("zoneId") in allowed_ids)
+        ]
+        excluded = {
+            str(endpoint.get("placementId"))
+            for endpoint in (source_endpoint, target_endpoint)
+            if endpoint.get("kind") == "placement_connector"
+        }
+        start_facing = source["facing"]
+        target_facing = target["facing"]
+        start = {
+            **deepcopy(source["position"]),
+            "heading": math.atan2(
+                float(start_facing["z"]),
+                float(start_facing["x"]),
+            ),
+        }
+        goal = {
+            **deepcopy(target["position"]),
+            "heading": math.atan2(
+                -float(target_facing["z"]),
+                -float(target_facing["x"]),
+            ),
+        }
+        result = plan_forklift_route(
+            start,
+            goal,
+            envelope.document,
+            traversable_polygons=traversable,
+            obstacles=self._route_obstacles(
+                draft,
+                context.asset_definitions,
+                context.shell,
+                excluded_placement_ids=excluded,
+            ),
+            load=(
+                request.get("load")
+                if isinstance(request.get("load"), Mapping)
+                else None
+            ),
+            allow_reverse=request.get("allowReverse"),
+            grid_resolution_meters=request.get(
+                "gridResolutionMeters",
+                0.5,
+            ),
+            source_revisions={
+                "layout": base_revision,
+                "shell": draft["sourceShellRef"]["shellRevision"],
+                "policy": draft["policySetRef"]["policySetRevision"],
+                "vehicle": vehicle_revision,
+            },
+        )
+        return {
+            **result,
+            "baseRevision": base_revision,
+            "sourceEndpoint": deepcopy(dict(source_endpoint)),
+            "targetEndpoint": deepcopy(dict(target_endpoint)),
+            "vehicleProfileRef": {
+                "vehicleProfileId": vehicle_id,
+                "vehicleProfileRevision": vehicle_revision,
+            },
+        }
+
     @staticmethod
     def _candidate_placement_id(
         layout: Mapping[str, Any],
@@ -1303,12 +2126,30 @@ class FacilityLayoutService:
             document,
         )
         spatial = self._diagnose_spatial(principal, site_id, document)
+        routing = self._diagnose_routing(principal, site_id, document)
+        findings = [
+            *deepcopy(spatial["findings"]),
+            *deepcopy(routing["findings"]),
+        ]
         return {
-            "valid": bool(spatial["valid"]),
+            "valid": bool(spatial["valid"] and routing["valid"]),
             "safetyStatus": spatial["safetyStatus"],
-            "findings": deepcopy(spatial["findings"]),
-            "metrics": deepcopy(spatial["metrics"]),
+            "findings": findings,
+            "metrics": {
+                **deepcopy(spatial["metrics"]),
+                "routingErrorCount": routing["metrics"]["errorCount"],
+                "routingBlockedCount": routing["metrics"]["blockedCount"],
+                "routeCount": routing["metrics"]["routeCount"],
+                "utilityNetworkCount": routing["metrics"][
+                    "utilityNetworkCount"
+                ],
+                "processBindingCount": routing["metrics"][
+                    "processBindingCount"
+                ],
+            },
             "spatialEngineVersion": spatial["spatialEngineVersion"],
+            "routingEngineVersion": routing["routingEngineVersion"],
+            "routingDiagnostics": routing,
             "dependencies": dependencies.to_dict(),
         }
 

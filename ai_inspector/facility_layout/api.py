@@ -432,6 +432,97 @@ def create_facility_layout_router(
             )
         )
 
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/routing/diagnostics"
+    )
+    async def routing_diagnostics(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.diagnose_routing(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                operations=operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/routing/connectors"
+    )
+    async def routing_connector_candidates(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            candidate_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.connector_candidates(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                candidate_request,
+                operations=operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/routing/forklift-plan"
+    )
+    async def routing_forklift_plan(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            route_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.plan_forklift_route(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                route_request,
+                operations=operations,
+            )
+        )
+
     @router.post("/api/facility-layouts/{site_id}/{layout_id}/archive")
     async def archive_layout(
         site_id: str,

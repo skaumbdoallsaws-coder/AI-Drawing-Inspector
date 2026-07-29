@@ -589,9 +589,23 @@ class JsonReceiptStore:
                 return deepcopy(existing)
             known_receipt = self._load_receipt(receipt.receipt_id)
             if known_receipt is not None and known_receipt != receipt:
-                raise TransactionIdempotencyConflictError(
-                    "receipt_conflict",
-                    "Receipt ID is already bound to another result.",
+                recovered_candidate = replace(
+                    receipt,
+                    created_at=known_receipt.created_at,
+                )
+                if known_receipt != recovered_candidate:
+                    raise TransactionIdempotencyConflictError(
+                        "receipt_conflict",
+                        "Receipt ID is already bound to another result.",
+                    )
+                # A prior finalize may have written the immutable receipt and
+                # crashed before advancing the idempotency record. Adopt that
+                # hash-verified receipt, including its original timestamp.
+                receipt = known_receipt
+                candidate = IdempotencyRecord(
+                    "finalized",
+                    prepared,
+                    receipt,
                 )
             if known_receipt is None:
                 self._atomic_write(

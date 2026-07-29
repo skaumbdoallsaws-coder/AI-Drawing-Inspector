@@ -263,6 +263,7 @@ class TransactionKernel:
             public_summary=deepcopy(dict(request.public_summary)),
             created_at=now,
             expires_at=now + self._proposal_lifetime,
+            principal_claimable=request.principal_claimable,
         )
         self._state.put_proposal(proposal, now=now)
         return proposal
@@ -280,7 +281,8 @@ class TransactionKernel:
                     "invalid_transaction_principal",
                     "principal must be a PrincipalBinding.",
                 )
-            self._assert_principal(principal, proposal.principal)
+            if proposal.principal is not None:
+                self._assert_principal(principal, proposal.principal)
         return proposal
 
     def cancel_proposal(
@@ -300,7 +302,13 @@ class TransactionKernel:
                 "proposal_not_found",
                 "Proposal was not found or the service restarted.",
             )
-        self._assert_principal(principal, proposal.principal)
+        if proposal.principal is not None:
+            self._assert_principal(principal, proposal.principal)
+        elif not proposal.principal_claimable:
+            raise TransactionAuthorizationError(
+                "transaction_principal_mismatch",
+                "Transaction proposal has no claimable principal.",
+            )
         if proposal.status == "cancelled":
             return proposal
         if proposal.expires_at <= self._now():
@@ -326,7 +334,13 @@ class TransactionKernel:
         now = self._now()
         proposal = self._active_proposal(request.proposal_id, now=now)
         self._assert_binding(request.binding, proposal.binding)
-        self._assert_principal(request.principal, proposal.principal)
+        if proposal.principal is not None:
+            self._assert_principal(request.principal, proposal.principal)
+        elif not proposal.principal_claimable:
+            raise TransactionAuthorizationError(
+                "transaction_principal_mismatch",
+                "Transaction proposal has no claimable principal.",
+            )
         fingerprint = self.request_fingerprint(
             request.binding,
             request.principal,
@@ -376,7 +390,7 @@ class TransactionKernel:
             proposal_id=proposal.proposal_id,
             action=proposal.action,
             binding=proposal.binding,
-            principal=proposal.principal,
+            principal=request.principal,
             idempotency_key=request.idempotency_key,
             request_fingerprint=fingerprint,
             created_at=now,
@@ -519,7 +533,13 @@ class TransactionKernel:
             )
         proposal = self._active_proposal(approval.proposal_id, now=now)
         self._assert_binding(approval.binding, proposal.binding)
-        self._assert_principal(approval.principal, proposal.principal)
+        if proposal.principal is not None:
+            self._assert_principal(approval.principal, proposal.principal)
+        elif not proposal.principal_claimable:
+            raise TransactionAuthorizationError(
+                "transaction_principal_mismatch",
+                "Transaction proposal has no claimable principal.",
+            )
 
         plan = adapter.regenerate(proposal)
         if not isinstance(plan, MutationPlan):
@@ -535,7 +555,7 @@ class TransactionKernel:
                 proposal_id=proposal.proposal_id,
                 action=proposal.action,
                 binding=proposal.binding,
-                principal=proposal.principal,
+                principal=approval.principal,
                 idempotency_key=approval.idempotency_key,
                 request_fingerprint=approval.request_fingerprint,
                 prepared_at=now,
@@ -559,7 +579,7 @@ class TransactionKernel:
                 prepared.proposal_id != proposal.proposal_id
                 or prepared.action != proposal.action
                 or prepared.binding != proposal.binding
-                or prepared.principal != proposal.principal
+                or prepared.principal != approval.principal
             ):
                 raise TransactionIdempotencyConflictError(
                     "prepared_transaction_conflict",

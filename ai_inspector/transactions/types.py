@@ -290,9 +290,10 @@ class ExactBinding:
 class ProposalRequest:
     action: str
     binding: ExactBinding
-    principal: PrincipalBinding
+    principal: Optional[PrincipalBinding]
     payload: Mapping[str, Any] = field(default_factory=dict)
     public_summary: Mapping[str, Any] = field(default_factory=dict)
+    principal_claimable: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "action", validate_action(self.action))
@@ -301,10 +302,28 @@ class ProposalRequest:
                 "invalid_transaction_binding",
                 "binding must be an ExactBinding.",
             )
-        if not isinstance(self.principal, PrincipalBinding):
+        if self.principal is not None and not isinstance(
+            self.principal,
+            PrincipalBinding,
+        ):
             raise TransactionValidationError(
                 "invalid_transaction_principal",
-                "principal must be a PrincipalBinding.",
+                "principal must be a PrincipalBinding or null.",
+            )
+        if not isinstance(self.principal_claimable, bool):
+            raise TransactionValidationError(
+                "invalid_transaction_principal",
+                "principalClaimable must be a boolean.",
+            )
+        if self.principal is None and not self.principal_claimable:
+            raise TransactionValidationError(
+                "transaction_principal_required",
+                "A proposal principal is required.",
+            )
+        if self.principal is not None and self.principal_claimable:
+            raise TransactionValidationError(
+                "invalid_transaction_principal",
+                "A principal-bound proposal cannot also be claimable.",
             )
         object.__setattr__(
             self,
@@ -323,12 +342,13 @@ class ProposalRecord:
     proposal_id: str
     action: str
     binding: ExactBinding
-    principal: PrincipalBinding
+    principal: Optional[PrincipalBinding]
     payload: Mapping[str, Any]
     public_summary: Mapping[str, Any]
     created_at: float
     expires_at: float
     status: str = "active"
+    principal_claimable: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -337,6 +357,29 @@ class ProposalRecord:
             validate_token(self.proposal_id, "proposalId"),
         )
         object.__setattr__(self, "action", validate_action(self.action))
+        if self.principal is not None and not isinstance(
+            self.principal,
+            PrincipalBinding,
+        ):
+            raise TransactionValidationError(
+                "invalid_transaction_principal",
+                "principal must be a PrincipalBinding or null.",
+            )
+        if not isinstance(self.principal_claimable, bool):
+            raise TransactionValidationError(
+                "invalid_transaction_principal",
+                "principalClaimable must be a boolean.",
+            )
+        if self.principal is None and not self.principal_claimable:
+            raise TransactionValidationError(
+                "transaction_principal_required",
+                "A proposal principal is required.",
+            )
+        if self.principal is not None and self.principal_claimable:
+            raise TransactionValidationError(
+                "invalid_transaction_principal",
+                "A principal-bound proposal cannot also be claimable.",
+            )
         object.__setattr__(
             self,
             "payload",
@@ -373,7 +416,12 @@ class ProposalRecord:
             "proposalId": self.proposal_id,
             "action": self.action,
             **self.binding.to_dict(),
-            "principal": self.principal.to_dict(),
+            "principal": (
+                self.principal.to_dict()
+                if self.principal is not None
+                else None
+            ),
+            "principalClaimable": self.principal_claimable,
             "summary": deepcopy(dict(self.public_summary)),
             "createdAt": self.created_at,
             "expiresAt": self.expires_at,

@@ -544,7 +544,7 @@ def test_prepared_record_reconciles_committed_result_without_recommit(tmp_path):
     )
     committed = CommitResult(
         revision=_hash("f"),
-        payload={"createdIds": ["rack-recovered"], "warnings": []},
+        payload={"createdIds": ["fixture-1"], "warnings": []},
     )
     recovery_adapter = RecordingAdapter(
         reconciliation=ReconciliationResult.committed(committed)
@@ -570,6 +570,76 @@ def test_prepared_record_reconciles_committed_result_without_recommit(tmp_path):
         receipt_store=JsonReceiptStore(root),
     )
     exact_retry = second_restart.apply(request, RecordingAdapter())
+    assert exact_retry.receipt == recovered.receipt
+
+
+def test_recovery_adopts_receipt_written_before_finalize_crash(
+    tmp_path,
+    monkeypatch,
+):
+    clock = FakeClock()
+    tokens = SequentialTokens()
+    root = tmp_path / "receipt-before-idempotency-crash"
+    store = JsonReceiptStore(root)
+    kernel = _kernel(
+        clock=clock,
+        tokens=tokens,
+        receipt_store=store,
+    )
+    _, _, request = _approve(kernel)
+    committed = CommitResult(
+        revision=_hash("f"),
+        payload={"createdIds": ["fixture-1"], "warnings": []},
+    )
+    adapter = RecordingAdapter(revision=committed.revision)
+    original_write = store._atomic_write
+
+    def fail_finalized_idempotency_write(path, data):
+        if (
+            path.parent.name == "idempotency"
+            and b'"state": "finalized"' in data
+        ):
+            raise OSError("simulated crash before idempotency finalize")
+        original_write(path, data)
+
+    monkeypatch.setattr(
+        store,
+        "_atomic_write",
+        fail_finalized_idempotency_write,
+    )
+    with pytest.raises(
+        OSError,
+        match="simulated crash before idempotency finalize",
+    ):
+        kernel.apply(request, adapter)
+    receipt_files = list((root / "receipts").glob("*.json"))
+    assert len(receipt_files) == 1
+    orphaned_receipt = json.loads(
+        receipt_files[0].read_text(encoding="ascii")
+    )
+
+    clock.advance(7)
+    recovery_adapter = RecordingAdapter(
+        reconciliation=ReconciliationResult.committed(committed)
+    )
+    restarted = _kernel(
+        clock=clock,
+        tokens=tokens,
+        receipt_store=JsonReceiptStore(root),
+    )
+    recovered = restarted.apply(request, recovery_adapter)
+    assert recovered.replayed is True
+    assert recovered.recovered is True
+    assert recovered.receipt.created_at == orphaned_receipt["createdAt"]
+    assert recovered.receipt.revision == committed.revision
+    assert recovered.receipt.payload == committed.payload
+    assert recovery_adapter.commit_calls == []
+
+    exact_retry = _kernel(
+        clock=clock,
+        tokens=tokens,
+        receipt_store=JsonReceiptStore(root),
+    ).apply(request, RecordingAdapter())
     assert exact_retry.receipt == recovered.receipt
 
 
@@ -778,3 +848,115 @@ def test_token_and_clock_factories_are_injected_and_validated():
     with pytest.raises(TransactionValidationError) as error:
         _propose(invalid_tokens)
     assert error.value.code == "invalid_transaction_token"
+
+
+def test_proposal_requires_a_bound_or_explicitly_claimable_principal():
+    with pytest.raises(TransactionValidationError) as missing:
+        ProposalRequest(
+            action="process_map.apply",
+            binding=_binding(),
+            principal=None,
+        )
+    assert missing.value.code == "transaction_principal_required"
+
+    with pytest.raises(TransactionValidationError) as conflicting:
+        ProposalRequest(
+            action="process_map.apply",
+            binding=_binding(),
+            principal=_principal(),
+            principal_claimable=True,
+        )
+    assert conflicting.value.code == "invalid_transaction_principal"
+
+
+def test_claimable_proposal_binds_the_first_explicit_approval_principal():
+    kernel = _kernel()
+    binding = _binding()
+    owner = _principal()
+    proposal = kernel.propose(
+        ProposalRequest(
+            action="process_map.apply",
+            binding=binding,
+            principal=None,
+            principal_claimable=True,
+            payload={"legacyCompatibility": True},
+        )
+    )
+    assert proposal.principal is None
+    assert proposal.principal_claimable is True
+    assert proposal.public_dict()["principal"] is None
+
+    approval = kernel.approve(
+        ApprovalRequest(
+            proposal_id=proposal.proposal_id,
+            binding=binding,
+            principal=owner,
+            idempotency_key="legacy-claim-0001",
+            explicit_approval=True,
+        )
+    )
+    assert approval.principal == owner
+
+    outcome = kernel.apply(
+        ApplyRequest(
+            approval_token=approval.approval_token,
+            binding=binding,
+            principal=owner,
+            idempotency_key="legacy-claim-0001",
+        ),
+        RecordingAdapter(),
+    )
+    assert outcome.receipt.principal == owner
+
+
+def test_claimable_proposal_rejects_a_different_apply_principal():
+    kernel = _kernel()
+    binding = _binding()
+    owner = _principal()
+    proposal = kernel.propose(
+        ProposalRequest(
+            action="process_map.apply",
+            binding=binding,
+            principal=None,
+            principal_claimable=True,
+        )
+    )
+    approval = kernel.approve(
+        ApprovalRequest(
+            proposal_id=proposal.proposal_id,
+            binding=binding,
+            principal=owner,
+            idempotency_key="legacy-claim-0002",
+            explicit_approval=True,
+        )
+    )
+    with pytest.raises(TransactionAuthorizationError) as error:
+        kernel.apply(
+            ApplyRequest(
+                approval_token=approval.approval_token,
+                binding=binding,
+                principal=_principal(principal_id="user-002"),
+                idempotency_key="legacy-claim-0002",
+            ),
+            RecordingAdapter(),
+        )
+    assert error.value.code == "transaction_principal_mismatch"
+
+
+def test_claimable_proposal_can_be_cancelled_by_opaque_token():
+    kernel = _kernel()
+    proposal = kernel.propose(
+        ProposalRequest(
+            action="process_map.apply",
+            binding=_binding(),
+            principal=None,
+            principal_claimable=True,
+        )
+    )
+    cancelled = kernel.cancel_proposal(
+        proposal.proposal_id,
+        principal=_principal(),
+    )
+    assert cancelled.status == "cancelled"
+    with pytest.raises(TransactionCancelledError):
+        kernel.get_proposal(proposal.proposal_id)

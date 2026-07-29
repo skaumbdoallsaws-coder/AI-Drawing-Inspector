@@ -113,6 +113,19 @@ from .transaction_adapter import (
     facility_transaction_principal,
 )
 from .validate import validate_layout
+from .workflows import (
+    FacilityWorkflowPackageError,
+    MANUFACTURING_CELL_PACKAGE_TYPE,
+    MANUFACTURING_CELL_PACKAGE_VERSION,
+    MANUFACTURING_CELL_TEMPLATE_VERSION,
+    WAREHOUSE_PACKAGE_TYPE,
+    WAREHOUSE_PACKAGE_VERSION,
+    WORKFLOW_PACKAGE_COMPILER_VERSION,
+    WORKFLOW_PACKAGE_SCHEMA_VERSION,
+    cell_template_revision,
+    compile_manufacturing_cell_package,
+    compile_warehouse_lane_package,
+)
 
 __all__ = [
     "AuthorizationDecision",
@@ -139,6 +152,10 @@ __all__ = [
     "FacilitySpatialExecutor",
     "FacilityShellRepository",
     "FacilityValidationError",
+    "FacilityWorkflowPackageError",
+    "MANUFACTURING_CELL_PACKAGE_TYPE",
+    "MANUFACTURING_CELL_PACKAGE_VERSION",
+    "MANUFACTURING_CELL_TEMPLATE_VERSION",
     "MigrationBundle",
     "PolicySetRepository",
     "PROCESS_SEMANTICS",
@@ -157,6 +174,10 @@ __all__ = [
     "TrustedFacilityContext",
     "TrustedFacilitySource",
     "UniformGridSpatialIndex",
+    "WAREHOUSE_PACKAGE_TYPE",
+    "WAREHOUSE_PACKAGE_VERSION",
+    "WORKFLOW_PACKAGE_COMPILER_VERSION",
+    "WORKFLOW_PACKAGE_SCHEMA_VERSION",
     "apply_facility_layout_operations",
     "authority_revision",
     "authorize_facility_action",
@@ -168,6 +189,9 @@ __all__ = [
     "canonicalize_layout",
     "canonicalize_polygon",
     "canonicalize_quaternion",
+    "cell_template_revision",
+    "compile_manufacturing_cell_package",
+    "compile_warehouse_lane_package",
     "coordinate_frame_fingerprint",
     "create_facility_layout_router",
     "create_layout_document",

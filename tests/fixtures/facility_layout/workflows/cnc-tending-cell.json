@@ -1,0 +1,774 @@
+{
+  "spec": {
+    "schemaVersion": 1,
+    "packageType": "manufacturing_cell",
+    "packageId": "cnc-tending-cell-alpha",
+    "scope": {
+      "siteId": "site-cell-alpha",
+      "layoutId": "fl-cell-alpha",
+      "label": "CNC tending cell alpha"
+    },
+    "objective": "place_and_cleanup",
+    "sourceRevisions": {
+      "layout": "1111111111111111111111111111111111111111111111111111111111111111",
+      "shell": "2222222222222222222222222222222222222222222222222222222222222222",
+      "policy": "3333333333333333333333333333333333333333333333333333333333333333",
+      "catalog": "4444444444444444444444444444444444444444444444444444444444444444",
+      "process.cnc-alpha": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "trustedEvidenceIds": [
+      "ev-cell-assets",
+      "ev-cell-zones",
+      "ev-cell-process"
+    ],
+    "template": {
+      "schemaVersion": 1,
+      "templateId": "template-cnc-tending-v1",
+      "templateRevision": "7f5653fea6ce8634d2ea73c60822a33ec7a769d1bcc965af1ca53331cc9b74d9",
+      "label": "CNC robot tending cell",
+      "roles": [
+        {
+          "roleId": "role-cnc",
+          "cellRole": "machine",
+          "label": "CNC machine",
+          "quantity": 1,
+          "stage": 1,
+          "targetZoneRef": "zone-cell-work"
+        },
+        {
+          "roleId": "role-robot",
+          "cellRole": "robot",
+          "label": "Tending robot",
+          "quantity": 1,
+          "stage": 1,
+          "targetZoneRef": "zone-cell-work"
+        },
+        {
+          "roleId": "role-fixture",
+          "cellRole": "fixture",
+          "label": "Part fixture",
+          "quantity": 1,
+          "stage": 1,
+          "targetZoneRef": "zone-cell-work"
+        },
+        {
+          "roleId": "role-guard",
+          "cellRole": "guard",
+          "label": "Safety guard",
+          "quantity": 1,
+          "stage": 1,
+          "targetZoneRef": "zone-cell-work"
+        },
+        {
+          "roleId": "role-operator-station",
+          "cellRole": "workstation",
+          "label": "Operator station",
+          "quantity": 1,
+          "stage": 2,
+          "targetZoneRef": "zone-cell-work"
+        },
+        {
+          "roleId": "role-conveyor",
+          "cellRole": "conveyor",
+          "label": "Output conveyor",
+          "quantity": 1,
+          "stage": 2,
+          "targetZoneRef": "zone-cell-work"
+        },
+        {
+          "roleId": "role-material-in",
+          "cellRole": "material_input",
+          "label": "Raw material input",
+          "quantity": 1,
+          "stage": 0,
+          "targetZoneRef": "zone-cell-work"
+        },
+        {
+          "roleId": "role-material-out",
+          "cellRole": "material_output",
+          "label": "Finished material output",
+          "quantity": 1,
+          "stage": 3,
+          "targetZoneRef": "zone-cell-work"
+        }
+      ],
+      "zones": [
+        {
+          "zoneRequestId": "zone-cell-work",
+          "zoneType": "workcell",
+          "label": "CNC tending workcell",
+          "memberRoleIds": [
+            "role-cnc",
+            "role-robot",
+            "role-fixture",
+            "role-guard",
+            "role-operator-station",
+            "role-conveyor",
+            "role-material-in",
+            "role-material-out"
+          ],
+          "paddingClass": "standard",
+          "allowedAssetCategories": [
+            "machine",
+            "robot",
+            "fixture",
+            "guard",
+            "workstation",
+            "conveyor",
+            "material_handling"
+          ]
+        },
+        {
+          "zoneRequestId": "zone-cell-operator",
+          "zoneType": "operator",
+          "label": "Operator zone",
+          "memberRoleIds": [
+            "role-operator-station",
+            "role-material-in",
+            "role-material-out"
+          ],
+          "paddingClass": "standard",
+          "allowedAssetCategories": [
+            "workstation",
+            "material_handling"
+          ]
+        },
+        {
+          "zoneRequestId": "zone-cell-maintenance",
+          "zoneType": "service",
+          "label": "Maintenance zone",
+          "memberRoleIds": [
+            "role-cnc",
+            "role-robot"
+          ],
+          "paddingClass": "generous",
+          "allowedAssetCategories": [
+            "machine",
+            "robot"
+          ]
+        },
+        {
+          "zoneRequestId": "zone-cell-safety",
+          "zoneType": "safety",
+          "label": "Guarded safety zone",
+          "memberRoleIds": [
+            "role-guard"
+          ],
+          "paddingClass": "standard",
+          "allowedAssetCategories": [
+            "guard"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "relationshipId": "rel-robot-cnc",
+          "relationshipType": "adjacent_to",
+          "sourceRoleId": "role-robot",
+          "targetRoleId": "role-cnc",
+          "knowledgeStatus": "inferred",
+          "evidenceIds": [],
+          "assumptionIds": [
+            "assumption-cell-sequence"
+          ]
+        },
+        {
+          "relationshipId": "rel-input-cnc",
+          "relationshipType": "upstream_of",
+          "sourceRoleId": "role-material-in",
+          "targetRoleId": "role-cnc",
+          "knowledgeStatus": "inferred",
+          "evidenceIds": [
+            "ev-cell-process"
+          ],
+          "assumptionIds": [
+            "assumption-cell-sequence"
+          ]
+        },
+        {
+          "relationshipId": "rel-cnc-output",
+          "relationshipType": "upstream_of",
+          "sourceRoleId": "role-cnc",
+          "targetRoleId": "role-material-out",
+          "knowledgeStatus": "inferred",
+          "evidenceIds": [
+            "ev-cell-process"
+          ],
+          "assumptionIds": [
+            "assumption-cell-sequence"
+          ]
+        }
+      ],
+      "flows": [
+        {
+          "flowId": "flow-cell-input",
+          "flowKind": "material",
+          "sourceEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-material-in",
+            "occurrenceIndex": 0,
+            "connectorId": "material-out"
+          },
+          "targetEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-cnc",
+            "occurrenceIndex": 0,
+            "connectorId": "material-in"
+          },
+          "knowledgeStatus": "inferred",
+          "evidenceIds": [
+            "ev-cell-process"
+          ],
+          "assumptionIds": [
+            "assumption-cell-sequence"
+          ]
+        },
+        {
+          "flowId": "flow-cell-conveyor",
+          "flowKind": "conveyor",
+          "sourceEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-cnc",
+            "occurrenceIndex": 0,
+            "connectorId": "material-out"
+          },
+          "targetEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-conveyor",
+            "occurrenceIndex": 0,
+            "connectorId": "material-in"
+          },
+          "knowledgeStatus": "inferred",
+          "evidenceIds": [
+            "ev-cell-process"
+          ],
+          "assumptionIds": [
+            "assumption-cell-sequence"
+          ]
+        },
+        {
+          "flowId": "flow-cell-output",
+          "flowKind": "material",
+          "sourceEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-conveyor",
+            "occurrenceIndex": 0,
+            "connectorId": "material-out"
+          },
+          "targetEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-material-out",
+            "occurrenceIndex": 0,
+            "connectorId": "material-in"
+          },
+          "knowledgeStatus": "inferred",
+          "evidenceIds": [
+            "ev-cell-process"
+          ],
+          "assumptionIds": [
+            "assumption-cell-sequence"
+          ]
+        },
+        {
+          "flowId": "flow-cell-operator",
+          "flowKind": "operator",
+          "sourceEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-operator-station",
+            "occurrenceIndex": 0,
+            "connectorId": "operator-out"
+          },
+          "targetEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-cnc",
+            "occurrenceIndex": 0,
+            "connectorId": "operator-in"
+          },
+          "knowledgeStatus": "inferred",
+          "evidenceIds": [],
+          "assumptionIds": [
+            "assumption-cell-sequence"
+          ]
+        },
+        {
+          "flowId": "flow-cell-air",
+          "flowKind": "utility",
+          "utilityKind": "compressed_air",
+          "sourceEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-cnc",
+            "occurrenceIndex": 0,
+            "connectorId": "air-in"
+          },
+          "targetEndpoint": {
+            "kind": "role_connector",
+            "roleId": "role-robot",
+            "occurrenceIndex": 0,
+            "connectorId": "air-in"
+          },
+          "knowledgeStatus": "unknown",
+          "evidenceIds": [],
+          "assumptionIds": []
+        }
+      ],
+      "capabilityRequirements": [
+        {
+          "requirementId": "req-cell-machining",
+          "capabilityId": "turning",
+          "quantity": 1,
+          "roleIds": [
+            "role-cnc"
+          ],
+          "knowledgeStatus": "authored",
+          "evidenceIds": [
+            "ev-cell-assets"
+          ],
+          "assumptionIds": []
+        },
+        {
+          "requirementId": "req-cell-tending",
+          "capabilityId": "robotic_tending",
+          "quantity": 1,
+          "roleIds": [
+            "role-robot"
+          ],
+          "knowledgeStatus": "authored",
+          "evidenceIds": [
+            "ev-cell-assets"
+          ],
+          "assumptionIds": []
+        },
+        {
+          "requirementId": "req-cell-guarding",
+          "capabilityId": "machine_guarding",
+          "quantity": 1,
+          "roleIds": [
+            "role-guard"
+          ],
+          "knowledgeStatus": "authored",
+          "evidenceIds": [
+            "ev-cell-assets"
+          ],
+          "assumptionIds": []
+        }
+      ]
+    },
+    "assetAssignments": [
+      {
+        "roleId": "role-cnc",
+        "itemId": "cell-cnc",
+        "assetId": "asset-cell-cnc",
+        "assetDefinitionRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "roleId": "role-robot",
+        "itemId": "cell-robot",
+        "assetId": "asset-cell-robot",
+        "assetDefinitionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "roleId": "role-fixture",
+        "itemId": "cell-fixture",
+        "assetId": "asset-cell-fixture",
+        "assetDefinitionRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "roleId": "role-guard",
+        "itemId": "cell-guard",
+        "assetId": "asset-cell-guard",
+        "assetDefinitionRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "roleId": "role-operator-station",
+        "itemId": "cell-operator-station",
+        "assetId": "asset-cell-operator-station",
+        "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "roleId": "role-conveyor",
+        "itemId": "cell-conveyor",
+        "assetId": "asset-cell-conveyor",
+        "assetDefinitionRevision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "roleId": "role-material-in",
+        "itemId": "cell-material-in",
+        "assetId": "asset-cell-material-in",
+        "assetDefinitionRevision": "6666666666666666666666666666666666666666666666666666666666666666",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "roleId": "role-material-out",
+        "itemId": "cell-material-out",
+        "assetId": "asset-cell-material-out",
+        "assetDefinitionRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-cell-assets"
+        ],
+        "assumptionIds": []
+      }
+    ],
+    "zoneBindings": [
+      {
+        "zoneRequestId": "zone-cell-work",
+        "existingZoneId": "zn-cell-work",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-cell-zones"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "zoneRequestId": "zone-cell-operator",
+        "existingZoneId": "zn-cell-operator",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-cell-zones"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "zoneRequestId": "zone-cell-maintenance",
+        "existingZoneId": "zn-cell-maintenance",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-cell-zones"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "zoneRequestId": "zone-cell-safety",
+        "existingZoneId": "zn-cell-safety",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-cell-zones"
+        ],
+        "assumptionIds": []
+      }
+    ],
+    "processAssignments": [
+      {
+        "bindingIntentId": "binding-cell-cnc-tending",
+        "productId": "product-cell-alpha",
+        "processMapId": "pm-cnc-alpha",
+        "processMapRevision": "5555555555555555555555555555555555555555555555555555555555555555",
+        "processNodeIds": [
+          "node-load-cnc",
+          "node-machine-part",
+          "node-unload-cnc"
+        ],
+        "processEdgeIds": [
+          "edge-load-machine",
+          "edge-machine-unload"
+        ],
+        "roleIds": [
+          "role-cnc",
+          "role-robot",
+          "role-fixture",
+          "role-conveyor"
+        ],
+        "flowIds": [
+          "flow-cell-input",
+          "flow-cell-conveyor",
+          "flow-cell-output"
+        ],
+        "bindingRole": "resource",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-cell-process"
+        ],
+        "assumptionIds": []
+      }
+    ],
+    "assumptions": [
+      {
+        "assumptionId": "assumption-cell-sequence",
+        "text": "Review the inferred input, tending, machining, and output sequence against the approved work instruction.",
+        "subjectRefs": [
+          "rel-robot-cnc",
+          "rel-input-cnc",
+          "rel-cnc-output",
+          "flow-cell-input",
+          "flow-cell-conveyor",
+          "flow-cell-output",
+          "flow-cell-operator"
+        ]
+      }
+    ],
+    "unresolvedItems": [
+      {
+        "unresolvedId": "unresolved-cell-air",
+        "code": "utility_capacity_unverified",
+        "message": "Confirm compressed-air source, pressure, flow, and connection topology.",
+        "subjectRefs": [
+          "flow-cell-air"
+        ]
+      }
+    ],
+    "evidence": [],
+    "alternatives": [
+      "flow_lanes",
+      "balanced_grid"
+    ],
+    "layoutHints": {
+      "density": "balanced"
+    }
+  },
+  "trustedState": {
+    "origin": {
+      "kind": "server"
+    },
+    "identity": {
+      "siteId": "site-cell-alpha",
+      "layoutId": "fl-cell-alpha",
+      "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "dependencyRevisions": {
+      "shellId": "shell-cell-alpha",
+      "shellRevision": "2222222222222222222222222222222222222222222222222222222222222222",
+      "policySetRevision": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "assets": [
+      {
+        "assetId": "asset-cell-cnc",
+        "assetDefinitionRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "planningReady": true,
+        "category": "machine",
+        "capabilityIds": [
+          "turning"
+        ],
+        "connectors": [
+          {
+            "connectorId": "material-in",
+            "allowedRouteKinds": [
+              "material"
+            ]
+          },
+          {
+            "connectorId": "material-out",
+            "allowedRouteKinds": [
+              "material",
+              "conveyor"
+            ]
+          },
+          {
+            "connectorId": "operator-in",
+            "allowedRouteKinds": [
+              "operator"
+            ]
+          },
+          {
+            "connectorId": "air-in",
+            "allowedRouteKinds": []
+          }
+        ]
+      },
+      {
+        "assetId": "asset-cell-robot",
+        "assetDefinitionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "planningReady": true,
+        "category": "robot",
+        "capabilityIds": [
+          "robotic_tending"
+        ],
+        "connectors": [
+          {
+            "connectorId": "air-in",
+            "allowedRouteKinds": []
+          }
+        ]
+      },
+      {
+        "assetId": "asset-cell-fixture",
+        "assetDefinitionRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "planningReady": true,
+        "category": "fixture",
+        "capabilityIds": [],
+        "connectors": []
+      },
+      {
+        "assetId": "asset-cell-guard",
+        "assetDefinitionRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "planningReady": true,
+        "category": "guard",
+        "capabilityIds": [
+          "machine_guarding"
+        ],
+        "connectors": []
+      },
+      {
+        "assetId": "asset-cell-operator-station",
+        "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "planningReady": true,
+        "category": "workstation",
+        "capabilityIds": [],
+        "connectors": [
+          {
+            "connectorId": "operator-out",
+            "allowedRouteKinds": [
+              "operator"
+            ]
+          }
+        ]
+      },
+      {
+        "assetId": "asset-cell-conveyor",
+        "assetDefinitionRevision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "planningReady": true,
+        "category": "conveyor",
+        "capabilityIds": [],
+        "connectors": [
+          {
+            "connectorId": "material-in",
+            "allowedRouteKinds": [
+              "conveyor"
+            ]
+          },
+          {
+            "connectorId": "material-out",
+            "allowedRouteKinds": [
+              "material"
+            ]
+          }
+        ]
+      },
+      {
+        "assetId": "asset-cell-material-in",
+        "assetDefinitionRevision": "6666666666666666666666666666666666666666666666666666666666666666",
+        "planningReady": true,
+        "category": "material_handling",
+        "capabilityIds": [],
+        "connectors": [
+          {
+            "connectorId": "material-out",
+            "allowedRouteKinds": [
+              "material"
+            ]
+          }
+        ]
+      },
+      {
+        "assetId": "asset-cell-material-out",
+        "assetDefinitionRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "planningReady": true,
+        "category": "material_handling",
+        "capabilityIds": [],
+        "connectors": [
+          {
+            "connectorId": "material-in",
+            "allowedRouteKinds": [
+              "material"
+            ]
+          }
+        ]
+      }
+    ],
+    "placements": [],
+    "zones": [
+      {
+        "zoneId": "zn-cell-work",
+        "zoneType": "workcell",
+        "anchors": []
+      },
+      {
+        "zoneId": "zn-cell-operator",
+        "zoneType": "operator",
+        "anchors": []
+      },
+      {
+        "zoneId": "zn-cell-maintenance",
+        "zoneType": "service",
+        "anchors": []
+      },
+      {
+        "zoneId": "zn-cell-safety",
+        "zoneType": "safety",
+        "anchors": []
+      }
+    ],
+    "vehicles": [],
+    "processMaps": [
+      {
+        "processMapId": "pm-cnc-alpha",
+        "processMapRevision": "5555555555555555555555555555555555555555555555555555555555555555",
+        "productId": "product-cell-alpha",
+        "nodeIds": [
+          "node-load-cnc",
+          "node-machine-part",
+          "node-unload-cnc"
+        ],
+        "edgeIds": [
+          "edge-load-machine",
+          "edge-machine-unload"
+        ]
+      }
+    ],
+    "staleDependencies": false
+  },
+  "trustedEvidence": {
+    "origin": {
+      "kind": "server"
+    },
+    "records": [
+      {
+        "evidenceId": "ev-cell-assets",
+        "status": "authored",
+        "current": true,
+        "authoritative": true,
+        "blockers": [],
+        "claimKey": "asset.capability.cell_resources"
+      },
+      {
+        "evidenceId": "ev-cell-zones",
+        "status": "derived",
+        "current": true,
+        "authoritative": true,
+        "blockers": [],
+        "claimKey": "facility.zone.cell"
+      },
+      {
+        "evidenceId": "ev-cell-process",
+        "status": "derived",
+        "current": true,
+        "authoritative": true,
+        "blockers": [],
+        "claimKey": "facility.process_binding.resource"
+      }
+    ]
+  }
+}

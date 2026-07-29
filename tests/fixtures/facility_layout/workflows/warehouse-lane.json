@@ -1,0 +1,374 @@
+{
+  "spec": {
+    "schemaVersion": 1,
+    "packageType": "warehouse_lane",
+    "packageId": "warehouse-lane-alpha",
+    "scope": {
+      "siteId": "site-warehouse-alpha",
+      "layoutId": "fl-warehouse-alpha",
+      "label": "Finished goods lane alpha"
+    },
+    "objective": "place_and_cleanup",
+    "sourceRevisions": {
+      "layout": "1111111111111111111111111111111111111111111111111111111111111111",
+      "shell": "2222222222222222222222222222222222222222222222222222222222222222",
+      "policy": "3333333333333333333333333333333333333333333333333333333333333333",
+      "catalog": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "trustedEvidenceIds": [
+      "ev-warehouse-rack",
+      "ev-warehouse-zones",
+      "ev-warehouse-forklift",
+      "ev-warehouse-support"
+    ],
+    "rackSystem": {
+      "itemId": "rack-bank-alpha",
+      "assetId": "asset-rack-bay-alpha",
+      "assetDefinitionRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rowCount": 2,
+      "baysPerRow": 3,
+      "levelsPerBay": 2,
+      "slotsPerLevel": 2,
+      "palletPositionsPerSlot": 1,
+      "targetZoneRef": "zone-storage-alpha",
+      "knowledgeStatus": "authored",
+      "evidenceIds": [
+        "ev-warehouse-rack"
+      ],
+      "assumptionIds": []
+    },
+    "supportingAssets": [
+      {
+        "kind": "staging",
+        "itemId": "staging-alpha",
+        "assetId": "asset-staging-alpha",
+        "assetDefinitionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "quantity": 1,
+        "stage": 2,
+        "targetZoneRef": "zone-staging-alpha",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-warehouse-support"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "kind": "dock",
+        "itemId": "dock-alpha",
+        "assetId": "asset-dock-alpha",
+        "assetDefinitionRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "quantity": 1,
+        "stage": 3,
+        "targetZoneRef": "zone-dock-alpha",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-warehouse-support"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "kind": "charger",
+        "itemId": "charger-alpha",
+        "assetId": "asset-charger-alpha",
+        "assetDefinitionRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "quantity": 1,
+        "stage": 3,
+        "targetZoneRef": "zone-charging-alpha",
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-warehouse-support"
+        ],
+        "assumptionIds": []
+      }
+    ],
+    "zones": [
+      {
+        "zoneRequestId": "zone-storage-alpha",
+        "zoneType": "storage",
+        "label": "Rack storage lane",
+        "existingZoneId": "zn-warehouse-storage",
+        "memberKinds": [
+          "rack_rows"
+        ],
+        "paddingClass": "standard",
+        "allowedAssetCategories": [
+          "rack"
+        ],
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-warehouse-zones"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "zoneRequestId": "zone-staging-alpha",
+        "zoneType": "staging",
+        "label": "Outbound staging",
+        "existingZoneId": "zn-warehouse-staging",
+        "memberKinds": [
+          "staging"
+        ],
+        "paddingClass": "standard",
+        "allowedAssetCategories": [
+          "staging"
+        ],
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-warehouse-zones"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "zoneRequestId": "zone-dock-alpha",
+        "zoneType": "dock",
+        "label": "Shipping dock",
+        "existingZoneId": "zn-warehouse-dock",
+        "memberKinds": [
+          "dock"
+        ],
+        "paddingClass": "compact",
+        "allowedAssetCategories": [
+          "dock"
+        ],
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-warehouse-zones"
+        ],
+        "assumptionIds": []
+      },
+      {
+        "zoneRequestId": "zone-charging-alpha",
+        "zoneType": "charging",
+        "label": "Forklift charging",
+        "existingZoneId": "zn-warehouse-charging",
+        "memberKinds": [
+          "charger"
+        ],
+        "paddingClass": "compact",
+        "allowedAssetCategories": [
+          "charger"
+        ],
+        "knowledgeStatus": "derived",
+        "evidenceIds": [
+          "ev-warehouse-zones"
+        ],
+        "assumptionIds": []
+      }
+    ],
+    "requiredCapabilities": [
+      {
+        "requirementId": "req-pallet-storage-alpha",
+        "capabilityId": "pallet_storage",
+        "quantity": 6,
+        "assignedItemIds": [
+          "rack-bank-alpha-row-001",
+          "rack-bank-alpha-row-002"
+        ],
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-warehouse-rack"
+        ],
+        "assumptionIds": []
+      }
+    ],
+    "forkliftFlows": [
+      {
+        "flowId": "flow-warehouse-alpha",
+        "sourceEndpoint": {
+          "kind": "zone_anchor",
+          "zoneId": "zn-warehouse-aisle",
+          "anchorId": "za-warehouse-in"
+        },
+        "targetEndpoint": {
+          "kind": "zone_anchor",
+          "zoneId": "zn-warehouse-aisle",
+          "anchorId": "za-warehouse-out"
+        },
+        "vehicleProfileId": "vehicle-warehouse-forklift",
+        "vehicleProfileRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "knowledgeStatus": "authored",
+        "evidenceIds": [
+          "ev-warehouse-forklift"
+        ],
+        "assumptionIds": []
+      }
+    ],
+    "pallets": [
+      {
+        "palletId": "pallet-alpha-001",
+        "slotId": "rack-bank-alpha-row-001-bay-001-level-01-slot-01",
+        "loadRef": "load-alpha-001"
+      },
+      {
+        "palletId": "pallet-alpha-002",
+        "slotId": "rack-bank-alpha-row-002-bay-003-level-02-slot-02",
+        "loadRef": "load-alpha-002"
+      }
+    ],
+    "capacityPolicy": {
+      "planningUtilizationPercent": 85,
+      "knowledgeStatus": "inferred",
+      "evidenceIds": [],
+      "assumptionIds": [
+        "assumption-warehouse-utilization"
+      ]
+    },
+    "assumptions": [
+      {
+        "assumptionId": "assumption-warehouse-utilization",
+        "text": "Use 85 percent of nominal pallet positions for planning until the operating policy is approved.",
+        "subjectRefs": [
+          "warehouse-lane-alpha-capacity"
+        ]
+      }
+    ],
+    "unresolvedItems": [],
+    "evidence": [],
+    "alternatives": [
+      "flow_lanes",
+      "compact_rows"
+    ],
+    "layoutHints": {
+      "density": "balanced"
+    }
+  },
+  "trustedState": {
+    "origin": {
+      "kind": "server"
+    },
+    "identity": {
+      "siteId": "site-warehouse-alpha",
+      "layoutId": "fl-warehouse-alpha",
+      "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "dependencyRevisions": {
+      "shellId": "shell-warehouse-alpha",
+      "shellRevision": "2222222222222222222222222222222222222222222222222222222222222222",
+      "policySetRevision": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "assets": [
+      {
+        "assetId": "asset-rack-bay-alpha",
+        "assetDefinitionRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "planningReady": true,
+        "category": "rack",
+        "capabilityIds": [
+          "pallet_storage"
+        ],
+        "connectors": []
+      },
+      {
+        "assetId": "asset-staging-alpha",
+        "assetDefinitionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "planningReady": true,
+        "category": "staging",
+        "capabilityIds": [],
+        "connectors": []
+      },
+      {
+        "assetId": "asset-dock-alpha",
+        "assetDefinitionRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "planningReady": true,
+        "category": "dock",
+        "capabilityIds": [],
+        "connectors": []
+      },
+      {
+        "assetId": "asset-charger-alpha",
+        "assetDefinitionRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "planningReady": true,
+        "category": "charger",
+        "capabilityIds": [],
+        "connectors": []
+      }
+    ],
+    "placements": [],
+    "zones": [
+      {
+        "zoneId": "zn-warehouse-storage",
+        "zoneType": "storage",
+        "anchors": []
+      },
+      {
+        "zoneId": "zn-warehouse-staging",
+        "zoneType": "staging",
+        "anchors": []
+      },
+      {
+        "zoneId": "zn-warehouse-dock",
+        "zoneType": "dock",
+        "anchors": []
+      },
+      {
+        "zoneId": "zn-warehouse-charging",
+        "zoneType": "charging",
+        "anchors": []
+      },
+      {
+        "zoneId": "zn-warehouse-aisle",
+        "zoneType": "aisle",
+        "anchors": [
+          {
+            "anchorId": "za-warehouse-in",
+            "allowedRouteKinds": [
+              "forklift"
+            ]
+          },
+          {
+            "anchorId": "za-warehouse-out",
+            "allowedRouteKinds": [
+              "forklift"
+            ]
+          }
+        ]
+      }
+    ],
+    "vehicles": [
+      {
+        "vehicleProfileId": "vehicle-warehouse-forklift",
+        "vehicleProfileRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "processMaps": [],
+    "staleDependencies": false
+  },
+  "trustedEvidence": {
+    "origin": {
+      "kind": "server"
+    },
+    "records": [
+      {
+        "evidenceId": "ev-warehouse-rack",
+        "status": "authored",
+        "current": true,
+        "authoritative": true,
+        "blockers": [],
+        "claimKey": "asset.capability.pallet_storage"
+      },
+      {
+        "evidenceId": "ev-warehouse-zones",
+        "status": "derived",
+        "current": true,
+        "authoritative": true,
+        "blockers": [],
+        "claimKey": "facility.zone.warehouse"
+      },
+      {
+        "evidenceId": "ev-warehouse-forklift",
+        "status": "authored",
+        "current": true,
+        "authoritative": true,
+        "blockers": [],
+        "claimKey": "facility.route.forklift"
+      },
+      {
+        "evidenceId": "ev-warehouse-support",
+        "status": "derived",
+        "current": true,
+        "authoritative": true,
+        "blockers": [],
+        "claimKey": "facility.resource.support"
+      }
+    ]
+  }
+}

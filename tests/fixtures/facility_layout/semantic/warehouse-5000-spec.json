@@ -1,0 +1,12 @@
+{
+  "fixtureId": "facility-layout-p9-warehouse-5000",
+  "placementCount": 5000,
+  "columns": 100,
+  "spacingMeters": 2.0,
+  "assetId": "asset-rack-p9-scale",
+  "assetDefinitionRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "siteId": "site-p9-scale",
+  "layoutId": "fl-p9-scale",
+  "shellRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "policyRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

@@ -22,6 +22,7 @@
         'edit_zone',
         'delete_zone',
     ]);
+    let idempotencySequence = 0;
 
     function clone(value) {
         if (value === undefined) return undefined;
@@ -68,6 +69,11 @@
         const result = finite(value, label);
         if (result <= 0) throw new RangeError(label + ' must be greater than zero');
         return result;
+    }
+
+    function timestamp(value, label) {
+        if (typeof value === 'number') return positive(value, label);
+        return nonEmptyString(value, label);
     }
 
     function worldPosition(value) {
@@ -500,6 +506,265 @@
         };
     }
 
+    function canonicalValue(value) {
+        if (Array.isArray(value)) return value.map(canonicalValue);
+        if (!value || typeof value !== 'object') return value;
+        const result = {};
+        Object.keys(value).sort().forEach(function (key) {
+            result[key] = canonicalValue(value[key]);
+        });
+        return result;
+    }
+
+    function sameStructuredValue(left, right) {
+        return JSON.stringify(canonicalValue(left))
+            === JSON.stringify(canonicalValue(right));
+    }
+
+    function layoutProposalStale(message, details) {
+        const error = new Error(message || 'Full-layout proposal is stale');
+        error.code = 'layout_proposal_stale';
+        error.details = clone(details || {});
+        return error;
+    }
+
+    function normalizeTransactionBinding(value, expectedRevision) {
+        const source = object(value, 'transaction binding');
+        const target = object(source.target, 'transaction binding target');
+        const binding = {
+            target: {
+                domain: nonEmptyString(
+                    target.domain,
+                    'transaction binding target domain'
+                ),
+                scopeId: nonEmptyString(
+                    target.scopeId,
+                    'transaction binding target scopeId'
+                ),
+                resourceId: nonEmptyString(
+                    target.resourceId,
+                    'transaction binding target resourceId'
+                ),
+            },
+            baseRevision: nonEmptyString(
+                source.baseRevision,
+                'transaction binding baseRevision'
+            ),
+            diffHash: nonEmptyString(
+                source.diffHash,
+                'transaction binding diffHash'
+            ),
+            dependencyFingerprint: nonEmptyString(
+                source.dependencyFingerprint,
+                'transaction binding dependencyFingerprint'
+            ),
+        };
+        if (expectedRevision && binding.baseRevision !== expectedRevision) {
+            throw layoutProposalStale(
+                'Full-layout proposal binding has a stale revision',
+                {
+                    proposalRevision: binding.baseRevision,
+                    currentRevision: expectedRevision,
+                }
+            );
+        }
+        return binding;
+    }
+
+    function normalizeLayoutAlternative(raw, index, expectedRevision) {
+        const source = object(raw, 'layout proposal alternative ' + index);
+        const ghost = object(
+            source.ghostPreview,
+            'layout proposal alternative ghostPreview'
+        );
+        const layout = layoutFromReceipt(
+            { layout: ghost.layout },
+            'layout proposal ghost preview'
+        );
+        if (!Array.isArray(source.operations)) {
+            throw new TypeError('layout proposal operations must be an array');
+        }
+        if (ghost.routeProposals !== undefined
+                && !Array.isArray(ghost.routeProposals)) {
+            throw new TypeError(
+                'layout proposal routeProposals must be an array'
+            );
+        }
+        const metrics = source.metrics === undefined
+            ? {}
+            : object(source.metrics, 'layout proposal metrics');
+        return {
+            proposalId: nonEmptyString(
+                source.proposalId,
+                'layout proposal proposalId'
+            ),
+            alternativeId: nonEmptyString(
+                source.alternativeId,
+                'layout proposal alternativeId'
+            ),
+            strategy: nonEmptyString(
+                source.strategy,
+                'layout proposal strategy'
+            ),
+            operations: clone(source.operations),
+            ghostPreview: {
+                layout: clone(layout),
+                routeProposals: clone(ghost.routeProposals || []),
+            },
+            metrics: clone(metrics),
+            transactionBinding: normalizeTransactionBinding(
+                source.transactionBinding,
+                expectedRevision
+            ),
+            createdAt: timestamp(
+                source.createdAt,
+                'layout proposal createdAt'
+            ),
+            expiresAt: timestamp(
+                source.expiresAt,
+                'layout proposal expiresAt'
+            ),
+            findings: clone(source.findings || []),
+            newHardFindingIds: clone(source.newHardFindingIds || []),
+        };
+    }
+
+    function normalizeLayoutProposals(receipt, expectedRevision, request) {
+        const source = object(receipt, 'layout proposal receipt');
+        if (source.previewPure !== true) {
+            throw new TypeError('layout proposal preview must be pure');
+        }
+        const revision = nonEmptyString(
+            source.layoutRevision,
+            'layout proposal layoutRevision'
+        );
+        if (revision !== expectedRevision) {
+            throw layoutProposalStale(
+                'Full-layout proposal was generated for a stale revision',
+                {
+                    proposalRevision: revision,
+                    currentRevision: expectedRevision,
+                }
+            );
+        }
+        if (!Array.isArray(source.alternatives)
+                || !source.alternatives.length) {
+            throw new TypeError(
+                'layout proposal receipt requires alternatives'
+            );
+        }
+        const alternatives = source.alternatives.map(function (item, index) {
+            return normalizeLayoutAlternative(item, index, expectedRevision);
+        });
+        const proposalIds = new Set(alternatives.map(function (item) {
+            return item.proposalId;
+        }));
+        const alternativeIds = new Set(alternatives.map(function (item) {
+            return item.alternativeId;
+        }));
+        if (proposalIds.size !== alternatives.length
+                || alternativeIds.size !== alternatives.length) {
+            throw new TypeError(
+                'layout proposal alternatives require unique IDs'
+            );
+        }
+        const selectedProposalId = nonEmptyString(
+            source.selectedProposalId,
+            'layout proposal selectedProposalId'
+        );
+        const selectedIndex = alternatives.findIndex(function (item) {
+            return item.proposalId === selectedProposalId;
+        });
+        if (selectedIndex < 0) {
+            throw new TypeError(
+                'selectedProposalId must identify one alternative'
+            );
+        }
+        return {
+            authority: 'server-authoritative',
+            previewPure: true,
+            baseRevision: revision,
+            request: clone(request),
+            selectedIndex: selectedIndex,
+            alternatives: alternatives,
+        };
+    }
+
+    function normalizeLayoutProposalPreview(
+        receipt,
+        expectedAlternative,
+        expectedRevision
+    ) {
+        const source = object(receipt, 'layout proposal preview receipt');
+        if (source.previewPure !== true) {
+            throw new TypeError('layout proposal preview must be pure');
+        }
+        const proposalId = nonEmptyString(
+            source.proposalId,
+            'layout proposal preview proposalId'
+        );
+        if (proposalId !== expectedAlternative.proposalId) {
+            throw layoutProposalStale(
+                'Full-layout proposal preview does not match the selection',
+                {
+                    expectedProposalId: expectedAlternative.proposalId,
+                    proposalId: proposalId,
+                }
+            );
+        }
+        const rawAlternative = object(
+            source.alternative,
+            'layout proposal preview alternative'
+        );
+        const alternative = normalizeLayoutAlternative({
+            ...rawAlternative,
+            proposalId: proposalId,
+            transactionBinding: rawAlternative.transactionBinding
+                || source.transactionBinding,
+            createdAt: rawAlternative.createdAt || source.createdAt,
+            expiresAt: rawAlternative.expiresAt || source.expiresAt,
+        }, 0, expectedRevision);
+        const topBinding = normalizeTransactionBinding(
+            source.transactionBinding,
+            expectedRevision
+        );
+        if (alternative.alternativeId !== expectedAlternative.alternativeId
+                || !sameStructuredValue(
+                    topBinding,
+                    expectedAlternative.transactionBinding
+                )
+                || !sameStructuredValue(
+                    alternative.transactionBinding,
+                    expectedAlternative.transactionBinding
+                )) {
+            throw layoutProposalStale(
+                'Full-layout proposal preview binding changed',
+                {
+                    expectedAlternativeId:
+                        expectedAlternative.alternativeId,
+                    alternativeId: alternative.alternativeId,
+                }
+            );
+        }
+        return {
+            proposalId: proposalId,
+            alternative: alternative,
+            transactionBinding: topBinding,
+        };
+    }
+
+    function createIdempotencyKey(config) {
+        if (typeof config.createIdempotencyKey === 'function') {
+            return nonEmptyString(
+                config.createIdempotencyKey(),
+                'idempotencyKey'
+            );
+        }
+        idempotencySequence += 1;
+        return 'fl-layout-' + Date.now().toString(36)
+            + '-' + idempotencySequence.toString(36).padStart(4, '0');
+    }
+
     function selectedIdsInLayout(layout, selectedIds) {
         const available = new Set();
         layout.placements.forEach(function (placement) {
@@ -667,6 +932,8 @@
         let camera = null;
         let ghost = null;
         let placementAlternatives = null;
+        let layoutProposal = null;
+        let recentReceiptIds = [];
         let busy = false;
         let conflict = null;
         let lastError = null;
@@ -700,6 +967,21 @@
             return flattenBatches(batches, cursor);
         }
 
+        function rememberReceipt(receipt) {
+            if (!receipt || typeof receipt !== 'object') return;
+            const receiptId = receipt.receiptId
+                || (receipt.receipt && receipt.receipt.receiptId)
+                || (receipt.result && receipt.result.receiptId);
+            if (typeof receiptId !== 'string' || !receiptId) return;
+            recentReceiptIds = recentReceiptIds.filter(function (item) {
+                return item !== receiptId;
+            });
+            recentReceiptIds.push(receiptId);
+            if (recentReceiptIds.length > 6) {
+                recentReceiptIds = recentReceiptIds.slice(-6);
+            }
+        }
+
         function installReceipt(receipt, requireRevision) {
             const layout = frozenClone(layoutFromReceipt(receipt, 'layout receipt'));
             const revision = revisionFromReceipt(receipt, requireRevision);
@@ -711,6 +993,7 @@
             selectedIds = selectedIdsInLayout(layout, selectedIds);
             ghost = null;
             placementAlternatives = null;
+            layoutProposal = null;
             conflict = null;
             lastError = null;
         }
@@ -754,6 +1037,7 @@
                     );
                     ghost = null;
                     placementAlternatives = null;
+                    layoutProposal = null;
                     conflict = null;
                     lastError = null;
                     return getState();
@@ -780,6 +1064,7 @@
                 }
                 ghost = null;
                 placementAlternatives = null;
+                layoutProposal = null;
             } catch (error) {
                 const stale = conflictDetails(error);
                 if (stale) conflict = stale;
@@ -804,6 +1089,7 @@
                 selectedIds = selectedIdsInLayout(draftLayout, selectedIds);
                 ghost = null;
                 placementAlternatives = null;
+                layoutProposal = null;
                 conflict = null;
                 lastError = null;
             } catch (error) {
@@ -842,6 +1128,8 @@
                 camera: clone(camera),
                 ghostPlacement: clone(ghost),
                 placementAlternatives: clone(placementAlternatives),
+                layoutProposal: clone(layoutProposal),
+                recentReceiptIds: recentReceiptIds.slice(),
                 lastError: lastError,
             };
         }
@@ -935,6 +1223,7 @@
             requireLoaded();
             object(asset, 'ghost asset');
             placementAlternatives = null;
+            layoutProposal = null;
             ghost = {
                 assetId: nonEmptyString(asset.assetId, 'assetId'),
                 assetDefinitionRevision: nonEmptyString(
@@ -998,6 +1287,7 @@
         function installPlacementAlternatives(receipt, request) {
             requireLoaded();
             assertIdle();
+            layoutProposal = null;
             placementAlternatives = deepFreeze(
                 normalizePlacementAlternatives(
                     receipt,
@@ -1034,6 +1324,7 @@
             };
             setBusy(true);
             try {
+                layoutProposal = null;
                 const receipt = await config.placementCandidates(
                     payload,
                     signal ? { signal: signal } : undefined
@@ -1200,6 +1491,228 @@
             ghost = null;
             notify();
             return getState();
+        }
+
+        function assertFullLayoutProposalReady() {
+            requireLoaded();
+            assertIdle();
+            if (cursor > 0) {
+                const error = new Error(
+                    'Save or discard changes before requesting Auto Arrange'
+                );
+                error.code = 'layout_proposal_dirty';
+                throw error;
+            }
+            if (conflict) {
+                const error = new Error(
+                    'Resolve the revision conflict before requesting Auto Arrange'
+                );
+                error.code = 'layout_proposal_conflict';
+                throw error;
+            }
+        }
+
+        async function requestLayoutProposal(request, options) {
+            assertFullLayoutProposalReady();
+            if (typeof config.createLayoutProposals !== 'function') {
+                throw new Error(
+                    'createLayoutProposals transport is not configured'
+                );
+            }
+            const declarativeRequest = clone(
+                object(request, 'full-layout proposal request')
+            );
+            const requestOptions = options || {};
+            setBusy(true);
+            try {
+                const receipt = await config.createLayoutProposals({
+                    baseRevision: baseRevision,
+                    request: declarativeRequest,
+                }, requestOptions.signal
+                    ? { signal: requestOptions.signal }
+                    : undefined);
+                layoutProposal = deepFreeze(normalizeLayoutProposals(
+                    receipt,
+                    baseRevision,
+                    declarativeRequest
+                ));
+                placementAlternatives = null;
+                ghost = null;
+                conflict = null;
+                lastError = null;
+            } catch (error) {
+                const stale = conflictDetails(error);
+                if (stale) conflict = stale;
+                layoutProposal = null;
+                lastError = error;
+                throw error;
+            } finally {
+                setBusy(false);
+            }
+            return getState();
+        }
+
+        function installLayoutProposal(receipt, request) {
+            assertFullLayoutProposalReady();
+            const declarativeRequest = clone(
+                object(request, 'full-layout proposal request')
+            );
+            layoutProposal = deepFreeze(normalizeLayoutProposals(
+                object(receipt, 'full-layout proposal receipt'),
+                baseRevision,
+                declarativeRequest
+            ));
+            placementAlternatives = null;
+            ghost = null;
+            conflict = null;
+            lastError = null;
+            notify();
+            return getState();
+        }
+
+        function cycleLayoutProposal(offset) {
+            requireLoaded();
+            assertIdle();
+            if (!layoutProposal) {
+                throw new Error('full-layout proposal is not active');
+            }
+            const delta = offset === undefined ? 1 : finite(
+                offset,
+                'layout proposal offset'
+            );
+            if (!Number.isInteger(delta)) {
+                throw new TypeError(
+                    'layout proposal offset must be an integer'
+                );
+            }
+            const count = layoutProposal.alternatives.length;
+            const nextIndex = (
+                (layoutProposal.selectedIndex + delta) % count + count
+            ) % count;
+            layoutProposal = deepFreeze({
+                ...layoutProposal,
+                selectedIndex: nextIndex,
+            });
+            notify();
+            return getState();
+        }
+
+        async function dismissLayoutProposal(options) {
+            requireLoaded();
+            assertIdle();
+            if (!layoutProposal) {
+                throw new Error('full-layout proposal is not active');
+            }
+            const proposalIds = layoutProposal.alternatives.map(
+                function (alternative) { return alternative.proposalId; }
+            );
+            const requestOptions = options || {};
+            layoutProposal = null;
+            notify();
+            if (typeof config.cancelLayoutProposal !== 'function') {
+                return getState();
+            }
+            setBusy(true);
+            try {
+                await Promise.all(proposalIds.map(function (proposalId) {
+                    return config.cancelLayoutProposal(
+                        { proposalId: proposalId },
+                        requestOptions.signal
+                            ? { signal: requestOptions.signal }
+                            : undefined
+                    );
+                }));
+                lastError = null;
+            } catch (error) {
+                lastError = error;
+                throw error;
+            } finally {
+                setBusy(false);
+            }
+            return getState();
+        }
+
+        async function approveAndApplyLayoutProposal(options) {
+            assertFullLayoutProposalReady();
+            if (!layoutProposal) {
+                throw new Error('full-layout proposal is not active');
+            }
+            [
+                ['getLayoutProposalPreview', config.getLayoutProposalPreview],
+                ['approveLayoutProposal', config.approveLayoutProposal],
+                ['applyLayoutProposal', config.applyLayoutProposal],
+            ].forEach(function (entry) {
+                if (typeof entry[1] !== 'function') {
+                    throw new Error(entry[0] + ' transport is not configured');
+                }
+            });
+            const proposal = layoutProposal;
+            const selectedIndex = proposal.selectedIndex;
+            const selected = proposal.alternatives[selectedIndex];
+            const requestOptions = options || {};
+            const transportOptions = requestOptions.signal
+                ? { signal: requestOptions.signal }
+                : undefined;
+            let appliedReceipt = null;
+            let approvalReceipt = null;
+            let idempotencyKey = null;
+            setBusy(true);
+            try {
+                const previewReceipt = await config.getLayoutProposalPreview(
+                    { proposalId: selected.proposalId },
+                    transportOptions
+                );
+                normalizeLayoutProposalPreview(
+                    previewReceipt,
+                    selected,
+                    baseRevision
+                );
+                if (layoutProposal !== proposal
+                        || layoutProposal.selectedIndex !== selectedIndex) {
+                    throw layoutProposalStale(
+                        'Full-layout proposal changed during revalidation'
+                    );
+                }
+                idempotencyKey = createIdempotencyKey(config);
+                approvalReceipt = await config.approveLayoutProposal({
+                    proposalId: selected.proposalId,
+                    binding: clone(selected.transactionBinding),
+                    idempotencyKey: idempotencyKey,
+                    explicitApproval: true,
+                }, transportOptions);
+                const approvalToken = nonEmptyString(
+                    object(
+                        approvalReceipt,
+                        'layout proposal approval receipt'
+                    ).approvalToken,
+                    'approvalToken'
+                );
+                appliedReceipt = await config.applyLayoutProposal({
+                    approvalToken: approvalToken,
+                    binding: clone(selected.transactionBinding),
+                    idempotencyKey: idempotencyKey,
+                }, transportOptions);
+                rememberReceipt(appliedReceipt);
+                const savedSelection = selectedIds.slice();
+                installReceipt(appliedReceipt, true);
+                selectedIds = selectedIdsInLayout(
+                    draftLayout,
+                    savedSelection
+                );
+            } catch (error) {
+                const stale = conflictDetails(error);
+                if (stale) conflict = stale;
+                lastError = error;
+                throw error;
+            } finally {
+                setBusy(false);
+            }
+            return {
+                state: getState(),
+                receipt: clone(appliedReceipt),
+                approval: clone(approvalReceipt),
+                idempotencyKey: idempotencyKey,
+            };
         }
 
         async function commitGhostPlacement(options) {
@@ -1419,6 +1932,7 @@
                     baseRevision: baseRevision,
                     operations: clone(operations),
                 });
+                rememberReceipt(savedReceipt);
                 const savedSelection = selectedIds.slice();
                 installReceipt(savedReceipt, true);
                 selectedIds = selectedIdsInLayout(draftLayout, savedSelection);
@@ -1445,6 +1959,7 @@
             selectedIds = selectedIdsInLayout(draftLayout, selectedIds);
             ghost = null;
             placementAlternatives = null;
+            layoutProposal = null;
             conflict = null;
             lastError = null;
             notify();
@@ -1473,6 +1988,11 @@
             cyclePlacementAlternative: cyclePlacementAlternative,
             dismissPlacementAlternatives: dismissPlacementAlternatives,
             acceptPlacementAlternative: acceptPlacementAlternative,
+            requestLayoutProposal: requestLayoutProposal,
+            installLayoutProposal: installLayoutProposal,
+            cycleLayoutProposal: cycleLayoutProposal,
+            dismissLayoutProposal: dismissLayoutProposal,
+            approveAndApplyLayoutProposal: approveAndApplyLayoutProposal,
             placeAsset: placeAsset,
             moveSelected: moveSelected,
             rotateSelected90: rotateSelected90,

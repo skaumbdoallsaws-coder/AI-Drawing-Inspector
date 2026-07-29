@@ -26,6 +26,16 @@ def _body_mapping(value: Any) -> Mapping[str, Any]:
     return value
 
 
+def _session_id(request: Request) -> str:
+    value = request.headers.get("X-InspectorPro-Session", "").strip()
+    if not value or len(value) > 128:
+        raise FacilityValidationError(
+            "invalid_session_id",
+            "X-InspectorPro-Session is required for proposal authority.",
+        )
+    return value
+
+
 def _error_response(error: FacilityLayoutError) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,
@@ -331,6 +341,153 @@ def create_facility_layout_router(
                 layout_id,
                 str(payload.get("baseRevision") or ""),
                 operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/proposals"
+    )
+    async def create_layout_proposals(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            planner_request = _body_mapping(payload.get("request"))
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.create_layout_proposals(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                planner_request,
+            )
+        )
+
+    @router.get(
+        "/api/facility-layouts/{site_id}/{layout_id}"
+        "/proposals/{proposal_id}/preview"
+    )
+    async def get_layout_proposal_preview(
+        site_id: str,
+        layout_id: str,
+        proposal_id: str,
+        request: Request,
+    ):
+        return await _thread_result(
+            lambda: service.get_layout_proposal_preview(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                proposal_id,
+            )
+        )
+
+    @router.delete(
+        "/api/facility-layouts/{site_id}/{layout_id}"
+        "/proposals/{proposal_id}"
+    )
+    async def cancel_layout_proposal(
+        site_id: str,
+        layout_id: str,
+        proposal_id: str,
+        request: Request,
+    ):
+        try:
+            session_id = _session_id(request)
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return _result(
+            lambda: service.cancel_layout_proposal(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                proposal_id,
+                session_id,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/approvals"
+    )
+    async def approve_layout_proposal(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            binding = _body_mapping(payload.get("binding"))
+            session_id = _session_id(request)
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return _result(
+            lambda: service.approve_layout_proposal(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("proposalId") or ""),
+                binding,
+                session_id=session_id,
+                idempotency_key=str(
+                    payload.get("idempotencyKey") or ""
+                ),
+                explicit_approval=(
+                    payload.get("explicitApproval") is True
+                ),
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/apply"
+    )
+    async def apply_layout_proposal(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        try:
+            payload = _body_mapping(body)
+            binding = _body_mapping(payload.get("binding"))
+            session_id = _session_id(request)
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.apply_layout_proposal(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("approvalToken") or ""),
+                binding,
+                session_id=session_id,
+                idempotency_key=str(
+                    payload.get("idempotencyKey") or ""
+                ),
+            )
+        )
+
+    @router.get(
+        "/api/facility-layouts/{site_id}/{layout_id}"
+        "/receipts/{receipt_id}"
+    )
+    async def get_layout_receipt(
+        site_id: str,
+        layout_id: str,
+        receipt_id: str,
+        request: Request,
+    ):
+        return _result(
+            lambda: service.get_layout_receipt(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                receipt_id,
             )
         )
 

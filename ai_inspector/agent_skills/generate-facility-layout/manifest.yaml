@@ -1,0 +1,27 @@
+schema_version: 1
+id: generate-facility-layout
+version: 1.0.0
+description: Draft one evidence-aware Semantic Facility Layout Plan and request one deterministic, revision-bound 2D/3D ghost preview.
+agents:
+  - sage
+workflows:
+  - facility-layout-generation
+modes:
+  - training
+requires_context:
+  - facility_layout.digest
+  - facility_layout.state
+  - facility_layout.evidence
+optional_context: []
+allowed_tools:
+  - search_industrial_assets
+  - inspect_facility_entities
+  - inspect_facility_region
+  - inspect_facility_findings
+  - inspect_process_bindings
+  - build_facility_layout_preview
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: computed_fields_only

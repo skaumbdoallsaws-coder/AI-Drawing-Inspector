@@ -608,6 +608,7 @@ test('exports the classic UMD global, CommonJS API, and complete adapter contrac
         'setSelection',
         'setSelectionHandler',
         'setGhostPlacement',
+        'setProposalPreview',
         'fit',
         'invalidate',
         'pick',
@@ -882,6 +883,77 @@ test('facility-floor projection and transient ghost remain outside picking state
     assert.strictEqual(diagnostics.ghostActive, false);
     data.adapter.dispose();
 });
+
+test('full-layout proposal overlays show before and proposed states outside picking',
+    async () => {
+        const data = fixture();
+        data.adapter.mount(data.host);
+        const proposedLayout = {
+            placements: [
+                placement('pl-a', 'asset-machine', REV_A, 10, 0, 0),
+                placement('pl-new', 'asset-machine', REV_A, 20, 0, 0),
+            ],
+        };
+        const proposal = {
+            active: true,
+            newPlacementIds: ['pl-new'],
+            movedPlacementIds: ['pl-a'],
+            removedPlacementIds: ['pl-removed'],
+            beforePlacements: [
+                placement('pl-a', 'asset-machine', REV_A, 0, 0, 0),
+                placement(
+                    'pl-removed',
+                    'asset-machine',
+                    REV_A,
+                    -5,
+                    0,
+                    0
+                ),
+            ],
+            proposedPlacements: proposedLayout.placements,
+        };
+        const proposedBefore = JSON.stringify(proposedLayout);
+        const previewBefore = JSON.stringify(proposal);
+        await data.adapter.setScene({
+            layout: proposedLayout,
+            assetCatalog: [asset('asset-machine', REV_A)],
+        });
+        assert.strictEqual(data.adapter.setProposalPreview(proposal), true);
+        data.scheduler.flush();
+        const roles = [];
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            if (object.userData
+                    && object.userData.facilityProposalPreview) {
+                roles.push(object.userData.facilityProposalPreview);
+            }
+        });
+        roles.sort();
+        assert.deepStrictEqual(roles, ['before', 'moved', 'new', 'removed']);
+        let diagnostics = data.adapter.getDiagnostics();
+        assert.strictEqual(diagnostics.proposalPreviewActive, true);
+        assert.strictEqual(diagnostics.proposalBeforeCount, 2);
+        assert.strictEqual(diagnostics.proposalProposedCount, 2);
+        assert.strictEqual(diagnostics.placementCount, 2);
+        assert.ok(diagnostics.worldBounds.minimum.x < -5);
+        assert.ok(diagnostics.worldBounds.maximum.x > 20);
+        assert.strictEqual(JSON.stringify(proposedLayout), proposedBefore);
+        assert.strictEqual(JSON.stringify(proposal), previewBefore);
+
+        assert.strictEqual(data.adapter.setProposalPreview(null), true);
+        data.scheduler.flush();
+        diagnostics = data.adapter.getDiagnostics();
+        assert.strictEqual(diagnostics.proposalPreviewActive, false);
+        let proposalObjectCount = 0;
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            if (object.userData
+                    && object.userData.facilityProposalPreview) {
+                proposalObjectCount += 1;
+            }
+        });
+        assert.strictEqual(proposalObjectCount, 0);
+        assert.strictEqual(diagnostics.placementCount, 2);
+        data.adapter.dispose();
+    });
 
 test('keeps failed assets as deterministic footprint boxes without blocking peers', async () => {
     const data = fixture({

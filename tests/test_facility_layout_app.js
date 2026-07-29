@@ -25,6 +25,12 @@ function fixture() {
         applyOperations: async () => ({}),
         placementCandidates: async () => ({}),
         placementCandidatePreview: async () => ({}),
+        createLayoutProposals: async () => ({}),
+        getLayoutProposalPreview: async () => ({}),
+        cancelLayoutProposal: async () => ({}),
+        approveLayoutProposal: async () => ({}),
+        applyLayoutProposal: async () => ({}),
+        getLayoutReceipt: async () => ({}),
         reloadLayout: async () => {
             calls.push('reload');
             return receipt;
@@ -105,7 +111,7 @@ test('destroy is idempotent and prevents late workspace mount', async () => {
     )), false);
 });
 
-test('wires candidate transport and owned advisory into the workspace', async () => {
+test('wires proposal transports and owned advisory into the workspace', async () => {
     const value = fixture();
     const advisorCalls = [];
     const advisor = {
@@ -139,6 +145,19 @@ test('wires candidate transport and owned advisory into the workspace', async ()
         sessionConfig.placementCandidatePreview,
         value.options.transport.placementCandidatePreview
     );
+    [
+        'createLayoutProposals',
+        'getLayoutProposalPreview',
+        'cancelLayoutProposal',
+        'approveLayoutProposal',
+        'applyLayoutProposal',
+        'getLayoutReceipt',
+    ].forEach(name => {
+        assert.strictEqual(
+            sessionConfig[name],
+            value.options.transport[name]
+        );
+    });
     const workspaceOptions = value.calls.find(
         item => Array.isArray(item) && item[0] === 'workspace'
     )[1];

@@ -253,6 +253,13 @@ function fakeAuthority(initialLayout, options) {
                     return receipt(canonical, [], revision);
                 },
                 placementCandidates: config.placementCandidates,
+                createLayoutProposals: config.createLayoutProposals,
+                getLayoutProposalPreview:
+                    config.getLayoutProposalPreview,
+                cancelLayoutProposal: config.cancelLayoutProposal,
+                approveLayoutProposal: config.approveLayoutProposal,
+                applyLayoutProposal: config.applyLayoutProposal,
+                createIdempotencyKey: config.createIdempotencyKey,
                 placementCandidatePreview: async request => {
                     candidatePreviewCalls.push(clone(request));
                     if (request.baseRevision !== revision) {
@@ -327,6 +334,88 @@ function fakeAuthority(initialLayout, options) {
 
 function byId(document, id) {
     return document.placements.find(item => item.placementId === id);
+}
+
+function layoutBinding(revision, suffix) {
+    return {
+        target: {
+            domain: 'facility-layout',
+            scopeId: 'site-a',
+            resourceId: 'fl-session-test',
+        },
+        baseRevision: revision,
+        diffHash: String(suffix || 'd').repeat(64),
+        dependencyFingerprint: 'e'.repeat(64),
+    };
+}
+
+function fullLayoutProposalReceipt(base, revision) {
+    function alternative(index, strategy, x) {
+        const previewLayout = clone(base);
+        previewLayout.placements[0].transform.position.x = x;
+        return {
+            proposalId: 'proposal-' + index,
+            alternativeId: 'alternative-' + index,
+            strategy,
+            operations: [{
+                op: 'move_placement',
+                placementId: 'pl-a',
+                position: { x, y: 0, z: 1 },
+                movementKind: 'automatic',
+            }],
+            ghostPreview: {
+                layout: previewLayout,
+                routeProposals: [],
+            },
+            metrics: {
+                placementCollisions: 0,
+                movedAutoCount: 1,
+            },
+            transactionBinding: layoutBinding(
+                revision,
+                index === 1 ? 'd' : 'c'
+            ),
+            createdAt: 1785283200,
+            expiresAt: 1785283800,
+        };
+    }
+    const alternatives = [
+        alternative(1, 'compact_rows', 10),
+        alternative(2, 'balanced_grid', 20),
+    ];
+    return {
+        previewPure: true,
+        layoutRevision: revision,
+        selectedProposalId: alternatives[0].proposalId,
+        alternatives,
+    };
+}
+
+function fullLayoutRequest() {
+    return {
+        schemaVersion: 1,
+        requestId: 'request-full-layout-001',
+        objective: 'place_and_cleanup',
+        assetSet: [{
+            itemId: 'existing-pl-a',
+            assetId: 'asset-a',
+            assetDefinitionRevision: 'asset-revision-asset-a',
+            quantity: 1,
+            stage: 0,
+            existingPlacementId: 'pl-a',
+        }],
+        strategies: ['compact_rows', 'balanced_grid'],
+        maximumAlternatives: 2,
+        spacingMeters: 1,
+        cleanup: {
+            enabled: true,
+            moveAuto: true,
+            movableManualPlacementIds: [],
+        },
+        zoneSizing: [],
+        routes: [],
+        sourceRevisions: {},
+    };
 }
 
 async function main() {
@@ -912,6 +1001,240 @@ async function main() {
             assert.strictEqual(state.dirty, false);
             assert.strictEqual(state.layout.placements.length, 4);
             assert.strictEqual(state.conflict, null);
+        });
+
+    await check('full-layout alternatives are read-only and cycle without dirtying',
+        async () => {
+            const cancelled = [];
+            const initial = layout();
+            const proposalReceipt = fullLayoutProposalReceipt(
+                initial,
+                'rev-1'
+            );
+            const authority = fakeAuthority(initial, {
+                createLayoutProposals: async () => clone(proposalReceipt),
+                cancelLayoutProposal: async request => {
+                    cancelled.push(request.proposalId);
+                    return { cancelled: true };
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const before = session.getState();
+            await session.requestLayoutProposal(fullLayoutRequest());
+            let state = session.getState();
+            assert.strictEqual(state.layoutProposal.selectedIndex, 0);
+            assert.strictEqual(
+                state.layoutProposal.alternatives[0].createdAt,
+                1785283200
+            );
+            assert.deepStrictEqual(state.layout, before.layout);
+            assert.deepStrictEqual(state.baseLayout, before.baseLayout);
+            assert.deepStrictEqual(state.operations, []);
+            assert.deepStrictEqual(state.history, []);
+            assert.strictEqual(state.dirty, false);
+            assert.strictEqual(state.baseRevision, 'rev-1');
+            session.cycleLayoutProposal(1);
+            state = session.getState();
+            assert.strictEqual(state.layoutProposal.selectedIndex, 1);
+            assert.strictEqual(
+                state.layoutProposal.alternatives[1]
+                    .ghostPreview.layout.placements[0].transform.position.x,
+                20
+            );
+            assert.deepStrictEqual(state.layout, before.layout);
+            await session.dismissLayoutProposal();
+            state = session.getState();
+            assert.strictEqual(state.layoutProposal, null);
+            assert.strictEqual(state.dirty, false);
+            assert.deepStrictEqual(cancelled.sort(), [
+                'proposal-1',
+                'proposal-2',
+            ]);
+        });
+
+    await check('full-layout approval revalidates and applies with one key',
+        async () => {
+            const calls = [];
+            const initial = layout();
+            const proposalReceipt = fullLayoutProposalReceipt(
+                initial,
+                'rev-1'
+            );
+            const selected = proposalReceipt.alternatives[0];
+            const authority = fakeAuthority(initial, {
+                createLayoutProposals: async request => {
+                    calls.push(['create', clone(request)]);
+                    return clone(proposalReceipt);
+                },
+                getLayoutProposalPreview: async request => {
+                    calls.push(['preview', clone(request)]);
+                    return {
+                        proposalId: selected.proposalId,
+                        alternative: clone(selected),
+                        transactionBinding:
+                            clone(selected.transactionBinding),
+                        createdAt: selected.createdAt,
+                        expiresAt: selected.expiresAt,
+                        previewPure: true,
+                    };
+                },
+                approveLayoutProposal: async request => {
+                    calls.push(['approve', clone(request)]);
+                    return { approvalToken: 'approval-token-001' };
+                },
+                applyLayoutProposal: async request => {
+                    calls.push(['apply', clone(request)]);
+                    return {
+                        layout: clone(selected.ghostPreview.layout),
+                        revision: 'rev-2',
+                        operationResult: {
+                            document: clone(selected.ghostPreview.layout),
+                            createdIds: [],
+                        },
+                        receipt: { receiptId: 'receipt-one' },
+                    };
+                },
+                createIdempotencyKey: () => 'layout-apply-001',
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.requestLayoutProposal(fullLayoutRequest());
+            const result = await session.approveAndApplyLayoutProposal();
+            const state = session.getState();
+            assert.strictEqual(result.idempotencyKey, 'layout-apply-001');
+            assert.deepStrictEqual(calls.map(item => item[0]), [
+                'create', 'preview', 'approve', 'apply',
+            ]);
+            assert.strictEqual(
+                calls[2][1].idempotencyKey,
+                calls[3][1].idempotencyKey
+            );
+            assert.strictEqual(calls[2][1].explicitApproval, true);
+            assert.deepStrictEqual(
+                calls[2][1].binding,
+                selected.transactionBinding
+            );
+            assert.strictEqual(state.baseRevision, 'rev-2');
+            assert.strictEqual(state.layoutProposal, null);
+            assert.strictEqual(state.dirty, false);
+            assert.deepStrictEqual(state.recentReceiptIds, ['receipt-one']);
+            assert.deepStrictEqual(
+                state.layout,
+                selected.ghostPreview.layout
+            );
+            assert.deepStrictEqual(state.history, []);
+        });
+
+    await check('stale full-layout preview rejects without applying or dirtying',
+        async () => {
+            const initial = layout();
+            const proposalReceipt = fullLayoutProposalReceipt(
+                initial,
+                'rev-1'
+            );
+            const selected = proposalReceipt.alternatives[0];
+            let approvalCalls = 0;
+            let applyCalls = 0;
+            const authority = fakeAuthority(initial, {
+                createLayoutProposals: async () => clone(proposalReceipt),
+                getLayoutProposalPreview: async () => ({
+                    proposalId: selected.proposalId,
+                    alternative: {
+                        ...clone(selected),
+                        alternativeId: 'alternative-replaced',
+                    },
+                    transactionBinding:
+                        clone(selected.transactionBinding),
+                    createdAt: selected.createdAt,
+                    expiresAt: selected.expiresAt,
+                    previewPure: true,
+                }),
+                approveLayoutProposal: async () => {
+                    approvalCalls += 1;
+                    return { approvalToken: 'approval-token-001' };
+                },
+                applyLayoutProposal: async () => {
+                    applyCalls += 1;
+                    return {};
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.requestLayoutProposal(fullLayoutRequest());
+            const before = session.getState();
+            await assert.rejects(
+                session.approveAndApplyLayoutProposal(),
+                error => error.code === 'layout_proposal_stale'
+            );
+            const after = session.getState();
+            assert.strictEqual(approvalCalls, 0);
+            assert.strictEqual(applyCalls, 0);
+            assert.deepStrictEqual(after.layout, before.layout);
+            assert.deepStrictEqual(after.history, before.history);
+            assert.strictEqual(after.dirty, false);
+            assert.ok(after.layoutProposal);
+        });
+
+    await check('full-layout requests reject dirty, busy, and conflict states',
+        async () => {
+            let createCalls = 0;
+            const dirtyAuthority = fakeAuthority(layout(), {
+                createLayoutProposals: async () => {
+                    createCalls += 1;
+                    return fullLayoutProposalReceipt(layout(), 'rev-1');
+                },
+            });
+            const dirtySession = dirtyAuthority.makeSession();
+            dirtySession.load(dirtyAuthority.initialReceipt());
+            dirtySession.select('pl-a');
+            await dirtySession.moveSelected({ x: 1, y: 0, z: 0 });
+            await assert.rejects(
+                dirtySession.requestLayoutProposal(fullLayoutRequest()),
+                error => error.code === 'layout_proposal_dirty'
+            );
+            assert.strictEqual(createCalls, 0);
+
+            let resolveProposal;
+            const busyAuthority = fakeAuthority(layout(), {
+                createLayoutProposals: () => new Promise(resolve => {
+                    resolveProposal = resolve;
+                }),
+            });
+            const busySession = busyAuthority.makeSession();
+            busySession.load(busyAuthority.initialReceipt());
+            const pending = busySession.requestLayoutProposal(
+                fullLayoutRequest()
+            );
+            await assert.rejects(
+                busySession.requestLayoutProposal(fullLayoutRequest()),
+                error => error.code === 'session_busy'
+            );
+            resolveProposal(fullLayoutProposalReceipt(layout(), 'rev-1'));
+            await pending;
+
+            const conflict = operationError(
+                'revision_conflict',
+                'Stale proposal request',
+                { currentRevision: 'rev-2' }
+            );
+            conflict.status = 409;
+            const conflictAuthority = fakeAuthority(layout(), {
+                createLayoutProposals: async () => {
+                    throw conflict;
+                },
+            });
+            const conflictSession = conflictAuthority.makeSession();
+            conflictSession.load(conflictAuthority.initialReceipt());
+            await assert.rejects(
+                conflictSession.requestLayoutProposal(fullLayoutRequest()),
+                error => error.code === 'revision_conflict'
+            );
+            assert.ok(conflictSession.getState().conflict);
+            await assert.rejects(
+                conflictSession.requestLayoutProposal(fullLayoutRequest()),
+                error => error.code === 'layout_proposal_conflict'
+            );
         });
 
     process.stdout.write(`${checks}/${checks} facility layout session checks passed\n`);

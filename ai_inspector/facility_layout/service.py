@@ -9,6 +9,25 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Optional
 
+from ai_inspector.transactions import (
+    CommitResult,
+    ExactBinding,
+    MutationPlan,
+    PreparedRecord,
+    ProposalRecord,
+    ReconciliationResult,
+    TransactionAuthorizationError,
+    TransactionBindingError,
+    TransactionCancelledError,
+    TransactionError,
+    TransactionExpiredError,
+    TransactionIdempotencyConflictError,
+    TransactionNotFoundError,
+    TransactionPreparedError,
+    TransactionReplayError,
+    TransactionValidationError,
+)
+
 from .authority_repository import (
     FacilityShellRepository,
     PolicySetRepository,
@@ -16,13 +35,23 @@ from .authority_repository import (
 )
 from .authorization import FacilityPrincipal, require_facility_action
 from .errors import (
+    FacilityAuthorizationError,
     FacilityConflictError,
     FacilityNotFoundError,
     FacilityValidationError,
 )
+from .canonical import canonical_layout_bytes
 from .operations import apply_facility_layout_operations
+from .planner import (
+    FACILITY_LAYOUT_ALTERNATIVE_POLICY_VERSION,
+    FACILITY_LAYOUT_PLANNER_VERSION,
+    FacilityLayoutPlanningError,
+    generate_layout_proposals,
+    validate_layout_request,
+)
 from .repository import FacilityLayoutRepository
 from .routing import (
+    ROUTER_VERSION,
     ROUTING_ENGINE_VERSION,
     generate_connector_candidates,
     plan_forklift_route,
@@ -37,6 +66,12 @@ from .spatial import (
     shell_obstacle_records,
 )
 from .spatial_executor import FacilitySpatialExecutor
+from .transaction_adapter import (
+    FacilityLayoutTransactionRuntime,
+    deterministic_facility_proposal_id,
+    facility_layout_binding,
+    facility_transaction_target,
+)
 from .validate import validate_layout
 
 
@@ -103,6 +138,36 @@ def _dependency_unavailable(kind: str) -> None:
         f"{kind} dependency validation is unavailable.",
         details={"dependencyKind": kind},
     )
+
+
+def _published_authority_dependency(
+    repository: Any,
+    principal: FacilityPrincipal,
+    *,
+    site_id: str,
+    authority_id: str,
+    revision: str,
+    kind: str,
+    stale_if_missing: bool = False,
+) -> Any:
+    try:
+        return repository.get_published(
+            principal,
+            site_id=site_id,
+            authority_id=authority_id,
+            revision=revision,
+        )
+    except FacilityNotFoundError as error:
+        if not stale_if_missing:
+            raise
+        raise FacilityConflictError(
+            f"stale_{kind}_revision",
+            f"Referenced {kind} revision is stale.",
+            details={
+                "dependencyId": authority_id,
+                "expectedRevision": revision,
+            },
+        ) from error
 
 
 def _require_resolved(
@@ -209,6 +274,9 @@ class FacilityLayoutService:
             EvidenceAuthorityResolver
         ] = None,
         spatial_executor: Optional[FacilitySpatialExecutor] = None,
+        transaction_runtime: Optional[
+            FacilityLayoutTransactionRuntime
+        ] = None,
     ) -> None:
         self.layout_repository = layout_repository
         self.shell_repository = shell_repository
@@ -218,6 +286,9 @@ class FacilityLayoutService:
         self.process_map_resolver = process_map_resolver
         self.evidence_authority_resolver = evidence_authority_resolver
         self.spatial_executor = spatial_executor or FacilitySpatialExecutor()
+        self.transaction_runtime = (
+            transaction_runtime or FacilityLayoutTransactionRuntime()
+        )
 
     @staticmethod
     def _collect_evidence_authority(
@@ -372,18 +443,22 @@ class FacilityLayoutService:
         additional_asset_refs: Iterable[tuple[str, str]] = (),
     ) -> FacilitySpatialContext:
         shell_ref = document["sourceShellRef"]
-        shell = self.shell_repository.get_published(
+        shell = _published_authority_dependency(
+            self.shell_repository,
             principal,
             site_id=site_id,
             authority_id=shell_ref["shellId"],
             revision=shell_ref["shellRevision"],
+            kind="shell",
         )
         policy_ref = document["policySetRef"]
-        policy = self.policy_repository.get_published(
+        policy = _published_authority_dependency(
+            self.policy_repository,
             principal,
             site_id=site_id,
             authority_id=policy_ref["policySetId"],
             revision=policy_ref["policySetRevision"],
+            kind="policy",
         )
         refs = {
             (
@@ -866,7 +941,7 @@ class FacilityLayoutService:
                 result.append(
                     {
                         "obstacleId": record.record_id,
-                        "polygon": [
+                        "boundary": [
                             {"x": point[0], "z": point[1]}
                             for point in record.polygon
                         ],
@@ -876,7 +951,7 @@ class FacilityLayoutService:
             result.append(
                 {
                     "obstacleId": record.record_id,
-                    "polygon": [
+                    "boundary": [
                         {"x": point[0], "z": point[1]}
                         for point in record.polygon
                     ],
@@ -1019,6 +1094,8 @@ class FacilityLayoutService:
         principal: FacilityPrincipal,
         site_id: str,
         document: Mapping[str, Any],
+        *,
+        stale_missing_authorities: bool = False,
     ) -> FacilityDependencySnapshot:
         require_facility_action(
             principal,
@@ -1035,11 +1112,14 @@ class FacilityLayoutService:
             )
 
         shell_ref = document["sourceShellRef"]
-        shell = self.shell_repository.get_published(
+        shell = _published_authority_dependency(
+            self.shell_repository,
             principal,
             site_id=site_id,
             authority_id=shell_ref["shellId"],
             revision=shell_ref["shellRevision"],
+            kind="shell",
+            stale_if_missing=stale_missing_authorities,
         )
         shell_frame = shell.document["coordinateFrame"]
         if _canonical_value_bytes(shell_frame) != _canonical_value_bytes(
@@ -1065,11 +1145,14 @@ class FacilityLayoutService:
             )
 
         policy_ref = document["policySetRef"]
-        policy = self.policy_repository.get_published(
+        policy = _published_authority_dependency(
+            self.policy_repository,
             principal,
             site_id=site_id,
             authority_id=policy_ref["policySetId"],
             revision=policy_ref["policySetRevision"],
+            kind="policy",
+            stale_if_missing=stale_missing_authorities,
         )
 
         asset_revisions = sorted(
@@ -1108,11 +1191,14 @@ class FacilityLayoutService:
             }
         )
         for vehicle_id, revision in vehicle_revisions:
-            self.vehicle_repository.get_published(
+            _published_authority_dependency(
+                self.vehicle_repository,
                 principal,
                 site_id=site_id,
                 authority_id=vehicle_id,
                 revision=revision,
+                kind="vehicle_profile",
+                stale_if_missing=stale_missing_authorities,
             )
 
         process_revisions = sorted(
@@ -1311,6 +1397,743 @@ class FacilityLayoutService:
             "dependencies": dependencies.to_dict(),
         }
 
+    @staticmethod
+    def _raise_transaction_error(error: TransactionError) -> None:
+        details = {"transactionCode": error.code}
+        if isinstance(error, TransactionNotFoundError):
+            raise FacilityNotFoundError(
+                error.code,
+                str(error),
+                details=details,
+            ) from error
+        if isinstance(error, TransactionAuthorizationError):
+            raise FacilityAuthorizationError(
+                error.code,
+                str(error),
+                details=details,
+            ) from error
+        if isinstance(
+            error,
+            (
+                TransactionBindingError,
+                TransactionCancelledError,
+                TransactionExpiredError,
+                TransactionIdempotencyConflictError,
+                TransactionPreparedError,
+                TransactionReplayError,
+            ),
+        ):
+            raise FacilityConflictError(
+                error.code,
+                str(error),
+                details=details,
+            ) from error
+        raise FacilityValidationError(
+            error.code,
+            str(error),
+            details=details,
+        ) from error
+
+    @staticmethod
+    def _planner_failure(error: FacilityLayoutPlanningError) -> None:
+        raise FacilityValidationError(
+            error.code,
+            error.message,
+            details=error.details,
+        ) from error
+
+    @staticmethod
+    def _proposal_dependency_fingerprint(
+        planner_result: Mapping[str, Any],
+        alternative: Mapping[str, Any],
+    ) -> str:
+        return hashlib.sha256(
+            _canonical_value_bytes(
+                {
+                    "alternativeId": alternative["alternativeId"],
+                    "alternativePolicyVersion": (
+                        FACILITY_LAYOUT_ALTERNATIVE_POLICY_VERSION
+                    ),
+                    "obstacleFingerprint": planner_result[
+                        "obstacleFingerprint"
+                    ],
+                    "plannerDependencyFingerprint": planner_result[
+                        "dependencyFingerprint"
+                    ],
+                    "plannerVersion": FACILITY_LAYOUT_PLANNER_VERSION,
+                    "routerVersion": ROUTER_VERSION,
+                    "routingEngineVersion": ROUTING_ENGINE_VERSION,
+                    "spatialEngineVersion": SPATIAL_ENGINE_VERSION,
+                }
+            )
+        ).hexdigest()
+
+    @classmethod
+    def _alternative_binding(
+        cls,
+        *,
+        tenant_id: str,
+        site_id: str,
+        layout_id: str,
+        planner_result: Mapping[str, Any],
+        alternative: Mapping[str, Any],
+    ) -> ExactBinding:
+        return facility_layout_binding(
+            tenant_id=tenant_id,
+            site_id=site_id,
+            layout_id=layout_id,
+            base_revision=str(planner_result["layoutRevision"]),
+            diff_hash=str(alternative["operationReceipt"]["diffHash"]),
+            dependency_fingerprint=cls._proposal_dependency_fingerprint(
+                planner_result,
+                alternative,
+            ),
+        )
+
+    @staticmethod
+    def _require_session_id(session_id: str) -> str:
+        value = session_id.strip() if isinstance(session_id, str) else ""
+        if not value or len(value) > 128:
+            raise FacilityValidationError(
+                "invalid_session_id",
+                "A bounded editor session ID is required.",
+            )
+        return value
+
+    @staticmethod
+    def _assert_proposal_target(
+        proposal: ProposalRecord,
+        *,
+        tenant_id: str,
+        site_id: str,
+        layout_id: str,
+    ) -> None:
+        if proposal.binding.target != facility_transaction_target(
+            tenant_id=tenant_id,
+            site_id=site_id,
+            layout_id=layout_id,
+        ):
+            raise FacilityNotFoundError(
+                "proposal_not_found",
+                "Facility Layout proposal was not found.",
+            )
+
+    @staticmethod
+    def _source_revision_check(
+        document: Mapping[str, Any],
+        request: Mapping[str, Any],
+    ) -> None:
+        supplied = request.get("sourceRevisions", {})
+        expected = {
+            "shell": str(
+                document.get("sourceShellRef", {}).get("shellRevision") or ""
+            ),
+            "policy": str(
+                document.get("policySetRef", {}).get(
+                    "policySetRevision"
+                ) or ""
+            ),
+        }
+        for key, current in expected.items():
+            requested = supplied.get(key)
+            if requested is not None and requested != current:
+                raise FacilityConflictError(
+                    f"stale_{key}_revision",
+                    f"Planner request uses a stale {key} revision.",
+                    details={
+                        "expectedRevision": requested,
+                        "currentRevision": current,
+                    },
+                )
+
+    def _generate_layout_alternatives(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        request: Mapping[str, Any],
+        *,
+        stale_missing_dependencies: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            normalized_request = validate_layout_request(request)
+        except FacilityLayoutPlanningError as error:
+            self._planner_failure(error)
+            raise AssertionError("unreachable")
+
+        current = self.layout_repository.get_layout(
+            principal,
+            site_id,
+            layout_id,
+        )
+        if current["revision"] != base_revision:
+            raise FacilityConflictError(
+                "revision_conflict",
+                "Facility Layout revision conflict.",
+                details={"currentRevision": current["revision"]},
+            )
+        document = current["layout"]
+        self.validate_dependencies(
+            principal,
+            site_id,
+            document,
+            stale_missing_authorities=stale_missing_dependencies,
+        )
+        self._source_revision_check(document, normalized_request)
+
+        requested_asset_refs = {
+            (
+                str(item["assetId"]),
+                str(item["assetDefinitionRevision"]),
+            )
+            for item in normalized_request["assetSet"]
+        }
+        context = self._spatial_context(
+            principal,
+            site_id,
+            document,
+            additional_asset_refs=requested_asset_refs,
+        )
+        asset_definitions = {
+            asset_id: {
+                "revision": revision,
+                "document": deepcopy(definition),
+            }
+            for (asset_id, revision), definition in sorted(
+                context.asset_definitions.items()
+            )
+        }
+        vehicle_profiles: dict[str, dict[str, Any]] = {}
+        for raw_route in normalized_request["routes"]:
+            if not isinstance(raw_route, Mapping):
+                continue
+            vehicle_id = raw_route.get("vehicleProfileId")
+            revision = raw_route.get("vehicleProfileRevision")
+            if not isinstance(vehicle_id, str) or not isinstance(
+                revision,
+                str,
+            ):
+                continue
+            envelope = _published_authority_dependency(
+                self.vehicle_repository,
+                principal,
+                site_id=site_id,
+                authority_id=vehicle_id,
+                revision=revision,
+                kind="vehicle_profile",
+                stale_if_missing=stale_missing_dependencies,
+            )
+            profile = deepcopy(envelope.document)
+            profile["vehicleProfileRevision"] = envelope.revision
+            vehicle_profiles[vehicle_id] = profile
+        try:
+            result = generate_layout_proposals(
+                document,
+                normalized_request,
+                asset_definitions,
+                shell=context.shell,
+                policy_set=context.policy_set,
+                evidence_authority=context.evidence_authority,
+                vehicle_profiles=vehicle_profiles,
+            )
+        except FacilityLayoutPlanningError as error:
+            self._planner_failure(error)
+            raise AssertionError("unreachable")
+
+        for alternative in result["alternatives"]:
+            prepared, dependencies = self._prepare_operations(
+                principal,
+                site_id,
+                layout_id,
+                base_revision,
+                alternative["operations"],
+                required_action=None,
+            )
+            if (
+                prepared["diffHash"]
+                != alternative["operationReceipt"]["diffHash"]
+                or canonical_layout_bytes(prepared["document"])
+                != canonical_layout_bytes(
+                    alternative["ghostPreview"]["layout"]
+                )
+            ):
+                raise FacilityConflictError(
+                    "planner_preview_mismatch",
+                    "Authoritative operation replay changed the proposal.",
+                    details={
+                        "alternativeId": alternative["alternativeId"]
+                    },
+                )
+            binding = self._alternative_binding(
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+                planner_result=result,
+                alternative=alternative,
+            )
+            alternative["transactionBinding"] = binding.to_dict()
+            alternative["authoritativeDependencies"] = dependencies.to_dict()
+            alternative["authoritativeDiagnostics"] = {
+                "spatial": deepcopy(prepared["spatialDiagnostics"]),
+                "routing": deepcopy(prepared["routingDiagnostics"]),
+            }
+        return result
+
+    @staticmethod
+    def _find_alternative(
+        result: Mapping[str, Any],
+        alternative_id: str,
+    ) -> dict[str, Any]:
+        alternative = next(
+            (
+                item
+                for item in result.get("alternatives", [])
+                if isinstance(item, Mapping)
+                and item.get("alternativeId") == alternative_id
+            ),
+            None,
+        )
+        if alternative is None:
+            raise FacilityConflictError(
+                "layout_alternative_stale",
+                "The approved layout alternative is no longer available.",
+                details={"alternativeId": alternative_id},
+            )
+        return deepcopy(dict(alternative))
+
+    def create_layout_proposals(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="proposal.create",
+        )
+        result = self._generate_layout_alternatives(
+            principal,
+            site_id,
+            layout_id,
+            base_revision,
+            request,
+        )
+        public_alternatives = []
+        selected_proposal_id = None
+        for alternative in result["alternatives"]:
+            binding = ExactBinding.from_dict(
+                alternative["transactionBinding"]
+            )
+            proposal_type = (
+                "layout-alternative:"
+                + str(alternative["strategy"])
+            )
+            proposal_id = deterministic_facility_proposal_id(
+                layout_id=layout_id,
+                base_revision=base_revision,
+                proposal_type=proposal_type,
+                semantic_plan_hash=str(result["requestFingerprint"]),
+                dependency_fingerprint=binding.dependency_fingerprint,
+            )
+            proposal = self.transaction_runtime.propose(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                proposal_id=proposal_id,
+                binding=binding,
+                payload={
+                    "tenantId": principal.tenant_id,
+                    "siteId": site_id,
+                    "layoutId": layout_id,
+                    "baseRevision": base_revision,
+                    "proposalType": proposal_type,
+                    "semanticPlanHash": str(result["requestFingerprint"]),
+                    "request": deepcopy(dict(request)),
+                    "alternativeId": alternative["alternativeId"],
+                },
+                public_summary={
+                    "alternativeId": alternative["alternativeId"],
+                    "strategy": alternative["strategy"],
+                    "metrics": deepcopy(alternative["metrics"]),
+                },
+            )
+            public = deepcopy(alternative)
+            public["proposalId"] = proposal.proposal_id
+            public["createdAt"] = proposal.created_at
+            public["expiresAt"] = proposal.expires_at
+            public_alternatives.append(public)
+            if alternative["alternativeId"] == result[
+                "selectedAlternativeId"
+            ]:
+                selected_proposal_id = proposal.proposal_id
+        return {
+            **{
+                key: deepcopy(value)
+                for key, value in result.items()
+                if key != "alternatives"
+            },
+            "selectedProposalId": selected_proposal_id,
+            "alternatives": public_alternatives,
+        }
+
+    def _regenerate_proposal(
+        self,
+        principal: FacilityPrincipal,
+        proposal: ProposalRecord,
+        *,
+        site_id: str,
+        layout_id: str,
+    ) -> tuple[dict[str, Any], ExactBinding, dict[str, Any]]:
+        self._assert_proposal_target(
+            proposal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            layout_id=layout_id,
+        )
+        payload = proposal.payload
+        if (
+            payload.get("tenantId") != principal.tenant_id
+            or payload.get("siteId") != site_id
+            or payload.get("layoutId") != layout_id
+        ):
+            raise FacilityNotFoundError(
+                "proposal_not_found",
+                "Facility Layout proposal was not found.",
+            )
+        request = payload.get("request")
+        if not isinstance(request, Mapping):
+            raise FacilityConflictError(
+                "proposal_payload_unavailable",
+                "Facility Layout proposal inputs are unavailable.",
+            )
+        result = self._generate_layout_alternatives(
+            principal,
+            site_id,
+            layout_id,
+            str(payload.get("baseRevision") or ""),
+            request,
+            stale_missing_dependencies=True,
+        )
+        alternative = self._find_alternative(
+            result,
+            str(payload.get("alternativeId") or ""),
+        )
+        binding = ExactBinding.from_dict(
+            alternative["transactionBinding"]
+        )
+        prepared, _ = self._prepare_operations(
+            principal,
+            site_id,
+            layout_id,
+            binding.base_revision,
+            alternative["operations"],
+            required_action=None,
+        )
+        return alternative, binding, prepared
+
+    def get_layout_proposal_preview(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        proposal_id: str,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="proposal.read",
+        )
+        try:
+            proposal = self.transaction_runtime.get_proposal(
+                proposal_id,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+                principal_id=principal.principal_id,
+            )
+        except TransactionError as error:
+            self._raise_transaction_error(error)
+            raise AssertionError("unreachable")
+        alternative, binding, _ = self._regenerate_proposal(
+            principal,
+            proposal,
+            site_id=site_id,
+            layout_id=layout_id,
+        )
+        return {
+            "proposalId": proposal.proposal_id,
+            "action": proposal.action,
+            "alternative": alternative,
+            "transactionBinding": binding.to_dict(),
+            "createdAt": proposal.created_at,
+            "expiresAt": proposal.expires_at,
+            "previewPure": True,
+        }
+
+    def cancel_layout_proposal(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        proposal_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="proposal.dismiss",
+        )
+        self._require_session_id(session_id)
+        try:
+            proposal = self.transaction_runtime.get_proposal(
+                proposal_id,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+                principal_id=principal.principal_id,
+            )
+            self._assert_proposal_target(
+                proposal,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+            )
+            cancelled = self.transaction_runtime.cancel(
+                proposal_id,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+                principal_id=principal.principal_id,
+                session_id=session_id,
+            )
+        except TransactionError as error:
+            self._raise_transaction_error(error)
+            raise AssertionError("unreachable")
+        return cancelled.public_dict()
+
+    def approve_layout_proposal(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        proposal_id: str,
+        binding_value: Mapping[str, Any],
+        *,
+        session_id: str,
+        idempotency_key: str,
+        explicit_approval: bool,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="proposal.approve",
+        )
+        self._require_session_id(session_id)
+        try:
+            binding = ExactBinding.from_dict(binding_value)
+            proposal = self.transaction_runtime.get_proposal(
+                proposal_id,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+                principal_id=principal.principal_id,
+            )
+            self._assert_proposal_target(
+                proposal,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+            )
+            approval = self.transaction_runtime.approve(
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+                proposal_id=proposal_id,
+                binding=binding,
+                principal_id=principal.principal_id,
+                session_id=session_id,
+                idempotency_key=idempotency_key,
+                explicit_approval=explicit_approval,
+            )
+        except TransactionError as error:
+            self._raise_transaction_error(error)
+            raise AssertionError("unreachable")
+        return approval.public_dict()
+
+    def apply_layout_proposal(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        approval_token: str,
+        binding_value: Mapping[str, Any],
+        *,
+        session_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="proposal.apply",
+        )
+        self._require_session_id(session_id)
+        service = self
+        try:
+            binding = ExactBinding.from_dict(binding_value)
+        except TransactionError as error:
+            self._raise_transaction_error(error)
+            raise AssertionError("unreachable")
+
+        class _FacilityApplyAdapter:
+            def regenerate(
+                self,
+                proposal: ProposalRecord,
+            ) -> MutationPlan:
+                alternative, regenerated, prepared = (
+                    service._regenerate_proposal(
+                        principal,
+                        proposal,
+                        site_id=site_id,
+                        layout_id=layout_id,
+                    )
+                )
+                return MutationPlan(
+                    binding=regenerated,
+                    payload={
+                        "alternative": alternative,
+                        "prepared": prepared,
+                    },
+                )
+
+            def commit(self, plan: MutationPlan) -> CommitResult:
+                alternative = plan.payload["alternative"]
+                operations = alternative["operations"]
+                prepared, dependencies = service._prepare_operations(
+                    principal,
+                    site_id,
+                    layout_id,
+                    plan.binding.base_revision,
+                    operations,
+                    required_action="proposal.apply",
+                )
+                # The full transaction binding was established during
+                # regeneration. Replaying operations must still preserve the
+                # exact approved content and diff.
+                if (
+                    prepared["diffHash"] != plan.binding.diff_hash
+                    or canonical_layout_bytes(prepared["document"])
+                    != canonical_layout_bytes(
+                        alternative["ghostPreview"]["layout"]
+                    )
+                ):
+                    raise TransactionBindingError(
+                        "transaction_binding_mismatch",
+                        "Facility Layout changed during commit.",
+                    )
+                saved = service.layout_repository.save_approved_layout(
+                    principal,
+                    site_id,
+                    layout_id,
+                    prepared["document"],
+                    plan.binding.base_revision,
+                )
+                return CommitResult(
+                    revision=saved["revision"],
+                    payload={
+                        "layout": deepcopy(saved["layout"]),
+                        "changed": bool(saved.get("changed")),
+                        "dependencies": dependencies.to_dict(),
+                        "operationResult": deepcopy(prepared),
+                        "spatialDiagnostics": deepcopy(
+                            prepared["spatialDiagnostics"]
+                        ),
+                        "routingDiagnostics": deepcopy(
+                            prepared["routingDiagnostics"]
+                        ),
+                        "alternativeId": alternative["alternativeId"],
+                        "strategy": alternative["strategy"],
+                        "metrics": deepcopy(alternative["metrics"]),
+                    },
+                )
+
+            def reconcile_prepared(
+                self,
+                prepared: PreparedRecord,
+            ) -> ReconciliationResult:
+                try:
+                    current = service.layout_repository.get_layout(
+                        principal,
+                        site_id,
+                        layout_id,
+                    )
+                except Exception:
+                    return ReconciliationResult.unknown()
+                if current["revision"] == prepared.binding.base_revision:
+                    return ReconciliationResult.not_committed()
+                # A changed current layout without the volatile proposal
+                # payload cannot be attributed safely after restart.
+                return ReconciliationResult.unknown()
+
+        try:
+            outcome = self.transaction_runtime.apply(
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+                approval_token=approval_token,
+                binding=binding,
+                principal_id=principal.principal_id,
+                session_id=session_id,
+                idempotency_key=idempotency_key,
+                adapter=_FacilityApplyAdapter(),
+            )
+        except TransactionError as error:
+            self._raise_transaction_error(error)
+            raise AssertionError("unreachable")
+        return {
+            **deepcopy(dict(outcome.receipt.payload)),
+            "revision": outcome.receipt.revision,
+            "receipt": outcome.receipt.to_dict(),
+            "replayed": outcome.replayed,
+            "recovered": outcome.recovered,
+        }
+
+    def get_layout_receipt(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="receipt.read",
+        )
+        try:
+            receipt = self.transaction_runtime.kernel.get_receipt(receipt_id)
+        except TransactionError as error:
+            self._raise_transaction_error(error)
+            raise AssertionError("unreachable")
+        if receipt.binding.target != facility_transaction_target(
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            layout_id=layout_id,
+        ):
+            raise FacilityNotFoundError(
+                "receipt_not_found",
+                "Facility Layout receipt was not found.",
+            )
+        return receipt.to_dict()
+
     def _prepare_operations(
         self,
         principal: FacilityPrincipal,
@@ -1318,13 +2141,16 @@ class FacilityLayoutService:
         layout_id: str,
         base_revision: str,
         operations: list[Mapping[str, Any]],
+        *,
+        required_action: str | None = "layout.edit",
     ) -> tuple[dict[str, Any], FacilityDependencySnapshot]:
-        require_facility_action(
-            principal,
-            tenant_id=principal.tenant_id,
-            site_id=site_id,
-            action="layout.edit",
-        )
+        if required_action is not None:
+            require_facility_action(
+                principal,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                action=required_action,
+            )
         current = self.layout_repository.get_layout(
             principal,
             site_id,

@@ -65,6 +65,7 @@ class FakeElement {
         this.clientHeight = 600;
         this.isContentEditable = false;
         this.capturedPointers = new Set();
+        this.focusCount = 0;
     }
 
     appendChild(child) {
@@ -149,6 +150,11 @@ class FakeElement {
         };
     }
 
+    focus() {
+        this.focusCount += 1;
+        this.ownerDocument.activeElement = this;
+    }
+
     descendants() {
         const result = [];
         this.children.forEach(child => {
@@ -197,6 +203,10 @@ class FakeElement {
 FakeElement.listenerCount = 0;
 
 class FakeDocument {
+    constructor() {
+        this.activeElement = null;
+    }
+
     createElement(name) {
         return new FakeElement(this, name);
     }
@@ -317,6 +327,7 @@ class FakeSession {
             camera: null,
             ghostPlacement: null,
             placementAlternatives: null,
+            layoutProposal: null,
             lastError: null,
         };
     }
@@ -489,6 +500,122 @@ class FakeSession {
         this.state.placementAlternatives = null;
         this.state.ghostPlacement = null;
         return this._gesture('Accept placement alternative');
+    }
+
+    requestLayoutProposal(request) {
+        this.calls.push(['requestLayoutProposal', clone(request)]);
+        const first = clone(this.state.baseLayout);
+        const second = clone(this.state.baseLayout);
+        first.placements[0].transform.position.x = 12;
+        second.placements[0].transform.position.x = 24;
+        first.placements = first.placements.slice(0, 1);
+        second.placements = second.placements.slice(0, 1);
+        first.placements.push(placement(
+            'pl-proposed',
+            'asset-machine',
+            9,
+            4,
+            'auto'
+        ));
+        second.placements.push(placement(
+            'pl-proposed',
+            'asset-machine',
+            18,
+            4,
+            'auto'
+        ));
+        function alternative(index, strategy, ghostLayout) {
+            return {
+                proposalId: 'proposal-' + index,
+                alternativeId: 'alternative-' + index,
+                strategy,
+                operations: [],
+                ghostPreview: {
+                    layout: ghostLayout,
+                    routeProposals: [],
+                },
+                metrics: {
+                    placementCollisions: 0,
+                    movedAutoCount: 1,
+                    spatialErrorCount: 0,
+                    spatialWarningCount: 1,
+                    spatialUnverifiedCount: 2,
+                    clearanceConflicts: 1,
+                    baselineClearanceConflicts: 3,
+                },
+                findings: [{
+                    severity: 'warning',
+                    code: 'fixture-warning',
+                    message: 'Fixture review warning.',
+                }],
+                newHardFindingIds: [],
+                transactionBinding: {
+                    target: {
+                        domain: 'facility-layout',
+                        scopeId: 'site-a',
+                        resourceId: 'fl-workspace',
+                    },
+                    baseRevision: 'rev-1',
+                    diffHash: 'd'.repeat(64),
+                    dependencyFingerprint: 'e'.repeat(64),
+                },
+                createdAt: '2026-07-29T00:00:00Z',
+                expiresAt: '2026-07-29T00:10:00Z',
+            };
+        }
+        this.state.layoutProposal = {
+            authority: 'server-authoritative',
+            previewPure: true,
+            baseRevision: 'rev-1',
+            request: clone(request),
+            selectedIndex: 0,
+            alternatives: [
+                alternative(1, 'compact_rows', first),
+                alternative(2, 'balanced_grid', second),
+            ],
+        };
+        this.state.placementAlternatives = null;
+        this.state.ghostPlacement = null;
+        this._notify();
+        return Promise.resolve(this.getState());
+    }
+
+    cycleLayoutProposal(offset) {
+        this.calls.push(['cycleLayoutProposal', offset]);
+        const proposal = this.state.layoutProposal;
+        proposal.selectedIndex = (
+            (proposal.selectedIndex + offset) % proposal.alternatives.length
+                + proposal.alternatives.length
+        ) % proposal.alternatives.length;
+        this._notify();
+        return this.getState();
+    }
+
+    dismissLayoutProposal() {
+        this.calls.push(['dismissLayoutProposal']);
+        this.state.layoutProposal = null;
+        this._notify();
+        return Promise.resolve(this.getState());
+    }
+
+    approveAndApplyLayoutProposal() {
+        this.calls.push(['approveAndApplyLayoutProposal']);
+        const selected = this.state.layoutProposal.alternatives[
+            this.state.layoutProposal.selectedIndex
+        ];
+        this.state.layout = clone(selected.ghostPreview.layout);
+        this.state.baseLayout = clone(selected.ghostPreview.layout);
+        this.state.baseRevision = 'rev-2';
+        this.state.layoutProposal = null;
+        this.state.dirty = false;
+        this._notify();
+        return Promise.resolve({
+            state: this.getState(),
+            receipt: {
+                layout: clone(this.state.layout),
+                revision: 'rev-2',
+            },
+        });
     }
 
     commitGhostPlacement() {
@@ -685,6 +812,7 @@ class FakeAdapter {
         this.invalidations = 0;
         this.camera = null;
         this.ghost = null;
+        this.proposalPreviews = [];
     }
 
     mount(host) {
@@ -710,6 +838,11 @@ class FakeAdapter {
 
     setGhostPlacement(value) {
         this.ghost = clone(value);
+        return true;
+    }
+
+    setProposalPreview(value) {
+        this.proposalPreviews.push(clone(value));
         return true;
     }
 
@@ -978,6 +1111,89 @@ async function main() {
         );
     });
 
+    await check('Auto Arrange request is declarative and preserves ownership',
+        async () => {
+            const state = new FakeSession().getState();
+            const request = workspaceModule.buildAutoArrangeRequest(
+                state,
+                catalog(),
+                'request-auto-arrange-001'
+            );
+            assert.strictEqual(request.objective, 'place_and_cleanup');
+            assert.deepStrictEqual(
+                request.assetSet.map(item => item.existingPlacementId),
+                ['pl-a', 'pl-b']
+            );
+            assert.deepStrictEqual(
+                request.cleanup.movableManualPlacementIds,
+                []
+            );
+            assert.strictEqual(request.cleanup.moveAuto, true);
+            assert.strictEqual(
+                request.sourceRevisions.shell,
+                state.baseLayout.sourceShellRef.shellRevision
+            );
+            const serialized = JSON.stringify(request);
+            ['"x"', '"y"', '"z"', '"position"', '"transform"',
+                '"quaternion"'].forEach(key => {
+                assert.strictEqual(serialized.includes(key), false);
+            });
+
+            const empty = clone(state);
+            empty.baseLayout.placements = [];
+            empty.layout.placements = [];
+            const seeded = workspaceModule.buildAutoArrangeRequest(
+                empty,
+                catalog(),
+                'request-seed-001'
+            );
+            assert.strictEqual(seeded.assetSet.length, 3);
+            assert.ok(seeded.assetSet.every(
+                item => item.existingPlacementId === undefined
+            ));
+        });
+
+    await check('proposal review diff is stable-ID based and remains pure',
+        async () => {
+            const saved = layout();
+            const proposed = clone(saved);
+            proposed.placements[0].transform.position.x = 11;
+            proposed.placements.pop();
+            proposed.placements.push(placement(
+                'pl-new',
+                'asset-machine',
+                7,
+                3,
+                'auto'
+            ));
+            const savedBefore = JSON.stringify(saved);
+            const proposedBefore = JSON.stringify(proposed);
+            const review = workspaceModule.buildLayoutProposalReview(
+                saved,
+                proposed
+            );
+            assert.deepStrictEqual(review.newPlacementIds, ['pl-new']);
+            assert.deepStrictEqual(review.movedPlacementIds, ['pl-a']);
+            assert.deepStrictEqual(review.removedPlacementIds, ['pl-b']);
+            assert.deepStrictEqual(
+                review.beforePlacements.map(item => item.placementId),
+                ['pl-a', 'pl-b']
+            );
+            assert.deepStrictEqual(
+                review.proposedPlacements.map(item => item.placementId),
+                ['pl-a', 'pl-new']
+            );
+            assert.strictEqual(JSON.stringify(saved), savedBefore);
+            assert.strictEqual(JSON.stringify(proposed), proposedBefore);
+            const noBaseline = workspaceModule.proposalDiagnosticSummary({
+                metrics: { clearanceConflicts: 2 },
+            });
+            assert.ok(noBaseline.includes('baseline comparison unavailable'));
+            assert.ok(noBaseline.includes(
+                'new-hard-finding comparison not reported'
+            ));
+        });
+
     await check('builds accessible CAD workspace with advisory authority notice',
         async () => {
             const data = fixture();
@@ -1130,6 +1346,159 @@ async function main() {
                     call => call[0] === 'acceptPlacementAlternative'
                 ).length,
                 1
+            );
+            data.workspace.destroy();
+        });
+
+    await check('full-layout preview renders in plan and 3D without dirtying',
+        async () => {
+            const data = fixture();
+            const saved = clone(data.session.getState().layout);
+            const autoArrange = toolbarButton(data, 'auto-arrange');
+            autoArrange.focus();
+            await data.workspace.executeCommand('auto-arrange');
+            await data.workspace.whenIdle();
+            let state = data.session.getState();
+            const requestCall = data.session.calls.find(
+                call => call[0] === 'requestLayoutProposal'
+            );
+            assert.ok(requestCall);
+            assert.strictEqual(
+                JSON.stringify(requestCall[1]).includes('"position"'),
+                false
+            );
+            assert.strictEqual(state.dirty, false);
+            assert.deepStrictEqual(state.layout, saved);
+            assert.strictEqual(
+                data.root.getAttribute('data-full-layout-preview'),
+                'true'
+            );
+            assert.ok(data.workspace.candidateSummary.textContent.includes(
+                'Preview not saved'
+            ));
+            assert.strictEqual(
+                data.workspace.candidateControls.getAttribute(
+                    'data-preview-kind'
+                ),
+                'full-layout'
+            );
+            assert.strictEqual(data.workspace.proposalReview.hidden, false);
+            assert.ok(data.workspace.proposalChangeText.textContent.includes(
+                '1 new assets, 1 moved assets, 1 removed assets'
+            ));
+            assert.ok(data.workspace.proposalBindingText.textContent.includes(
+                'Proposal binding: map rev-1'
+            ));
+            assert.ok(data.workspace.proposalBindingText.textContent.includes(
+                'dependency eeeeeeeeee...'
+            ));
+            assert.ok(data.workspace.proposalDiagnosticText.textContent.includes(
+                'clearance conflicts 1 (difference -2)'
+            ));
+            assert.ok(data.workspace.proposalDiagnosticText.textContent.includes(
+                'new hard findings 0'
+            ));
+            assert.ok(data.workspace.proposalDiagnosticText.textContent.length
+                <= 360);
+            const topPreview = data.top.proposalPreviews.at(-1);
+            const threePreview = data.three.proposalPreviews.at(-1);
+            assert.deepStrictEqual(topPreview, threePreview);
+            assert.deepStrictEqual(topPreview.newPlacementIds, ['pl-proposed']);
+            assert.deepStrictEqual(topPreview.movedPlacementIds, ['pl-a']);
+            assert.deepStrictEqual(topPreview.removedPlacementIds, ['pl-b']);
+            assert.strictEqual(topPreview.beforePlacements.length, 2);
+            assert.strictEqual(
+                data.controller.layouts.at(-1)
+                    .placements[0].transform.position.x,
+                12
+            );
+            assert.strictEqual(
+                data.top.layouts.at(-1).placements[0].transform.position.x,
+                12
+            );
+            assert.strictEqual(
+                data.three.layouts.at(-1).placements[0].transform.position.x,
+                12
+            );
+
+            data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="next"]'
+            ).dispatch('click');
+            state = data.session.getState();
+            assert.strictEqual(state.layoutProposal.selectedIndex, 1);
+            assert.deepStrictEqual(state.layout, saved);
+            assert.strictEqual(
+                data.controller.layouts.at(-1)
+                    .placements[0].transform.position.x,
+                24
+            );
+            assert.strictEqual(
+                data.top.layouts.at(-1).placements[0].transform.position.x,
+                24
+            );
+            assert.strictEqual(
+                data.three.layouts.at(-1).placements[0].transform.position.x,
+                24
+            );
+            assert.strictEqual(
+                data.top.proposalPreviews.at(-1)
+                    .proposedPlacements[0].transform.position.x,
+                24
+            );
+
+            const dismiss = data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="dismiss"]'
+            );
+            dismiss.focus();
+            dismiss.dispatch('click');
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.session.getState().layoutProposal, null);
+            assert.deepStrictEqual(data.session.getState().layout, saved);
+            assert.strictEqual(
+                data.root.getAttribute('data-full-layout-preview'),
+                null
+            );
+            assert.strictEqual(
+                data.controller.layouts.at(-1)
+                    .placements[0].transform.position.x,
+                saved.placements[0].transform.position.x
+            );
+            assert.strictEqual(data.top.proposalPreviews.at(-1), null);
+            assert.strictEqual(data.three.proposalPreviews.at(-1), null);
+            assert.strictEqual(data.documentRef.activeElement, autoArrange);
+            await data.workspace.executeCommand('auto-arrange');
+            const escape = data.root.dispatch('keydown', {
+                key: 'Escape',
+                target: data.root,
+            });
+            await data.workspace.whenIdle();
+            assert.strictEqual(escape.defaultPrevented, true);
+            assert.strictEqual(data.session.getState().layoutProposal, null);
+            assert.strictEqual(data.documentRef.activeElement, autoArrange);
+            assert.ok(data.controller.fitCount >= 4);
+            data.workspace.destroy();
+        });
+
+    await check('proposal approval restores focus after controls disappear',
+        async () => {
+            const data = fixture();
+            const autoArrange = toolbarButton(data, 'auto-arrange');
+            autoArrange.focus();
+            await data.workspace.executeCommand('auto-arrange');
+            await data.workspace.whenIdle();
+            const approve = data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="accept"]'
+            );
+            approve.focus();
+            approve.dispatch('click');
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.session.getState().layoutProposal, null);
+            assert.strictEqual(data.workspace.candidateControls.hidden, true);
+            assert.strictEqual(data.documentRef.activeElement, autoArrange);
+            assert.strictEqual(
+                data.session.getState().layout.placements[0]
+                    .transform.position.x,
+                12
             );
             data.workspace.destroy();
         });

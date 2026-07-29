@@ -9,6 +9,9 @@
     'use strict';
 
     const API_VERSION = 1;
+    const MAX_SESSION_ID_LENGTH = 128;
+    const HASH_PATTERN = /^[0-9a-f]{64}$/;
+    let sessionSequence = 0;
 
     function nonEmptyString(value, label) {
         if (typeof value !== 'string' || !value.trim()) {
@@ -20,6 +23,52 @@
     function clone(value) {
         if (value === undefined) return undefined;
         return JSON.parse(JSON.stringify(value));
+    }
+
+    function boundedIdentifier(value, label, maximum) {
+        const result = nonEmptyString(value, label);
+        if (result.length > (maximum || 128)
+                || !/^[A-Za-z0-9][A-Za-z0-9._:@+-]*$/.test(result)) {
+            throw new TypeError(label + ' is malformed');
+        }
+        return result;
+    }
+
+    function hash(value, label) {
+        const result = nonEmptyString(value, label);
+        if (!HASH_PATTERN.test(result)) {
+            throw new TypeError(label + ' must be a lowercase SHA-256 hash');
+        }
+        return result;
+    }
+
+    function opaqueToken(value, label, maximum) {
+        const result = nonEmptyString(value, label);
+        if (result.length > (maximum || 256)
+                || !/^[A-Za-z0-9][A-Za-z0-9._~:-]*$/.test(result)) {
+            throw new TypeError(label + ' is malformed');
+        }
+        return result;
+    }
+
+    function idempotencyKey(value) {
+        const result = nonEmptyString(value, 'idempotencyKey');
+        if (result.length < 8 || result.length > 128
+                || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(result)) {
+            throw new TypeError('idempotencyKey is malformed');
+        }
+        return result;
+    }
+
+    function defaultSessionId() {
+        sessionSequence += 1;
+        const cryptoApi = typeof globalThis !== 'undefined'
+            ? globalThis.crypto : null;
+        if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+            return 'fls-' + cryptoApi.randomUUID();
+        }
+        return 'fls-' + Date.now().toString(36)
+            + '-' + sessionSequence.toString(36);
     }
 
     function operationBatch(value) {
@@ -34,6 +83,54 @@
             throw new TypeError(label + ' must be an object');
         }
         return value;
+    }
+
+    function declarativeLayoutRequest(value) {
+        const source = object(value, 'layout proposal request');
+        if (source.schemaVersion !== 1) {
+            throw new TypeError('layout proposal request schemaVersion must equal 1');
+        }
+        nonEmptyString(source.requestId, 'layout proposal requestId');
+        nonEmptyString(source.objective, 'layout proposal objective');
+        if (!Array.isArray(source.assetSet)) {
+            throw new TypeError('layout proposal assetSet must be an array');
+        }
+        if (!Array.isArray(source.strategies) || !source.strategies.length) {
+            throw new TypeError(
+                'layout proposal strategies must be a non-empty array'
+            );
+        }
+        return clone(source);
+    }
+
+    function transactionBinding(value) {
+        const source = object(value, 'transaction binding');
+        const target = object(source.target, 'transaction binding target');
+        return {
+            target: {
+                domain: boundedIdentifier(
+                    target.domain,
+                    'transaction binding target domain'
+                ),
+                scopeId: boundedIdentifier(
+                    target.scopeId,
+                    'transaction binding target scopeId'
+                ),
+                resourceId: boundedIdentifier(
+                    target.resourceId,
+                    'transaction binding target resourceId'
+                ),
+            },
+            baseRevision: hash(
+                source.baseRevision,
+                'transaction binding baseRevision'
+            ),
+            diffHash: hash(source.diffHash, 'transaction binding diffHash'),
+            dependencyFingerprint: hash(
+                source.dependencyFingerprint,
+                'transaction binding dependencyFingerprint'
+            ),
+        };
     }
 
     function worldPosition(value, label) {
@@ -111,6 +208,11 @@
         const layoutId = nonEmptyString(options.layoutId, 'layoutId');
         const baseUrl = String(options.baseUrl || '').replace(/\/+$/, '');
         const headers = Object.assign({}, options.headers || {});
+        const sessionId = boundedIdentifier(
+            options.sessionId || defaultSessionId(),
+            'sessionId',
+            MAX_SESSION_ID_LENGTH
+        );
         const encodedSite = encodeURIComponent(siteId);
         const encodedLayout = encodeURIComponent(layoutId);
         const layoutUrl = baseUrl + '/api/facility-layouts/'
@@ -124,6 +226,7 @@
                 credentials: options.credentials || 'same-origin',
                 headers: Object.assign({}, headers),
             };
+            init.headers['X-InspectorPro-Session'] = sessionId;
             if (requestConfig.signal) init.signal = requestConfig.signal;
             if (body !== undefined) {
                 init.headers['Content-Type'] = 'application/json';
@@ -142,6 +245,7 @@
             siteId: siteId,
             layoutId: layoutId,
             layoutUrl: layoutUrl,
+            sessionId: sessionId,
             previewOperations: function (payload) {
                 const value = payload || {};
                 return request('/preview', 'POST', {
@@ -208,6 +312,82 @@
                             'candidateId'
                         ),
                     },
+                    requestOptions
+                );
+            },
+            createLayoutProposals: function (payload, requestOptions) {
+                const value = object(payload, 'layout proposal payload');
+                return request('/proposals', 'POST', {
+                    baseRevision: nonEmptyString(
+                        value.baseRevision,
+                        'baseRevision'
+                    ),
+                    request: declarativeLayoutRequest(value.request),
+                }, requestOptions);
+            },
+            getLayoutProposalPreview: function (payload, requestOptions) {
+                const value = object(payload, 'layout proposal preview payload');
+                const proposalId = boundedIdentifier(
+                    value.proposalId,
+                    'proposalId'
+                );
+                return request(
+                    '/proposals/' + encodeURIComponent(proposalId) + '/preview',
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            cancelLayoutProposal: function (payload, requestOptions) {
+                const value = object(payload, 'layout proposal cancel payload');
+                const proposalId = boundedIdentifier(
+                    value.proposalId,
+                    'proposalId'
+                );
+                return request(
+                    '/proposals/' + encodeURIComponent(proposalId),
+                    'DELETE',
+                    undefined,
+                    requestOptions
+                );
+            },
+            approveLayoutProposal: function (payload, requestOptions) {
+                const value = object(payload, 'layout proposal approval payload');
+                if (value.explicitApproval !== true) {
+                    throw new TypeError('explicitApproval must equal true');
+                }
+                return request('/approvals', 'POST', {
+                    proposalId: boundedIdentifier(
+                        value.proposalId,
+                        'proposalId'
+                    ),
+                    binding: transactionBinding(value.binding),
+                    idempotencyKey: idempotencyKey(value.idempotencyKey),
+                    explicitApproval: true,
+                }, requestOptions);
+            },
+            applyLayoutProposal: function (payload, requestOptions) {
+                const value = object(payload, 'layout proposal apply payload');
+                return request('/apply', 'POST', {
+                    approvalToken: opaqueToken(
+                        value.approvalToken,
+                        'approvalToken',
+                        256
+                    ),
+                    binding: transactionBinding(value.binding),
+                    idempotencyKey: idempotencyKey(value.idempotencyKey),
+                }, requestOptions);
+            },
+            getLayoutReceipt: function (payload, requestOptions) {
+                const value = object(payload, 'layout receipt payload');
+                const receiptId = boundedIdentifier(
+                    value.receiptId,
+                    'receiptId'
+                );
+                return request(
+                    '/receipts/' + encodeURIComponent(receiptId),
+                    'GET',
+                    undefined,
                     requestOptions
                 );
             },

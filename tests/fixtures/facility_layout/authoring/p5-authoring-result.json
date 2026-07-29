@@ -180,19 +180,19 @@
           224,
           230
         ],
-        "changedPixelCount": 66366,
-        "changedPixelFraction": 0.10372281,
-        "height": 688,
+        "changedPixelCount": 67237,
+        "changedPixelFraction": 0.1043259,
+        "height": 693,
         "maximumDelta": 669,
         "nonblank": true,
         "width": 930
       },
-      "elementScreenshotSha256": "434048fe81d81446f0952410cb4943768a0ef2cbcde5aecf21edd31e64160440",
+      "elementScreenshotSha256": "1db1fbd3cf9edf5d2adcc277fc59885a8fc05e43418c5883dbdeb6fd36446d86",
       "webglReadback": {
         "available": true,
-        "changedPixelCount": 59625,
-        "changedPixelFraction": 0.09318735933983496,
-        "height": 688,
+        "changedPixelCount": 60496,
+        "changedPixelFraction": 0.09386646806001644,
+        "height": 693,
         "maximumDelta": 669,
         "width": 930
       }
@@ -213,8 +213,8 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 300,
-            "renderedFrames": 75
+            "renderRequests": 316,
+            "renderedFrames": 74
           },
           "disposed": true,
           "ghostActive": false,
@@ -314,6 +314,9 @@
           "mounted": false,
           "pendingLoads": 0,
           "placementCount": 5,
+          "proposalBeforeCount": 0,
+          "proposalPreviewActive": false,
+          "proposalProposedCount": 0,
           "representationGroups": [],
           "selectedPlacementIds": [],
           "status": "disposed",
@@ -337,7 +340,7 @@
         "dom": {
           "assetRows": 1,
           "canvasCount": 1,
-          "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
+          "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.New proposalMoved proposalOriginal positionPreviousNextAcceptDismiss",
           "p6WarningVisible": true,
           "planGhostCount": 0,
           "planSvgCount": 1,
@@ -798,9 +801,11 @@
               }
             ]
           },
+          "layoutProposal": null,
           "loaded": true,
           "operations": [],
           "placementAlternatives": null,
+          "recentReceiptIds": [],
           "selection": []
         },
         "theme": {
@@ -812,9 +817,9 @@
           "assetGroupCount": 1,
           "camera": {
             "position": {
-              "x": 9.591983102068944,
-              "y": 7.887524688039356,
-              "z": 30.849133784747583
+              "x": 9.726915185492912,
+              "y": 7.96031812555945,
+              "z": 30.827921531102483
             },
             "target": {
               "x": 8.674699992333519,
@@ -827,8 +832,8 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 299,
-            "renderedFrames": 75
+            "renderRequests": 315,
+            "renderedFrames": 74
           },
           "disposed": false,
           "ghostActive": false,
@@ -945,6 +950,9 @@
           "mounted": true,
           "pendingLoads": 0,
           "placementCount": 5,
+          "proposalBeforeCount": 0,
+          "proposalPreviewActive": false,
+          "proposalProposedCount": 0,
           "representationGroups": [
             {
               "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
@@ -1004,17 +1012,21 @@
             "pl-9cd3a1d36e081c7c182969b9"
           ],
           "projection": {
-            "height": 688,
+            "height": 693,
             "maxX": 15,
             "maxZ": 18,
             "minX": -1,
             "minZ": 1.235800028,
-            "offsetX": 159.58727475504014,
+            "offsetX": 157.20123783906388,
             "offsetY": 24,
             "padding": 24,
-            "scale": 38.17659065561998,
+            "scale": 38.474845270117015,
             "width": 930
           },
+          "proposalBeforeCount": 0,
+          "proposalMovedCount": 0,
+          "proposalNewCount": 0,
+          "proposalPreviewActive": false,
           "renderCount": 139,
           "selection": null,
           "selections": [],
@@ -1506,9 +1518,11 @@
                 }
               ]
             },
+            "layoutProposal": null,
             "loaded": true,
             "operations": [],
             "placementAlternatives": null,
+            "recentReceiptIds": [],
             "selection": []
           },
           "toolMode": "polygon-zone",
@@ -1520,7 +1534,7 @@
       "dom": {
         "assetRows": 1,
         "canvasCount": 1,
-        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
+        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.New proposalMoved proposalOriginal positionPreviousNextAcceptDismiss",
         "p6WarningVisible": true,
         "planGhostCount": 0,
         "planSvgCount": 1,
@@ -1981,9 +1995,11 @@
             }
           ]
         },
+        "layoutProposal": null,
         "loaded": true,
         "operations": [],
         "placementAlternatives": null,
+        "recentReceiptIds": [],
         "selection": []
       },
       "theme": {
@@ -1995,9 +2011,9 @@
         "assetGroupCount": 1,
         "camera": {
           "position": {
-            "x": 9.591983102068944,
-            "y": 7.887524688039356,
-            "z": 30.849133784747583
+            "x": 9.726915185492912,
+            "y": 7.96031812555945,
+            "z": 30.827921531102483
           },
           "target": {
             "x": 8.674699992333519,
@@ -2010,8 +2026,8 @@
         "degraded": false,
         "demandRendering": {
           "pendingFrame": false,
-          "renderRequests": 299,
-          "renderedFrames": 75
+          "renderRequests": 315,
+          "renderedFrames": 74
         },
         "disposed": false,
         "ghostActive": false,
@@ -2128,6 +2144,9 @@
         "mounted": true,
         "pendingLoads": 0,
         "placementCount": 5,
+        "proposalBeforeCount": 0,
+        "proposalPreviewActive": false,
+        "proposalProposedCount": 0,
         "representationGroups": [
           {
             "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
@@ -2187,17 +2206,21 @@
           "pl-9cd3a1d36e081c7c182969b9"
         ],
         "projection": {
-          "height": 688,
+          "height": 693,
           "maxX": 15,
           "maxZ": 18,
           "minX": -1,
           "minZ": 1.235800028,
-          "offsetX": 159.58727475504014,
+          "offsetX": 157.20123783906388,
           "offsetY": 24,
           "padding": 24,
-          "scale": 38.17659065561998,
+          "scale": 38.474845270117015,
           "width": 930
         },
+        "proposalBeforeCount": 0,
+        "proposalMovedCount": 0,
+        "proposalNewCount": 0,
+        "proposalPreviewActive": false,
         "renderCount": 139,
         "selection": null,
         "selections": [],
@@ -2689,9 +2712,11 @@
               }
             ]
           },
+          "layoutProposal": null,
           "loaded": true,
           "operations": [],
           "placementAlternatives": null,
+          "recentReceiptIds": [],
           "selection": []
         },
         "toolMode": "polygon-zone",
@@ -2702,7 +2727,7 @@
       "dom": {
         "assetRows": 1,
         "canvasCount": 1,
-        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
+        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.New proposalMoved proposalOriginal positionPreviousNextAcceptDismiss",
         "p6WarningVisible": true,
         "planGhostCount": 0,
         "planSvgCount": 1,
@@ -2957,9 +2982,11 @@
           "utilityNetworks": [],
           "zones": []
         },
+        "layoutProposal": null,
         "loaded": true,
         "operations": [],
         "placementAlternatives": null,
+        "recentReceiptIds": [],
         "selection": []
       },
       "theme": {
@@ -2986,7 +3013,7 @@
         "degraded": false,
         "demandRendering": {
           "pendingFrame": false,
-          "renderRequests": 17,
+          "renderRequests": 19,
           "renderedFrames": 3
         },
         "disposed": false,
@@ -3104,6 +3131,9 @@
         "mounted": true,
         "pendingLoads": 0,
         "placementCount": 3,
+        "proposalBeforeCount": 0,
+        "proposalPreviewActive": false,
+        "proposalProposedCount": 0,
         "representationGroups": [
           {
             "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
@@ -3157,17 +3187,21 @@
           "pl-p5-locked"
         ],
         "projection": {
-          "height": 688,
+          "height": 693,
           "maxX": 14.613599956,
           "maxZ": 9.264199972,
           "minX": 2.386400044,
           "minZ": 1.735800028,
           "offsetX": 23.999999999999943,
-          "offsetY": 72.47222592266058,
+          "offsetY": 74.97222592266058,
           "padding": 24,
           "scale": 72.13425856678674,
           "width": 930
         },
+        "proposalBeforeCount": 0,
+        "proposalMovedCount": 0,
+        "proposalNewCount": 0,
+        "proposalPreviewActive": false,
         "renderCount": 5,
         "selection": null,
         "selections": [],
@@ -3433,9 +3467,11 @@
             "utilityNetworks": [],
             "zones": []
           },
+          "layoutProposal": null,
           "loaded": true,
           "operations": [],
           "placementAlternatives": null,
+          "recentReceiptIds": [],
           "selection": []
         },
         "toolMode": "select",
@@ -3957,10 +3993,10 @@
         ]
       },
       "fitChangedLayout": false,
-      "projectionDelta": 155.17607124147636,
+      "projectionDelta": 155.1764100826976,
       "viewport": {
-        "bottom": 673.5,
-        "height": 547.5,
+        "bottom": 678.5,
+        "height": 552.5,
         "left": 240,
         "right": 910,
         "top": 126,
@@ -4141,12 +4177,12 @@
         "z": 8.26
       },
       "targetClient": {
-        "x": 871.8449726805904,
-        "y": 532.9752524107352
+        "x": 873.1484490296575,
+        "y": 535.9695340475471
       },
       "viewport": {
-        "bottom": 813.5,
-        "height": 687.5,
+        "bottom": 818.5,
+        "height": 692.5,
         "left": 240,
         "right": 1170,
         "top": 126,
@@ -4157,8 +4193,8 @@
     },
     "three": {
       "canvasRect": {
-        "bottom": 693.5,
-        "height": 567.5,
+        "bottom": 698.5,
+        "height": 572.5,
         "left": 240,
         "right": 990,
         "top": 126,
@@ -4226,30 +4262,30 @@
         ]
       },
       "floorPoint": {
-        "x": 9.667634685046615,
+        "x": 9.640340493450214,
         "y": 0,
-        "z": 2.677861685054147
+        "z": 2.7137973307026613
       },
       "floorRoundTripError": 0,
-      "projectionDelta": 186.55272589290738,
+      "projectionDelta": 186.84658007326559,
       "renderedFrameDelta": 17,
       "stableClientAfterOrbit": {
-        "clientX": 464.78226505712075,
-        "clientY": 455.7190757030893,
+        "clientX": 464.1127972255927,
+        "clientY": 458.1060228894409,
         "ndc": {
-          "x": -0.4005806265143447,
-          "y": -0.16200555313864062,
-          "z": 0.998444587244833
+          "x": -0.40236587406508606,
+          "y": -0.16019571315088535,
+          "z": 0.9984466551140507
         },
         "visible": true,
-        "x": 464.78226505712075,
-        "y": 455.7190757030893
+        "x": 464.1127972255927,
+        "y": 458.1060228894409
       }
     },
     "threePrepared": {
       "canvasRect": {
-        "bottom": 813.5,
-        "height": 687.5,
+        "bottom": 818.5,
+        "height": 692.5,
         "left": 240,
         "right": 1170,
         "top": 126,
@@ -4259,16 +4295,16 @@
       },
       "renderedFrames": 47,
       "stableClient": {
-        "clientX": 648.5298316643341,
-        "clientY": 423.48941073427613,
+        "clientX": 648.119437999104,
+        "clientY": 425.6529700850709,
         "ndc": {
-          "x": -0.12144122222723845,
+          "x": -0.12232378924923874,
           "y": 0.13457625968210588,
           "z": 0.9985973292677561
         },
         "visible": true,
-        "x": 648.5298316643341,
-        "y": 423.48941073427613
+        "x": 648.119437999104,
+        "y": 425.6529700850709
       },
       "stableWorld": {
         "x": 3,
@@ -4527,7 +4563,7 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 31,
+            "renderRequests": 33,
             "renderedFrames": 7
           },
           "disposed": true,
@@ -4628,6 +4664,9 @@
           "mounted": false,
           "pendingLoads": 0,
           "placementCount": 5,
+          "proposalBeforeCount": 0,
+          "proposalPreviewActive": false,
+          "proposalProposedCount": 0,
           "representationGroups": [],
           "selectedPlacementIds": [],
           "status": "disposed",
@@ -4651,7 +4690,7 @@
         "dom": {
           "assetRows": 1,
           "canvasCount": 1,
-          "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
+          "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.New proposalMoved proposalOriginal positionPreviousNextAcceptDismiss",
           "p6WarningVisible": true,
           "planGhostCount": 0,
           "planSvgCount": 1,
@@ -5112,9 +5151,11 @@
               }
             ]
           },
+          "layoutProposal": null,
           "loaded": true,
           "operations": [],
           "placementAlternatives": null,
+          "recentReceiptIds": [],
           "selection": []
         },
         "theme": {
@@ -5141,7 +5182,7 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 30,
+            "renderRequests": 32,
             "renderedFrames": 7
           },
           "disposed": false,
@@ -5259,6 +5300,9 @@
           "mounted": true,
           "pendingLoads": 0,
           "placementCount": 5,
+          "proposalBeforeCount": 0,
+          "proposalPreviewActive": false,
+          "proposalProposedCount": 0,
           "representationGroups": [
             {
               "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
@@ -5318,17 +5362,21 @@
             "pl-9cd3a1d36e081c7c182969b9"
           ],
           "projection": {
-            "height": 620,
+            "height": 621,
             "maxX": 15,
             "maxZ": 18,
             "minX": -1,
             "minZ": 1.235800028,
             "offsetX": 24,
-            "offsetY": 188.983431452125,
+            "offsetY": 194.19836269425,
             "padding": 24,
-            "scale": 14.4375,
-            "width": 279
+            "scale": 13.875,
+            "width": 270
           },
+          "proposalBeforeCount": 0,
+          "proposalMovedCount": 0,
+          "proposalNewCount": 0,
+          "proposalPreviewActive": false,
           "renderCount": 16,
           "selection": null,
           "selections": [],
@@ -5800,9 +5848,11 @@
                 }
               ]
             },
+            "layoutProposal": null,
             "loaded": true,
             "operations": [],
             "placementAlternatives": null,
+            "recentReceiptIds": [],
             "selection": []
           },
           "toolMode": "select",
@@ -5841,14 +5891,14 @@
       },
       "pixels": {
         "available": true,
-        "changedPixelCount": 51403,
-        "changedPixelFraction": 0.2971615215631865,
-        "height": 620,
+        "changedPixelCount": 50818,
+        "changedPixelFraction": 0.3030834377050158,
+        "height": 621,
         "maximumDelta": 375,
-        "width": 279
+        "width": 270
       },
-      "planWidth": 279.28125,
-      "rootScrollWidth": 399,
+      "planWidth": 270,
+      "rootScrollWidth": 390,
       "rootWidth": 390,
       "theme": {
         "background": "rgb(23, 32, 42)",
@@ -5861,7 +5911,7 @@
       "dom": {
         "assetRows": 1,
         "canvasCount": 1,
-        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.PreviousNextAcceptDismiss",
+        "p6Warning": "Browser overlap feedback is advisory. The server validates every accepted placement.New proposalMoved proposalOriginal positionPreviousNextAcceptDismiss",
         "p6WarningVisible": true,
         "planGhostCount": 0,
         "planSvgCount": 1,
@@ -6322,9 +6372,11 @@
             }
           ]
         },
+        "layoutProposal": null,
         "loaded": true,
         "operations": [],
         "placementAlternatives": null,
+        "recentReceiptIds": [],
         "selection": []
       },
       "theme": {
@@ -6351,7 +6403,7 @@
         "degraded": false,
         "demandRendering": {
           "pendingFrame": false,
-          "renderRequests": 30,
+          "renderRequests": 32,
           "renderedFrames": 7
         },
         "disposed": false,
@@ -6469,6 +6521,9 @@
         "mounted": true,
         "pendingLoads": 0,
         "placementCount": 5,
+        "proposalBeforeCount": 0,
+        "proposalPreviewActive": false,
+        "proposalProposedCount": 0,
         "representationGroups": [
           {
             "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
@@ -6528,17 +6583,21 @@
           "pl-9cd3a1d36e081c7c182969b9"
         ],
         "projection": {
-          "height": 620,
+          "height": 621,
           "maxX": 15,
           "maxZ": 18,
           "minX": -1,
           "minZ": 1.235800028,
           "offsetX": 24,
-          "offsetY": 188.983431452125,
+          "offsetY": 194.19836269425,
           "padding": 24,
-          "scale": 14.4375,
-          "width": 279
+          "scale": 13.875,
+          "width": 270
         },
+        "proposalBeforeCount": 0,
+        "proposalMovedCount": 0,
+        "proposalNewCount": 0,
+        "proposalPreviewActive": false,
         "renderCount": 16,
         "selection": null,
         "selections": [],
@@ -7010,9 +7069,11 @@
               }
             ]
           },
+          "layoutProposal": null,
           "loaded": true,
           "operations": [],
           "placementAlternatives": null,
+          "recentReceiptIds": [],
           "selection": []
         },
         "toolMode": "select",
@@ -7026,7 +7087,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:65100/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:64371/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "failedRequests": [],
@@ -7034,7 +7095,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:65100/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:64371/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "offlineOnly": true,
@@ -7057,7 +7118,7 @@
   },
   "screenshots": {
     "desktop": {
-      "bytes": 41324,
+      "bytes": 42019,
       "channelSpans": [
         249,
         238,
@@ -7065,11 +7126,11 @@
       ],
       "height": 900,
       "path": "tests/fixtures/facility_layout/authoring/p5-authoring-desktop.png",
-      "sha256": "6ea8bd0af3c148c665040dda4083d00b6c379d92d9f5654081e814b70cbe23ef",
+      "sha256": "e3658a796acde9d9c154da5e3bae092f9fbce9ff87d8e2c42c38d9313bca1756",
       "width": 1440
     },
     "mobile": {
-      "bytes": 19555,
+      "bytes": 18830,
       "channelSpans": [
         249,
         238,
@@ -7077,30 +7138,30 @@
       ],
       "height": 844,
       "path": "tests/fixtures/facility_layout/authoring/p5-authoring-mobile.png",
-      "sha256": "46d3c97d569e4b1b4c4ffc418bbed900efe7b326679dda63a8f6f56e5ea83b20",
+      "sha256": "e37d5e4f1681e8010a8c9a268706e7dc9977b0ed6d7e2e2dc1babc4f2fa4211d",
       "width": 390
     },
     "three": {
-      "bytes": 10208,
+      "bytes": 10288,
       "channelSpans": [
         251,
         252,
         253
       ],
-      "height": 688,
+      "height": 693,
       "path": "tests/fixtures/facility_layout/authoring/p5-authoring-three.png",
-      "sha256": "434048fe81d81446f0952410cb4943768a0ef2cbcde5aecf21edd31e64160440",
+      "sha256": "1db1fbd3cf9edf5d2adcc277fc59885a8fc05e43418c5883dbdeb6fd36446d86",
       "width": 930
     }
   },
   "source": {
     "assetCatalogSha256": "9dd60d2f319615c7107c60132eb88d1cc59c1103707b71aacf431ebce7975369",
     "authorityFixtureSha256": "9f199d55082a29b5ee415d68352f9d01d5688cddea3c4e24dac59e4a824f3e87",
-    "facilityLayoutEditorSha256": "a332c05763f2cd7ba672e53d9cec96c76c01598437fee9cf404429baba4736c5",
-    "facilityLayoutSessionSha256": "7cca324888c53ac583d1636369de978994ae1dea9f7f1391f73219966c44f82b",
-    "facilityLayoutWorkspaceCssSha256": "4d0c4cb6fb1ef1725a2de0a7789644158dc4d09892c59899326d415b43286b77",
-    "facilityLayoutWorkspaceSha256": "9973b8011a659616f58a70285e693c95a27f9c6661569d1d6224a49c981e5196",
-    "facilityThreeAdapterSha256": "b3a1627de9cc50d4f5c75bb444b79422ce3225a3145e5f51d7b877fec57e192e",
+    "facilityLayoutEditorSha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875",
+    "facilityLayoutSessionSha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a",
+    "facilityLayoutWorkspaceCssSha256": "2f2593a79c98f4200cb66d93e4cb201ac8e0b69e6010da6c31ee6a852141c4f8",
+    "facilityLayoutWorkspaceSha256": "5ab0bfb622bb0cef5b0ea8dbc6756a0d76c8b182a2d52293cddd910589cc382b",
+    "facilityThreeAdapterSha256": "7a2b3322342a80da5df15c6dafd68d82ee89b8a87b7348091ad5fab26bc9e62b",
     "fixturePageSha256": "a078d77d2b6d64b8f85911198323eb7c35764b03da92a0cd59e6290ab7d7153a",
     "fixtureScriptSha256": "a6ee0561b19bdae8f42841b0b4d40815407e8a9d3984c43a02155a0ffac32920",
     "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
@@ -7108,7 +7169,7 @@
     "overviewGlbSha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14",
     "p4LayoutSeedSha256": "60892cb1ec25ba7f9b39446af4deea7c05868279063c181bfd68e54d22f3f772",
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
-    "verifierSha256": "6cfc0fccce3c0b344497e14612714d2e95dea5e2f149be9539b90213381b00e1"
+    "verifierSha256": "4ca515ce4954f8dc525006aff0cbf51a3f4b75d53b4abeefaec43f02b7d56b56"
   },
   "unexpectedConsoleErrors": []
 }

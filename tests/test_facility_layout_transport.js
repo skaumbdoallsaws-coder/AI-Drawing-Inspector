@@ -17,6 +17,19 @@ function response(status, body) {
     };
 }
 
+function binding(revision) {
+    return {
+        target: {
+            domain: 'facility-layout',
+            scopeId: 'site-a',
+            resourceId: 'fl-a',
+        },
+        baseRevision: revision,
+        diffHash: 'd'.repeat(64),
+        dependencyFingerprint: 'e'.repeat(64),
+    };
+}
+
 test('constructs encoded revision-bound preview and apply requests', async () => {
     const calls = [];
     const transport = Transport.createHttpTransport({
@@ -164,6 +177,87 @@ test('exposes revision-bound authoritative spatial requests', async () => {
     });
 });
 
+test('uses one session identity across the full proposal transaction', async () => {
+    const calls = [];
+    const revision = 'a'.repeat(64);
+    const exactBinding = binding(revision);
+    const transport = Transport.createHttpTransport({
+        siteId: 'site a',
+        layoutId: 'layout/one',
+        sessionId: 'facility-browser-session-001',
+        fetch: async (url, init) => {
+            calls.push({ url, init });
+            return response(200, { ok: true });
+        },
+    });
+    const request = {
+        schemaVersion: 1,
+        requestId: 'request-browser-001',
+        objective: 'place_and_cleanup',
+        assetSet: [],
+        strategies: ['compact_rows'],
+    };
+    await transport.createLayoutProposals({
+        baseRevision: revision,
+        request,
+    });
+    await transport.getLayoutProposalPreview({
+        proposalId: 'proposal-one',
+    });
+    await transport.cancelLayoutProposal({
+        proposalId: 'proposal-one',
+    });
+    await transport.approveLayoutProposal({
+        proposalId: 'proposal-one',
+        binding: exactBinding,
+        idempotencyKey: 'layout-apply-001',
+        explicitApproval: true,
+    });
+    await transport.applyLayoutProposal({
+        approvalToken: 'approval-token-001',
+        binding: exactBinding,
+        idempotencyKey: 'layout-apply-001',
+    });
+    await transport.getLayoutReceipt({ receiptId: 'receipt-one' });
+
+    assert.strictEqual(
+        transport.sessionId,
+        'facility-browser-session-001'
+    );
+    assert.deepStrictEqual(calls.map(item => item.url), [
+        '/api/facility-layouts/site%20a/layout%2Fone/proposals',
+        '/api/facility-layouts/site%20a/layout%2Fone/proposals/proposal-one/preview',
+        '/api/facility-layouts/site%20a/layout%2Fone/proposals/proposal-one',
+        '/api/facility-layouts/site%20a/layout%2Fone/approvals',
+        '/api/facility-layouts/site%20a/layout%2Fone/apply',
+        '/api/facility-layouts/site%20a/layout%2Fone/receipts/receipt-one',
+    ]);
+    assert.deepStrictEqual(calls.map(item => item.init.method), [
+        'POST', 'GET', 'DELETE', 'POST', 'POST', 'GET',
+    ]);
+    calls.forEach(item => {
+        assert.strictEqual(
+            item.init.headers['X-InspectorPro-Session'],
+            transport.sessionId
+        );
+    });
+    assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
+        baseRevision: revision,
+        request,
+    });
+    assert.deepStrictEqual(JSON.parse(calls[3].init.body), {
+        proposalId: 'proposal-one',
+        binding: exactBinding,
+        idempotencyKey: 'layout-apply-001',
+        explicitApproval: true,
+    });
+    assert.deepStrictEqual(JSON.parse(calls[4].init.body), {
+        approvalToken: 'approval-token-001',
+        binding: exactBinding,
+        idempotencyKey: 'layout-apply-001',
+    });
+});
+
 test('validates stable identity and revision inputs before fetch', async () => {
     assert.throws(
         () => Transport.createHttpTransport({
@@ -210,6 +304,28 @@ test('validates stable identity and revision inputs before fetch', async () => {
             },
         }),
         /candidateId/
+    );
+    assert.throws(
+        () => transport.createLayoutProposals({
+            baseRevision: 'a'.repeat(64),
+            request: {
+                schemaVersion: 1,
+                requestId: 'request-one',
+                objective: 'cleanup_layout',
+                assetSet: [],
+                strategies: [],
+            },
+        }),
+        /strategies/
+    );
+    assert.throws(
+        () => transport.approveLayoutProposal({
+            proposalId: 'proposal-one',
+            binding: binding('a'.repeat(64)),
+            idempotencyKey: 'layout-apply-001',
+            explicitApproval: false,
+        }),
+        /explicitApproval/
     );
 });
 

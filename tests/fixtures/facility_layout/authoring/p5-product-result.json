@@ -1,11 +1,11 @@
 {
-  "appUrl": "http://127.0.0.1:8036/",
+  "appUrl": "http://127.0.0.1:8043/",
   "camera": {
     "after": {
       "position": {
-        "x": 8.570027836286304,
-        "y": 2.4557139550765084,
-        "z": 96.03040032357019
+        "x": 9.085338971955137,
+        "y": 2.455713955076509,
+        "z": 96.10141931497989
       },
       "target": {
         "x": 20,
@@ -44,21 +44,21 @@
     "roots": 0
   },
   "drop": {
-    "acceptedCandidateId": "fsc-e2be94a8351ab1b743b51969",
+    "acceptedCandidateId": "fsc-340f39aee4f630792f8f922a",
     "acceptedSafetyStatus": "unverified",
     "after": 1,
     "afterUndo": 0,
     "before": 0,
     "createdWorld": {
-      "x": 20,
+      "x": 20.5,
       "y": 0,
-      "z": 14.5
+      "z": 13
     },
     "dirtyAfterUndo": false,
     "ghostWorld": {
-      "x": 20,
+      "x": 20.5,
       "y": 0,
-      "z": 14.5
+      "z": 13
     }
   },
   "errors": {
@@ -87,7 +87,7 @@
       "degraded": false,
       "demandRendering": {
         "pendingFrame": false,
-        "renderRequests": 9,
+        "renderRequests": 11,
         "renderedFrames": 2
       },
       "disposed": false,
@@ -134,6 +134,9 @@
       "mounted": true,
       "pendingLoads": 0,
       "placementCount": 0,
+      "proposalBeforeCount": 0,
+      "proposalPreviewActive": false,
+      "proposalProposedCount": 0,
       "representationGroups": [],
       "selectedPlacementIds": [],
       "status": "ready",
@@ -166,33 +169,33 @@
   "schemaVersion": "facility-layout-p5-product-evidence-v1",
   "screenshots": {
     "plan": {
-      "bytes": 177791,
+      "bytes": 178403,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-integration.png",
-      "sha256": "6216dce3bf7827ec74840b4c099266742ba9132495ad714ebbd5c0df6e9d6400",
+      "sha256": "bc11af213c4052312b37b9c69cc48be6c5c15627ca487c6be673f2caec10c894",
       "width": 1920
     },
     "three": {
-      "bytes": 178103,
+      "bytes": 178633,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-three-integration.png",
-      "sha256": "c9a39ca0cdaf4747591878688917eecb5faaafa77dd3525de07509659fff7818",
+      "sha256": "1b7caf4cc184731afd5815165c94c08f1b09fe5060733266a1ca55358f410fb8",
       "width": 1920
     }
   },
   "source": {
-    "appSha256": "6b758d2b8ad58a65ae234e5f9d4f7df08a9721616a42b597ddda3f6ef39e1095",
-    "editorSha256": "a332c05763f2cd7ba672e53d9cec96c76c01598437fee9cf404429baba4736c5",
-    "hostSha256": "96f00bb0974421ab8ff3f4ad59317fe029d81c7468a4ddb35216207a672d646a",
-    "indexSha256": "a6a388635c5c043c7e9dd3636c981c9aefb768cb3af82743547f1b940b754826",
+    "appSha256": "76cb06be339b3352a600d645995cc7f6499a0528567489397603074123bcfbea",
+    "editorSha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875",
+    "hostSha256": "e9884f51f26d23780fb915100d3a40c6fb843080f763b16d4491d9fd22adba2b",
+    "indexSha256": "eeeafd10a8a11cf7b4c01652c4ef20988d4fd7d8c87f3fa9a943bc7a33a28773",
     "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
-    "threeAdapterSha256": "b3a1627de9cc50d4f5c75bb444b79422ce3225a3145e5f51d7b877fec57e192e",
+    "threeAdapterSha256": "7a2b3322342a80da5df15c6dafd68d82ee89b8a87b7348091ad5fab26bc9e62b",
     "threeClassicSha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2",
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
-    "transportSha256": "97de85cc6be1f69f2148ca460c0c38169a2d3f9ad6c71b0e4ea1d6bede1601ab",
+    "transportSha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6",
     "verifierSha256": "c5b48108fc57a6077f060f204f04a811ae8e767fb1a43fc55d19a9c3c4e52251",
-    "workspaceSha256": "9973b8011a659616f58a70285e693c95a27f9c6661569d1d6224a49c981e5196"
+    "workspaceSha256": "5ab0bfb622bb0cef5b0ea8dbc6756a0d76c8b182a2d52293cddd910589cc382b"
   }
 }

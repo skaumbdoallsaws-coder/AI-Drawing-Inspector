@@ -98,6 +98,7 @@
                 headers: options.headers,
                 credentials: options.credentials,
                 fetch: options.fetch,
+                sessionId: options.sessionId,
             });
         const session = options.session
             || requireFunction(Session.createSession, 'createSession')({
@@ -107,6 +108,13 @@
                 placementCandidates: transport.placementCandidates,
                 placementCandidatePreview:
                     transport.placementCandidatePreview,
+                createLayoutProposals: transport.createLayoutProposals,
+                getLayoutProposalPreview:
+                    transport.getLayoutProposalPreview,
+                cancelLayoutProposal: transport.cancelLayoutProposal,
+                approveLayoutProposal: transport.approveLayoutProposal,
+                applyLayoutProposal: transport.applyLayoutProposal,
+                getLayoutReceipt: transport.getLayoutReceipt,
             });
 
         let workspace = null;

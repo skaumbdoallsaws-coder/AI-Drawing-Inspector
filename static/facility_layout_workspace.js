@@ -14,6 +14,7 @@
     const TOOL_MODES = Object.freeze(['select', 'pan', 'rectangle-zone', 'polygon-zone']);
     const VIEW_MODES = Object.freeze(['plan', '3d']);
     let dragSequence = 0;
+    let autoArrangeSequence = 0;
 
     function clone(value) {
         if (value === undefined) return undefined;
@@ -300,6 +301,362 @@
         });
     }
 
+    function buildAutoArrangeRequest(state, catalog, requestId) {
+        const snapshot = assertObject(state, 'facility layout state');
+        const savedLayout = assertObject(
+            snapshot.baseLayout || snapshot.layout,
+            'saved facility layout'
+        );
+        const placements = Array.isArray(savedLayout.placements)
+            ? savedLayout.placements : [];
+        const assets = normalizeCatalog(catalog || []);
+        const assetSet = placements.length
+            ? placements.map(function (placement, index) {
+                const source = assertObject(
+                    placement,
+                    'saved placement ' + index
+                );
+                return {
+                    itemId: 'existing-' + cleanString(
+                        source.placementId,
+                        String(index + 1)
+                    ),
+                    assetId: cleanString(source.assetId, ''),
+                    assetDefinitionRevision: cleanString(
+                        source.assetDefinitionRevision,
+                        ''
+                    ),
+                    quantity: 1,
+                    stage: index,
+                    existingPlacementId: cleanString(
+                        source.placementId,
+                        ''
+                    ),
+                };
+            })
+            : assets.slice(0, 3).map(function (asset, index) {
+                return {
+                    itemId: 'catalog-' + String(index + 1),
+                    assetId: asset.assetId,
+                    assetDefinitionRevision:
+                        asset.assetDefinitionRevision,
+                    quantity: 1,
+                    stage: index,
+                };
+            });
+        if (!assetSet.length) {
+            throw new Error(
+                'Auto Arrange requires an existing placement or catalog asset'
+            );
+        }
+        assetSet.forEach(function (item) {
+            if (!item.assetId || !item.assetDefinitionRevision
+                    || (item.existingPlacementId !== undefined
+                        && !item.existingPlacementId)) {
+                throw new Error(
+                    'Auto Arrange requires stable asset and placement identities'
+                );
+            }
+        });
+        const sourceRevisions = {};
+        const shellRevision = savedLayout.sourceShellRef
+            && savedLayout.sourceShellRef.shellRevision;
+        const policyRevision = savedLayout.policySetRef
+            && savedLayout.policySetRef.policySetRevision;
+        if (typeof shellRevision === 'string' && shellRevision) {
+            sourceRevisions.shell = shellRevision;
+        }
+        if (typeof policyRevision === 'string' && policyRevision) {
+            sourceRevisions.policy = policyRevision;
+        }
+        return {
+            schemaVersion: 1,
+            requestId: cleanString(requestId, 'facility-auto-arrange'),
+            objective: 'place_and_cleanup',
+            assetSet: assetSet,
+            strategies: ['compact_rows', 'balanced_grid', 'flow_lanes'],
+            maximumAlternatives: 3,
+            spacingMeters: 1,
+            cleanup: {
+                enabled: true,
+                moveAuto: true,
+                movableManualPlacementIds: [],
+            },
+            zoneSizing: [],
+            routes: [],
+            sourceRevisions: sourceRevisions,
+        };
+    }
+
+    function activeLayoutAlternative(state) {
+        const proposal = state && state.layoutProposal;
+        if (!proposal || !Array.isArray(proposal.alternatives)
+                || !proposal.alternatives.length) {
+            return null;
+        }
+        return proposal.alternatives[proposal.selectedIndex] || null;
+    }
+
+    function recordIndex(records, identityKey) {
+        const index = new Map();
+        (Array.isArray(records) ? records : []).forEach(function (record) {
+            const identifier = cleanString(
+                record && record[identityKey],
+                ''
+            );
+            if (identifier && !index.has(identifier)) {
+                index.set(identifier, record);
+            }
+        });
+        return index;
+    }
+
+    function placementSpatialSignature(placement) {
+        const source = placement || {};
+        return JSON.stringify({
+            assetId: source.assetId || '',
+            assetDefinitionRevision:
+                source.assetDefinitionRevision || '',
+            transform: source.transform || null,
+        });
+    }
+
+    function collectionChangeCounts(before, after, identityKey) {
+        const beforeIndex = recordIndex(before, identityKey);
+        const afterIndex = recordIndex(after, identityKey);
+        let added = 0;
+        let changed = 0;
+        let removed = 0;
+        afterIndex.forEach(function (record, identifier) {
+            if (!beforeIndex.has(identifier)) {
+                added += 1;
+            } else if (JSON.stringify(beforeIndex.get(identifier))
+                    !== JSON.stringify(record)) {
+                changed += 1;
+            }
+        });
+        beforeIndex.forEach(function (record, identifier) {
+            if (!afterIndex.has(identifier)) removed += 1;
+        });
+        return { added: added, changed: changed, removed: removed };
+    }
+
+    function buildLayoutProposalReview(savedLayout, proposedLayout) {
+        const before = savedLayout && typeof savedLayout === 'object'
+            ? savedLayout : {};
+        const after = proposedLayout && typeof proposedLayout === 'object'
+            ? proposedLayout : {};
+        const beforeIndex = recordIndex(before.placements, 'placementId');
+        const afterIndex = recordIndex(after.placements, 'placementId');
+        const newPlacementIds = [];
+        const movedPlacementIds = [];
+        const removedPlacementIds = [];
+        const beforePlacements = [];
+        const proposedPlacements = [];
+
+        afterIndex.forEach(function (placement, placementId) {
+            const original = beforeIndex.get(placementId);
+            if (!original) {
+                newPlacementIds.push(placementId);
+                proposedPlacements.push(clone(placement));
+                return;
+            }
+            if (placementSpatialSignature(original)
+                    !== placementSpatialSignature(placement)) {
+                movedPlacementIds.push(placementId);
+                beforePlacements.push(clone(original));
+                proposedPlacements.push(clone(placement));
+            }
+        });
+        beforeIndex.forEach(function (placement, placementId) {
+            if (afterIndex.has(placementId)) return;
+            removedPlacementIds.push(placementId);
+            beforePlacements.push(clone(placement));
+        });
+
+        newPlacementIds.sort();
+        movedPlacementIds.sort();
+        removedPlacementIds.sort();
+        beforePlacements.sort(function (left, right) {
+            return left.placementId.localeCompare(right.placementId);
+        });
+        proposedPlacements.sort(function (left, right) {
+            return left.placementId.localeCompare(right.placementId);
+        });
+        return {
+            newPlacementIds: newPlacementIds,
+            movedPlacementIds: movedPlacementIds,
+            removedPlacementIds: removedPlacementIds,
+            beforePlacements: beforePlacements,
+            proposedPlacements: proposedPlacements,
+            zoneChanges: collectionChangeCounts(
+                before.zones,
+                after.zones,
+                'zoneId'
+            ),
+            routeChanges: collectionChangeCounts(
+                before.routes,
+                after.routes,
+                'routeId'
+            ),
+        };
+    }
+
+    function proposalPreviewDescriptor(state, alternative) {
+        const proposedLayout = alternative
+            && alternative.ghostPreview
+            && alternative.ghostPreview.layout;
+        const savedLayout = state && state.layout;
+        if (!savedLayout || !proposedLayout) return null;
+        return Object.assign({
+            active: true,
+            proposalId: cleanString(alternative.proposalId, ''),
+            alternativeId: cleanString(alternative.alternativeId, ''),
+        }, buildLayoutProposalReview(savedLayout, proposedLayout));
+    }
+
+    function shortBindingValue(value) {
+        const text = cleanString(value, '');
+        if (!text) return 'not reported';
+        return text.length <= 14 ? text : text.slice(0, 10) + '...';
+    }
+
+    function proposalBindingSummary(layoutProposal, alternative) {
+        const binding = alternative
+            && alternative.transactionBinding
+            && typeof alternative.transactionBinding === 'object'
+            ? alternative.transactionBinding : {};
+        const sourceRevisions = layoutProposal
+            && layoutProposal.request
+            && layoutProposal.request.sourceRevisions
+            && typeof layoutProposal.request.sourceRevisions === 'object'
+            ? layoutProposal.request.sourceRevisions : {};
+        return boundedText(
+            'Proposal binding: map '
+            + shortBindingValue(
+                binding.baseRevision
+                || (layoutProposal && layoutProposal.baseRevision)
+            )
+            + '; dependency '
+            + shortBindingValue(binding.dependencyFingerprint)
+            + '; diff ' + shortBindingValue(binding.diffHash)
+            + '; shell ' + shortBindingValue(sourceRevisions.shell)
+            + '; policy ' + shortBindingValue(sourceRevisions.policy)
+            + '.',
+            280
+        );
+    }
+
+    function firstFiniteMetric(metrics, names) {
+        for (let index = 0; index < names.length; index += 1) {
+            const value = Number(metrics && metrics[names[index]]);
+            if (Number.isFinite(value)) return value;
+        }
+        return null;
+    }
+
+    function proposalDiagnosticSummary(alternative) {
+        const source = alternative || {};
+        const metrics = source.metrics && typeof source.metrics === 'object'
+            ? source.metrics : {};
+        const findings = Array.isArray(source.findings) ? source.findings : [];
+        function countFindings(severity) {
+            return findings.filter(function (finding) {
+                return String(
+                    finding && (finding.severity || finding.level) || ''
+                ).toLowerCase() === severity;
+            }).length;
+        }
+        const errors = firstFiniteMetric(
+            metrics,
+            ['spatialErrorCount', 'errorCount']
+        );
+        const warnings = firstFiniteMetric(
+            metrics,
+            ['spatialWarningCount', 'warningCount']
+        );
+        const unverified = firstFiniteMetric(
+            metrics,
+            ['spatialUnverifiedCount', 'unverifiedCount']
+        );
+        const collisions = firstFiniteMetric(
+            metrics,
+            ['placementCollisions', 'physicalCollisions']
+        );
+        const clearance = firstFiniteMetric(
+            metrics,
+            ['clearanceConflicts']
+        );
+        const baselineClearance = firstFiniteMetric(
+            metrics,
+            ['baselineClearanceConflicts', 'clearanceConflictsBefore']
+        );
+        let clearanceDelta = firstFiniteMetric(
+            metrics,
+            ['clearanceConflictDelta', 'clearanceConflictsDelta']
+        );
+        if (clearanceDelta === null
+                && clearance !== null
+                && baselineClearance !== null) {
+            clearanceDelta = clearance - baselineClearance;
+        }
+        const parts = [
+            'errors ' + (errors === null ? countFindings('error') : errors),
+            'warnings ' + (
+                warnings === null ? countFindings('warning') : warnings
+            ),
+            'unverified ' + (
+                unverified === null
+                    ? countFindings('unverified') : unverified
+            ),
+            'collisions ' + (
+                collisions === null ? 'not reported' : collisions
+            ),
+        ];
+        if (clearance === null) {
+            parts.push('clearance conflicts not reported');
+        } else if (clearanceDelta === null) {
+            parts.push(
+                'clearance conflicts ' + clearance
+                + ' (baseline comparison unavailable)'
+            );
+        } else {
+            parts.push(
+                'clearance conflicts ' + clearance
+                + ' (difference '
+                + (clearanceDelta > 0 ? '+' : '')
+                + clearanceDelta + ')'
+            );
+        }
+        if (Array.isArray(source.newHardFindingIds)) {
+            parts.push(
+                'new hard findings ' + source.newHardFindingIds.length
+            );
+        } else {
+            parts.push('new-hard-finding comparison not reported');
+        }
+        return boundedText('Proposal diagnostics: ' + parts.join('; ') + '.', 360);
+    }
+
+    function proposalChangeSummary(review) {
+        const source = review || {};
+        const zones = source.zoneChanges || {};
+        const routes = source.routeChanges || {};
+        return boundedText(
+            'Changes: '
+            + (source.newPlacementIds || []).length + ' new assets, '
+            + (source.movedPlacementIds || []).length + ' moved assets, '
+            + (source.removedPlacementIds || []).length + ' removed assets; '
+            + finite(zones.added, 0) + ' new, '
+            + finite(zones.changed, 0) + ' changed, '
+            + finite(zones.removed, 0) + ' removed zones; '
+            + finite(routes.added, 0) + ' new, '
+            + finite(routes.changed, 0) + ' changed, '
+            + finite(routes.removed, 0) + ' removed routes.',
+            300
+        );
+    }
+
     function zoneDimensions(zone) {
         const points = zone && Array.isArray(zone.boundary) ? zone.boundary : [];
         if (!points.length) return null;
@@ -430,6 +787,8 @@
         this.createdTopAdapter = false;
         this.createdThreeAdapter = false;
         this.ownsController = !options.controller;
+        this.lastProposalVisualFingerprint = 'none';
+        this.proposalFocusReturn = null;
         this._build();
         this._connectRendering();
         this._connectEvents();
@@ -491,6 +850,7 @@
             ['undo', 'Undo', 'Ctrl+Z'],
             ['redo', 'Redo', 'Ctrl+Y'],
             ['fit', 'Fit', 'F'],
+            ['auto-arrange', 'Auto Arrange', ''],
             ['save', 'Save', 'Ctrl+S'],
         ].forEach(function (spec) {
             this.toolbar.appendChild(this._button(spec[0], spec[1], spec[2]));
@@ -608,8 +968,55 @@
             'aria-live': 'polite',
             'aria-atomic': 'true',
         });
+        this.proposalReview = element(this.document, 'div', {
+            className: 'ip-flw-proposal-review',
+            role: 'note',
+            'aria-label': 'Full-layout proposal review details',
+            hidden: true,
+        });
+        this.proposalChangeText = element(this.document, 'div', {
+            className: 'ip-flw-proposal-review-line',
+            'data-proposal-review': 'changes',
+        });
+        this.proposalBindingText = element(this.document, 'div', {
+            className: 'ip-flw-proposal-review-line',
+            'data-proposal-review': 'binding',
+        });
+        this.proposalDiagnosticText = element(this.document, 'div', {
+            className: 'ip-flw-proposal-review-line',
+            'data-proposal-review': 'diagnostics',
+        });
+        this.proposalLegend = element(this.document, 'div', {
+            className: 'ip-flw-proposal-legend',
+            'aria-label': 'Proposal visual legend',
+        });
+        [
+            ['new', 'New proposal'],
+            ['moved', 'Moved proposal'],
+            ['before', 'Original position'],
+        ].forEach(function (item) {
+            const label = element(this.document, 'span', {
+                className: 'ip-flw-proposal-legend-item',
+            });
+            append(label,
+                element(this.document, 'span', {
+                    className: 'ip-flw-proposal-swatch',
+                    'data-proposal-swatch': item[0],
+                    'aria-hidden': 'true',
+                }),
+                element(this.document, 'span', {}, item[1])
+            );
+            this.proposalLegend.appendChild(label);
+        }, this);
+        append(this.proposalReview,
+            this.proposalChangeText,
+            this.proposalBindingText,
+            this.proposalDiagnosticText,
+            this.proposalLegend
+        );
         append(this.candidateControls,
             this.candidateSummary,
+            this.proposalReview,
             element(this.document, 'button', {
                 type: 'button',
                 className: 'ip-flw-view-tab',
@@ -1274,6 +1681,22 @@
             this.candidateControls
         );
         if (!action || this.state.busy) return;
+        if (this.state.layoutProposal) {
+            if (action === 'previous') {
+                this.session.cycleLayoutProposal(-1);
+            } else if (action === 'next') {
+                this.session.cycleLayoutProposal(1);
+            } else if (action === 'dismiss') {
+                this._invoke('Dismiss layout proposal', function () {
+                    return this.session.dismissLayoutProposal();
+                }.bind(this));
+            } else if (action === 'accept') {
+                this._invoke('Approve layout proposal', function () {
+                    return this.session.approveAndApplyLayoutProposal();
+                }.bind(this));
+            }
+            return;
+        }
         if (action === 'previous') {
             this.session.cyclePlacementAlternative(-1);
         } else if (action === 'next') {
@@ -1288,13 +1711,124 @@
     };
 
     Workspace.prototype._renderCandidateControls = function () {
+        const layoutProposal = this.state.layoutProposal;
+        const acceptButton = this.candidateControls.querySelector(
+            '[data-candidate-action="accept"]'
+        );
+        const dismissButton = this.candidateControls.querySelector(
+            '[data-candidate-action="dismiss"]'
+        );
+        if (layoutProposal && Array.isArray(layoutProposal.alternatives)
+                && layoutProposal.alternatives.length) {
+            const alternative = layoutProposal.alternatives[
+                layoutProposal.selectedIndex
+            ];
+            this.candidateControls.hidden = false;
+            this.candidateControls.removeAttribute('data-safety-status');
+            this.candidateControls.setAttribute(
+                'data-preview-kind',
+                'full-layout'
+            );
+            this.candidateControls.setAttribute(
+                'aria-label',
+                'Full-layout alternatives'
+            );
+            this.candidateSummary.textContent = 'Preview not saved. Layout option '
+                + (layoutProposal.selectedIndex + 1)
+                + ' of ' + layoutProposal.alternatives.length
+                + ': ' + boundedText(
+                    String(alternative.strategy || '').replace(/_/g, ' '),
+                    48
+                )
+                + (candidateMetricSummary(alternative.metrics)
+                    ? '. ' + candidateMetricSummary(alternative.metrics)
+                    : '')
+                + '.';
+            const review = buildLayoutProposalReview(
+                this.state.layout,
+                alternative.ghostPreview.layout
+            );
+            this.proposalReview.hidden = false;
+            this.proposalChangeText.textContent =
+                proposalChangeSummary(review);
+            this.proposalBindingText.textContent =
+                proposalBindingSummary(layoutProposal, alternative);
+            this.proposalDiagnosticText.textContent =
+                proposalDiagnosticSummary(alternative);
+            const cycleDisabled = layoutProposal.alternatives.length < 2
+                || this.state.busy;
+            ['previous', 'next'].forEach(function (action) {
+                const button = this.candidateControls.querySelector(
+                    '[data-candidate-action="' + action + '"]'
+                );
+                if (button) button.disabled = cycleDisabled;
+            }, this);
+            if (acceptButton) {
+                acceptButton.disabled = this.state.busy;
+                acceptButton.textContent = 'Approve';
+                acceptButton.setAttribute(
+                    'aria-label',
+                    'Approve and apply full-layout proposal'
+                );
+                acceptButton.setAttribute(
+                    'title',
+                    'Approve and apply full-layout proposal'
+                );
+            }
+            if (dismissButton) {
+                dismissButton.disabled = this.state.busy;
+                dismissButton.setAttribute(
+                    'aria-label',
+                    'Dismiss full-layout proposal'
+                );
+                dismissButton.setAttribute(
+                    'title',
+                    'Dismiss full-layout proposal'
+                );
+            }
+            return;
+        }
+        this.proposalReview.hidden = true;
+        this.proposalChangeText.textContent = '';
+        this.proposalBindingText.textContent = '';
+        this.proposalDiagnosticText.textContent = '';
         const proposal = this.state.placementAlternatives;
         if (!proposal || !Array.isArray(proposal.candidates)
                 || !proposal.candidates.length) {
             this.candidateControls.hidden = true;
             this.candidateControls.removeAttribute('data-safety-status');
+            this.candidateControls.removeAttribute('data-preview-kind');
             this.candidateSummary.textContent = '';
             return;
+        }
+        this.candidateControls.setAttribute(
+            'data-preview-kind',
+            'placement'
+        );
+        this.candidateControls.setAttribute(
+            'aria-label',
+            'Authoritative placement alternatives'
+        );
+        if (acceptButton) {
+            acceptButton.textContent = 'Accept';
+            acceptButton.setAttribute(
+                'aria-label',
+                'Accept placement alternative'
+            );
+            acceptButton.setAttribute(
+                'title',
+                'Accept placement alternative'
+            );
+        }
+        if (dismissButton) {
+            dismissButton.setAttribute(
+                'aria-label',
+                'Dismiss placement alternatives'
+            );
+            dismissButton.setAttribute(
+                'title',
+                'Dismiss placement alternatives'
+            );
         }
         const candidate = proposal.candidates[proposal.selectedIndex];
         const assessment = candidateAssessment(candidate);
@@ -1627,6 +2161,33 @@
         this.executeCommand(command);
     };
 
+    Workspace.prototype._rememberProposalFocus = function () {
+        const active = this.document.activeElement;
+        this.proposalFocusReturn = active
+            && this.root.contains(active)
+            && typeof active.focus === 'function'
+            ? active
+            : this.toolbar.querySelector('[data-command="auto-arrange"]');
+    };
+
+    Workspace.prototype._restoreProposalFocus = function () {
+        let target = this.proposalFocusReturn;
+        if (!target || target.disabled || target.hidden
+                || !this.root.contains(target)
+                || typeof target.focus !== 'function') {
+            target = this.toolbar.querySelector(
+                '[data-command="auto-arrange"]'
+            );
+        }
+        if (!target || target.disabled || target.hidden
+                || typeof target.focus !== 'function') {
+            target = this.viewMode === '3d' && !this.threeView.hidden
+                ? this.threeView : this.planView;
+        }
+        this.proposalFocusReturn = null;
+        if (target && typeof target.focus === 'function') target.focus();
+    };
+
     Workspace.prototype.executeCommand = function (command) {
         if (TOOL_MODES.includes(command)) {
             this._setToolMode(command);
@@ -1637,6 +2198,25 @@
             return Promise.resolve(this.getState());
         }
         const actions = {
+            'auto-arrange': function () {
+                if (typeof this.session.requestLayoutProposal !== 'function') {
+                    throw new Error(
+                        'Full-layout proposals are not available'
+                    );
+                }
+                this._rememberProposalFocus();
+                autoArrangeSequence += 1;
+                const requestId = 'facility-auto-arrange-'
+                    + Date.now().toString(36)
+                    + '-' + autoArrangeSequence.toString(36);
+                return this.session.requestLayoutProposal(
+                    buildAutoArrangeRequest(
+                        this.state,
+                        this.assetCatalog,
+                        requestId
+                    )
+                );
+            },
             rotate: function () { return this.session.rotateSelected90(); },
             duplicate: function () {
                 return this.session.duplicateSelected(DEFAULT_DUPLICATE_OFFSET);
@@ -1889,6 +2469,10 @@
             : [];
         const hasPlacement = selectedPlacements.length > 0;
         const states = {
+            'auto-arrange': typeof this.session.requestLayoutProposal
+                    !== 'function'
+                || this.state.dirty
+                || Boolean(this.state.conflict),
             rotate: !hasPlacement,
             duplicate: !hasPlacement,
             delete: !hasSelection,
@@ -1930,18 +2514,49 @@
         if (this.state.placementAlternatives) {
             parts.push('Authoritative placement preview');
         }
+        if (this.state.layoutProposal) {
+            parts.push('Full-layout preview not saved');
+        }
         this.statusText.textContent = parts.join(' | ');
         this.root.setAttribute('aria-busy', this.state.busy ? 'true' : 'false');
     };
 
     Workspace.prototype._syncController = function () {
         if (!this.state.layout || !this.controller) return;
-        const layoutFingerprint = JSON.stringify(this.state.layout);
+        const layoutAlternative = activeLayoutAlternative(this.state);
+        const proposalPreview = proposalPreviewDescriptor(
+            this.state,
+            layoutAlternative
+        );
+        const renderedLayout = layoutAlternative
+            ? layoutAlternative.ghostPreview.layout
+            : this.state.layout;
+        const layoutFingerprint = JSON.stringify(renderedLayout);
         if (layoutFingerprint !== this.lastLayoutFingerprint) {
-            this.controller.setLayout(this.state.layout);
+            this.controller.setLayout(renderedLayout);
             this.lastLayoutFingerprint = layoutFingerprint;
         }
-        const placementIds = new Set(this.state.layout.placements.map(function (item) {
+        const proposalVisualFingerprint = proposalPreview
+            ? JSON.stringify(proposalPreview) : 'none';
+        const proposalVisualChanged = proposalVisualFingerprint
+            !== this.lastProposalVisualFingerprint;
+        const hadProposalVisual =
+            this.lastProposalVisualFingerprint !== 'none';
+        if (proposalVisualChanged) {
+            [this.topAdapter, this.threeAdapter].filter(Boolean).forEach(
+                function (adapter) {
+                    if (typeof adapter.setProposalPreview === 'function') {
+                        adapter.setProposalPreview(proposalPreview);
+                    }
+                }
+            );
+            this.lastProposalVisualFingerprint = proposalVisualFingerprint;
+            if ((proposalPreview || hadProposalVisual)
+                    && typeof this.controller.fit === 'function') {
+                this.controller.fit();
+            }
+        }
+        const placementIds = new Set(renderedLayout.placements.map(function (item) {
             return item.placementId;
         }));
         const primary = this.state.selection.find(function (id) {
@@ -1964,8 +2579,16 @@
 
     Workspace.prototype._handleSessionState = function (state) {
         if (this.destroyed) return;
+        const hadLayoutProposal = Boolean(
+            this.state && this.state.layoutProposal
+        );
         this.state = state || this.session.getState();
         this.lastError = this.state.lastError || this.lastError;
+        if (this.state.layoutProposal) {
+            this.root.setAttribute('data-full-layout-preview', 'true');
+        } else {
+            this.root.removeAttribute('data-full-layout-preview');
+        }
         this._syncController();
         if (this.state.ghostPlacement
                 && this.state.ghostPlacement.worldPosition) {
@@ -1980,6 +2603,9 @@
         this._renderToolbarState();
         this._renderCandidateControls();
         this._renderStatus();
+        if (hadLayoutProposal && !this.state.layoutProposal) {
+            this._restoreProposalFocus();
+        }
         if (typeof this.options.onStateChange === 'function') {
             this.options.onStateChange(clone(this.state));
         }
@@ -2035,9 +2661,18 @@
             }
             return;
         } else if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
             this.polygonPoints = [];
             this._cancelPointerGesture();
-            if (this.state.placementAlternatives
+            if (this.state.layoutProposal
+                    && typeof this.session.dismissLayoutProposal
+                        === 'function') {
+                this._invoke('Dismiss layout proposal', function () {
+                    return this.session.dismissLayoutProposal();
+                }.bind(this));
+            } else if (this.state.placementAlternatives
                     && typeof this.session.dismissPlacementAlternatives
                         === 'function') {
                 this.session.dismissPlacementAlternatives();
@@ -2097,10 +2732,12 @@
             }
         }
         this._hideGhost();
+        this.proposalFocusReturn = null;
         clearElement(this.root);
         this.root.removeAttribute('data-facility-workspace');
         this.root.removeAttribute('data-tool-mode');
         this.root.removeAttribute('data-view-mode');
+        this.root.removeAttribute('data-full-layout-preview');
         return true;
     };
 
@@ -2122,5 +2759,8 @@
         quarterTurnQuaternion: quarterTurnQuaternion,
         normalizeCatalog: normalizeCatalog,
         zoneDimensions: zoneDimensions,
+        buildAutoArrangeRequest: buildAutoArrangeRequest,
+        buildLayoutProposalReview: buildLayoutProposalReview,
+        proposalDiagnosticSummary: proposalDiagnosticSummary,
     });
 }));

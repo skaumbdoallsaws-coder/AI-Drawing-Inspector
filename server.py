@@ -824,19 +824,19 @@ app.add_middleware(
 # and in its tests. Local mode provisions only the explicit local principal;
 # it does not bypass the domain authorization or revision checks.
 from ai_inspector.facility_layout.host import (  # noqa: E402
-    create_local_facility_layout_router,
+    LocalFacilityLayoutHost,
 )
 
-app.include_router(
-    create_local_facility_layout_router(
-        Path(
-            os.getenv(
-                "INSPECTORPRO_FACILITY_LAYOUT_ROOT",
-                str(REPO_ROOT / ".runtime" / "facility-layout"),
-            )
+_FACILITY_LAYOUT_HOST = LocalFacilityLayoutHost(
+    Path(
+        os.getenv(
+            "INSPECTORPRO_FACILITY_LAYOUT_ROOT",
+            str(REPO_ROOT / ".runtime" / "facility-layout"),
         )
-    )
+    ),
+    process_map_root=REPO_ROOT / "generated" / "training",
 )
+app.include_router(_FACILITY_LAYOUT_HOST.create_router())
 
 
 # Phase 3 telemetry: endpoint timing middleware. Records one telemetry

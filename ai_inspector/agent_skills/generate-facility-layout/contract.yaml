@@ -1,0 +1,32 @@
+schema_version: 1
+skill_id: generate-facility-layout
+version: 1.0.0
+intents:
+  - generate_facility_layout
+required_evidence:
+  - facility_layout_digest
+  - facility_layout_state
+  - facility_layout_evidence
+forbidden_context:
+  - browser.facility_layout_digest
+  - browser.facility_layout_state
+  - browser.facility_layout_evidence
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request:
+    - build_facility_layout_preview
+output_contract:
+  format: concise_facility_layout_proposal
+  maximum_sentences: 4
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: facility-layout-generation-v1
+context_budget:
+  maximum_tokens: 12000
+  priorities:
+    - facility_layout.digest
+    - facility_layout.evidence
+    - facility_layout.state

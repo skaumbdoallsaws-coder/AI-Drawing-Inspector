@@ -290,6 +290,8 @@
             currentInput: null,
             ghostInput: null,
             ghostObject: null,
+            proposalInput: null,
+            proposalRoot: null,
             placements: [],
             baseGroups: new Map(),
             renderGroups: new Map(),
@@ -632,6 +634,7 @@
 
         function clearModel() {
             disposeGhostObject();
+            disposeProposalObjects();
             state.renderGroups.forEach(disposeRenderGroup);
             state.renderGroups.clear();
             state.pickObjects = [];
@@ -718,6 +721,144 @@
             return true;
         }
 
+        function disposeProposalObjects() {
+            if (!state.proposalRoot) return;
+            if (state.proposalRoot.parent
+                    && typeof state.proposalRoot.parent.remove === 'function') {
+                state.proposalRoot.parent.remove(state.proposalRoot);
+            }
+            disposeObjectGraphs([state.proposalRoot]);
+            state.proposalRoot = null;
+        }
+
+        function normalizeProposalInput(value) {
+            if (!value || value.active !== true) return null;
+            function identifiers(name) {
+                return Array.from(new Set(
+                    (Array.isArray(value[name]) ? value[name] : []).filter(
+                        function (identifier) {
+                            return typeof identifier === 'string'
+                                && identifier;
+                        }
+                    )
+                )).sort();
+            }
+            function placements(name) {
+                return (Array.isArray(value[name]) ? value[name] : []).map(
+                    normalizePlacement
+                ).sort(function (left, right) {
+                    return left.placementId.localeCompare(right.placementId);
+                });
+            }
+            return {
+                active: true,
+                newPlacementIds: identifiers('newPlacementIds'),
+                movedPlacementIds: identifiers('movedPlacementIds'),
+                removedPlacementIds: identifiers('removedPlacementIds'),
+                beforePlacements: placements('beforePlacements'),
+                proposedPlacements: placements('proposedPlacements'),
+            };
+        }
+
+        function boundsForPlacement(placement) {
+            const group = state.baseGroups.get(
+                placement.assetId + '|'
+                + placement.assetDefinitionRevision
+            );
+            if (group) return group.bounds;
+            const catalog = state.currentInput
+                && state.currentInput.assetCatalog;
+            const index = buildCatalogIndex(catalog);
+            const exactKey = placement.assetId + '|'
+                + placement.assetDefinitionRevision;
+            return extractBounds(index.exact.get(exactKey))
+                || extractBounds(index.byAsset.get(placement.assetId))
+                || cloneBounds(DEFAULT_BOUNDS);
+        }
+
+        function styleProposalObject(object, role) {
+            const colors = {
+                before: 0xd97706,
+                removed: 0xdc2626,
+                moved: 0x8b5cf6,
+                new: 0x0ea5e9,
+            };
+            const opacity = role === 'before' || role === 'removed'
+                ? 0.3 : 0.38;
+            const visit = function (candidate) {
+                const materials = Array.isArray(candidate && candidate.material)
+                    ? candidate.material : [candidate && candidate.material];
+                materials.filter(Boolean).forEach(function (material) {
+                    material.transparent = true;
+                    material.opacity = opacity;
+                    material.depthWrite = false;
+                    material.wireframe = true;
+                    if (material.color
+                            && typeof material.color.setHex === 'function') {
+                        material.color.setHex(colors[role] || 0x8b5cf6);
+                    }
+                    material.needsUpdate = true;
+                });
+            };
+            if (typeof object.traverse === 'function') object.traverse(visit);
+            else visit(object);
+        }
+
+        function proposalObject(placement, role) {
+            const prototype = makeFallbackPrototype(
+                boundsForPlacement(placement)
+            );
+            const object = prototype.object;
+            styleProposalObject(object, role);
+            applyPlacementTransform(object, placement);
+            object.name = 'FacilityProposalPreview:'
+                + role + ':' + placement.placementId;
+            object.userData = object.userData || {};
+            object.userData.facilityProposalPreview = role;
+            object.userData.facilityProposalPlacementId =
+                placement.placementId;
+            return object;
+        }
+
+        function renderProposalObjects() {
+            disposeProposalObjects();
+            const proposal = state.proposalInput;
+            if (!proposal || !state.mounted || !state.modelRoot
+                    || state.degraded) {
+                invalidate();
+                return false;
+            }
+            const removed = new Set(proposal.removedPlacementIds);
+            const added = new Set(proposal.newPlacementIds);
+            const rootObject = createContainer();
+            rootObject.name = 'FacilityProposalPreviewRoot';
+            rootObject.userData = rootObject.userData || {};
+            rootObject.userData.facilityProposalPreviewRoot = true;
+            proposal.beforePlacements.forEach(function (placement) {
+                rootObject.add(proposalObject(
+                    placement,
+                    removed.has(placement.placementId)
+                        ? 'removed' : 'before'
+                ));
+            });
+            proposal.proposedPlacements.forEach(function (placement) {
+                const role = added.has(placement.placementId)
+                    ? 'new' : 'moved';
+                rootObject.add(proposalObject(placement, role));
+            });
+            state.modelRoot.add(rootObject);
+            state.proposalRoot = rootObject;
+            invalidate();
+            return true;
+        }
+
+        function setProposalPreview(value) {
+            state.proposalInput = normalizeProposalInput(value);
+            const rendered = renderProposalObjects();
+            state.worldBounds = computeWorldBounds();
+            return state.proposalInput ? rendered : true;
+        }
+
         function abortLoading() {
             state.sceneGeneration += 1;
             if (state.abortController
@@ -800,7 +941,10 @@
             state.listenerCount = 0;
             state.teardownCount += 1;
             state.disposed = Boolean(finalDispose);
-            if (finalDispose) state.ghostInput = null;
+            if (finalDispose) {
+                state.ghostInput = null;
+                state.proposalInput = null;
+            }
             notifyStatus(finalDispose ? 'disposed' : 'unmounted', null);
         }
 
@@ -868,8 +1012,9 @@
                     }).catch(function (error) {
                         reportError('scene_remount_failed', error);
                     });
-                } else if (replayGhost) {
-                    setGhostPlacement(replayGhost);
+                } else {
+                    renderProposalObjects();
+                    if (replayGhost) setGhostPlacement(replayGhost);
                 }
             } catch (error) {
                 reportError('webgl_initialization_failed', error);
@@ -1442,6 +1587,7 @@
                     'footprint'
                 );
             });
+            renderProposalObjects();
             renderGhostObject();
             state.worldBounds = computeWorldBounds();
             notifyStatus('loading', null);
@@ -1587,13 +1733,17 @@
                 minimum: { x: Infinity, y: Infinity, z: Infinity },
                 maximum: { x: -Infinity, y: -Infinity, z: -Infinity },
             };
-            if (!state.placements.length) return hasConfigured ? output : null;
-            state.placements.forEach(function (placement) {
-                const group = state.baseGroups.get(
-                    placement.assetId + '|' + placement.assetDefinitionRevision
-                );
+            const reviewPlacements = state.proposalInput
+                ? state.proposalInput.beforePlacements : [];
+            const boundedPlacements = state.placements.concat(
+                reviewPlacements
+            );
+            if (!boundedPlacements.length) {
+                return hasConfigured ? output : null;
+            }
+            boundedPlacements.forEach(function (placement) {
                 const bounds = transformedBounds(
-                    group ? group.bounds : DEFAULT_BOUNDS,
+                    boundsForPlacement(placement),
                     placement
                 );
                 ['x', 'y', 'z'].forEach(function (axis) {
@@ -2024,6 +2174,11 @@
                 representationGroups: groups,
                 selectedPlacementIds: Array.from(state.selectedIds).sort(),
                 ghostActive: Boolean(state.ghostInput),
+                proposalPreviewActive: Boolean(state.proposalInput),
+                proposalBeforeCount: state.proposalInput
+                    ? state.proposalInput.beforePlacements.length : 0,
+                proposalProposedCount: state.proposalInput
+                    ? state.proposalInput.proposedPlacements.length : 0,
                 loadTrace: state.loadTrace.map(function (item) {
                     return Object.assign({}, item);
                 }),
@@ -2084,6 +2239,7 @@
             setSelection: setSelection,
             setSelectionHandler: setSelectionHandler,
             setGhostPlacement: setGhostPlacement,
+            setProposalPreview: setProposalPreview,
             worldPointOnFloor: worldPointOnFloor,
             worldToClient: worldToClient,
             fit: fit,

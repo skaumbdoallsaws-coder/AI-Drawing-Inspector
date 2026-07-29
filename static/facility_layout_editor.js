@@ -424,6 +424,54 @@
             && left.minZ <= right.maxZ;
     }
 
+    function proposalReviewBounds(layout, proposalPreview, options) {
+        const bounds = collectTopPlanBounds(layout, options);
+        const beforePlacements = proposalPreview
+            && Array.isArray(proposalPreview.beforePlacements)
+            ? proposalPreview.beforePlacements : [];
+        beforePlacements.forEach(function (placement) {
+            placementFootprint(placement, options).forEach(function (value) {
+                bounds.minX = Math.min(bounds.minX, value.x);
+                bounds.minZ = Math.min(bounds.minZ, value.z);
+                bounds.maxX = Math.max(bounds.maxX, value.x);
+                bounds.maxZ = Math.max(bounds.maxZ, value.z);
+            });
+        });
+        return bounds;
+    }
+
+    function normalizeProposalPreview(value) {
+        if (!value || value.active !== true) return null;
+        function identifiers(name) {
+            return Array.from(new Set(
+                (Array.isArray(value[name]) ? value[name] : []).filter(
+                    function (identifier) {
+                        return typeof identifier === 'string' && identifier;
+                    }
+                )
+            )).sort();
+        }
+        function placements(name) {
+            return (Array.isArray(value[name]) ? value[name] : []).filter(
+                function (placement) {
+                    return placement
+                        && typeof placement.placementId === 'string'
+                        && placement.placementId;
+                }
+            ).map(clone).sort(function (left, right) {
+                return left.placementId.localeCompare(right.placementId);
+            });
+        }
+        return {
+            active: true,
+            newPlacementIds: identifiers('newPlacementIds'),
+            movedPlacementIds: identifiers('movedPlacementIds'),
+            removedPlacementIds: identifiers('removedPlacementIds'),
+            beforePlacements: placements('beforePlacements'),
+            proposedPlacements: placements('proposedPlacements'),
+        };
+    }
+
     function TopPlanAdapter(host, options) {
         if (!(this instanceof TopPlanAdapter)) {
             return new TopPlanAdapter(host, options);
@@ -444,6 +492,7 @@
         this.geometry = null;
         this.projection = null;
         this.ghostPlacement = null;
+        this.proposalPreview = null;
         this.selection = null;
         this.selections = new Set();
         this.selectionHandler = null;
@@ -514,7 +563,11 @@
                 || this.projection.width !== size.width
                 || this.projection.height !== size.height) {
             this.projection = createTopPlanProjection(
-                collectTopPlanBounds(this.layout, this.options),
+                proposalReviewBounds(
+                    this.layout,
+                    this.proposalPreview,
+                    this.options
+                ),
                 size,
                 this.options.padding
             );
@@ -566,24 +619,120 @@
         }, this);
         this.svg.appendChild(routeLayer);
 
+        const newProposalIds = new Set(
+            this.proposalPreview
+                ? this.proposalPreview.newPlacementIds : []
+        );
+        const movedProposalIds = new Set(
+            this.proposalPreview
+                ? this.proposalPreview.movedPlacementIds : []
+        );
+        const removedProposalIds = new Set(
+            this.proposalPreview
+                ? this.proposalPreview.removedPlacementIds : []
+        );
+        const proposedById = new Map(
+            (this.proposalPreview
+                ? this.proposalPreview.proposedPlacements : []).map(
+                function (placement) {
+                    return [placement.placementId, placement];
+                }
+            )
+        );
+        if (this.proposalPreview) {
+            const beforeLayer = svgElement(this.document, 'g');
+            beforeLayer.setAttribute('data-layer', 'proposal-before');
+            this.proposalPreview.beforePlacements.forEach(function (placement) {
+                const proposed = proposedById.get(placement.placementId);
+                if (proposed && placement.transform && proposed.transform) {
+                    const start = projectTopPlanPoint(
+                        placement.transform.position || { x: 0, z: 0 },
+                        this.projection
+                    );
+                    const end = projectTopPlanPoint(
+                        proposed.transform.position || { x: 0, z: 0 },
+                        this.projection
+                    );
+                    const movement = svgElement(this.document, 'line');
+                    setAttributes(movement, {
+                        x1: start.x,
+                        y1: start.y,
+                        x2: end.x,
+                        y2: end.y,
+                        stroke: '#d97706',
+                        'stroke-width': '1.5',
+                        'stroke-dasharray': '3 4',
+                        'vector-effect': 'non-scaling-stroke',
+                        'pointer-events': 'none',
+                        'data-proposal-move-id': placement.placementId,
+                    });
+                    beforeLayer.appendChild(movement);
+                }
+                const before = svgElement(this.document, 'polygon');
+                setAttributes(before, {
+                    points: pointString(
+                        placementFootprint(placement, this.options),
+                        this.projection
+                    ),
+                    fill: '#d97706',
+                    'fill-opacity': '0.06',
+                    stroke: '#d97706',
+                    'stroke-width': '2',
+                    'stroke-dasharray': '4 4',
+                    'vector-effect': 'non-scaling-stroke',
+                    'pointer-events': 'none',
+                    'aria-hidden': 'true',
+                    'data-proposal-before-id': placement.placementId,
+                    'data-proposal-before-state':
+                        removedProposalIds.has(placement.placementId)
+                            ? 'removed' : 'moved',
+                });
+                beforeLayer.appendChild(before);
+            }, this);
+            this.svg.appendChild(beforeLayer);
+        }
+
         const placementLayer = svgElement(this.document, 'g');
         placementLayer.setAttribute('data-layer', 'placements');
         this.geometry.placements.forEach(function (placement) {
             const selected = this.selections.has(placement.placementId);
+            const proposalState = newProposalIds.has(placement.placementId)
+                ? 'new'
+                : (movedProposalIds.has(placement.placementId)
+                    ? 'moved' : '');
             const polygon = svgElement(this.document, 'polygon');
-            setAttributes(polygon, {
+            const attributes = {
                 points: pointString(placement.points, this.projection),
-                fill: selected ? '#bfe3ff' : '#e8edf2',
-                stroke: selected ? '#0878d1' : '#526273',
+                fill: proposalState === 'new'
+                    ? '#0ea5e9'
+                    : (proposalState === 'moved'
+                        ? '#8b5cf6'
+                        : (selected ? '#bfe3ff' : '#e8edf2')),
+                stroke: proposalState === 'new'
+                    ? '#0284c7'
+                    : (proposalState === 'moved'
+                        ? '#7c3aed'
+                        : (selected ? '#0878d1' : '#526273')),
                 'stroke-width': selected ? '3' : '1.5',
                 'vector-effect': 'non-scaling-stroke',
-                tabindex: '0',
-                role: 'button',
-                'aria-label': placement.label,
+                tabindex: proposalState ? '-1' : '0',
+                role: proposalState ? 'img' : 'button',
+                'aria-label': placement.label + (
+                    proposalState
+                        ? ' (' + proposalState + ' proposal)' : ''
+                ),
                 'aria-selected': selected ? 'true' : 'false',
                 'data-placement-id': placement.placementId,
                 'data-asset-id': placement.assetId || '',
-            });
+            };
+            if (proposalState) {
+                attributes['fill-opacity'] = '0.24';
+                attributes['stroke-width'] = '2';
+                attributes['stroke-dasharray'] = '7 4';
+                attributes['pointer-events'] = 'none';
+                attributes['data-proposal-state'] = proposalState;
+            }
+            setAttributes(polygon, attributes);
             placementLayer.appendChild(polygon);
         }, this);
         this.svg.appendChild(placementLayer);
@@ -693,6 +842,14 @@
         return true;
     };
 
+    TopPlanAdapter.prototype.setProposalPreview = function (preview) {
+        if (this.disposed) return false;
+        this.proposalPreview = normalizeProposalPreview(preview);
+        this.projection = null;
+        this._render();
+        return true;
+    };
+
     TopPlanAdapter.prototype.setSelection = function (placementId) {
         if (this.disposed) return false;
         const next = placementId || null;
@@ -732,7 +889,11 @@
     TopPlanAdapter.prototype.fit = function () {
         if (this.disposed || !this.layout) return null;
         this.projection = createTopPlanProjection(
-            collectTopPlanBounds(this.layout, this.options),
+            proposalReviewBounds(
+                this.layout,
+                this.proposalPreview,
+                this.options
+            ),
             this._measure(),
             this.options.padding
         );
@@ -836,6 +997,13 @@
             selection: this.selection,
             selections: Array.from(this.selections).sort(),
             ghostActive: Boolean(this.ghostPlacement),
+            proposalPreviewActive: Boolean(this.proposalPreview),
+            proposalBeforeCount: this.proposalPreview
+                ? this.proposalPreview.beforePlacements.length : 0,
+            proposalNewCount: this.proposalPreview
+                ? this.proposalPreview.newPlacementIds.length : 0,
+            proposalMovedCount: this.proposalPreview
+                ? this.proposalPreview.movedPlacementIds.length : 0,
             projection: this.projection ? clone(this.projection) : null,
             placementIds: this.layout
                 ? this.layout.placements.map(function (placement) {
@@ -862,6 +1030,7 @@
         this.geometry = null;
         this.projection = null;
         this.ghostPlacement = null;
+        this.proposalPreview = null;
     };
 
     function parseControllerArguments(layoutOrOptions, maybeOptions) {

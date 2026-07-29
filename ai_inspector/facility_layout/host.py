@@ -25,10 +25,15 @@ from .authority_repository import (
     VehicleProfileRepository,
 )
 from .authorization import FacilityPrincipal, local_facility_principal
+from .agent_runtime import (
+    FacilityLayoutAgentRuntime,
+    FacilityLayoutAgentRuntimeError,
+)
 from .errors import FacilityNotFoundError
 from .operations import create_layout_document
 from .repository import FacilityLayoutRepository
 from .service import FacilityLayoutService, coordinate_frame_fingerprint
+from .transaction_adapter import FacilityLayoutTransactionRuntime
 
 
 LOCAL_SITE_ID = "site-local"
@@ -256,6 +261,9 @@ class LocalFacilityLayoutHost:
             item["assetId"]: deepcopy(item)
             for item in LOCAL_ASSET_CATALOG
         }
+        self.transaction_runtime = FacilityLayoutTransactionRuntime(
+            receipt_root=self.root / "transactions",
+        )
         self.service = FacilityLayoutService(
             layout_repository=self.layout_repository,
             shell_repository=self.shell_repository,
@@ -267,6 +275,16 @@ class LocalFacilityLayoutHost:
                 if self.process_map_root is not None
                 else None
             ),
+            transaction_runtime=self.transaction_runtime,
+        )
+        self.agent_runtime = FacilityLayoutAgentRuntime(
+            service=self.service,
+            shell_repository=self.shell_repository,
+            policy_repository=self.policy_repository,
+            vehicle_repository=self.vehicle_repository,
+            asset_catalog_provider=self._agent_asset_catalog,
+            process_catalog_provider=self._agent_process_catalog,
+            capabilities_provider=self._agent_capabilities,
         )
         self._lock = threading.RLock()
         self._bootstrapped = False
@@ -322,6 +340,119 @@ class LocalFacilityLayoutHost:
             "revision": result["revision"],
             "document": deepcopy(result["map"]),
         }
+
+    def _agent_asset_catalog(
+        self,
+        _principal: FacilityPrincipal,
+        site_id: str,
+    ) -> list[dict[str, Any]]:
+        if site_id != LOCAL_SITE_ID:
+            raise FacilityNotFoundError(
+                "not_found",
+                "Facility resource was not found.",
+            )
+        return deepcopy(list(self._catalog.values()))
+
+    def _agent_process_catalog(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        if site_id != LOCAL_SITE_ID:
+            raise FacilityNotFoundError(
+                "not_found",
+                "Facility resource was not found.",
+            )
+        result = []
+        seen = set()
+        for binding in layout.get("processBindings", []):
+            if not isinstance(binding, Mapping):
+                continue
+            key = (
+                str(binding.get("productId") or ""),
+                str(binding.get("processMapId") or ""),
+                str(binding.get("processMapRevision") or ""),
+            )
+            if not all(key) or key in seen:
+                continue
+            seen.add(key)
+            resolved = self._resolve_process_map(
+                principal,
+                site_id,
+                key[0],
+                key[1],
+                key[2],
+            )
+            if (
+                not isinstance(resolved, Mapping)
+                or resolved.get("revision") != key[2]
+                or not isinstance(resolved.get("document"), Mapping)
+            ):
+                continue
+            document = resolved["document"]
+            result.append(
+                {
+                    "productId": key[0],
+                    "processMapId": key[1],
+                    "processMapRevision": key[2],
+                    "displayName": str(
+                        document.get("displayName") or key[1]
+                    ),
+                    "nodeIds": sorted(
+                        {
+                            str(item.get("id"))
+                            for item in document.get("canvasNodes", [])
+                            if isinstance(item, Mapping) and item.get("id")
+                        }
+                    ),
+                    "edgeIds": sorted(
+                        {
+                            str(item.get("id"))
+                            for item in document.get("canvasEdges", [])
+                            if isinstance(item, Mapping) and item.get("id")
+                        }
+                    ),
+                }
+            )
+        return sorted(
+            result,
+            key=lambda item: (
+                item["processMapId"],
+                item["processMapRevision"],
+            ),
+        )
+
+    @staticmethod
+    def _agent_capabilities(
+        principal: FacilityPrincipal,
+        _site_id: str,
+    ) -> dict[str, bool]:
+        actions = principal.action_set
+        allowed = lambda action: "*" in actions or action in actions
+        return {
+            "read": allowed("layout.read"),
+            "semanticPlanning": allowed("layout.read"),
+            "semanticPreview": allowed("proposal.create"),
+            "approval": allowed("proposal.approve"),
+            "apply": allowed("proposal.apply"),
+            "manualAuthoring": allowed("layout.edit"),
+            "automaticRouting": True,
+            "spatialValidation": True,
+        }
+
+    @staticmethod
+    def _agent_error(error: FacilityLayoutAgentRuntimeError) -> HTTPException:
+        return HTTPException(
+            status_code=error.status_code,
+            detail={
+                "error": {
+                    "code": error.code,
+                    "message": str(error),
+                    "details": deepcopy(error.details),
+                }
+            },
+        )
 
     def _ensure_published(
         self,
@@ -445,6 +576,8 @@ class LocalFacilityLayoutHost:
                     "collisionValidation": True,
                     "candidateSnapping": True,
                     "coarseAdvisoryWorker": True,
+                    "fullLayoutProposals": True,
+                    "atomicProposalApply": True,
                 },
             }
 
@@ -474,6 +607,107 @@ class LocalFacilityLayoutHost:
                 "siteId": LOCAL_SITE_ID,
                 "assets": deepcopy(list(self._catalog.values())),
             }
+
+        @router.post(
+            "/api/facility-layout-agent/{site_id}/{layout_id}/read/{tool_name}"
+        )
+        async def facility_agent_read(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            tool_name: str,
+            body: dict[str, Any],
+        ):
+            principal = self.resolve_principal(request)
+            turn_id = (
+                request.headers.get("X-InspectorPro-Agent-Turn")
+                or request.headers.get("X-InspectorPro-Session")
+                or "facility-agent-turn"
+            )
+            try:
+                return self.agent_runtime.execute_read_tool(
+                    principal,
+                    site_id=site_id,
+                    layout_id=layout_id,
+                    expected_revision=str(
+                        body.get("expectedRevision") or ""
+                    ),
+                    tool_name=tool_name,
+                    arguments=(
+                        body.get("arguments")
+                        if isinstance(body.get("arguments"), Mapping)
+                        else {}
+                    ),
+                    turn_id=turn_id,
+                    live_facts=(
+                        body.get("liveState")
+                        if isinstance(body.get("liveState"), Mapping)
+                        else None
+                    ),
+                    proposal_id=(
+                        str(body["proposalId"])
+                        if body.get("proposalId") else None
+                    ),
+                    receipt_ids=(
+                        body.get("receiptIds")
+                        if isinstance(body.get("receiptIds"), list)
+                        else None
+                    ),
+                )
+            except FacilityLayoutAgentRuntimeError as error:
+                raise self._agent_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-agent/{site_id}/{layout_id}/preview"
+        )
+        async def facility_agent_preview(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self.resolve_principal(request)
+            semantic_plan = body.get("semanticPlan")
+            if not isinstance(semantic_plan, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "semantic_facility_plan_missing",
+                            "message": (
+                                "semanticPlan must be a Semantic Facility "
+                                "Layout Plan v1 object."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            try:
+                return self.agent_runtime.build_preview(
+                    principal,
+                    site_id=site_id,
+                    layout_id=layout_id,
+                    expected_revision=str(
+                        body.get("expectedRevision") or ""
+                    ),
+                    semantic_plan=semantic_plan,
+                    live_facts=(
+                        body.get("liveState")
+                        if isinstance(body.get("liveState"), Mapping)
+                        else None
+                    ),
+                    proposal_id=(
+                        str(body["proposalId"])
+                        if body.get("proposalId") else None
+                    ),
+                    receipt_ids=(
+                        body.get("receiptIds")
+                        if isinstance(body.get("receiptIds"), list)
+                        else None
+                    ),
+                )
+            except FacilityLayoutAgentRuntimeError as error:
+                raise self._agent_error(error) from error
 
         router.include_router(
             create_facility_layout_router(

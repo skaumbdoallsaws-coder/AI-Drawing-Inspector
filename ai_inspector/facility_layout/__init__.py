@@ -1,5 +1,10 @@
 """Authoritative Facility Layout domain, persistence, and API boundary."""
 
+from .agent_runtime import (
+    FacilityAgentContextBundle,
+    FacilityLayoutAgentRuntime,
+    FacilityLayoutAgentRuntimeError,
+)
 from .api import create_facility_layout_router
 from .authority_repository import (
     AuthorityDocumentEnvelope,
@@ -25,6 +30,10 @@ from .canonical import (
     layout_revision,
 )
 from .diff import build_exact_layout_diff, facility_layout_diff_hash
+from .digest import (
+    FacilityDigestError,
+    build_facility_layout_digest,
+)
 from .errors import (
     FacilityAuthorizationError,
     FacilityCompatibilityError,
@@ -44,6 +53,14 @@ from .operations import (
     apply_facility_layout_operations,
     create_layout_document,
     supported_facility_layout_operations,
+)
+from .observation import (
+    FacilityObservationError,
+    TrustedFacilityContext,
+    TrustedFacilitySource,
+    build_facility_layout_observation,
+    facility_layout_read_tool_specs,
+    trusted_facility_source,
 )
 from .repository import FacilityLayoutRepository
 from .routing import (
@@ -68,6 +85,13 @@ from .service import (
     FacilitySpatialContext,
     coordinate_frame_fingerprint,
 )
+from .semantic_plan import (
+    SEMANTIC_FACILITY_PREVIEW_TOOL,
+    SemanticFacilityPlanError,
+    compile_semantic_facility_plan,
+    facility_layout_preview_tool_spec,
+    validate_semantic_facility_plan,
+)
 from .spatial import (
     CANDIDATE_POLICY_VERSION,
     SPATIAL_ENGINE_VERSION,
@@ -83,22 +107,33 @@ from .spatial_executor import (
     SpatialExecutionCancelled,
     SpatialJob,
 )
+from .transaction_adapter import (
+    FacilityLayoutTransactionRuntime,
+    facility_layout_binding,
+    facility_transaction_principal,
+)
 from .validate import validate_layout
 
 __all__ = [
     "AuthorizationDecision",
     "AuthorityDocumentEnvelope",
     "AuthorityMutationResult",
+    "FacilityAgentContextBundle",
     "FacilityAuthorizationError",
     "FacilityCompatibilityError",
     "FacilityConflictError",
     "FacilityDependencySnapshot",
+    "FacilityDigestError",
     "FacilityIntegrityError",
     "FacilityLayoutError",
+    "FacilityLayoutAgentRuntime",
+    "FacilityLayoutAgentRuntimeError",
     "FacilityLayoutOperationError",
     "FacilityLayoutRepository",
     "FacilityLayoutService",
+    "FacilityLayoutTransactionRuntime",
     "FacilityNotFoundError",
+    "FacilityObservationError",
     "FacilityPrincipal",
     "FacilitySpatialContext",
     "FacilitySpatialExecutor",
@@ -113,15 +148,21 @@ __all__ = [
     "VehicleProfileRepository",
     "CANDIDATE_POLICY_VERSION",
     "SPATIAL_ENGINE_VERSION",
+    "SEMANTIC_FACILITY_PREVIEW_TOOL",
+    "SemanticFacilityPlanError",
     "SpatialCancellationToken",
     "SpatialExecutionCancelled",
     "SpatialJob",
     "SpatialRecord",
+    "TrustedFacilityContext",
+    "TrustedFacilitySource",
     "UniformGridSpatialIndex",
     "apply_facility_layout_operations",
     "authority_revision",
     "authorize_facility_action",
     "build_aisle_topology",
+    "build_facility_layout_digest",
+    "build_facility_layout_observation",
     "build_exact_layout_diff",
     "canonical_layout_bytes",
     "canonicalize_layout",
@@ -132,6 +173,10 @@ __all__ = [
     "create_layout_document",
     "detect_layout_compatibility",
     "facility_layout_diff_hash",
+    "facility_layout_preview_tool_spec",
+    "facility_layout_read_tool_specs",
+    "facility_layout_binding",
+    "facility_transaction_principal",
     "diagnose_layout",
     "estimate_aisle_distance",
     "generate_connector_candidates",
@@ -146,8 +191,11 @@ __all__ = [
     "routing_layout_fingerprint",
     "stable_route_fingerprint",
     "supported_facility_layout_operations",
+    "trusted_facility_source",
+    "compile_semantic_facility_plan",
     "spatial_fingerprint",
     "validate_layout",
+    "validate_semantic_facility_plan",
     "validate_route",
     "validate_swept_volume",
     "validate_utility_network",

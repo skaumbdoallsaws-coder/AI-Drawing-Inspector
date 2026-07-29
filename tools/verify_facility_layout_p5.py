@@ -937,18 +937,17 @@ def main() -> int:
             and desktop["canvas"]["elementScreenshot"]["nonblank"] is True
         ),
         "p6_constraint_warning_visible": (
-            desktop["final"]["dom"]["p6Warning"]
-            in {
-                (
+            isinstance(desktop["final"]["dom"]["p6Warning"], str)
+            and (
+                desktop["final"]["dom"]["p6Warning"].startswith(
                     "Collision, containment, and clearance validation "
                     "arrives in P6."
-                ),
-                (
+                )
+                or desktop["final"]["dom"]["p6Warning"].startswith(
                     "Browser overlap feedback is advisory. The server "
                     "validates every accepted placement."
-                    "PreviousNextAcceptDismiss"
-                ),
-            }
+                )
+            )
             and desktop["final"]["dom"]["p6WarningVisible"] is True
             and mobile["probe"]["warningVisible"] is True
         ),

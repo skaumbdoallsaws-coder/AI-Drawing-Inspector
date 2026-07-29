@@ -660,6 +660,102 @@ check('plan authoring projection preserves world intent through pan zoom and lay
         adapter.dispose();
     });
 
+check('top plan shows proposal footprints and original positions without picking them',
+    () => {
+        FakeResizeObserver.reset();
+        const { documentRef, host } = makeHost();
+        const adapter = facility.createTopPlanAdapter(host, {
+            document: documentRef,
+            ResizeObserver: FakeResizeObserver,
+            assetBounds: {
+                'asset-machine': { width: 2, depth: 1 },
+                'asset-rack': { width: 3, depth: 1.2 },
+            },
+        });
+        const saved = layout();
+        const proposed = layout([
+            placement('pl-machine', 'asset-machine', 20, 2),
+            placement('pl-new', 'asset-rack', 15, 6),
+        ]);
+        const savedBefore = JSON.stringify(saved);
+        const proposedBefore = JSON.stringify(proposed);
+        adapter.setLayout(proposed);
+        assert.strictEqual(adapter.setProposalPreview({
+            active: true,
+            newPlacementIds: ['pl-new'],
+            movedPlacementIds: ['pl-machine'],
+            removedPlacementIds: ['pl-rack'],
+            beforePlacements: [
+                saved.placements[0],
+                saved.placements[1],
+            ],
+            proposedPlacements: [
+                proposed.placements[0],
+                proposed.placements[1],
+            ],
+        }), true);
+        const moved = host.findByAttribute(
+            'data-proposal-state',
+            'moved'
+        )[0];
+        const added = host.findByAttribute(
+            'data-proposal-state',
+            'new'
+        )[0];
+        assert.ok(moved);
+        assert.ok(added);
+        assert.strictEqual(moved.getAttribute('pointer-events'), 'none');
+        assert.strictEqual(added.getAttribute('role'), 'img');
+        assert.strictEqual(
+            host.findByAttribute(
+                'data-proposal-before-id',
+                'pl-machine'
+            ).length,
+            1
+        );
+        assert.strictEqual(
+            host.findByAttribute(
+                'data-proposal-before-state',
+                'removed'
+            ).length,
+            1
+        );
+        assert.strictEqual(
+            host.findByAttribute(
+                'data-proposal-move-id',
+                'pl-machine'
+            ).length,
+            1
+        );
+        const diagnostics = adapter.getDiagnostics();
+        assert.strictEqual(diagnostics.proposalPreviewActive, true);
+        assert.strictEqual(diagnostics.proposalBeforeCount, 2);
+        assert.strictEqual(diagnostics.proposalNewCount, 1);
+        assert.strictEqual(diagnostics.proposalMovedCount, 1);
+        assert.ok(diagnostics.projection.minX <= 2);
+        assert.ok(diagnostics.projection.maxX >= 21);
+        assert.strictEqual(JSON.stringify(saved), savedBefore);
+        assert.strictEqual(JSON.stringify(proposed), proposedBefore);
+
+        assert.strictEqual(adapter.setProposalPreview(null), true);
+        assert.strictEqual(
+            host.findByAttribute('data-proposal-state', 'moved').length,
+            0
+        );
+        assert.strictEqual(
+            host.findByAttribute(
+                'data-proposal-before-id',
+                'pl-machine'
+            ).length,
+            0
+        );
+        assert.strictEqual(
+            adapter.getDiagnostics().proposalPreviewActive,
+            false
+        );
+        adapter.dispose();
+    });
+
 Promise.all(pendingChecks).then(() => {
     process.stdout.write(
         `${checks}/${checks} facility layout editor checks passed\n`

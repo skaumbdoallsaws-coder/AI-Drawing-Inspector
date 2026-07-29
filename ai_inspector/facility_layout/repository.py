@@ -925,8 +925,14 @@ class FacilityLayoutRepository:
         layout_id: str,
         document: Mapping[str, Any],
         base_revision: str,
+        *,
+        _authorization_action: str = "layout.edit",
     ) -> dict[str, Any]:
-        tenant_id, safe_site_id = _authorize(principal, site_id, "layout.edit")
+        tenant_id, safe_site_id = _authorize(
+            principal,
+            site_id,
+            _authorization_action,
+        )
         safe_layout_id = _validate_layout_id(layout_id)
         candidate = deepcopy(dict(document))
         self._assert_document_scope(
@@ -1040,6 +1046,25 @@ class FacilityLayoutRepository:
                 findings,
                 changed=True,
             )
+
+    def save_approved_layout(
+        self,
+        principal: Any,
+        site_id: str,
+        layout_id: str,
+        document: Mapping[str, Any],
+        base_revision: str,
+    ) -> dict[str, Any]:
+        """Commit one approved exact proposal without granting direct edits."""
+
+        return self.save_layout(
+            principal,
+            site_id,
+            layout_id,
+            document,
+            base_revision,
+            _authorization_action="proposal.apply",
+        )
 
     def archive_layout(
         self,

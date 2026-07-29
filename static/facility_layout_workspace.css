@@ -379,6 +379,108 @@
     font-size: 10px;
 }
 
+.ip-flw-candidate-controls {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+    padding: 0;
+    border: 0;
+    color: var(--ip-flw-text);
+    background: transparent;
+}
+
+.ip-flw-candidate-summary {
+    flex: 1 1 320px;
+    min-width: 0;
+    color: inherit;
+}
+
+.ip-flw-candidate-controls .ip-flw-view-tab {
+    min-width: 58px;
+    height: 25px;
+    padding: 3px 8px;
+    border: 1px solid var(--ip-flw-border);
+    border-radius: 2px;
+    color: var(--ip-flw-text);
+    background: var(--ip-flw-panel);
+}
+
+.ip-flw-candidate-controls[data-preview-kind="full-layout"] {
+    border-left: 2px solid var(--ip-flw-accent);
+    padding-left: 7px;
+}
+
+.ip-flw-candidate-controls[data-preview-kind="full-layout"]
+    .ip-flw-candidate-summary {
+    flex-basis: 100%;
+    font-weight: 600;
+}
+
+.ip-flw-proposal-review {
+    display: grid;
+    flex: 1 0 100%;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+    padding: 5px 0 3px;
+    border-top: 1px solid color-mix(
+        in srgb,
+        var(--ip-flw-accent) 28%,
+        transparent
+    );
+    color: var(--ip-flw-text);
+    line-height: 1.35;
+}
+
+.ip-flw-proposal-review[hidden] {
+    display: none;
+}
+
+.ip-flw-proposal-review-line {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ip-flw-proposal-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 14px;
+    padding-top: 3px;
+    color: var(--ip-flw-muted);
+}
+
+.ip-flw-proposal-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.ip-flw-proposal-swatch {
+    width: 15px;
+    height: 9px;
+    border: 1px dashed currentColor;
+    background: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.ip-flw-proposal-swatch[data-proposal-swatch="new"] {
+    color: #0284c7;
+}
+
+.ip-flw-proposal-swatch[data-proposal-swatch="moved"] {
+    color: #7c3aed;
+}
+
+.ip-flw-proposal-swatch[data-proposal-swatch="before"] {
+    color: #d97706;
+    background: transparent;
+}
+
+.ip-flw-root[data-full-layout-preview="true"] .ip-flw-viewport-stack {
+    box-shadow: inset 0 0 0 2px
+        color-mix(in srgb, var(--ip-flw-accent) 58%, transparent);
+}
+
 .ip-flw-properties-body {
     padding: 10px;
 }

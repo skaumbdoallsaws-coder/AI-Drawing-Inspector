@@ -1,0 +1,24 @@
+schema_version: 1
+id: facility-layout-generation
+version: 1.0.0
+description: Observe one trusted Facility Layout and create one review-only deterministic layout proposal without granting approval or commit authority.
+agents:
+  - sage
+entry_signals:
+  - build, generate, arrange, or optimize a warehouse or manufacturing-cell layout
+  - inspect assets, zones, routes, findings, or process bindings in the active Facility Layout
+required_assets:
+  - facility_layout
+optional_assets:
+  - process_map
+stages:
+  - observe_revision_bound_layout
+  - inspect_bounded_authority
+  - draft_semantic_facility_plan
+  - validate_semantics_and_evidence
+  - build_synchronized_ghost_preview
+  - await_explicit_approval
+completion:
+  - one complete revision-bound 2D and 3D ghost preview is shown
+  - assumptions and unresolved authority gaps are reported
+  - no persistent write occurs before separate explicit approval

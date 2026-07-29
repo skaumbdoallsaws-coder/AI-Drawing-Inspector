@@ -54,7 +54,22 @@ _CONTEXT_FIELDS = {
     "motion.groups": {"mode_state", "viewport_context"},
     "viewport.state": {"mode_state", "viewport_context", "selected_parts"},
     "process_map.graph": {"process_map_graph"},
+    "facility_layout.digest": {"facility_layout_digest"},
+    "facility_layout.state": {"facility_layout_state"},
+    "facility_layout.evidence": {"facility_layout_evidence"},
 }
+
+_CONTEXT_PROVIDER_ORIGINS = {
+    "process_map.graph": "server",
+    "facility_layout.digest": "server",
+    "facility_layout.state": "server",
+    "facility_layout.evidence": "server",
+}
+
+
+def context_provider_origin(context_key: str) -> str:
+    """Return the declared trust origin for a registered context provider."""
+    return _CONTEXT_PROVIDER_ORIGINS.get(context_key, "browser")
 
 
 @dataclass(frozen=True)
@@ -599,6 +614,10 @@ def compile_skill_context(
         "mode": mode,
         "required_context": sorted(required),
         "optional_context": sorted(optional),
+        "context_origins": {
+            key: context_provider_origin(key)
+            for key in sorted(requested)
+        },
         "derived_context": sorted(derived_context),
         "included_fields": sorted(compiled),
         "original_chars": len(original),

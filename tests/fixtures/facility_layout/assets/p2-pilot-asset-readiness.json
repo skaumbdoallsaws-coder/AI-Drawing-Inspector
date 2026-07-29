@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "industrial-asset-p2-pilot-readiness-v1",
+  "geometryInterfaceRevision": "c8b9dd44c45266ba501b3116856fae43657ce31f6c7bbf8bedaa357e70a5717d",
+  "assets": [
+    {
+      "assetId": "asset-cnc-vmc-f26678cafa91",
+      "category": "cnc_machine",
+      "folder": "cnc_vmc",
+      "definitionFixture": "cnc-vmc-milling-machine.normalized-p0.json",
+      "detail": {
+        "artifactName": "User Library-CNC Milling machine_colored.glb",
+        "byteLength": 525844,
+        "sha256": "7055aceb64674764bac4bdaae187229eead1aa0d877fc12a5b90cca581309a43"
+      },
+      "overview": {
+        "artifactName": "User Library-CNC Milling machine_colored.glb",
+        "byteLength": 525844,
+        "sha256": "7055aceb64674764bac4bdaae187229eead1aa0d877fc12a5b90cca581309a43"
+      },
+      "sourceThumbnail": "User Library-CNC Milling machine_view_isometric.png",
+      "thumbnail": {
+        "artifactName": "thumbnail.webp",
+        "byteLength": 91604,
+        "height": 857,
+        "mediaType": "image/webp",
+        "sha256": "e5aecd4227bf0bc1e4eabced8829f2a96103976f75c5e2ee112b9061d69a8f0f",
+        "width": 1920
+      },
+      "renderBundleRevision": "693bc91cc691413c0c15bde8280149697aaa8be50d49144404cc27743f9325f4",
+      "expectedReadiness": {
+        "placementReady": true,
+        "publicReady": false,
+        "visualReady": true
+      }
+    },
+    {
+      "assetId": "asset-pallet-rack-185e9914e281",
+      "category": "rack",
+      "folder": "rack_prototypes",
+      "definitionFixture": null,
+      "detail": {
+        "artifactName": "Pallet Racking_colored.glb",
+        "byteLength": 13493420,
+        "sha256": "185e9914e28106b14054a8467b941eba1cf31c85593cd566ab40d608cea77c0c"
+      },
+      "overview": {
+        "artifactName": "Pallet Racking_colored_overview_proxy.glb",
+        "byteLength": 916,
+        "sha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14"
+      },
+      "sourceThumbnail": "thumbnail.png",
+      "thumbnail": {
+        "artifactName": "thumbnail.webp",
+        "byteLength": 18484,
+        "height": 576,
+        "mediaType": "image/webp",
+        "sha256": "bd72d208fce6d748c305fbfa7a1719e2ded4a3d37e2cf8b47c20fe8be02e4514",
+        "width": 768
+      },
+      "renderBundleRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+      "expectedReadiness": {
+        "placementReady": false,
+        "publicReady": false,
+        "visualReady": true
+      }
+    },
+    {
+      "assetId": "asset-toyota-forklift-993cee0e0fbf",
+      "category": "forklift",
+      "folder": "toyota_forklift",
+      "definitionFixture": null,
+      "detail": {
+        "artifactName": "User Library-Toyota Forklift_colored.glb",
+        "byteLength": 297776,
+        "sha256": "993cee0e0fbf4a608c0718d08b8c4c94905aced18c6ef381bc4bdf74f738a41f"
+      },
+      "overview": {
+        "artifactName": "User Library-Toyota Forklift_colored_overview_proxy.glb",
+        "byteLength": 924,
+        "sha256": "26a9faeb0153282cedc1ea84395bc0869e83a787c1073d8cfae61a5bca130d12"
+      },
+      "sourceThumbnail": "thumbnail.png",
+      "thumbnail": {
+        "artifactName": "thumbnail.webp",
+        "byteLength": 13822,
+        "height": 576,
+        "mediaType": "image/webp",
+        "sha256": "34777f23374c547d35ba9b05df48c855c1474492b15985010bf654d022421d46",
+        "width": 768
+      },
+      "renderBundleRevision": "60449b2e602850594b9f7d9575ed919bce50d063b2d605c06fa1fc2c02f64bf1",
+      "expectedReadiness": {
+        "placementReady": false,
+        "publicReady": false,
+        "visualReady": true
+      }
+    },
+    {
+      "assetId": "asset-wa01-e773742615b2",
+      "category": "workstation",
+      "folder": "wa01_workstation",
+      "definitionFixture": "wa01-w48-d36-machine-table.normalized-p0.json",
+      "detail": {
+        "artifactName": "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002_colored.glb",
+        "byteLength": 350816,
+        "sha256": "dd15e9453916b303c6bef406106bcbbded061302778c3139d1221e8c1f44e590"
+      },
+      "overview": {
+        "artifactName": "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002_colored.glb",
+        "byteLength": 350816,
+        "sha256": "dd15e9453916b303c6bef406106bcbbded061302778c3139d1221e8c1f44e590"
+      },
+      "sourceThumbnail": "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002_view_isometric.png",
+      "thumbnail": {
+        "artifactName": "thumbnail.webp",
+        "byteLength": 76712,
+        "height": 683,
+        "mediaType": "image/webp",
+        "sha256": "682b1ec15b35f5057d23686031eb3638646e41d31ae17c54b51175795289f64a",
+        "width": 1518
+      },
+      "renderBundleRevision": "0d063491899f83c08f2906dac2f3639d07769e020ea62dc3fff50ca16b02ae60",
+      "expectedReadiness": {
+        "placementReady": true,
+        "publicReady": false,
+        "visualReady": true
+      }
+    }
+  ]
+}

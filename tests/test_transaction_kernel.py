@@ -512,6 +512,39 @@ def test_json_store_recovers_exact_finalized_retry_after_restart(tmp_path):
     assert retry_adapter.commit_calls == []
 
 
+def test_json_store_retries_transient_missing_parent(tmp_path, monkeypatch):
+    clock = FakeClock()
+    tokens = SequentialTokens()
+    store = JsonReceiptStore(tmp_path / "transient-parent")
+    kernel = _kernel(
+        clock=clock,
+        tokens=tokens,
+        receipt_store=store,
+    )
+    _, _, request = _approve(kernel)
+    original = __import__(
+        "ai_inspector.transactions.stores",
+        fromlist=["tempfile"],
+    ).tempfile.NamedTemporaryFile
+    attempts = 0
+
+    def transient_failure(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise FileNotFoundError("simulated transient parent loss")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "ai_inspector.transactions.stores.tempfile.NamedTemporaryFile",
+        transient_failure,
+    )
+    result = kernel.apply(request, RecordingAdapter())
+
+    assert result.replayed is False
+    assert attempts >= 2
+
+
 def _leave_durable_prepared_record(tmp_path):
     clock = FakeClock()
     tokens = SequentialTokens()
@@ -614,9 +647,7 @@ def test_recovery_adopts_receipt_written_before_finalize_crash(
         kernel.apply(request, adapter)
     receipt_files = list((root / "receipts").glob("*.json"))
     assert len(receipt_files) == 1
-    orphaned_receipt = json.loads(
-        receipt_files[0].read_text(encoding="ascii")
-    )
+    orphaned_receipt = store._read_mapping(receipt_files[0])
 
     clock.advance(7)
     recovery_adapter = RecordingAdapter(

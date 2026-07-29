@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import replace
@@ -359,6 +360,17 @@ def _shared_root_lock(root: Path) -> threading.RLock:
         return lock
 
 
+def _native_fs_path(path: Path) -> str:
+    """Return an extended Windows path for deep transaction stores."""
+
+    value = os.path.abspath(str(path))
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    if value.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + value[2:]
+    return "\\\\?\\" + value
+
+
 class JsonReceiptStore:
     """Canonical atomic receipt store with durable exact-retry recovery."""
 
@@ -428,39 +440,49 @@ class JsonReceiptStore:
 
     @staticmethod
     def _atomic_write(path: Path, data: bytes) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_name: Optional[str] = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=str(path.parent),
-                prefix=f".{path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                temporary_name = handle.name
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary_name, path)
-            temporary_name = None
-        finally:
-            if temporary_name is not None:
-                try:
-                    os.unlink(temporary_name)
-                except FileNotFoundError:
-                    pass
+        for attempt in range(6):
+            temporary_name: Optional[str] = None
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                native_parent = _native_fs_path(path.parent)
+                native_path = _native_fs_path(path)
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=native_parent,
+                    prefix=".txn-",
+                    suffix=".tmp",
+                    delete=False,
+                ) as handle:
+                    temporary_name = handle.name
+                    handle.write(data)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary_name, native_path)
+                temporary_name = None
+                return
+            except (FileNotFoundError, PermissionError):
+                if attempt == 5:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+            finally:
+                if temporary_name is not None:
+                    try:
+                        os.unlink(temporary_name)
+                    except FileNotFoundError:
+                        pass
 
     @staticmethod
     def _read_mapping(path: Path) -> Mapping[str, Any]:
         try:
-            size = path.stat().st_size
+            native_path = _native_fs_path(path)
+            size = os.stat(native_path).st_size
             if size < 1 or size > MAX_RECORD_BYTES:
                 raise TransactionValidationError(
                     "corrupt_transaction_store",
                     "Transaction record size is invalid.",
                 )
-            raw = path.read_bytes()
+            with open(native_path, "rb") as stream:
+                raw = stream.read()
         except FileNotFoundError:
             raise
         except OSError as exc:

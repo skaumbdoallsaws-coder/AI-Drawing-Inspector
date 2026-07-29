@@ -1,0 +1,113 @@
+{
+  "checks": {
+    "actualBoundsFinite": true,
+    "boundedDimensions": true,
+    "boundedOutputBytes": true,
+    "geometryRenderable": true,
+    "inputTransferFinished": true,
+    "localAssetsOnly": true,
+    "nonblankPixels": true,
+    "pinnedThreeRevision": true,
+    "validGlb2": true
+  },
+  "geometry": {
+    "bounds": {
+      "center": [
+        0,
+        1.174812626093626,
+        0.9810749888420105
+      ],
+      "max": [
+        0.5651500225067139,
+        2.4256999492645264,
+        1.962149977684021
+      ],
+      "min": [
+        -0.5651500225067139,
+        -0.07607469707727432,
+        -5.551115123125783e-17
+      ],
+      "radius": 1.687193461622096,
+      "size": [
+        1.1303000450134277,
+        2.5017746463418007,
+        1.962149977684021
+      ]
+    },
+    "meshCount": 23,
+    "primitiveCount": 23,
+    "triangleCount": 3586
+  },
+  "network": {
+    "externalRequestCount": 0,
+    "failedRequestCount": 0,
+    "failedResponseCount": 0,
+    "offlineOnly": true
+  },
+  "output": {
+    "artifactName": "thumbnail.png",
+    "byteLength": 18924,
+    "height": 576,
+    "mediaType": "image/png",
+    "pixelValidation": {
+      "backgroundRgb": [
+        232,
+        237,
+        242
+      ],
+      "changedPixelBounds": [
+        231,
+        72,
+        535,
+        536
+      ],
+      "changedPixelCount": 63200,
+      "changedPixelFraction": 0.14286748,
+      "channelSpan": 253,
+      "nonblank": true
+    },
+    "sha256": "122691949b94d820676cbee0eb16f80df1c67334bb4fc12dcf786fbadfd71a82",
+    "width": 768
+  },
+  "passed": true,
+  "renderer": {
+    "background": "#e8edf2",
+    "browser": "150.0.4078.99",
+    "camera": {
+      "direction": [
+        0.6301408648309204,
+        0.45370142267826263,
+        0.6301408648309204
+      ],
+      "far": 11.345651660285423,
+      "fovDegrees": 35,
+      "near": 3.7532810829859895,
+      "position": [
+        3.9598501081517576,
+        4.025904703962891,
+        4.940925096993768
+      ],
+      "target": [
+        0,
+        1.174812626093626,
+        0.9810749888420105
+      ]
+    },
+    "deviceScaleFactor": 1,
+    "fovDegrees": 35.0,
+    "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
+    "renderCalls": 23,
+    "renderPlanSha256": "4197adbd8d67f022f9c30ced820ec0d71cf7fe8c1dd18196ea23e4f93044026c",
+    "renderedTriangles": 3586,
+    "runnerSha256": "a7e1c921972a1aa633af1e9457fb74f16d58835de3c7b711d31db6f92193f92b",
+    "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
+    "threeRevision": "184"
+  },
+  "schemaVersion": "industrial-asset-thumbnail-evidence-v1",
+  "source": {
+    "artifactName": "User Library-Toyota Forklift_colored.glb",
+    "byteLength": 297776,
+    "containerVersion": 2,
+    "sha256": "993cee0e0fbf4a608c0718d08b8c4c94905aced18c6ef381bc4bdf74f738a41f"
+  }
+}

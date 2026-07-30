@@ -1,0 +1,157 @@
+{
+  "automatedAuditPassed": false,
+  "blockers": [
+    "automated_keyboard_audit_failed",
+    "manual_screen_reader_audit_pending"
+  ],
+  "categoryStatus": {
+    "announcements": {
+      "missingChecks": [],
+      "observedChecks": {
+        "actionAnnouncementObserved": true,
+        "announcementsObserved": true,
+        "liveRegionsPresent": true
+      },
+      "passed": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "contrast": {
+      "missingChecks": [],
+      "observedChecks": {
+        "bothThemesMeasured": true,
+        "controlContrastPasses": true,
+        "controlSamplesPresent": true,
+        "textContrastPasses": true,
+        "textSamplesPresent": true
+      },
+      "passed": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "focus": {
+      "missingChecks": [],
+      "observedChecks": {
+        "allSamplesHaveVisibleIndicator": true,
+        "allSamplesUseFocusVisible": true,
+        "focusScreenshotsCaptured": true,
+        "samplesPresent": true
+      },
+      "passed": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "keyboard": {
+      "missingChecks": [],
+      "observedChecks": {
+        "assetActionWorks": true,
+        "enteredWorkspaceByTab": true,
+        "forwardTraversalProgresses": true,
+        "noKeyboardTrap": true,
+        "reverseTraversalExitsWorkspace": true,
+        "shortcutActionWorks": true,
+        "tabKeyboardActivationWorks": false,
+        "undoActionWorks": true
+      },
+      "passed": false,
+      "reportedPassed": false,
+      "reportedResultMatchesChecks": true
+    },
+    "network": {
+      "missingChecks": [],
+      "observedChecks": {
+        "blockingPolicyInstalled": true,
+        "externalBlockCanaryObserved": true,
+        "noExternalResponses": true,
+        "sameOriginApplicationLoaded": true
+      },
+      "passed": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "reducedMotion": {
+      "missingChecks": [],
+      "observedChecks": {
+        "animationsSuppressed": true,
+        "mediaQueryMatched": true,
+        "transitionsSuppressed": true
+      },
+      "passed": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "runtime": {
+      "missingChecks": [],
+      "observedChecks": {
+        "auditCompleted": true,
+        "noConsoleErrors": true,
+        "noPageErrors": true,
+        "sourceStableDuringAudit": true
+      },
+      "passed": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "semantics": {
+      "missingChecks": [],
+      "observedChecks": {
+        "ariaSnapshotCaptured": true,
+        "busyStatePresent": true,
+        "controlsNamed": true,
+        "duplicateIdsAbsent": true,
+        "panelsNamed": true,
+        "pressedStatePresent": true,
+        "tabStateValid": true,
+        "tabsNamed": true,
+        "toolbarNamed": true,
+        "treeItemsNamed": true,
+        "treeNamed": true,
+        "workspaceNamed": true
+      },
+      "passed": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    }
+  },
+  "claims": {
+    "automatedBrowserAudit": true,
+    "manualScreenReaderAudit": false,
+    "screenReaderSimulation": false
+  },
+  "contrastRecordsValid": true,
+  "generatedAtUtc": "2026-07-30T04:45:47Z",
+  "integrityFindings": [],
+  "manualScreenReaderAudit": {
+    "artifact": {
+      "byteLength": 3156,
+      "path": "docs/facility-layout-manual-screen-reader-checklist.md",
+      "sha256": "dd5e283f3052803741a989184f98cc4250bdfa1d664f715edb14d9eb98d2017c"
+    },
+    "pendingMarkerPresent": true,
+    "present": true,
+    "status": "pending"
+  },
+  "rawArtifact": {
+    "byteLength": 262088,
+    "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-raw.json",
+    "sha256": "fc499489be12d303fb6f113e0330913e1d843bd1d4872cb9b7a5b97d8e23353a"
+  },
+  "releaseGateMet": false,
+  "releaseGateReason": "Automated browser evidence cannot clear the pending manual screen-reader audit.",
+  "schemaVersion": "facility-layout-accessibility-summary-v1",
+  "scope": "Automated keyboard, focus, semantics, live-region, reduced-motion, contrast, network, and runtime checks in the real Facility Layout workspace.",
+  "sourceBinding": {
+    "aggregateMatches": true,
+    "algorithmsMatch": true,
+    "capturedAggregateSha256": "4ef1ab3e5e9efa8ff786d686f5de956f65dbc5adbb3a995ab2f710e839d13e2c",
+    "currentAggregateSha256": "4ef1ab3e5e9efa8ff786d686f5de956f65dbc5adbb3a995ab2f710e839d13e2c",
+    "duplicatePaths": [],
+    "matches": true,
+    "missingPaths": [],
+    "present": true,
+    "requiredInputsExact": true,
+    "stalePaths": [],
+    "unexpectedPaths": []
+  },
+  "status": "automated_audit_failed"
+}

@@ -153,6 +153,7 @@
                 session: session,
                 layoutRuntime: Layout,
                 assetCatalog: options.assetCatalog || [],
+                capabilities: options.capabilities || {},
                 gridSize: options.gridSize,
                 topPlanOptions: options.topPlanOptions,
                 threeRuntime: options.threeRuntime

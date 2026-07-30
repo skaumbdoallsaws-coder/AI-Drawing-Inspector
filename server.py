@@ -23,6 +23,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import importlib.util
+import ipaddress
 import inspect
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Optional, List, Dict, Any, Tuple, Callable, Awaitable
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -158,6 +160,19 @@ from ai_inspector.process_map import (
     save_process_map_template,
     show_process_map_proposal,
     suggest_process_map_connections,
+)
+from ai_inspector.facility_layout.agent_runtime import (
+    FacilityLayoutAgentRuntimeError,
+)
+from ai_inspector.facility_layout.errors import FacilityNotFoundError
+from ai_inspector.facility_layout.observation import (
+    facility_layout_read_tool_specs,
+)
+from ai_inspector.facility_layout.semantic_plan import (
+    SEMANTIC_FACILITY_PREVIEW_TOOL,
+    SemanticFacilityPlanError,
+    canonicalize_semantic_facility_plan,
+    facility_layout_preview_tool_spec,
 )
 
 # Configure logging
@@ -811,22 +826,200 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for local development
+def _configured_cors_origins() -> list[str]:
+    return [
+        origin.strip().rstrip("/")
+        for origin in os.getenv("INSPECTORPRO_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+
+
+def _configured_allowed_hosts() -> set[str]:
+    return {
+        host.strip().lower().rstrip(".")
+        for host in os.getenv("INSPECTORPRO_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    }
+
+
+def _normalized_http_origin(value: str) -> tuple[str, str] | None:
+    candidate = str(value or "").strip().rstrip("/")
+    if not candidate:
+        return None
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    hostname = parsed.hostname.lower().rstrip(".")
+    authority = hostname
+    if ":" in hostname:
+        authority = f"[{hostname}]"
+    if port is not None:
+        authority = f"{authority}:{port}"
+    return f"{parsed.scheme.lower()}://{authority}", authority
+
+
+def _normalized_request_authority(value: str) -> str | None:
+    candidate = str(value or "").strip()
+    if not candidate or any(char in candidate for char in "/?#@"):
+        return None
+    try:
+        parsed = urlsplit(f"//{candidate}")
+        port = parsed.port
+    except ValueError:
+        return None
+    if not parsed.hostname or parsed.username is not None:
+        return None
+    hostname = parsed.hostname.lower().rstrip(".")
+    authority = hostname
+    if ":" in hostname:
+        authority = f"[{hostname}]"
+    if port is not None:
+        authority = f"{authority}:{port}"
+    return authority
+
+
+def _authority_hostname(authority: str) -> str | None:
+    try:
+        return urlsplit(f"//{authority}").hostname
+    except ValueError:
+        return None
+
+
+def _is_loopback_authority(authority: str) -> bool:
+    hostname = _authority_hostname(authority)
+    if not hostname:
+        return False
+    if hostname.lower().rstrip(".") == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _authority_is_explicitly_allowed(authority: str) -> bool:
+    allowed = _configured_allowed_hosts()
+    return (
+        authority.lower().rstrip(".") in allowed
+        or str(_authority_hostname(authority) or "").lower().rstrip(".")
+        in allowed
+    )
+
+
+# Same-origin product traffic does not need CORS. Explicit deployments may add
+# trusted origins, while loopback ports remain available for local development.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_configured_cors_origins(),
+    allow_origin_regex=(
+        r"^https?://(?:127(?:\.\d{1,3}){3}|localhost|\[::1\])"
+        r"(?::\d+)?$"
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+def _request_origin_is_trusted(request: Request) -> bool:
+    raw_origin = str(request.headers.get("origin") or "").strip()
+    if not raw_origin:
+        return True
+
+    normalized = _normalized_http_origin(raw_origin)
+    if normalized is None:
+        return False
+    origin, origin_authority = normalized
+    configured_origins = {
+        normalized_origin[0].casefold()
+        for value in _configured_cors_origins()
+        if (normalized_origin := _normalized_http_origin(value)) is not None
+    }
+    if origin.casefold() in configured_origins:
+        return True
+    if (
+        _is_loopback_authority(origin_authority)
+        or _authority_is_explicitly_allowed(origin_authority)
+    ):
+        return True
+
+    request_authority = _normalized_request_authority(
+        request.headers.get("host", "")
+    )
+    if (
+        request_authority is None
+        or not _authority_is_explicitly_allowed(request_authority)
+    ):
+        return False
+    request_origin = f"{request.url.scheme.lower()}://{request_authority}"
+    return origin.casefold() == request_origin.casefold()
+
+
+def _is_facility_authority_path(path: str) -> bool:
+    return (
+        path.startswith("/api/facility-")
+        or path.startswith("/api/industrial-assets")
+        or path.startswith("/api/training/facility-layout")
+    )
+
+
+@app.middleware("http")
+async def _facility_layout_same_origin_boundary(request: Request, call_next):
+    if (
+        _is_facility_authority_path(request.url.path)
+        and not _request_origin_is_trusted(request)
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "facility_origin_forbidden",
+                    "message": (
+                        "Facility Layout requests must originate from the "
+                        "InspectorPro application or an explicitly trusted "
+                        "origin."
+                    ),
+                }
+            },
+        )
+    return await call_next(request)
+
 # Facility Layout uses the same principal-bound domain router in the product
 # and in its tests. Local mode provisions only the explicit local principal;
 # it does not bypass the domain authorization or revision checks.
 from ai_inspector.facility_layout.host import (  # noqa: E402
+    LOCAL_SITE_ID,
     LocalFacilityLayoutHost,
 )
+from ai_inspector.facility_layout.feature_flags import (  # noqa: E402
+    FacilityLayoutFeatureFlags,
+)
+from ai_inspector.facility_layout.identity import (  # noqa: E402
+    FacilityPrincipalResolver,
+    maker_checker_required_from_environment,
+)
 
+_FACILITY_REQUIRE_DISTINCT_APPROVER = (
+    maker_checker_required_from_environment()
+)
+_FACILITY_PRINCIPAL_RESOLVER = (
+    FacilityPrincipalResolver.from_environment(
+        site_id=LOCAL_SITE_ID,
+        require_authenticated=_FACILITY_REQUIRE_DISTINCT_APPROVER,
+    )
+)
 _FACILITY_LAYOUT_HOST = LocalFacilityLayoutHost(
     Path(
         os.getenv(
@@ -835,6 +1028,9 @@ _FACILITY_LAYOUT_HOST = LocalFacilityLayoutHost(
         )
     ),
     process_map_root=REPO_ROOT / "generated" / "training",
+    feature_flags=FacilityLayoutFeatureFlags.from_environment(),
+    require_distinct_approver=_FACILITY_REQUIRE_DISTINCT_APPROVER,
+    principal_resolver=_FACILITY_PRINCIPAL_RESOLVER,
 )
 app.include_router(_FACILITY_LAYOUT_HOST.create_router())
 
@@ -15301,9 +15497,14 @@ def _openai_native_tool_specs(
             "name": str(spec.get("name") or ""),
             "description": str(spec.get("description") or ""),
             "parameters": schema,
-            # Selected schemas have optional fields, so strict mode would
-            # reject valid calls before InspectorPro's own guardrails run.
-            "strict": False,
+            # The Facility Layout semantic plan is fully closed and uses
+            # nullable fields where needed. Provider enforcement prevents a
+            # second, model-invented planning vocabulary from crossing the
+            # deterministic validation boundary.
+            "strict": (
+                str(spec.get("name") or "")
+                == SEMANTIC_FACILITY_PREVIEW_TOOL
+            ),
         })
     return [spec for spec in translated if spec["name"]]
 
@@ -16428,6 +16629,24 @@ AGENT_PROMPTS = {
 
 # === Phase 4B: Tool Specs + Canonical Tool Calls ===
 
+_FACILITY_LAYOUT_READ_AGENT_TOOL_SPECS = [
+    {
+        "name": spec["name"],
+        "description": spec["description"],
+        "args": {},
+        "input_schema": copy.deepcopy(spec["input_schema"]),
+    }
+    for spec in facility_layout_read_tool_specs()
+]
+_FACILITY_LAYOUT_PREVIEW_AGENT_TOOL_SPEC = {
+    "name": facility_layout_preview_tool_spec()["name"],
+    "description": facility_layout_preview_tool_spec()["description"],
+    "args": {},
+    "input_schema": copy.deepcopy(
+        facility_layout_preview_tool_spec()["input_schema"]
+    ),
+}
+
 AGENT_TOOL_SPECS = {
     "inspector": [
         {"name": "run_inspection", "description": "Run drawing inspection against the loaded profile", "args": {}},
@@ -16438,6 +16657,8 @@ AGENT_TOOL_SPECS = {
         {"name": "fai_fill", "description": "Fill FAI measured values", "args": {"values": "dict of char_number -> measured_value"}},
         {"name": "fai_tol", "description": "Set FAI tolerances", "args": {"values": "dict of char_number -> tolerance_value"}},
         {"name": "ui_actions", "description": "Declarative UI action block validated against UI action contract v1 -- used for deterministic CAD viewport actions and non-persistent process-map result selection.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
+        *_FACILITY_LAYOUT_READ_AGENT_TOOL_SPECS,
+        _FACILITY_LAYOUT_PREVIEW_AGENT_TOOL_SPEC,
     ],
     "deviation-analyst": [
         {"name": "highlight_dimensions", "description": "Highlight dimensions on the drawing", "args": {"dim_keys": "list of dim_key strings"}},
@@ -16452,6 +16673,8 @@ AGENT_TOOL_SPECS = {
         {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
         {"name": "ui_actions", "description": "Chat-first action registry validated against UI action contract v1 -- workspace plus ordered CAD viewport or non-persistent process-map selection actions.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
         {"name": "create_edit_session", "description": "Create an edit-session audit record from a cad-edit-handoff payload; does not execute CAD edits.", "args": {"handoffPayload": "cad-edit-handoff payload object", "notes": "optional note string"}},
+        *_FACILITY_LAYOUT_READ_AGENT_TOOL_SPECS,
+        _FACILITY_LAYOUT_PREVIEW_AGENT_TOOL_SPEC,
     ],
     "parts-finder": [
         {"name": "highlight_parts", "description": "Highlight assembly parts in 3D", "args": {"part_numbers": "list of part numbers"}},
@@ -16686,6 +16909,48 @@ def apply_compiled_skill_tool_policy(
         and isinstance(skill_prompt_plan.get("workflow"), dict)
         else {}
     )
+    if workflow.get("id") == "facility-layout-generation":
+        runtime_tool_policy = (
+            skill_prompt_plan.get("runtime_tool_policy")
+            if isinstance(skill_prompt_plan, dict)
+            and isinstance(
+                skill_prompt_plan.get("runtime_tool_policy"),
+                dict,
+            )
+            else {}
+        )
+        mode = str(runtime_tool_policy.get("mode") or "")
+        read_tools = {
+            item["name"]
+            for item in _FACILITY_LAYOUT_READ_AGENT_TOOL_SPECS
+        }
+        allowed = set(read_tools)
+        if mode == "semantic_generation":
+            allowed.add(SEMANTIC_FACILITY_PREVIEW_TOOL)
+        filtered = []
+        preview_seen = False
+        for call in tool_calls or []:
+            if (
+                not isinstance(call, dict)
+                or call.get("name") not in allowed
+            ):
+                continue
+            if call.get("name") == SEMANTIC_FACILITY_PREVIEW_TOOL:
+                if preview_seen:
+                    continue
+                preview_seen = True
+            filtered.append(call)
+        warnings = [
+            "skill_policy_dropped:"
+            + (
+                str(call.get("name"))
+                if isinstance(call, dict)
+                else "invalid"
+            )
+            for call in tool_calls or []
+            if call not in filtered
+        ]
+        return filtered, warnings
     if workflow.get("id") != "process-map-analysis":
         return tool_calls, []
     allowed_action_types = {
@@ -16709,6 +16974,96 @@ def apply_compiled_skill_tool_policy(
             continue
         filtered.append(call)
     return filtered, warnings
+
+
+def _is_facility_layout_generation_request(message: str) -> bool:
+    normalized = re.sub(
+        r"\s+",
+        " ",
+        str(message or "").strip().lower(),
+    )
+    if not normalized:
+        return False
+    action = re.search(
+        r"\b(build|create|generate|design|arrange|propose|lay\s*out|"
+        r"add|place|optimi[sz]e|rearrange)\b",
+        normalized,
+    )
+    scope = re.search(
+        r"\b(facility|warehouse|plant|factory|workcell|work\s*cell|"
+        r"manufacturing\s*cell|layout|rack|machine|production\s*line)\b",
+        normalized,
+    )
+    preview = re.search(r"\b(preview|proposal|ghost)\b", normalized)
+    return bool((action and scope) or (preview and scope))
+
+
+def _has_trusted_facility_layout_context(ctx: Any) -> bool:
+    return bool(
+        isinstance(ctx, dict)
+        and isinstance(ctx.get("facility_layout_state"), dict)
+        and isinstance(ctx.get("facility_layout_evidence"), dict)
+        and isinstance(ctx.get("facility_layout_digest"), dict)
+    )
+
+
+def _apply_facility_layout_request_tool_policy(
+    skill_prompt_plan: Optional[Dict[str, Any]],
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    workflow = (
+        skill_prompt_plan.get("workflow")
+        if isinstance(skill_prompt_plan, dict)
+        and isinstance(skill_prompt_plan.get("workflow"), dict)
+        else {}
+    )
+    if workflow.get("id") != "facility-layout-generation":
+        return skill_prompt_plan
+    constrained = copy.deepcopy(skill_prompt_plan)
+    read_tools = [
+        item["name"]
+        for item in _FACILITY_LAYOUT_READ_AGENT_TOOL_SPECS
+    ]
+    if _is_facility_layout_generation_request(message):
+        constrained["allowed_tools"] = [
+            *read_tools,
+            SEMANTIC_FACILITY_PREVIEW_TOOL,
+        ]
+        constrained["runtime_tool_policy"] = {
+            "mode": "semantic_generation",
+            "reason": "explicit_facility_layout_preview_request",
+        }
+        constrained["prompt"] = str(constrained.get("prompt") or "") + (
+            "\n\nFACILITY LAYOUT GENERATION OVERRIDE\n"
+            "- Observe the trusted revision-bound Facility Layout state first.\n"
+            "- Use bounded read tools only when the digest lacks an exact detail.\n"
+            "- Produce one complete Semantic Facility Layout Plan and call "
+            "build_facility_layout_preview exactly once.\n"
+            "- Copy the exact Semantic Facility Layout Plan v1 field names "
+            "from the tool schema; do not invent a different vocabulary.\n"
+            "- Never emit coordinates, transforms, route points, screen pixels, "
+            "camera values, low-level operations, approval, or commit claims.\n"
+            "- Deterministic placement, routing, validation, and transaction "
+            "binding retain sole spatial and write authority.\n"
+            "- The result is a synchronized 2D/3D ghost preview, not a saved "
+            "layout. Report assumptions and unresolved authority gaps.\n"
+        )
+    else:
+        constrained["allowed_tools"] = read_tools
+        constrained["runtime_tool_policy"] = {
+            "mode": "read_only_observation",
+            "reason": "facility_layout_information_request",
+        }
+        constrained["prompt"] = str(constrained.get("prompt") or "") + (
+            "\n\nREAD-ONLY FACILITY LAYOUT OVERRIDE\n"
+            "- Answer from trusted Facility Layout context and bounded read "
+            "tools only.\n"
+            "- Do not call build_facility_layout_preview and do not claim any "
+            "layout, proposal, approval, or receipt changed.\n"
+            "- Leave unsupported safety, capacity, clearance, and utility "
+            "claims unverified.\n"
+        )
+    return constrained
 
 
 def extract_tool_calls_from_response(text: str, agent_type: str) -> tuple:
@@ -16824,6 +17179,14 @@ def build_native_tool_specs(
         specs = [spec for spec in specs if spec.get("name") in allowed_tools]
     native = []
     for spec in specs:
+        declared_schema = spec.get("input_schema")
+        if isinstance(declared_schema, dict):
+            native.append({
+                "name": spec["name"],
+                "description": spec["description"],
+                "input_schema": copy.deepcopy(declared_schema),
+            })
+            continue
         properties: Dict[str, Any] = {}
         required = []
         for key, description in (spec.get("args") or {}).items():
@@ -17082,6 +17445,13 @@ def normalize_agent_context(ctx: dict) -> dict:
     flat.pop("process_map_graph", None)
     flat.pop("process_map_digest", None)
     flat.pop("process_map_ref", None)
+    flat.pop("facility_layout_ref", None)
+    flat.pop("facility_layout_live_state", None)
+    flat.pop("facility_layout_proposal_id", None)
+    flat.pop("facility_layout_receipt_ids", None)
+    flat.pop("facility_layout_state", None)
+    flat.pop("facility_layout_evidence", None)
+    flat.pop("facility_layout_digest", None)
 
     # Reconstruct ALL flat keys from structured attachments
     if attachments:
@@ -17092,6 +17462,7 @@ def normalize_agent_context(ctx: dict) -> dict:
         compare = attachments.get("compare", {})
         assembly = attachments.get("assembly", {})
         process_map = attachments.get("process_map", {})
+        facility_layout = attachments.get("facility_layout", {})
         session = attachments.get("session", {})
         user = attachments.get("user", {}) or {}
 
@@ -17205,6 +17576,49 @@ def normalize_agent_context(ctx: dict) -> dict:
         process_map_ref = normalize_process_map_reference(process_map)
         if process_map_ref:
             flat["process_map_ref"] = process_map_ref
+
+        if isinstance(facility_layout, dict):
+            site_id = str(facility_layout.get("siteId") or "").strip()
+            layout_id = str(
+                facility_layout.get("layoutId") or ""
+            ).strip()
+            layout_revision = str(
+                facility_layout.get("revision") or ""
+            ).strip()
+            stable_id = re.compile(
+                r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$"
+            )
+            valid_revision = bool(
+                re.fullmatch(r"[0-9a-f]{64}", layout_revision)
+            )
+            if (
+                stable_id.fullmatch(site_id)
+                and stable_id.fullmatch(layout_id)
+                and valid_revision
+            ):
+                flat["facility_layout_ref"] = {
+                    "siteId": site_id,
+                    "layoutId": layout_id,
+                    "revision": layout_revision,
+                }
+                live_state = facility_layout.get("state")
+                if isinstance(live_state, dict):
+                    flat["facility_layout_live_state"] = copy.deepcopy(
+                        live_state
+                    )
+                proposal_id = facility_layout.get("proposalId")
+                if isinstance(proposal_id, str) and stable_id.fullmatch(
+                    proposal_id
+                ):
+                    flat["facility_layout_proposal_id"] = proposal_id
+                receipt_ids = facility_layout.get("receiptIds")
+                if isinstance(receipt_ids, list):
+                    flat["facility_layout_receipt_ids"] = [
+                        item
+                        for item in receipt_ids[-6:]
+                        if isinstance(item, str)
+                        and stable_id.fullmatch(item)
+                    ]
 
         # Session
         if session.get("paused_walkthrough"):
@@ -17327,6 +17741,101 @@ def _resolve_trusted_process_map_context(ctx: Dict[str, Any]) -> Optional[Dict[s
     ctx["process_map_ref"] = resolved["reference"]
     ctx["process_map_graph"] = resolved["graph"]
     return resolved
+
+
+def _resolve_trusted_facility_layout_context(
+    ctx: Dict[str, Any],
+    http_request: Optional[Request] = None,
+) -> Optional[Dict[str, Any]]:
+    """Replace the browser Facility Layout reference with server authority."""
+
+    ctx.pop("facility_layout_state", None)
+    ctx.pop("facility_layout_evidence", None)
+    ctx.pop("facility_layout_digest", None)
+    reference = ctx.get("facility_layout_ref")
+    if not isinstance(reference, dict):
+        return None
+    live_facts = ctx.pop("facility_layout_live_state", None)
+    proposal_id = ctx.pop("facility_layout_proposal_id", None)
+    receipt_ids = ctx.pop("facility_layout_receipt_ids", None)
+    try:
+        if http_request is not None:
+            principal = _FACILITY_LAYOUT_HOST.resolve_principal(
+                http_request
+            )
+        elif _FACILITY_LAYOUT_HOST.principal_mode == "local":
+            principal = _FACILITY_LAYOUT_HOST.principal()
+        else:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": {
+                        "code": "facility_authentication_required",
+                        "message": (
+                            "A valid Facility Layout pilot identity is "
+                            "required."
+                        ),
+                    }
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        bundle = _FACILITY_LAYOUT_HOST.agent_runtime.resolve_context(
+            principal,
+            site_id=str(reference.get("siteId") or ""),
+            layout_id=str(reference.get("layoutId") or ""),
+            expected_revision=str(reference.get("revision") or ""),
+            live_facts=(
+                live_facts
+                if isinstance(live_facts, dict)
+                else None
+            ),
+            proposal_id=(
+                str(proposal_id)
+                if proposal_id
+                else None
+            ),
+            receipt_ids=(
+                receipt_ids
+                if isinstance(receipt_ids, list)
+                else None
+            ),
+        )
+    except HTTPException:
+        raise
+    except FacilityLayoutAgentRuntimeError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": {
+                    "code": exc.code,
+                    "message": str(exc),
+                    "details": copy.deepcopy(exc.details),
+                }
+            },
+        ) from exc
+    except FacilityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Facility Layout not found",
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "agent Facility Layout resolution failed: %s",
+            exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Facility Layout context could not be loaded",
+        ) from exc
+    ctx["facility_layout_ref"] = {
+        "siteId": bundle.state["identity"]["siteId"],
+        "layoutId": bundle.state["identity"]["layoutId"],
+        "revision": bundle.state["identity"]["revision"],
+    }
+    ctx["facility_layout_state"] = bundle.state
+    ctx["facility_layout_evidence"] = bundle.evidence
+    ctx["facility_layout_digest"] = bundle.digest
+    return ctx["facility_layout_ref"]
 
 
 # -- Mode-aware Sage (mode contract) ----------------------------------------
@@ -20497,7 +21006,11 @@ Rules:
 _SKILL_PRODUCTION_MIN_WORKFLOW_CONFIDENCE = 0.75
 _SKILL_PRODUCTION_MIN_SKILL_CONFIDENCE = 0.70
 _SKILL_PRODUCTION_WORKFLOWS = frozenset(
-    {"supplier-fai-disposition", "process-map-analysis"}
+    {
+        "supplier-fai-disposition",
+        "process-map-analysis",
+        "facility-layout-generation",
+    }
 )
 _AGENT_SKILL_RUNTIME_LOCK = threading.Lock()
 _AGENT_SKILL_RUNTIME_CACHE: Optional[Tuple[WorkflowRegistry, SkillRegistry]] = None
@@ -20807,6 +21320,59 @@ def _safe_fai_compiler_route(mode: str) -> Dict[str, Any]:
     }
 
 
+def _required_facility_layout_workflow(message: str) -> Optional[str]:
+    normalized = re.sub(
+        r"\s+",
+        " ",
+        str(message or "").strip().lower(),
+    )
+    if _is_facility_layout_generation_request(normalized):
+        return "facility-layout-generation"
+    if re.search(
+        r"\b(facility|warehouse|plant|factory|workcell|work\s*cell|"
+        r"manufacturing\s*cell|layout|rack|aisle|machine|route|zone|"
+        r"clearance|forklift|utility)\b",
+        normalized,
+    ):
+        return "facility-layout-generation"
+    return None
+
+
+def _safe_facility_layout_route(message: str) -> Dict[str, Any]:
+    generating = _is_facility_layout_generation_request(message)
+    return {
+        "route_version": 2,
+        "speech_act": "command" if generating else "analyze",
+        "primary_workflow": "facility-layout-generation",
+        "continue_existing_workflow": False,
+        "workflow_confidence": 1.0,
+        "intents": [{
+            "kind": (
+                "generate_facility_layout"
+                if generating
+                else "inspect_facility_layout"
+            ),
+            "targets": [{"kind": "facility_layout", "id": None}],
+            "requested_effects": [],
+        }],
+        "skill_candidates": [{
+            "id": "generate-facility-layout",
+            "role": "primary",
+            "confidence": 1.0,
+        }],
+        "requested_side_effects": {
+            "viewport_write": False,
+            "asset_write": False,
+            "system_write": False,
+        },
+        "needs_clarification": False,
+        "_compiler_fallback": {
+            "reason": "semantic_route_unavailable",
+            "mode": "training",
+        },
+    }
+
+
 def _is_process_map_analysis_request(message: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(message or "").strip().lower())
     graph_request = bool(re.search(
@@ -20974,6 +21540,107 @@ def ensure_process_map_scope_tool_call(
         action.get("scope_occurrence_id") or "current selection",
     )
     return synthesized, warnings, True
+
+
+def ensure_facility_layout_preview_tool_call(
+    tool_calls: list,
+    skill_prompt_plan: Optional[Dict[str, Any]],
+    ctx: Optional[Dict[str, Any]],
+    message: str,
+    agent_type: str,
+) -> tuple[list, list[str], bool]:
+    """Canonicalize one Facility Layout preview call against trusted state."""
+
+    workflow = (
+        skill_prompt_plan.get("workflow")
+        if isinstance(skill_prompt_plan, dict)
+        and isinstance(skill_prompt_plan.get("workflow"), dict)
+        else {}
+    )
+    has_preview_call = any(
+        isinstance(call, dict)
+        and call.get("name") == SEMANTIC_FACILITY_PREVIEW_TOOL
+        for call in tool_calls or []
+    )
+    if (
+        not _is_facility_layout_generation_request(message)
+        or (
+            workflow.get("id") != "facility-layout-generation"
+            and not has_preview_call
+        )
+    ):
+        return tool_calls, [], False
+    state = (
+        ctx.get("facility_layout_state")
+        if isinstance(ctx, dict)
+        else None
+    )
+    evidence = (
+        ctx.get("facility_layout_evidence")
+        if isinstance(ctx, dict)
+        else None
+    )
+    if state is None or evidence is None:
+        return [], ["facility_semantic_context_unavailable"], False
+    raw_plan: Dict[str, Any] = {}
+    for call in tool_calls or []:
+        if (
+            isinstance(call, dict)
+            and call.get("name") == SEMANTIC_FACILITY_PREVIEW_TOOL
+        ):
+            args = call.get("args")
+            if isinstance(args, dict) and isinstance(
+                args.get("semantic_plan"),
+                dict,
+            ):
+                raw_plan = copy.deepcopy(args["semantic_plan"])
+            break
+    try:
+        semantic_plan, repaired = canonicalize_semantic_facility_plan(
+            raw_plan,
+            user_message=message,
+            state=state,
+            evidence=evidence,
+        )
+    except SemanticFacilityPlanError as exc:
+        logger.warning(
+            "[SkillRuntime] Facility semantic preview rejected: %s (%s)",
+            exc,
+            exc.code,
+        )
+        return [], [f"facility_semantic_plan_rejected:{exc.code}"], False
+    synthesized, warnings = apply_tool_guardrails(
+        [{
+            "name": SEMANTIC_FACILITY_PREVIEW_TOOL,
+            "args": {"semantic_plan": semantic_plan},
+        }],
+        agent_type,
+        "facility_semantic_plan_canonicalizer",
+    )
+    policy_warnings = []
+    if workflow.get("id") == "facility-layout-generation":
+        synthesized, policy_warnings = apply_compiled_skill_tool_policy(
+            synthesized,
+            skill_prompt_plan,
+        )
+    elif synthesized:
+        policy_warnings.append("facility_workflow_route_canonicalized")
+    warnings = list(warnings or []) + list(policy_warnings or [])
+    if repaired:
+        warnings.append("facility_semantic_plan_canonicalized")
+    if not synthesized:
+        return [], warnings + ["facility_semantic_plan_dropped"], False
+    logger.info(
+        "[SkillRuntime] prepared Facility Layout preview plan %s "
+        "(%d resource items, %d placements)",
+        semantic_plan["planId"],
+        len(semantic_plan["selectedAssets"]),
+        sum(
+            int(item["quantity"])
+            for item in semantic_plan["selectedAssets"]
+        ),
+    )
+    return synthesized[:1], warnings, repaired or not bool(tool_calls)
 
 
 def _safe_process_map_compiler_route() -> Dict[str, Any]:
@@ -21190,6 +21857,60 @@ _SKILL_WORKFLOW_STATE_SHADOW_STORE = WorkflowStateStore(
 def _workflow_asset_fingerprint(ctx: Optional[Dict[str, Any]]) -> str:
     """Compute continuity identity from asset IDs only, never from viewport state."""
     ctx = ctx if isinstance(ctx, dict) else {}
+    facility_state = (
+        ctx.get("facility_layout_state")
+        if isinstance(ctx.get("facility_layout_state"), dict)
+        else {}
+    )
+    facility_identity = (
+        facility_state.get("identity")
+        if isinstance(facility_state.get("identity"), dict)
+        else {}
+    )
+    if (
+        facility_identity.get("siteId")
+        and facility_identity.get("layoutId")
+        and facility_identity.get("revision")
+    ):
+        canonical = json.dumps(
+            {
+                "facility_layout": {
+                    "site_id": _skill_route_text(
+                        facility_identity.get("siteId"),
+                        128,
+                    ),
+                    "layout_id": _skill_route_text(
+                        facility_identity.get("layoutId"),
+                        128,
+                    ),
+                    "revision": _skill_route_text(
+                        facility_identity.get("revision"),
+                        128,
+                    ),
+                    "shell_revision": _skill_route_text(
+                        (
+                            facility_state.get("dependencyRevisions")
+                            or {}
+                        ).get("shellRevision"),
+                        128,
+                    ),
+                    "policy_revision": _skill_route_text(
+                        (
+                            facility_state.get("dependencyRevisions")
+                            or {}
+                        ).get("policySetRevision"),
+                        128,
+                    ),
+                }
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        return (
+            "asset-v1:"
+            + hashlib.sha256(canonical.encode("ascii")).hexdigest()[:32]
+        )
     process_map_graph = (
         ctx.get("process_map_graph")
         if isinstance(ctx.get("process_map_graph"), dict)
@@ -21687,6 +22408,105 @@ def _skill_route_context(ctx: Optional[Dict]) -> Tuple[set[str], set[str], Dict[
             ],
         }
 
+    facility_digest = (
+        ctx.get("facility_layout_digest")
+        if isinstance(ctx.get("facility_layout_digest"), dict)
+        else {}
+    )
+    facility_identity = (
+        facility_digest.get("identity")
+        if isinstance(facility_digest.get("identity"), dict)
+        else {}
+    )
+    facility_layout_id = _skill_route_text(
+        facility_identity.get("layoutId"),
+        128,
+    )
+    if facility_layout_id:
+        assets.add("facility_layout")
+        contexts.update(
+            {
+                "facility_layout.digest",
+                "facility_layout.state",
+                "facility_layout.evidence",
+            }
+        )
+        facts["target_index"].setdefault("facility_layout", []).append(
+            facility_layout_id
+        )
+        facts["target_index"].setdefault("facility_zone", [])
+        facts["target_index"].setdefault("facility_entity", [])
+        facts["target_index"].setdefault("industrial_asset", [])
+        facility_state = (
+            ctx.get("facility_layout_state")
+            if isinstance(ctx.get("facility_layout_state"), dict)
+            else {}
+        )
+        for zone in facility_digest.get("zoneSummaries", [])[:80]:
+            if isinstance(zone, dict) and zone.get("zoneId"):
+                facts["target_index"]["facility_zone"].append(
+                    _skill_route_text(zone.get("zoneId"), 128)
+                )
+        for descriptor in facility_digest.get("readDescriptors", []):
+            if not isinstance(descriptor, dict):
+                continue
+            for item in descriptor.get("sampleIds", [])[:20]:
+                identifier = _skill_route_text(item, 128)
+                if identifier:
+                    facts["target_index"]["facility_entity"].append(
+                        identifier
+                    )
+        for asset in facility_state.get("assets", [])[:120]:
+            if isinstance(asset, dict) and asset.get("assetId"):
+                facts["target_index"]["industrial_asset"].append(
+                    _skill_route_text(asset.get("assetId"), 128)
+                )
+        facts["facility_layout"] = {
+            "site_id": _skill_route_text(
+                facility_identity.get("siteId"),
+                128,
+            ),
+            "layout_id": facility_layout_id,
+            "display_name": _skill_route_text(
+                facility_identity.get("displayName"),
+                160,
+            ),
+            "revision": _skill_route_text(
+                facility_identity.get("revision"),
+                128,
+            ),
+            "saved_state_current": bool(
+                facility_digest.get("savedStateCurrent")
+            ),
+            "counts": copy.deepcopy(
+                facility_digest.get("counts")
+                if isinstance(facility_digest.get("counts"), dict)
+                else {}
+            ),
+            "finding_summary": copy.deepcopy(
+                facility_digest.get("findingSummary")
+                if isinstance(
+                    facility_digest.get("findingSummary"),
+                    dict,
+                )
+                else {}
+            ),
+            "active_proposal": bool(
+                facility_digest.get("activeProposal")
+            ),
+            "stale_dependency_count": len(
+                facility_digest.get("staleDependencies") or []
+            ),
+            "capabilities": copy.deepcopy(
+                facility_digest.get("capabilitiesAvailable")
+                if isinstance(
+                    facility_digest.get("capabilitiesAvailable"),
+                    dict,
+                )
+                else {}
+            ),
+        }
+
     for kind, values in facts["target_index"].items():
         facts["target_index"][kind] = list(dict.fromkeys(str(value) for value in values if str(value)))
     return assets, contexts, facts
@@ -21923,7 +22743,10 @@ def _submit_skill_route_shadow(
 
 
 @app.post("/api/internal/agent-skills/test-route")
-async def agent_skill_test_route(request: AgentSkillTestRouteRequest):
+async def agent_skill_test_route(
+    request: AgentSkillTestRouteRequest,
+    http_request: Request,
+):
     """Run one semantic route synchronously without applying its output."""
     settings = _agent_skill_runtime_settings()
     if not (settings.enabled or settings.shadow):
@@ -21933,6 +22756,7 @@ async def agent_skill_test_route(request: AgentSkillTestRouteRequest):
     normalized = normalize_agent_context(request.inspection_context or {})
     ctx = normalized["flat"]
     _resolve_trusted_process_map_context(ctx)
+    _resolve_trusted_facility_layout_context(ctx, http_request)
     catalog, facts = _build_skill_route_catalog(ctx, "sage")
     route_cache = (
         ExactRouteCache(max_entries=1, ttl_seconds=1.0)
@@ -22455,7 +23279,10 @@ async def _deterministic_semantic_chat_result(
 
 
 @app.post("/api/agent/chat")
-async def agent_chat(request: AgentChatRequest):
+async def agent_chat(
+    request: AgentChatRequest,
+    http_request: Request,
+):
     """Chat with InspectorPro's agent through the configured answer provider."""
     _answer_provider = _sage_answer_provider_config(request.agent_type)
     # The router and viewport-intent classifier retain their existing
@@ -22562,6 +23389,7 @@ async def agent_chat(request: AgentChatRequest):
         normalized = normalize_agent_context(raw_ctx)
         ctx = normalized["flat"]  # flat dict with all legacy keys
         _resolve_trusted_process_map_context(ctx)
+        _resolve_trusted_facility_layout_context(ctx, http_request)
         ctx["_user_message"] = request.message
         _fai_request = _apply_fai_request_targeting(ctx, request.message)
         _approved_disposition = _approved_fai_disposition_result(
@@ -22658,6 +23486,10 @@ async def agent_chat(request: AgentChatRequest):
                     mode=_skill_mode,
                     workflow_state=_skill_workflow_state,
                 )
+                _skill_prompt_plan = _apply_facility_layout_request_tool_policy(
+                    _skill_prompt_plan,
+                    request.message,
+                )
                 if _skill_prompt_plan:
                     system_prompt = _skill_prompt_plan["prompt"]
                     _runtime_meta = (_skill_route or {}).get("_runtime") or {}
@@ -22708,6 +23540,65 @@ async def agent_chat(request: AgentChatRequest):
                     logger.warning(
                         "[SkillRuntime] read-only compiled process-map fallback rejected: %s",
                         _safe_reason,
+                    )
+            _required_facility_workflow = (
+                _required_facility_layout_workflow(request.message)
+                if _has_trusted_facility_layout_context(ctx)
+                else None
+            )
+            _selected_facility_workflow = (
+                (_skill_prompt_plan.get("workflow") or {}).get("id")
+                if isinstance(_skill_prompt_plan, dict)
+                else None
+            )
+            if (
+                _required_facility_workflow
+                and _selected_facility_workflow
+                != _required_facility_workflow
+            ):
+                _prior_facility_workflow = _selected_facility_workflow
+                _facility_route = _safe_facility_layout_route(
+                    request.message
+                )
+                _facility_plan, _facility_reason = (
+                    _compose_production_skill_prompt(
+                        _facility_route,
+                        mode="training",
+                        workflow_state=_skill_workflow_state,
+                    )
+                )
+                _facility_plan = _apply_facility_layout_request_tool_policy(
+                    _facility_plan,
+                    request.message,
+                )
+                if _facility_plan:
+                    _facility_plan["classification_fallback"] = {
+                        "used": True,
+                        "reason": (
+                            "deterministic_facility_layout_override:"
+                            + str(_prior_facility_workflow)
+                            if _prior_facility_workflow
+                            else _skill_fallback_reason
+                            or "semantic_route_unavailable"
+                        ),
+                    }
+                    _skill_prompt_plan = _facility_plan
+                    _skill_executor_plan = None
+                    system_prompt = _facility_plan["prompt"]
+                    logger.warning(
+                        "[SkillRuntime] semantic route unavailable (%s); "
+                        "using compiled Facility Layout fallback",
+                        (
+                            f"misrouted:{_prior_facility_workflow}"
+                            if _prior_facility_workflow
+                            else _skill_fallback_reason or "unknown"
+                        ),
+                    )
+                elif _facility_reason:
+                    logger.warning(
+                        "[SkillRuntime] compiled Facility Layout fallback "
+                        "rejected: %s",
+                        _facility_reason,
                     )
             if (
                 not _skill_prompt_plan
@@ -23869,6 +24760,18 @@ async def agent_chat(request: AgentChatRequest):
             _skill_prompt_plan,
         )
         warnings = list(warnings or []) + list(skill_policy_warnings or [])
+        guarded, facility_backstop_warnings, facility_backstop_added = (
+            ensure_facility_layout_preview_tool_call(
+                guarded or [],
+                _skill_prompt_plan,
+                ctx,
+                request.message,
+                request.agent_type,
+            )
+        )
+        warnings = list(warnings or []) + list(
+            facility_backstop_warnings or []
+        )
         guarded, backstop_warnings, backstop_added = ensure_process_map_scope_tool_call(
             guarded or [],
             _skill_prompt_plan,
@@ -23877,12 +24780,42 @@ async def agent_chat(request: AgentChatRequest):
             request.agent_type,
         )
         warnings = list(warnings or []) + list(backstop_warnings or [])
+        guarded_workflow = (
+            _skill_prompt_plan.get("workflow")
+            if isinstance(_skill_prompt_plan, dict)
+            and isinstance(_skill_prompt_plan.get("workflow"), dict)
+            else {}
+        )
         if guarded:
             result["tool_calls"] = guarded
-            if backstop_added:
+            if backstop_added or facility_backstop_added:
                 result["tool_source"] = "skill_policy_backstop"
+            if (
+                any(
+                    isinstance(call, dict)
+                    and call.get("name")
+                    == SEMANTIC_FACILITY_PREVIEW_TOOL
+                    for call in guarded
+                )
+                and _is_facility_layout_generation_request(
+                    request.message
+                )
+            ):
+                result["response"] = (
+                    "Building a revision-bound Facility Layout ghost preview "
+                    "for review. Nothing is saved or approved."
+                )
         else:
             result.pop("tool_calls", None)
+            if (
+                guarded_workflow.get("id")
+                == "facility-layout-generation"
+                and _is_facility_layout_generation_request(request.message)
+            ):
+                result["response"] = (
+                    "I could not create a valid Facility Layout preview from "
+                    "the current trusted state. Nothing was changed."
+                )
 
         if _skill_executor_plan is not None:
             merged_calls = merge_executor_tool_calls(guarded or [], _skill_executor_plan)
@@ -24245,7 +25178,7 @@ async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request)
         sink_token = _AGENT_CHAT_STREAM_SINK.set(_sink)
         meta_token = _AGENT_CHAT_STREAM_META.set(stream_meta)
         try:
-            final_result = await agent_chat(payload)
+            final_result = await agent_chat(payload, http_request)
             stream_meta["pipeline_completed_perf"] = time.perf_counter()
             await queue.put(("final", final_result))
         except asyncio.CancelledError:

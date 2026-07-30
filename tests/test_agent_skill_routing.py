@@ -42,7 +42,16 @@ def _registries():
         known_agents={"sage", "iris", "scout"},
         known_modes={"report_fai", "report", "drawing", "assembly", "training"},
         known_tools_by_agent={
-            "sage": {"ui_actions", "highlight_features"},
+            "sage": {
+                "ui_actions",
+                "highlight_features",
+                "search_industrial_assets",
+                "inspect_facility_entities",
+                "inspect_facility_region",
+                "inspect_facility_findings",
+                "inspect_process_bindings",
+                "build_facility_layout_preview",
+            },
             "iris": set(),
             "scout": set(),
         },

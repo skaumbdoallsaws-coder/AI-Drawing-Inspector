@@ -1,0 +1,194 @@
+{
+  "allPassed": true,
+  "executedAtUtc": "2026-07-30T04:03:57Z",
+  "generatedAtUtc": "2026-07-30T04:03:27Z",
+  "releaseGateMet": true,
+  "requiredCoverage": [
+    "rbac",
+    "principal_authentication",
+    "idor",
+    "tool_authorization",
+    "explicit_approval",
+    "stale_revision",
+    "exact_diff",
+    "replay",
+    "receipt",
+    "maker_checker",
+    "hostile_origin",
+    "transaction_recovery",
+    "repository_persistence",
+    "catalog_publication",
+    "webgl_recovery",
+    "webgl_edit_continuity",
+    "aria_runtime"
+  ],
+  "results": {
+    "node-p11-static-contracts": {
+      "durationSeconds": 0.984,
+      "outputTail": [
+        "PASS facility workspace exposes the static ARIA contract",
+        "PASS WebGL loss and restoration are symmetric and demand driven",
+        "PASS behavioral recovery and corrupt-asset tests remain present",
+        "PASS pilot runbook carries the mandatory safety disclaimer",
+        "4/4 facility layout P11 contract checks passed"
+      ],
+      "passed": true,
+      "returnCode": 0
+    },
+    "node-three-adapter": {
+      "durationSeconds": 1.008,
+      "outputTail": [
+        "ok - exports the classic UMD global, CommonJS API, and complete adapter contract",
+        "ok - resolves every asset progressively in the required deterministic order",
+        "ok - instances repeated exact revisions with stable placement identity and xyzw transforms",
+        "ok - keeps different definition revisions in separate render groups",
+        "ok - Fit mutates only camera and controls while model and scene roots stay fixed",
+        "ok - Fit uses authoritative facility bounds even when the layout is empty",
+        "ok - facility-floor projection and transient ghost remain outside picking state",
+        "ok - full-layout proposal overlays show before and proposed states outside picking",
+        "ok - keeps failed assets as deterministic footprint boxes without blocking peers",
+        "ok - context loss degrades 3D without throwing and context restoration resumes it",
+        "ok - context restoration replays edits made while 3D was degraded and clears dismissed preview",
+        "ok - WebGL-unavailable mode retains scene identity for the independent 2D controller",
+        "ok - coalesces invalidations into a demand-driven frame with no idle loop",
+        "ok - twenty remounts leave exactly one canvas, observer, and render request",
+        "ok - remounting a populated adapter replays its authoritative scene",
+        "ok - a visual resolving after disposal is released instead of leaked",
+        "ok - dispose is idempotent and releases canvas, listeners, controls, RAF, and GPU resources",
+        "17/17 passed"
+      ],
+      "passed": true,
+      "returnCode": 0
+    },
+    "node-workspace-accessibility": {
+      "durationSeconds": 1.133,
+      "outputTail": [
+        "PASS exports UMD and CommonJS API with pure helpers",
+        "PASS drag payload is stable, minimal, and strictly parseable",
+        "PASS grid snap and quarter-turn quaternion are deterministic",
+        "PASS Auto Arrange request is declarative and preserves ownership",
+        "PASS proposal review diff is stable-ID based and remains pure",
+        "PASS builds accessible CAD workspace with advisory authority notice",
+        "PASS latest drag advisory is visible and never controls validity",
+        "PASS authoritative alternatives cycle, dismiss, and accept from controls",
+        "PASS full-layout preview renders in plan and 3D without dirtying",
+        "PASS proposal approval restores focus after controls disappear",
+        "PASS candidate safety copy is distinct and summary stays bounded",
+        "PASS opt-in drop requests server candidates instead of direct commit",
+        "PASS asset search filters categorized rows without changing catalog",
+        "PASS drop remains world-stable after arbitrary camera changes and delegates once",
+        "PASS ghost cancel is transient and never commits layout",
+        "PASS Ctrl selection is additive and propagates across controller views",
+        "PASS zones select directly without starting a marquee",
+        "PASS plan marquee hook selects resolved IDs once with additive behavior",
+        "PASS placement pointer move is one delegated gesture and marks auto manual",
+        "PASS pointer capture keeps a move gesture owned by the plan view",
+        "PASS dragging one member of a multi-selection moves the full selection once",
+        "PASS toolbar commands delegate exactly once and Fit changes only view",
+        "PASS rectangle and polygon zone tools commit one gesture each",
+        "PASS session updates controller and adapter selections return to session",
+        "PASS Plan and 3D segmented modes switch without framing scene state",
+        "PASS placement transform fields and zone dimensions delegate authoritative edits",
+        "PASS keyboard shortcuts are accessible and ignore active form fields",
+        "PASS Enter places the focused catalog asset at the plan center",
+        "PASS destroy removes listeners, subscription, adapters, and DOM exactly once",
+        "29/29 facility layout workspace checks passed"
+      ],
+      "passed": true,
+      "returnCode": 0
+    },
+    "python-security-authority": {
+      "durationSeconds": 26.97,
+      "outputTail": [
+        "........................................................................ [ 29%]",
+        "........................................................................ [ 59%]",
+        ".............................................................ss......... [ 88%]",
+        "...........................                                              [100%]",
+        "241 passed, 2 skipped in 24.77s",
+        "",
+        "C:\\Users\\might\\AppData\\Roaming\\Python\\Python314\\site-packages\\langsmith\\schemas.py:23: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.",
+        "  from pydantic.v1 import ("
+      ],
+      "passed": true,
+      "returnCode": 0
+    }
+  },
+  "schemaVersion": "facility-layout-p11-suite-matrix-v1",
+  "suites": [
+    {
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_facility_layout_authorization.py",
+        "tests/test_facility_layout_p11_identity.py",
+        "tests/test_facility_layout_proposals.py",
+        "tests/test_facility_layout_agent_runtime.py",
+        "tests/test_facility_layout_agent_integration.py",
+        "tests/test_facility_layout_product_boundary.py",
+        "tests/test_facility_layout_repository.py",
+        "tests/test_facility_authority_repository.py",
+        "tests/test_industrial_asset_registry.py",
+        "tests/test_industrial_asset_publication.py",
+        "tests/test_industrial_asset_pilot_readiness.py",
+        "tests/test_transaction_kernel.py",
+        "-q"
+      ],
+      "coverage": [
+        "rbac",
+        "principal_authentication",
+        "idor",
+        "tool_authorization",
+        "explicit_approval",
+        "stale_revision",
+        "exact_diff",
+        "replay",
+        "receipt",
+        "maker_checker",
+        "hostile_origin",
+        "transaction_recovery",
+        "repository_persistence",
+        "catalog_publication"
+      ],
+      "suiteId": "python-security-authority"
+    },
+    {
+      "command": [
+        "node",
+        "tests/test_facility_layout_three_adapter.js"
+      ],
+      "coverage": [
+        "webgl_recovery",
+        "webgl_edit_continuity",
+        "webgl_unavailable",
+        "corrupt_asset_fallback",
+        "lifecycle"
+      ],
+      "suiteId": "node-three-adapter"
+    },
+    {
+      "command": [
+        "node",
+        "tests/test_facility_layout_workspace.js"
+      ],
+      "coverage": [
+        "aria_runtime",
+        "keyboard_state",
+        "proposal_review"
+      ],
+      "suiteId": "node-workspace-accessibility"
+    },
+    {
+      "command": [
+        "node",
+        "tests/test_facility_layout_p11_contracts.js"
+      ],
+      "coverage": [
+        "aria_static",
+        "webgl_static",
+        "safety_disclaimer"
+      ],
+      "suiteId": "node-p11-static-contracts"
+    }
+  ]
+}

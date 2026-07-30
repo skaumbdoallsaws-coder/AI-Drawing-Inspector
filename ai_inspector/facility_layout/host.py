@@ -14,7 +14,7 @@ import threading
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -24,12 +24,18 @@ from .authority_repository import (
     PolicySetRepository,
     VehicleProfileRepository,
 )
-from .authorization import FacilityPrincipal, local_facility_principal
+from .authorization import (
+    FacilityPrincipal,
+    local_facility_principal,
+    require_facility_action,
+)
 from .agent_runtime import (
     FacilityLayoutAgentRuntime,
     FacilityLayoutAgentRuntimeError,
 )
-from .errors import FacilityNotFoundError
+from .errors import FacilityLayoutError, FacilityNotFoundError
+from .feature_flags import FacilityLayoutFeatureFlags
+from .identity import FacilityPrincipalResolver
 from .operations import create_layout_document
 from .repository import FacilityLayoutRepository
 from .service import FacilityLayoutService, coordinate_frame_fingerprint
@@ -238,6 +244,11 @@ class LocalFacilityLayoutHost:
         root: str | Path,
         *,
         process_map_root: str | Path | None = None,
+        feature_flags: FacilityLayoutFeatureFlags | None = None,
+        require_distinct_approver: bool = False,
+        principal_resolver: (
+            Callable[[Request], FacilityPrincipal] | None
+        ) = None,
     ) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -245,6 +256,31 @@ class LocalFacilityLayoutHost:
             Path(process_map_root).resolve()
             if process_map_root is not None
             else None
+        )
+        self.feature_flags = (
+            feature_flags
+            if feature_flags is not None
+            else FacilityLayoutFeatureFlags.all_enabled()
+        )
+        self.require_distinct_approver = bool(
+            require_distinct_approver
+        )
+        if self.require_distinct_approver and (
+            not isinstance(
+                principal_resolver,
+                FacilityPrincipalResolver,
+            )
+            or not principal_resolver.authenticated
+        ):
+            raise ValueError(
+                "Maker-checker mode requires the authenticated Facility "
+                "pilot principal resolver."
+            )
+        self._principal_resolver = principal_resolver
+        self.principal_mode = (
+            str(getattr(principal_resolver, "mode", "custom"))
+            if principal_resolver is not None
+            else "local"
         )
         authority_root = self.root / "authorities"
         self.layout_repository = FacilityLayoutRepository(self.root / "layouts")
@@ -263,6 +299,7 @@ class LocalFacilityLayoutHost:
         }
         self.transaction_runtime = FacilityLayoutTransactionRuntime(
             receipt_root=self.root / "transactions",
+            require_distinct_approver=self.require_distinct_approver,
         )
         self.service = FacilityLayoutService(
             layout_repository=self.layout_repository,
@@ -423,8 +460,8 @@ class LocalFacilityLayoutHost:
             ),
         )
 
-    @staticmethod
     def _agent_capabilities(
+        self,
         principal: FacilityPrincipal,
         _site_id: str,
     ) -> dict[str, bool]:
@@ -432,14 +469,38 @@ class LocalFacilityLayoutHost:
         allowed = lambda action: "*" in actions or action in actions
         return {
             "read": allowed("layout.read"),
-            "semanticPlanning": allowed("layout.read"),
-            "semanticPreview": allowed("proposal.create"),
-            "approval": allowed("proposal.approve"),
-            "apply": allowed("proposal.apply"),
-            "manualAuthoring": allowed("layout.edit"),
-            "automaticRouting": True,
-            "spatialValidation": True,
+            "semanticPlanning": (
+                allowed("layout.read")
+                and self.feature_flags.enabled("viewer_v2")
+            ),
+            "semanticPreview": (
+                allowed("proposal.create")
+                and self.feature_flags.enabled("agent_preview")
+            ),
+            "approval": (
+                allowed("proposal.approve")
+                and self.feature_flags.enabled("agent_write")
+            ),
+            "apply": (
+                allowed("proposal.apply")
+                and self.feature_flags.enabled("agent_write")
+            ),
+            "manualAuthoring": (
+                allowed("layout.edit")
+                and self.feature_flags.enabled("manual_edit")
+            ),
+            "automaticRouting": self.feature_flags.enabled("routing"),
+            "spatialValidation": self.feature_flags.enabled("constraints"),
         }
+
+    def _require_feature(self, capability: str) -> None:
+        try:
+            self.feature_flags.require(capability)
+        except FacilityLayoutError as error:
+            raise HTTPException(
+                status_code=error.status_code,
+                detail={"error": error.to_dict()},
+            ) from error
 
     @staticmethod
     def _agent_error(error: FacilityLayoutAgentRuntimeError) -> HTTPException:
@@ -556,7 +617,11 @@ class LocalFacilityLayoutHost:
                 "siteId": LOCAL_SITE_ID,
                 "layoutId": LOCAL_LAYOUT_ID,
                 "layout": layout_receipt,
-                "assetCatalog": deepcopy(list(self._catalog.values())),
+                "assetCatalog": (
+                    deepcopy(list(self._catalog.values()))
+                    if self.feature_flags.enabled("asset_library")
+                    else []
+                ),
                 "worldBounds": {
                     "minX": 0,
                     "minZ": 0,
@@ -570,33 +635,111 @@ class LocalFacilityLayoutHost:
                     ),
                 },
                 "capabilities": {
-                    "manualAuthoring": True,
-                    "authoritativePreview": True,
-                    "casSave": True,
-                    "collisionValidation": True,
-                    "candidateSnapping": True,
-                    "coarseAdvisoryWorker": True,
-                    "fullLayoutProposals": True,
-                    "atomicProposalApply": True,
+                    "viewerV2": self.feature_flags.enabled("viewer_v2"),
+                    "assetLibrary": self.feature_flags.enabled(
+                        "asset_library"
+                    ),
+                    "manualAuthoring": self.feature_flags.enabled(
+                        "manual_edit"
+                    ),
+                    "authoritativePreview": self.feature_flags.enabled(
+                        "constraints"
+                    ),
+                    "casSave": self.feature_flags.enabled("manual_edit"),
+                    "collisionValidation": self.feature_flags.enabled(
+                        "constraints"
+                    ),
+                    "candidateSnapping": self.feature_flags.enabled(
+                        "constraints"
+                    ),
+                    "coarseAdvisoryWorker": self.feature_flags.enabled(
+                        "constraints"
+                    ),
+                    "automaticRouting": self.feature_flags.enabled("routing"),
+                    "fullLayoutProposals": self.feature_flags.enabled(
+                        "agent_preview"
+                    ),
+                    "atomicProposalApply": self.feature_flags.enabled(
+                        "agent_write"
+                    ),
+                    "makerCheckerRequired": (
+                        self.require_distinct_approver
+                    ),
+                    "principalAuthentication": self.principal_mode,
                 },
+                "featureFlags": self.feature_flags.to_dict(),
             }
 
-    def resolve_principal(self, _request: Request) -> FacilityPrincipal:
+    def resolve_principal(self, request: Request) -> FacilityPrincipal:
+        if self._principal_resolver is not None:
+            principal = self._principal_resolver(request)
+        else:
+            principal = self.principal()
         self.ensure_bootstrap()
-        return self.principal()
+        return principal
+
+    def _require_request_action(
+        self,
+        request: Request,
+        action: str,
+    ) -> FacilityPrincipal:
+        principal = self.resolve_principal(request)
+        try:
+            require_facility_action(
+                principal,
+                tenant_id="local",
+                site_id=LOCAL_SITE_ID,
+                action=action,
+            )
+        except FacilityLayoutError as error:
+            raise HTTPException(
+                status_code=error.status_code,
+                detail={"error": error.to_dict()},
+            ) from error
+        return principal
 
     def create_router(self) -> APIRouter:
         router = APIRouter()
         router.add_event_handler("shutdown", self.close)
 
         @router.get("/api/facility-layout-bootstrap")
-        async def bootstrap():
-            return self.ensure_bootstrap()
+        async def bootstrap(request: Request):
+            principal = self._require_request_action(
+                request,
+                "layout.read",
+            )
+            try:
+                require_facility_action(
+                    principal,
+                    tenant_id="local",
+                    site_id=LOCAL_SITE_ID,
+                    action="catalog.read",
+                )
+            except FacilityLayoutError as error:
+                raise HTTPException(
+                    status_code=error.status_code,
+                    detail={"error": error.to_dict()},
+                ) from error
+            result = self.ensure_bootstrap()
+            result["principal"] = {
+                "principalId": principal.principal_id,
+                "tenantId": principal.tenant_id,
+                "allowedSiteIds": list(principal.allowed_site_ids),
+                "roles": list(principal.roles),
+            }
+            result["principalCapabilities"] = self._agent_capabilities(
+                principal,
+                LOCAL_SITE_ID,
+            )
+            return result
 
         @router.get("/api/industrial-assets")
         async def list_assets(
+            request: Request,
             site_id: str = Query(LOCAL_SITE_ID, alias="siteId"),
         ):
+            self._require_feature("asset_library")
+            self._require_request_action(request, "catalog.read")
             if site_id != LOCAL_SITE_ID:
                 raise HTTPException(
                     status_code=404,
@@ -618,6 +761,7 @@ class LocalFacilityLayoutHost:
             tool_name: str,
             body: dict[str, Any],
         ):
+            self._require_feature("viewer_v2")
             principal = self.resolve_principal(request)
             turn_id = (
                 request.headers.get("X-InspectorPro-Agent-Turn")
@@ -666,6 +810,7 @@ class LocalFacilityLayoutHost:
             layout_id: str,
             body: dict[str, Any],
         ):
+            self._require_feature("agent_preview")
             principal = self.resolve_principal(request)
             semantic_plan = body.get("semanticPlan")
             if not isinstance(semantic_plan, Mapping):
@@ -713,6 +858,7 @@ class LocalFacilityLayoutHost:
             create_facility_layout_router(
                 service=self.service,
                 principal_resolver=self.resolve_principal,
+                feature_gate=self.feature_flags.require,
             )
         )
         return router
@@ -733,6 +879,7 @@ def create_local_facility_layout_router(
     return LocalFacilityLayoutHost(
         root,
         process_map_root=effective_process_map_root,
+        feature_flags=FacilityLayoutFeatureFlags.from_environment(),
     ).create_router()
 
 

@@ -758,6 +758,14 @@
             throw new TypeError('FacilityLayout runtime or controller is required');
         }
         this.assetCatalog = normalizeCatalog(options.assetCatalog || []);
+        this.capabilities = Object.assign({
+            assetLibrary: true,
+            manualAuthoring: true,
+            authoritativePreview: true,
+            automaticRouting: true,
+            fullLayoutProposals: true,
+            atomicProposalApply: true,
+        }, options.capabilities || {});
         this.gridSize = finite(options.gridSize, DEFAULT_GRID_SIZE);
         if (this.gridSize <= 0) this.gridSize = DEFAULT_GRID_SIZE;
         this.eventToWorld = options.eventToWorld || options.worldPointFromPointer;
@@ -1251,6 +1259,8 @@
     };
 
     Workspace.prototype._handleAssetDragStart = function (event) {
+        if (!this.capabilities.assetLibrary
+                || !this.capabilities.manualAuthoring) return;
         const asset = this._assetFromRow(event.target);
         if (!asset) return;
         const dragSessionId = (typeof this.options.createDragSessionId === 'function'
@@ -1362,7 +1372,7 @@
         const asset = this._catalogAssetFromTarget(event.target);
         if (!asset) return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
-        if (this.state.busy) return;
+        if (this.state.busy || !this.capabilities.manualAuthoring) return;
         const world = this._keyboardPlacementWorld();
         this.session.beginGhostPlacement({
             assetId: asset.assetId,
@@ -1436,6 +1446,7 @@
     };
 
     Workspace.prototype._handleDrop = function (event) {
+        if (!this.capabilities.manualAuthoring) return;
         const payload = this._payloadForEvent(event);
         if (!payload) return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
@@ -2189,6 +2200,25 @@
     };
 
     Workspace.prototype.executeCommand = function (command) {
+        const manualCommands = [
+            'rectangle-zone',
+            'polygon-zone',
+            'rotate',
+            'duplicate',
+            'delete',
+            'lock',
+            'undo',
+            'redo',
+            'save',
+        ];
+        if (manualCommands.includes(command)
+                && !this.capabilities.manualAuthoring) {
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'auto-arrange'
+                && !this.capabilities.fullLayoutProposals) {
+            return Promise.resolve(this.getState());
+        }
         if (TOOL_MODES.includes(command)) {
             this._setToolMode(command);
             return Promise.resolve(this.getState());
@@ -2469,17 +2499,20 @@
             : [];
         const hasPlacement = selectedPlacements.length > 0;
         const states = {
-            'auto-arrange': typeof this.session.requestLayoutProposal
+            'rectangle-zone': !this.capabilities.manualAuthoring,
+            'polygon-zone': !this.capabilities.manualAuthoring,
+            'auto-arrange': !this.capabilities.fullLayoutProposals
+                || typeof this.session.requestLayoutProposal
                     !== 'function'
                 || this.state.dirty
                 || Boolean(this.state.conflict),
-            rotate: !hasPlacement,
-            duplicate: !hasPlacement,
-            delete: !hasSelection,
-            lock: !hasPlacement,
-            undo: !this.state.canUndo,
-            redo: !this.state.canRedo,
-            save: !this.state.dirty,
+            rotate: !this.capabilities.manualAuthoring || !hasPlacement,
+            duplicate: !this.capabilities.manualAuthoring || !hasPlacement,
+            delete: !this.capabilities.manualAuthoring || !hasSelection,
+            lock: !this.capabilities.manualAuthoring || !hasPlacement,
+            undo: !this.capabilities.manualAuthoring || !this.state.canUndo,
+            redo: !this.capabilities.manualAuthoring || !this.state.canRedo,
+            save: !this.capabilities.manualAuthoring || !this.state.dirty,
         };
         Object.keys(states).forEach(function (command) {
             const button = this.toolbar.querySelector(

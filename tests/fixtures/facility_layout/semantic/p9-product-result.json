@@ -22,25 +22,25 @@
   "schemaVersion": "facility-layout-p9-product-evidence-v1",
   "screenshots": {
     "plan": {
-      "bytes": 52089,
+      "bytes": 51932,
       "height": 893,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/semantic/p9-product-plan.png",
-      "sha256": "2da47d5ea8bc688a2d9b80eda7a6768212cdd2cd80b86226542b3ba65215cd01",
+      "sha256": "9e001f83b5278784ba77502dc6c24f0eb79c38ced2caef20422b6f44477c4251",
       "width": 1220
     },
     "three": {
-      "bytes": 52935,
+      "bytes": 52558,
       "height": 893,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/semantic/p9-product-three.png",
-      "sha256": "3d33e04cf56b24b6827b416688af15fc6af6f8b374969f6f5a33b0e0f25a464e",
+      "sha256": "5d5964af9282461eac7c3231c95dc35d99dd286d0a59e4d1377ac305ec9d8000",
       "width": 1220
     }
   },
   "semantic": {
     "assumptionCount": 1,
-    "selectedProposalId": "flp-9ff58d0daa5abab8d510c7b620bff6fbdc297b059acdd616059458280441ec71",
+    "selectedProposalId": "flp-780d5d2df7b6b61c732420a8c928e8c7f81c77a62900af51da4a07acbe7b88ef",
     "summary": {
       "assumptionCount": 1,
       "flowCount": 0,
@@ -55,11 +55,11 @@
   },
   "source": {
     "agentRuntimeSha256": "47729847c63e0b6b8b3027a60259609e2f1cc81ba1d1c4f2a3ddb8b54145be0d",
-    "hostSha256": "e9884f51f26d23780fb915100d3a40c6fb843080f763b16d4491d9fd22adba2b",
-    "indexSha256": "eeeafd10a8a11cf7b4c01652c4ef20988d4fd7d8c87f3fa9a943bc7a33a28773",
+    "hostSha256": "e8a50c65675559b1c449432abda4456a020c49793b5e60c5239aae074d5c53f4",
+    "indexSha256": "67b040e7e0dc70449ed4b79a6f0e41f70af5c161c9c01904bd61cf1a61fcc5d7",
     "observationSha256": "0430764d8f80ed20ebb8596d706912879a9abdc8c824802dc658ae865d00a972",
     "semanticPlanSha256": "feab61794b27ba7fe3992afa41ebbd25f72b63e0083c0a88435a7c6a9e4ffe24",
-    "serverSha256": "cbbcd108618fab089885bc583213ca095c20dba36c46e13f810405bc568645e9",
+    "serverSha256": "864eae0b738afefee6f0c18fe28fbdcab9f94d23a8cc922338c97bb4b85bebdd",
     "sessionSha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a",
     "verifierSha256": "6c2a5180f02f3dbac798cc6580f7d5f9536e06fc28b6df74cae2b3daa930016a"
   }

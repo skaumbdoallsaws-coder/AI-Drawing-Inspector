@@ -1,0 +1,74 @@
+{
+  "artifacts": [
+    "p11-accessibility-evidence.json",
+    "p11-documentation-evidence.json",
+    "p11-feature-flag-matrix.json",
+    "p11-licensing-inventory.json",
+    "p11-maker-checker-evidence.json",
+    "p11-performance-budget.json",
+    "p11-rollback-drill.json",
+    "p11-soak-ledger.json",
+    "p11-suite-matrix.json",
+    "p11-visual-manifest.json",
+    "p11-webgl-offline-evidence.json"
+  ],
+  "blockers": [
+    "accessibility_manual_audit_pending",
+    "asset_loading_latency_budgets_not_measured",
+    "benchmark_scope_is_placement_layer_only",
+    "full_zone_route_clearance_label_layers_not_profiled",
+    "industrial_asset_redistribution_rights_unresolved",
+    "minimum_reference_hardware_unresolved",
+    "pick_spatial_candidate_collision_route_budgets_not_all_measured",
+    "python_distribution_dependency_review_pending",
+    "real_soak_elapsed_duration_pending",
+    "twenty_remount_memory_growth_not_measured"
+  ],
+  "evidenceGenerationPassed": true,
+  "generatedAtUtc": "2026-07-30T04:04:04Z",
+  "literalTimeBoundStatus": "elapsed_duration_pending",
+  "releaseGateMet": false,
+  "safetyDisclaimer": "InspectorPro assists industrial layout planning and validation. It does not replace required facility, safety, regulatory, or professional engineering approval.",
+  "schemaVersion": "facility-layout-p11-release-evidence-v1",
+  "sectionGates": {
+    "acceleratedSoak": true,
+    "accessibility": false,
+    "documentation": true,
+    "featureFlags": true,
+    "licensing": false,
+    "makerChecker": true,
+    "performance": false,
+    "realSoak": false,
+    "rollback": true,
+    "securitySuites": true,
+    "visual": true,
+    "webglOffline": true
+  },
+  "sections": {
+    "acceleratedSoak": "passed",
+    "accessibility": "static_pass_manual_audit_pending",
+    "documentation": "passed",
+    "featureFlags": "passed",
+    "licensing": "blocked",
+    "makerChecker": "passed",
+    "performance": "partial",
+    "realSoak": "elapsed_duration_pending",
+    "rollback": "passed",
+    "securitySuites": "passed",
+    "visual": "passed",
+    "webglOffline": "passed"
+  },
+  "source": {
+    "authorizationContract": {
+      "byteLength": 6101,
+      "path": "static/contracts/facility-layout-authorization-v1.json",
+      "sha256": "ad6ab3b0e5427a2ba6239860bd9a078c23a27ca348e2781a3a67e40d7e0fa1c2"
+    },
+    "verifier": {
+      "byteLength": 91598,
+      "path": "tools/verify_facility_layout_p11.py",
+      "sha256": "8f20b8093a91f56a8d8c51876596767b9c0f9686ad45e30561d55995d1d90099"
+    }
+  },
+  "status": "blocked"
+}

@@ -8,11 +8,14 @@ data.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
 import math
+from threading import RLock
 from typing import Any
 
 
@@ -21,6 +24,8 @@ CANDIDATE_POLICY_VERSION = 1
 DEFAULT_INDEX_CELL_SIZE_METERS = 4.0
 DEFAULT_GRID_SPACING_METERS = 0.25
 GEOMETRY_EPSILON = 1.0e-9
+_CANDIDATE_OBSTACLE_CACHE_LIMIT = 8
+_CANDIDATE_RESULT_CACHE_LIMIT = 32
 
 _EVIDENCE_STATES = frozenset({"authored", "derived", "inferred", "unknown"})
 _AUTHORITATIVE_EVIDENCE_STATES = frozenset({"authored", "derived"})
@@ -73,6 +78,10 @@ _SUPPORTED_POLICY_RULE_TYPES = frozenset(
 Point2 = tuple[float, float]
 Bounds2 = tuple[float, float, float, float]
 CancelCheck = Callable[[], None]
+PreparedTransform = tuple[
+    tuple[float, float, float],
+    tuple[float, float, float, float],
+]
 
 
 def _check_cancel(cancel_check: CancelCheck | None) -> None:
@@ -474,11 +483,46 @@ def _transform_polygon_and_interval(
     local_interval: tuple[float, float],
     transform: Mapping[str, Any],
 ) -> tuple[tuple[Point2, ...], tuple[float, float]]:
+    return _transform_polygon_and_interval_prepared(
+        polygon,
+        local_interval,
+        _prepare_transform(transform),
+    )
+
+
+def _prepare_transform(transform: Mapping[str, Any]) -> PreparedTransform:
     position = _point3(transform.get("position"), "transform.position")
     quaternion = _quaternion(transform.get("quaternion"))
     scale = _number(transform.get("scale", 1), "transform.scale")
     if abs(scale - 1.0) > GEOMETRY_EPSILON:
         raise ValueError("Facility Layout spatial transforms require scale 1")
+    return position, quaternion
+
+
+def _transform_polygon_and_interval_prepared(
+    polygon: Sequence[Point2],
+    local_interval: tuple[float, float],
+    prepared_transform: PreparedTransform,
+) -> tuple[tuple[Point2, ...], tuple[float, float]]:
+    position, quaternion = prepared_transform
+    if quaternion[0] == 0.0 and quaternion[2] == 0.0:
+        transformed = tuple(
+            (
+                rotated[0] + position[0],
+                rotated[2] + position[2],
+            )
+            for local_x, local_z in polygon
+            for rotated in (
+                _rotate_vector(
+                    (local_x, local_interval[0], local_z),
+                    quaternion,
+                ),
+            )
+        )
+        return transformed, (
+            local_interval[0] + position[1],
+            local_interval[1] + position[1],
+        )
     projected: list[Point2] = []
     y_values: list[float] = []
     for local_y in local_interval:
@@ -697,17 +741,20 @@ def _placement_spatial_records_from_template(
     asset_id: str,
     footprints: Sequence[Sequence[Point2]],
     interval: tuple[float, float],
+    *,
+    prepared_transform: PreparedTransform | None = None,
 ) -> tuple[SpatialRecord, ...]:
     placement_id = str(placement.get("placementId") or "")
     transform = placement.get("transform")
     if not isinstance(transform, Mapping):
         raise ValueError("placement transform is missing")
+    prepared = prepared_transform or _prepare_transform(transform)
     result = []
     for index, local_polygon in enumerate(footprints):
-        polygon, world_interval = _transform_polygon_and_interval(
+        polygon, world_interval = _transform_polygon_and_interval_prepared(
             local_polygon,
             interval,
-            transform,
+            prepared,
         )
         result.append(
             SpatialRecord(
@@ -1029,11 +1076,14 @@ def _placement_clearance_records_from_templates(
             bool,
         ]
     ],
+    *,
+    prepared_transform: PreparedTransform | None = None,
 ) -> tuple[SpatialRecord, ...]:
     placement_id = str(placement.get("placementId") or "")
     transform = placement.get("transform")
     if not isinstance(transform, Mapping):
         raise ValueError("placement transform is missing")
+    prepared = prepared_transform or _prepare_transform(transform)
     result = []
     for (
         clearance_id,
@@ -1044,10 +1094,10 @@ def _placement_clearance_records_from_templates(
         evidence_status,
         authoritative,
     ) in templates:
-        world_polygon, world_interval = _transform_polygon_and_interval(
+        world_polygon, world_interval = _transform_polygon_and_interval_prepared(
             polygon,
             interval,
-            transform,
+            prepared,
         )
         result.append(
             SpatialRecord(
@@ -1125,6 +1175,21 @@ class UniformGridSpatialIndex:
 
     def record(self, record_id: str) -> SpatialRecord:
         return self._records[record_id]
+
+
+@dataclass(frozen=True)
+class _CandidateObstacleScene:
+    physical_index: UniformGridSpatialIndex | None
+    clearance_index: UniformGridSpatialIndex | None
+
+
+_CANDIDATE_OBSTACLE_CACHE: OrderedDict[
+    tuple[str, str, str, str],
+    _CandidateObstacleScene,
+] = OrderedDict()
+_CANDIDATE_OBSTACLE_CACHE_LOCK = RLock()
+_CANDIDATE_RESULT_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_CANDIDATE_RESULT_CACHE_LOCK = RLock()
 
 
 def brute_force_query(
@@ -3204,6 +3269,194 @@ def _candidate_cross_findings(
     return findings
 
 
+def _candidate_asset_fingerprint(
+    placements: Sequence[Mapping[str, Any]],
+    catalog: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> str:
+    assets: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for placement in placements:
+        placement_id = str(placement.get("placementId") or "")
+        asset_id = str(placement.get("assetId") or "")
+        revision = str(placement.get("assetDefinitionRevision") or "")
+        asset = _catalog_asset(catalog, asset_id, revision)
+        if asset is None:
+            raise ValueError(f"asset geometry is unavailable for {placement_id}")
+        assets[(asset_id, revision)] = asset
+    return spatial_fingerprint(
+        [
+            {
+                "assetDefinition": assets[key],
+                "assetDefinitionRevision": key[1],
+                "assetId": key[0],
+            }
+            for key in sorted(assets)
+        ]
+    )
+
+
+def _compile_candidate_obstacle_scene(
+    placements: Sequence[Mapping[str, Any]],
+    catalog: Mapping[tuple[str, str], Mapping[str, Any]],
+    authority: Mapping[str, str],
+) -> _CandidateObstacleScene:
+    physical: list[SpatialRecord] = []
+    clearances: list[SpatialRecord] = []
+    template_cache: dict[
+        tuple[str, str],
+        tuple[
+            tuple[tuple[Point2, ...], ...],
+            tuple[float, float],
+            tuple[Any, ...],
+        ],
+    ] = {}
+    for placement in placements:
+        placement_id = str(placement.get("placementId") or "")
+        asset_id = str(placement.get("assetId") or "")
+        revision = str(placement.get("assetDefinitionRevision") or "")
+        asset = _catalog_asset(catalog, asset_id, revision)
+        if asset is None:
+            raise ValueError(f"asset geometry is unavailable for {placement_id}")
+        cache_key = (asset_id, revision)
+        template = template_cache.get(cache_key)
+        if template is None:
+            template = (
+                _local_footprints(asset),
+                _local_height_interval(asset),
+                _clearance_templates(asset, authority),
+            )
+            template_cache[cache_key] = template
+        footprints, interval, clearance_templates = template
+        transform = placement.get("transform")
+        if not isinstance(transform, Mapping):
+            raise ValueError("placement transform is missing")
+        prepared_transform = _prepare_transform(transform)
+        physical.extend(
+            _placement_spatial_records_from_template(
+                placement,
+                asset_id,
+                footprints,
+                interval,
+                prepared_transform=prepared_transform,
+            )
+        )
+        clearances.extend(
+            _placement_clearance_records_from_templates(
+                placement,
+                asset_id,
+                clearance_templates,
+                prepared_transform=prepared_transform,
+            )
+        )
+    return _CandidateObstacleScene(
+        physical_index=UniformGridSpatialIndex(physical) if physical else None,
+        clearance_index=(
+            UniformGridSpatialIndex(clearances) if clearances else None
+        ),
+    )
+
+
+def _candidate_obstacle_scene(
+    *,
+    placements: Sequence[Mapping[str, Any]],
+    catalog: Mapping[tuple[str, str], Mapping[str, Any]],
+    authority: Mapping[str, str],
+    obstacle_fingerprint: str,
+    target_placement_id: str | None,
+    asset_fingerprint: str,
+    authority_fingerprint: str,
+) -> _CandidateObstacleScene:
+    key = (
+        obstacle_fingerprint,
+        str(target_placement_id or ""),
+        asset_fingerprint,
+        authority_fingerprint,
+    )
+    with _CANDIDATE_OBSTACLE_CACHE_LOCK:
+        cached = _CANDIDATE_OBSTACLE_CACHE.get(key)
+        if cached is not None:
+            _CANDIDATE_OBSTACLE_CACHE.move_to_end(key)
+            return cached
+    compiled = _compile_candidate_obstacle_scene(
+        placements,
+        catalog,
+        authority,
+    )
+    with _CANDIDATE_OBSTACLE_CACHE_LOCK:
+        existing = _CANDIDATE_OBSTACLE_CACHE.get(key)
+        if existing is not None:
+            _CANDIDATE_OBSTACLE_CACHE.move_to_end(key)
+            return existing
+        _CANDIDATE_OBSTACLE_CACHE[key] = compiled
+        while len(_CANDIDATE_OBSTACLE_CACHE) > _CANDIDATE_OBSTACLE_CACHE_LIMIT:
+            _CANDIDATE_OBSTACLE_CACHE.popitem(last=False)
+    return compiled
+
+
+def _candidate_result_cache_key(
+    *,
+    base_layout_fingerprint: str,
+    obstacle_fingerprint: str,
+    base_asset_fingerprint: str,
+    asset_definition: Mapping[str, Any],
+    zones: Any,
+    shell: Mapping[str, Any] | None,
+    policy_set: Mapping[str, Any] | None,
+    authority: Mapping[str, str],
+    requested: Point2,
+    requested_y: float,
+    requested_quaternion: Mapping[str, Any],
+    enabled_families: frozenset[str],
+    target_placement_id: str | None,
+    asset_definition_revision: str,
+    maximum_candidates: int,
+) -> str:
+    return spatial_fingerprint(
+        {
+            "assetDefinition": asset_definition,
+            "assetDefinitionRevision": asset_definition_revision,
+            "authority": authority,
+            "baseAssetFingerprint": base_asset_fingerprint,
+            "candidatePolicyVersion": CANDIDATE_POLICY_VERSION,
+            "enabledFamilies": sorted(enabled_families),
+            "layoutFingerprint": base_layout_fingerprint,
+            "maximumCandidates": maximum_candidates,
+            "obstacleFingerprint": obstacle_fingerprint,
+            "policySet": policy_set,
+            "requestedPosition": {
+                "x": requested[0],
+                "y": requested_y,
+                "z": requested[1],
+            },
+            "requestedQuaternion": requested_quaternion,
+            "shell": shell,
+            "spatialEngineVersion": SPATIAL_ENGINE_VERSION,
+            "targetPlacementId": target_placement_id,
+            "zones": zones,
+        }
+    )
+
+
+def _cached_candidate_result(key: str) -> dict[str, Any] | None:
+    with _CANDIDATE_RESULT_CACHE_LOCK:
+        result = _CANDIDATE_RESULT_CACHE.get(key)
+        if result is None:
+            return None
+        _CANDIDATE_RESULT_CACHE.move_to_end(key)
+        return deepcopy(result)
+
+
+def _cache_candidate_result(
+    key: str,
+    result: Mapping[str, Any],
+) -> None:
+    stored = deepcopy(dict(result))
+    with _CANDIDATE_RESULT_CACHE_LOCK:
+        _CANDIDATE_RESULT_CACHE[key] = stored
+        _CANDIDATE_RESULT_CACHE.move_to_end(key)
+        while len(_CANDIDATE_RESULT_CACHE) > _CANDIDATE_RESULT_CACHE_LIMIT:
+            _CANDIDATE_RESULT_CACHE.popitem(last=False)
+
+
 def generate_placement_candidates(
     layout: Mapping[str, Any],
     asset_definition: Mapping[str, Any],
@@ -3298,6 +3551,65 @@ def generate_placement_candidates(
     candidate_placement_id = target_placement_id or "pl-spatial-candidate"
     base_layout_fingerprint = _candidate_layout_fingerprint(layout)
     obstacle_fingerprint = _obstacle_fingerprint(layout, shell)
+    # The service supplies a canonical, immutable domain document. A shallow
+    # working view is sufficient because this function replaces only the
+    # placements list and never mutates caller-owned nested values.
+    base_layout = dict(layout)
+    base_layout["placements"] = [
+        item
+        for item in base_layout.get("placements", [])
+        if item.get("placementId") != target_placement_id
+    ]
+    candidate_context = {
+        key: value
+        for key, value in base_layout.items()
+        if key != "placements"
+    }
+    base_placements = tuple(sorted(
+        (
+            item
+            for item in base_layout.get("placements", [])
+            if isinstance(item, Mapping)
+        ),
+        key=lambda item: str(item.get("placementId") or ""),
+    ))
+    base_asset_fingerprint = _candidate_asset_fingerprint(
+        base_placements,
+        catalog,
+    )
+    authority_fingerprint = spatial_fingerprint(authority)
+    result_cache_key = _candidate_result_cache_key(
+        base_layout_fingerprint=base_layout_fingerprint,
+        obstacle_fingerprint=obstacle_fingerprint,
+        base_asset_fingerprint=base_asset_fingerprint,
+        asset_definition=asset_definition,
+        zones=layout.get("zones"),
+        shell=shell,
+        policy_set=policy_set,
+        authority=authority,
+        requested=requested,
+        requested_y=requested_y,
+        requested_quaternion=quaternion,
+        enabled_families=family_set,
+        target_placement_id=target_placement_id,
+        asset_definition_revision=revision,
+        maximum_candidates=maximum_candidates,
+    )
+    cached_result = _cached_candidate_result(result_cache_key)
+    if cached_result is not None:
+        _check_cancel(cancel_check)
+        return cached_result
+    obstacle_scene = _candidate_obstacle_scene(
+        placements=base_placements,
+        catalog=catalog,
+        authority=authority,
+        obstacle_fingerprint=obstacle_fingerprint,
+        target_placement_id=target_placement_id,
+        asset_fingerprint=base_asset_fingerprint,
+        authority_fingerprint=authority_fingerprint,
+    )
+    base_physical_index = obstacle_scene.physical_index
+    base_clearance_index = obstacle_scene.clearance_index
     seeds = _family_seed_candidates(
         layout,
         asset_definition,
@@ -3318,93 +3630,6 @@ def generate_placement_candidates(
         tuple(deduplicated.values()),
         requested,
         maximum_candidates,
-    )
-    # The service supplies a canonical, immutable domain document. A shallow
-    # working view is sufficient because this function replaces only the
-    # placements list and never mutates caller-owned nested values.
-    base_layout = dict(layout)
-    base_layout["placements"] = [
-        item
-        for item in base_layout.get("placements", [])
-        if item.get("placementId") != target_placement_id
-    ]
-    candidate_context = {
-        key: value
-        for key, value in base_layout.items()
-        if key != "placements"
-    }
-    base_records_by_placement: dict[
-        str,
-        tuple[SpatialRecord, ...],
-    ] = {}
-    base_clearances: list[SpatialRecord] = []
-    template_cache: dict[
-        tuple[str, str],
-        tuple[
-            tuple[tuple[Point2, ...], ...],
-            tuple[float, float],
-            tuple[Any, ...],
-        ],
-    ] = {}
-    for placement in sorted(
-        (
-            item
-            for item in base_layout.get("placements", [])
-            if isinstance(item, Mapping)
-        ),
-        key=lambda item: str(item.get("placementId") or ""),
-    ):
-        placement_id = str(placement.get("placementId") or "")
-        placement_asset_id = str(placement.get("assetId") or "")
-        placement_revision = str(
-            placement.get("assetDefinitionRevision") or ""
-        )
-        placed_asset = _catalog_asset(
-            catalog,
-            placement_asset_id,
-            placement_revision,
-        )
-        if placed_asset is None:
-            raise ValueError(
-                f"asset geometry is unavailable for {placement_id}"
-            )
-        cache_key = (placement_asset_id, placement_revision)
-        template = template_cache.get(cache_key)
-        if template is None:
-            template = (
-                _local_footprints(placed_asset),
-                _local_height_interval(placed_asset),
-                _clearance_templates(placed_asset, authority),
-            )
-            template_cache[cache_key] = template
-        footprints, interval, clearance_templates = template
-        base_records_by_placement[placement_id] = (
-            _placement_spatial_records_from_template(
-                placement,
-                placement_asset_id,
-                footprints,
-                interval,
-            )
-        )
-        base_clearances.extend(
-            _placement_clearance_records_from_templates(
-                placement,
-                placement_asset_id,
-                clearance_templates,
-            )
-        )
-    base_physical = tuple(
-        record
-        for values in base_records_by_placement.values()
-        for record in values
-    )
-    base_physical_index = (
-        UniformGridSpatialIndex(base_physical) if base_physical else None
-    )
-    base_clearance_index = (
-        UniformGridSpatialIndex(base_clearances)
-        if base_clearances
-        else None
     )
     evaluated = []
     rejection_counts: dict[str, int] = {}
@@ -3448,14 +3673,22 @@ def generate_placement_candidates(
             evidence_authority=evidence_authority,
             cancel_check=cancel_check,
         )
-        candidate_records = placement_spatial_records(
+        candidate_transform = placement.get("transform")
+        if not isinstance(candidate_transform, Mapping):
+            raise ValueError("placement transform is missing")
+        prepared_candidate_transform = _prepare_transform(candidate_transform)
+        candidate_records = _placement_spatial_records_from_template(
             placement,
-            asset_definition,
+            asset_id,
+            _local_footprints(asset_definition),
+            _local_height_interval(asset_definition),
+            prepared_transform=prepared_candidate_transform,
         )
-        candidate_clearances = _placement_clearance_records(
+        candidate_clearances = _placement_clearance_records_from_templates(
             placement,
-            asset_definition,
-            authority,
+            asset_id,
+            _clearance_templates(asset_definition, authority),
+            prepared_transform=prepared_candidate_transform,
         )
         findings = list(diagnostics.get("findings", []))
         findings.extend(
@@ -3533,7 +3766,7 @@ def generate_placement_candidates(
             "before": _canonical_value(baseline),
             "after": _canonical_value(candidate["metrics"]),
         }
-    return {
+    result = {
         "spatialEngineVersion": SPATIAL_ENGINE_VERSION,
         "candidatePolicyVersion": CANDIDATE_POLICY_VERSION,
         "layoutFingerprint": base_layout_fingerprint,
@@ -3556,6 +3789,8 @@ def generate_placement_candidates(
         },
         "candidates": ranked,
     }
+    _cache_candidate_result(result_cache_key, result)
+    return result
 
 
 __all__ = [

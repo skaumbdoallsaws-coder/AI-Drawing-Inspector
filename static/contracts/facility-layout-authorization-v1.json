@@ -70,7 +70,8 @@
     "idempotencyRequired": true,
     "staleProposalFailsClosed": true,
     "alteredProposalFailsClosed": true,
-    "replayFailsClosed": true
+    "exactIdempotentRetryReturnsCanonicalReceipt": true,
+    "alteredRetryFailsClosed": true
   },
   "cases": [
     {

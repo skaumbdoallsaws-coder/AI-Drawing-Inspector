@@ -205,6 +205,7 @@ class FacilityLayoutTransactionRuntime:
         proposal_lifetime_seconds: float = 15 * 60,
         approval_lifetime_seconds: float = 5 * 60,
         limit: int = 512,
+        require_distinct_approver: bool = False,
     ) -> None:
         receipt_store = (
             JsonReceiptStore(receipt_root)
@@ -219,6 +220,7 @@ class FacilityLayoutTransactionRuntime:
         self._receipt_store = receipt_store
         self._proposal_lifetime_seconds = proposal_lifetime_seconds
         self._approval_lifetime_seconds = approval_lifetime_seconds
+        self.require_distinct_approver = bool(require_distinct_approver)
         self._authority_lock = threading.RLock()
         self.kernel = TransactionKernel(
             state_store=state_store,
@@ -346,6 +348,25 @@ class FacilityLayoutTransactionRuntime:
         )
         return proposal
 
+    def _get_proposal_for_approval(
+        self,
+        proposal_id: str,
+        *,
+        tenant_id: str,
+        site_id: str,
+        layout_id: str,
+    ) -> ProposalRecord:
+        """Resolve only the exact proposal target for an authorized approval."""
+
+        proposal = self.kernel.get_proposal(proposal_id)
+        self._assert_target(
+            proposal.binding,
+            tenant_id=tenant_id,
+            site_id=site_id,
+            layout_id=layout_id,
+        )
+        return proposal
+
     def cancel(
         self,
         proposal_id: str,
@@ -400,24 +421,34 @@ class FacilityLayoutTransactionRuntime:
         explicit_approval: bool,
     ) -> ApprovalRecord:
         with self._authority_lock:
-            proposal = self.get_proposal(
+            proposal = self._get_proposal_for_approval(
                 proposal_id,
                 tenant_id=tenant_id,
                 site_id=site_id,
                 layout_id=layout_id,
-                principal_id=principal_id,
             )
             principal = facility_transaction_principal(
                 tenant_id,
                 principal_id,
                 session_id,
             )
-            owner = self._assert_owner(
-                proposal,
-                tenant_id=tenant_id,
-                principal_id=principal_id,
-            )
-            if proposal.principal == owner:
+            if (
+                self.require_distinct_approver
+                and proposal.principal is not None
+                and proposal.principal.principal_id
+                == principal.principal_id
+            ):
+                raise TransactionAuthorizationError(
+                    "maker_checker_required",
+                    (
+                        "Facility Layout pilot approval requires a principal "
+                        "other than the proposal creator."
+                    ),
+                )
+            if (
+                proposal.principal is not None
+                and proposal.principal.session_id.startswith("own:")
+            ):
                 proposal = replace(proposal, principal=principal)
                 self._state_store.put_proposal(
                     proposal,
@@ -426,7 +457,7 @@ class FacilityLayoutTransactionRuntime:
             elif proposal.principal != principal:
                 raise TransactionAuthorizationError(
                     "transaction_principal_mismatch",
-                    "Transaction proposal belongs to another session.",
+                    "Transaction proposal belongs to another approver.",
                 )
             return self.kernel.approve(
                 ApprovalRequest(

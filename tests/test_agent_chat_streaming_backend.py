@@ -328,7 +328,7 @@ def test_high_risk_stream_releases_only_cleaned_sentences(monkeypatch):
 def test_failed_stream_never_enters_workflow_commit(monkeypatch):
     commit_calls = []
 
-    async def failing_chat(_payload):
+    async def failing_chat(_payload, _http_request):
         sink = server._AGENT_CHAT_STREAM_SINK.get()
         await sink("A partial response that must not commit.")
         raise RuntimeError("synthetic provider failure")
@@ -358,7 +358,7 @@ def test_stream_surfaces_provider_credit_failure_without_generic_detail(monkeypa
             "is too low to access the Anthropic API.'}}"
         )
 
-    async def failing_chat(_payload):
+    async def failing_chat(_payload, _http_request):
         raise ProviderCreditError()
 
     monkeypatch.setattr(server, "agent_chat", failing_chat)

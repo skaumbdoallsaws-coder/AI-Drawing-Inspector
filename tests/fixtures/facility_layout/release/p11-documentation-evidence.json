@@ -1,0 +1,32 @@
+{
+  "documents": [
+    {
+      "byteLength": 7437,
+      "containsSafetyDisclaimer": true,
+      "path": "docs/facility-layout-p11-pilot-runbook.md",
+      "sha256": "4448d2d16387e0670338c66913522a56bb6febd18191f406eb1c1a05e34015ac"
+    },
+    {
+      "byteLength": 4171,
+      "containsSafetyDisclaimer": false,
+      "path": "docs/facility-layout-p11-release-gates.md",
+      "sha256": "981fb09d33fbc7c2879bb286ea5e54877bb829517a0cd5951dcf7edd11a3c462"
+    },
+    {
+      "byteLength": 1794,
+      "containsSafetyDisclaimer": false,
+      "path": "docs/facility-layout-p11-licensing.md",
+      "sha256": "9f1230f2338a5a81ba0db584f163a8c3c33fe8c1736912292865699515ab2285"
+    },
+    {
+      "byteLength": 2458,
+      "containsSafetyDisclaimer": false,
+      "path": "docs/facility-layout-p11-soak-procedure.md",
+      "sha256": "671fb2bb942719b1c84e676147503aefa60bca7c2945ef8fb2782c5f2138d436"
+    }
+  ],
+  "generatedAtUtc": "2026-07-30T04:03:59Z",
+  "pilotRunbookContainsSafetyDisclaimer": true,
+  "releaseGateMet": true,
+  "schemaVersion": "facility-layout-p11-documentation-evidence-v1"
+}

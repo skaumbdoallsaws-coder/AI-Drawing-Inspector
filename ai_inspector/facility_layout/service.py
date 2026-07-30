@@ -1787,7 +1787,12 @@ class FacilityLayoutService:
         *,
         site_id: str,
         layout_id: str,
-    ) -> tuple[dict[str, Any], ExactBinding, dict[str, Any]]:
+    ) -> tuple[
+        dict[str, Any],
+        ExactBinding,
+        dict[str, Any],
+        FacilityDependencySnapshot,
+    ]:
         self._assert_proposal_target(
             proposal,
             tenant_id=principal.tenant_id,
@@ -1825,7 +1830,7 @@ class FacilityLayoutService:
         binding = ExactBinding.from_dict(
             alternative["transactionBinding"]
         )
-        prepared, _ = self._prepare_operations(
+        prepared, dependencies = self._prepare_operations(
             principal,
             site_id,
             layout_id,
@@ -1833,7 +1838,198 @@ class FacilityLayoutService:
             alternative["operations"],
             required_action=None,
         )
-        return alternative, binding, prepared
+        return alternative, binding, prepared, dependencies
+
+    @staticmethod
+    def _layout_content_fingerprint(
+        document: Mapping[str, Any],
+    ) -> str:
+        candidate = deepcopy(dict(document))
+        # Repository-owned timestamps change during an approved save and are
+        # not part of the user-approved spatial content.
+        candidate["createdAt"] = "__repository_timestamp__"
+        candidate["updatedAt"] = "__repository_timestamp__"
+        return hashlib.sha256(canonical_layout_bytes(candidate)).hexdigest()
+
+    @staticmethod
+    def _collection_receipt_summary(
+        values: Any,
+    ) -> dict[str, Any]:
+        items = (
+            deepcopy(list(values))
+            if isinstance(values, list)
+            else []
+        )
+        return {
+            "count": len(items),
+            "sha256": hashlib.sha256(
+                _canonical_value_bytes(items)
+            ).hexdigest(),
+        }
+
+    @classmethod
+    def _diagnostic_receipt_summary(
+        cls,
+        diagnostics: Any,
+    ) -> dict[str, Any]:
+        value = (
+            deepcopy(dict(diagnostics))
+            if isinstance(diagnostics, Mapping)
+            else {}
+        )
+        findings = value.get("findings")
+        summary = {
+            "sha256": hashlib.sha256(
+                _canonical_value_bytes(value)
+            ).hexdigest(),
+            "findings": cls._collection_receipt_summary(findings),
+        }
+        for key in (
+            "valid",
+            "safe",
+            "safetyStatus",
+            "spatialEngineVersion",
+            "routingEngineVersion",
+        ):
+            if key in value:
+                summary[key] = deepcopy(value[key])
+        metrics = value.get("metrics")
+        if isinstance(metrics, Mapping):
+            summary["metrics"] = deepcopy(dict(metrics))
+        return summary
+
+    @classmethod
+    def _compact_operation_result(
+        cls,
+        prepared: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        document = prepared.get("document")
+        document_timestamps = {}
+        if isinstance(document, Mapping):
+            document_timestamps = {
+                key: deepcopy(document.get(key))
+                for key in ("createdAt", "updatedAt")
+                if key in document
+            }
+        canonical_diff = prepared.get("canonicalDiff")
+        diff_summary: dict[str, Any] = {}
+        if isinstance(canonical_diff, Mapping):
+            diff_summary = {
+                "schemaVersion": canonical_diff.get("schemaVersion"),
+                "beforeRevision": canonical_diff.get("beforeRevision"),
+                "afterRevision": canonical_diff.get("afterRevision"),
+                "changed": bool(canonical_diff.get("changed")),
+                "entries": cls._collection_receipt_summary(
+                    canonical_diff.get("entries")
+                ),
+                "sha256": hashlib.sha256(
+                    _canonical_value_bytes(canonical_diff)
+                ).hexdigest(),
+            }
+        return {
+            "schemaVersion": prepared.get("schemaVersion"),
+            "changed": bool(prepared.get("changed")),
+            "createdIds": deepcopy(prepared.get("createdIds") or []),
+            "affectedIds": deepcopy(prepared.get("affectedIds") or []),
+            "findings": cls._collection_receipt_summary(
+                prepared.get("findings")
+            ),
+            "canonicalDiff": diff_summary,
+            "diffHash": prepared.get("diffHash"),
+            "operationResults": cls._collection_receipt_summary(
+                prepared.get("operationResults")
+            ),
+            "spatialDiagnostics": cls._diagnostic_receipt_summary(
+                prepared.get("spatialDiagnostics")
+            ),
+            "routingDiagnostics": cls._diagnostic_receipt_summary(
+                prepared.get("routingDiagnostics")
+            ),
+            "documentTimestamps": document_timestamps,
+        }
+
+    @classmethod
+    def _proposal_commit_payload(
+        cls,
+        alternative: Mapping[str, Any],
+        prepared: Mapping[str, Any],
+        dependencies: FacilityDependencySnapshot,
+    ) -> dict[str, Any]:
+        return {
+            "dependencies": dependencies.to_dict(),
+            "operationResult": cls._compact_operation_result(prepared),
+            "spatialDiagnostics": cls._diagnostic_receipt_summary(
+                prepared.get("spatialDiagnostics")
+            ),
+            "routingDiagnostics": cls._diagnostic_receipt_summary(
+                prepared.get("routingDiagnostics")
+            ),
+            "alternativeId": alternative["alternativeId"],
+            "strategy": alternative["strategy"],
+            "metrics": deepcopy(alternative["metrics"]),
+        }
+
+    @classmethod
+    def _proposal_recovery_context(
+        cls,
+        alternative: Mapping[str, Any],
+        prepared: Mapping[str, Any],
+        dependencies: FacilityDependencySnapshot,
+    ) -> dict[str, Any]:
+        return {
+            "schemaVersion": 2,
+            "kind": "facility-layout-commit",
+            "expectedChanged": bool(prepared.get("changed")),
+            "expectedLayoutFingerprint": (
+                cls._layout_content_fingerprint(prepared["document"])
+            ),
+            "commitPayload": cls._proposal_commit_payload(
+                alternative,
+                prepared,
+                dependencies,
+            ),
+        }
+
+    def _hydrate_proposal_commit_payload(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        revision: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        historical = self.layout_repository.get_layout_revision(
+            principal,
+            site_id,
+            layout_id,
+            revision,
+        )
+        document = deepcopy(historical["layout"])
+        result = deepcopy(dict(payload))
+        result["layout"] = document
+        operation_result = result.get("operationResult")
+        if isinstance(operation_result, Mapping):
+            operation_result = deepcopy(dict(operation_result))
+            if (
+                "document" in operation_result
+                and "documentTimestamps" not in operation_result
+            ):
+                result["operationResult"] = operation_result
+                return result
+            operation_document = deepcopy(document)
+            timestamps = operation_result.pop(
+                "documentTimestamps",
+                {},
+            )
+            if isinstance(timestamps, Mapping):
+                for key in ("createdAt", "updatedAt"):
+                    if key in timestamps:
+                        operation_document[key] = deepcopy(
+                            timestamps[key]
+                        )
+            operation_result["document"] = operation_document
+            result["operationResult"] = operation_result
+        return result
 
     def get_layout_proposal_preview(
         self,
@@ -1859,7 +2055,7 @@ class FacilityLayoutService:
         except TransactionError as error:
             self._raise_transaction_error(error)
             raise AssertionError("unreachable")
-        alternative, binding, _ = self._regenerate_proposal(
+        alternative, binding, _, _ = self._regenerate_proposal(
             principal,
             proposal,
             site_id=site_id,
@@ -1938,19 +2134,6 @@ class FacilityLayoutService:
         self._require_session_id(session_id)
         try:
             binding = ExactBinding.from_dict(binding_value)
-            proposal = self.transaction_runtime.get_proposal(
-                proposal_id,
-                tenant_id=principal.tenant_id,
-                site_id=site_id,
-                layout_id=layout_id,
-                principal_id=principal.principal_id,
-            )
-            self._assert_proposal_target(
-                proposal,
-                tenant_id=principal.tenant_id,
-                site_id=site_id,
-                layout_id=layout_id,
-            )
             approval = self.transaction_runtime.approve(
                 tenant_id=principal.tenant_id,
                 site_id=site_id,
@@ -1997,7 +2180,7 @@ class FacilityLayoutService:
                 self,
                 proposal: ProposalRecord,
             ) -> MutationPlan:
-                alternative, regenerated, prepared = (
+                alternative, regenerated, prepared, dependencies = (
                     service._regenerate_proposal(
                         principal,
                         proposal,
@@ -2011,6 +2194,11 @@ class FacilityLayoutService:
                         "alternative": alternative,
                         "prepared": prepared,
                     },
+                    recovery=service._proposal_recovery_context(
+                        alternative,
+                        prepared,
+                        dependencies,
+                    ),
                 )
 
             def commit(self, plan: MutationPlan) -> CommitResult:
@@ -2033,6 +2221,12 @@ class FacilityLayoutService:
                     != canonical_layout_bytes(
                         alternative["ghostPreview"]["layout"]
                     )
+                    or plan.recovery
+                    != service._proposal_recovery_context(
+                        alternative,
+                        prepared,
+                        dependencies,
+                    )
                 ):
                     raise TransactionBindingError(
                         "transaction_binding_mismatch",
@@ -2045,22 +2239,16 @@ class FacilityLayoutService:
                     prepared["document"],
                     plan.binding.base_revision,
                 )
+                commit_payload = service._proposal_commit_payload(
+                    alternative,
+                    prepared,
+                    dependencies,
+                )
                 return CommitResult(
                     revision=saved["revision"],
                     payload={
-                        "layout": deepcopy(saved["layout"]),
                         "changed": bool(saved.get("changed")),
-                        "dependencies": dependencies.to_dict(),
-                        "operationResult": deepcopy(prepared),
-                        "spatialDiagnostics": deepcopy(
-                            prepared["spatialDiagnostics"]
-                        ),
-                        "routingDiagnostics": deepcopy(
-                            prepared["routingDiagnostics"]
-                        ),
-                        "alternativeId": alternative["alternativeId"],
-                        "strategy": alternative["strategy"],
-                        "metrics": deepcopy(alternative["metrics"]),
+                        **commit_payload,
                     },
                 )
 
@@ -2076,11 +2264,108 @@ class FacilityLayoutService:
                     )
                 except Exception:
                     return ReconciliationResult.unknown()
-                if current["revision"] == prepared.binding.base_revision:
+                recovery = prepared.recovery
+                if (
+                    recovery.get("schemaVersion") == 1
+                    and recovery.get("kind")
+                    == "facility-layout-commit"
+                    and isinstance(
+                        recovery.get("expectedLayout"),
+                        Mapping,
+                    )
+                    and isinstance(
+                        recovery.get("commitPayload"),
+                        Mapping,
+                    )
+                    and isinstance(
+                        recovery.get("expectedChanged"),
+                        bool,
+                    )
+                ):
+                    expected = deepcopy(
+                        dict(recovery["expectedLayout"])
+                    )
+                    actual = deepcopy(dict(current["layout"]))
+                    expected["createdAt"] = actual.get("createdAt")
+                    expected["updatedAt"] = actual.get("updatedAt")
+                    if (
+                        canonical_layout_bytes(expected)
+                        != canonical_layout_bytes(actual)
+                    ):
+                        if (
+                            current["revision"]
+                            == prepared.binding.base_revision
+                        ):
+                            return (
+                                ReconciliationResult.not_committed()
+                            )
+                        return ReconciliationResult.unknown()
+                    if (
+                        current["revision"]
+                        == prepared.binding.base_revision
+                        and recovery["expectedChanged"]
+                    ):
+                        return ReconciliationResult.not_committed()
+                    payload = deepcopy(
+                        dict(recovery["commitPayload"])
+                    )
+                    payload["layout"] = actual
+                    payload["changed"] = recovery["expectedChanged"]
+                    return ReconciliationResult.committed(
+                        CommitResult(
+                            revision=current["revision"],
+                            payload=payload,
+                        )
+                    )
+                if (
+                    recovery.get("schemaVersion") != 2
+                    or recovery.get("kind") != "facility-layout-commit"
+                    or not isinstance(
+                        recovery.get("expectedLayoutFingerprint"),
+                        str,
+                    )
+                    or len(recovery["expectedLayoutFingerprint"]) != 64
+                    or not isinstance(
+                        recovery.get("commitPayload"),
+                        Mapping,
+                    )
+                    or not isinstance(
+                        recovery.get("expectedChanged"),
+                        bool,
+                    )
+                ):
+                    if (
+                        current["revision"]
+                        == prepared.binding.base_revision
+                    ):
+                        return ReconciliationResult.not_committed()
+                    return ReconciliationResult.unknown()
+
+                actual = deepcopy(dict(current["layout"]))
+                if (
+                    service._layout_content_fingerprint(actual)
+                    != recovery["expectedLayoutFingerprint"]
+                ):
+                    if (
+                        current["revision"]
+                        == prepared.binding.base_revision
+                    ):
+                        return ReconciliationResult.not_committed()
+                    return ReconciliationResult.unknown()
+                if (
+                    current["revision"] == prepared.binding.base_revision
+                    and recovery["expectedChanged"]
+                ):
                     return ReconciliationResult.not_committed()
-                # A changed current layout without the volatile proposal
-                # payload cannot be attributed safely after restart.
-                return ReconciliationResult.unknown()
+
+                payload = deepcopy(dict(recovery["commitPayload"]))
+                payload["changed"] = recovery["expectedChanged"]
+                return ReconciliationResult.committed(
+                    CommitResult(
+                        revision=current["revision"],
+                        payload=payload,
+                    )
+                )
 
         try:
             outcome = self.transaction_runtime.apply(
@@ -2097,8 +2382,15 @@ class FacilityLayoutService:
         except TransactionError as error:
             self._raise_transaction_error(error)
             raise AssertionError("unreachable")
+        public_payload = self._hydrate_proposal_commit_payload(
+            principal,
+            site_id,
+            layout_id,
+            outcome.receipt.revision,
+            outcome.receipt.payload,
+        )
         return {
-            **deepcopy(dict(outcome.receipt.payload)),
+            **public_payload,
             "revision": outcome.receipt.revision,
             "receipt": outcome.receipt.to_dict(),
             "replayed": outcome.replayed,

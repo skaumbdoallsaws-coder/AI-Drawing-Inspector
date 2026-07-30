@@ -579,6 +579,7 @@ class ApplyRequest:
 class MutationPlan:
     binding: ExactBinding
     payload: Mapping[str, Any] = field(default_factory=dict)
+    recovery: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.binding, ExactBinding):
@@ -590,6 +591,11 @@ class MutationPlan:
             self,
             "payload",
             copy_mapping(self.payload, "mutationPayload"),
+        )
+        object.__setattr__(
+            self,
+            "recovery",
+            copy_mapping(self.recovery, "mutationRecovery"),
         )
 
 
@@ -621,6 +627,7 @@ class PreparedRecord:
     idempotency_key: str
     request_fingerprint: str
     prepared_at: float
+    recovery: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -659,9 +666,14 @@ class PreparedRecord:
             "prepared_at",
             validate_timestamp(self.prepared_at, "preparedAt"),
         )
+        object.__setattr__(
+            self,
+            "recovery",
+            copy_mapping(self.recovery, "preparedRecovery"),
+        )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "receiptId": self.receipt_id,
             "proposalId": self.proposal_id,
             "action": self.action,
@@ -671,6 +683,9 @@ class PreparedRecord:
             "requestFingerprint": self.request_fingerprint,
             "preparedAt": self.prepared_at,
         }
+        if self.recovery:
+            result["recovery"] = deepcopy(dict(self.recovery))
+        return result
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "PreparedRecord":
@@ -690,6 +705,7 @@ class PreparedRecord:
             idempotency_key=value.get("idempotencyKey"),
             request_fingerprint=value.get("requestFingerprint"),
             prepared_at=value.get("preparedAt"),
+            recovery=value.get("recovery") or {},
         )
 
 

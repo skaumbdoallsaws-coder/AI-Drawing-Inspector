@@ -1,0 +1,73 @@
+{
+  "beforeCanonicalLayoutSha256": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+  "beforeRevision": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+  "blockers": [],
+  "consumedProposalId": "flp-6bd9f645134c17ca1280f8fe2f23b83de82b07bfff8bbcf24270f224f7355dbc",
+  "dataFilesAfter": {
+    "authorities/policies/local/site-local/authority/policy_set/policy-local/revisions/37e3ded2bfa6f313267b04c23888ee5996bdc36ca70eeb41df6178e2b746f870.json": "37e3ded2bfa6f313267b04c23888ee5996bdc36ca70eeb41df6178e2b746f870",
+    "authorities/policies/local/site-local/authority/policy_set/policy-local/revisions/46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0.json": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+    "authorities/policies/local/site-local/authority/policy_set/policy-local/revisions/50fb3338f98280ecc57e8a31ee511ba65a298dc6b89c39d92e93c21567bc77b3.json": "50fb3338f98280ecc57e8a31ee511ba65a298dc6b89c39d92e93c21567bc77b3",
+    "authorities/policies/local/site-local/authority/policy_set/registry.json": "24ca3a39c8331e1798ff50536353165890466fe9fa12941bb40216627e47ac05",
+    "authorities/shells/local/site-local/authority/facility_shell/registry.json": "cb08918b52191ff800b4fd1c07787c529114b96aac6fe64d02421637925e3ac6",
+    "authorities/shells/local/site-local/authority/facility_shell/shell-local/revisions/6956c351920e4b277632be52e4d0479a5a93d65de1e23ef72cc3cf41b11333a8.json": "6956c351920e4b277632be52e4d0479a5a93d65de1e23ef72cc3cf41b11333a8",
+    "authorities/shells/local/site-local/authority/facility_shell/shell-local/revisions/736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f.json": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+    "authorities/shells/local/site-local/authority/facility_shell/shell-local/revisions/b889400930f4d84680d23d2a268898eec264f2bc8f58d6751c92e711db3585b9.json": "b889400930f4d84680d23d2a268898eec264f2bc8f58d6751c92e711db3585b9",
+    "layouts/local/site-local/layouts/backups/fl-main/3831e8703c78bd75e49dbb2124ee016edf04e2560a2fbc954adb723085c3e173.json": "3831e8703c78bd75e49dbb2124ee016edf04e2560a2fbc954adb723085c3e173",
+    "layouts/local/site-local/layouts/fl-main.json": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+    "layouts/local/site-local/layouts/registry.json": "76cd3859a52d63e2d39e4a91e302324ea59ed7bcb5c06f16e74fd0a020b82d22",
+    "transactions/idempotency/fa2c0c701ab73615222c0dcbdefe45d52463e96d107fb4f1bbba839fe75a3e29.json": "08d5105e7d648eb96593ad6537dc40712ea0ca83838791137786d92f54040193",
+    "transactions/receipts/30054329ea5e45483fb49cc776e1e35180082d437d1d9a954b9f1c38169c1d11.json": "919b3de153512241990e65e30de52c8f2b565fcae15fd461f9be4d1b0aaa78ec"
+  },
+  "dataFilesBefore": {
+    "authorities/policies/local/site-local/authority/policy_set/policy-local/revisions/37e3ded2bfa6f313267b04c23888ee5996bdc36ca70eeb41df6178e2b746f870.json": "37e3ded2bfa6f313267b04c23888ee5996bdc36ca70eeb41df6178e2b746f870",
+    "authorities/policies/local/site-local/authority/policy_set/policy-local/revisions/46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0.json": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+    "authorities/policies/local/site-local/authority/policy_set/policy-local/revisions/50fb3338f98280ecc57e8a31ee511ba65a298dc6b89c39d92e93c21567bc77b3.json": "50fb3338f98280ecc57e8a31ee511ba65a298dc6b89c39d92e93c21567bc77b3",
+    "authorities/policies/local/site-local/authority/policy_set/registry.json": "24ca3a39c8331e1798ff50536353165890466fe9fa12941bb40216627e47ac05",
+    "authorities/shells/local/site-local/authority/facility_shell/registry.json": "cb08918b52191ff800b4fd1c07787c529114b96aac6fe64d02421637925e3ac6",
+    "authorities/shells/local/site-local/authority/facility_shell/shell-local/revisions/6956c351920e4b277632be52e4d0479a5a93d65de1e23ef72cc3cf41b11333a8.json": "6956c351920e4b277632be52e4d0479a5a93d65de1e23ef72cc3cf41b11333a8",
+    "authorities/shells/local/site-local/authority/facility_shell/shell-local/revisions/736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f.json": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+    "authorities/shells/local/site-local/authority/facility_shell/shell-local/revisions/b889400930f4d84680d23d2a268898eec264f2bc8f58d6751c92e711db3585b9.json": "b889400930f4d84680d23d2a268898eec264f2bc8f58d6751c92e711db3585b9",
+    "layouts/local/site-local/layouts/backups/fl-main/3831e8703c78bd75e49dbb2124ee016edf04e2560a2fbc954adb723085c3e173.json": "3831e8703c78bd75e49dbb2124ee016edf04e2560a2fbc954adb723085c3e173",
+    "layouts/local/site-local/layouts/fl-main.json": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+    "layouts/local/site-local/layouts/registry.json": "76cd3859a52d63e2d39e4a91e302324ea59ed7bcb5c06f16e74fd0a020b82d22",
+    "transactions/idempotency/fa2c0c701ab73615222c0dcbdefe45d52463e96d107fb4f1bbba839fe75a3e29.json": "08d5105e7d648eb96593ad6537dc40712ea0ca83838791137786d92f54040193",
+    "transactions/receipts/30054329ea5e45483fb49cc776e1e35180082d437d1d9a954b9f1c38169c1d11.json": "919b3de153512241990e65e30de52c8f2b565fcae15fd461f9be4d1b0aaa78ec"
+  },
+  "durableReceiptId": "flr-5-XnN_-tkU6R59ETe2tlXUoXRu_dU4_D",
+  "featureFlagControlEffective": true,
+  "generatedAtUtc": "2026-07-30T04:03:59Z",
+  "layoutId": "fl-main",
+  "noDataConversion": true,
+  "noFileMutation": true,
+  "observations": [
+    {
+      "bootstrapStatus": 200,
+      "canonicalLayoutSha256": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+      "consumedProposalStatus": 403,
+      "durableReceiptExact": true,
+      "durableReceiptStatus": 200,
+      "manualAuthoring": false,
+      "newPreviewStatus": 403,
+      "noOpWriteStatus": 403,
+      "revision": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+      "state": "all_off",
+      "viewerV2": false
+    },
+    {
+      "bootstrapStatus": 200,
+      "canonicalLayoutSha256": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+      "consumedProposalStatus": 404,
+      "durableReceiptExact": true,
+      "durableReceiptStatus": 200,
+      "manualAuthoring": true,
+      "newPreviewStatus": "not_run",
+      "noOpWriteStatus": 200,
+      "revision": "bec882797487c7317670c8ed5d0415a71b466dc2cdee3698ddc5b09f2ef53733",
+      "state": "all_on",
+      "viewerV2": true
+    }
+  ],
+  "releaseGateMet": true,
+  "schemaVersion": "facility-layout-p11-rollback-drill-v1",
+  "status": "passed"
+}

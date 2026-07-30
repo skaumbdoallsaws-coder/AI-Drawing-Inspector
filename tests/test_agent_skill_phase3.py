@@ -89,7 +89,7 @@ def _part_display_route(effect: str, *, part_id: str | None = "SYNTH-H1"):
 def test_phase3_registry_resolves_dependency_bounded_skill_compositions():
     server._reset_agent_skill_runtime_cache_for_tests()
     workflows, skills = server._get_agent_skill_runtime()
-    assert len(skills.ids) == 8
+    assert len(skills.ids) == 9
     disposition = skills.resolve_selection(
         primary_id="recommend-fai-disposition",
         supporting_ids=[],

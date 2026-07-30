@@ -425,6 +425,7 @@ def main() -> int:
     with TemporaryDirectory(
         prefix="facility-p5-",
         dir=runtime_root,
+        ignore_cleanup_errors=True,
     ) as directory:
         app, service, created = _bootstrap_app(Path(directory))
         port = _free_port()

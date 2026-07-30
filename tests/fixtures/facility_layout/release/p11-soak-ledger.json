@@ -1,0 +1,2250 @@
+{
+  "acceleratedDeterministicSoak": {
+    "canonicalReceipts": [
+      {
+        "canonicalReceiptSha256": "fdfcd45a22643d654c57a3eae7a68302408700b386426508a6d649dc69b19e27",
+        "layoutId": "fl-p11-soak-01",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "0b7b0e536eb7e96dc365d438fa3f6dfb5ee0f358eaedfbba9eabc4f974a57aee",
+            "dependencyFingerprint": "31e478be83442c7e2c5a4906a6b01acdd52ca3079d1d6e7afe49a97dee29a61e",
+            "diffHash": "ba6706ff19c03d03b4e737dd17fadb2c5b8b7f4320c2a2d69cbc4d9ddf510d23",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-01",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384240.2564101,
+          "idempotencyKey": "p11-approved-apply-01",
+          "payload": {
+            "alternativeId": "fla-p8-51f13dbbb2068cca37d26026",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-eb23b1e9e5fad6715494",
+                "pl-p8-f10c9b4f9f362800bc59"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "ab7afab13b0fd9d447be22f71e69f49a20ff54a35316f7b8108a392d3aadd936",
+                "beforeRevision": "0b7b0e536eb7e96dc365d438fa3f6dfb5ee0f358eaedfbba9eabc4f974a57aee",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "6ca69c33391cdde30cfcb177cb9b8323db8fe96ea669bb7781eaabf59aaabefe"
+                },
+                "schemaVersion": 1,
+                "sha256": "01142ddfd1f4a5edefb87dd1fae7de2e67eb6c8280afa3a28f0a31c7e6d97129"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-eb23b1e9e5fad6715494",
+                "pl-p8-f10c9b4f9f362800bc59"
+              ],
+              "diffHash": "ba6706ff19c03d03b4e737dd17fadb2c5b8b7f4320c2a2d69cbc4d9ddf510d23",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:03:59.971594Z",
+                "updatedAt": "2026-07-30T04:03:59.971594Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "4fb1bd4d88751232597ca375348cab711f8c6057eeafc641352b48061c7a36aa"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "7263a9ee4d6ffc2e8972d2b295e8f9655ec36b2e9c890329139edd2ee675fc0c"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "ab19e9957f95fdbcb2ee9578a7c11b5f4c12c31f9faad86941ad0ff149a27f65",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "7263a9ee4d6ffc2e8972d2b295e8f9655ec36b2e9c890329139edd2ee675fc0c"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "ab19e9957f95fdbcb2ee9578a7c11b5f4c12c31f9faad86941ad0ff149a27f65",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:f5b0d3c866e53b57e52d536fabe301e5"
+          },
+          "proposalId": "flp-92993645882c44bc2400bd3e642fbaa6bc109a6244c38439155f313418d800af",
+          "receiptId": "flr-h-PD0cz2Jv1Wj3rpnXWR2zmYTpp6EI3e",
+          "requestFingerprint": "b8d6d291d6aaeb365d0a0c3dcd771c4ea8f554c73c480cbad04e1431d09bde64",
+          "revision": "9de832eb39f169485b8fa1b33304bbc667b6df33d18553fb18afce55ac9646f5"
+        },
+        "receiptId": "flr-h-PD0cz2Jv1Wj3rpnXWR2zmYTpp6EI3e",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "400ffea20a1acb2dbfbaff20b46a46d60d2c793f4f8e98ac35566c7c2a9a25ad",
+        "layoutId": "fl-p11-soak-02",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "7439533ed082de8fcb3cadcb579cf9735984a69dd9e9e72cdd0a303672807c97",
+            "dependencyFingerprint": "61d236f5ad58d026279d07e53431cdafe6c95c503cfb6a35dede1e4b415070b9",
+            "diffHash": "939ab8b4a9dbcd3abb6fcc4761f6b73dc64bca2b19076f164949e3d1ffe806e3",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-02",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384240.5891542,
+          "idempotencyKey": "p11-approved-apply-02",
+          "payload": {
+            "alternativeId": "fla-p8-0b72f7fa396928b1f3e8cd1b",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-36027f3fd0218ba1d17d",
+                "pl-p8-58dab005fc85b4920c19"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "21a1e00b6f6f2d4731fc1ac955ebc140eebc9f13dc730f8948119bf608855c1a",
+                "beforeRevision": "7439533ed082de8fcb3cadcb579cf9735984a69dd9e9e72cdd0a303672807c97",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "d34523a7c00e7f6a8403ea57d1bb4a21769ab7d79cb5f04e2ae7ba6f2441e082"
+                },
+                "schemaVersion": 1,
+                "sha256": "27a50f857451d12d8da22d31a1d7f9b71bd3a14f4617398dbbc45d0a5f934478"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-36027f3fd0218ba1d17d",
+                "pl-p8-58dab005fc85b4920c19"
+              ],
+              "diffHash": "939ab8b4a9dbcd3abb6fcc4761f6b73dc64bca2b19076f164949e3d1ffe806e3",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:00.288001Z",
+                "updatedAt": "2026-07-30T04:04:00.288001Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "515df4240439acfff7c9dd4db6b5e208aceea9d4d35e36be649d06fa0ae3074f"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "08a3292a5896e958746f9e330ee1b45360c5094212850db5331112a5bdc6d194"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "5c295528ac1b9f91beb3b2b0d71e95aa44e4a816a7b6db80bc12052f5817723f",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "08a3292a5896e958746f9e330ee1b45360c5094212850db5331112a5bdc6d194"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "5c295528ac1b9f91beb3b2b0d71e95aa44e4a816a7b6db80bc12052f5817723f",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:f3a7bf7db7a4ca13c8dd3eb7c77e0f46"
+          },
+          "proposalId": "flp-643f128fa94dce5178d426437b82fae4cddc82c09a6b5e145d637efbcf9a7026",
+          "receiptId": "flr-kc7cyKJJKRz8Wu_BxaVobyAea37GQKzz",
+          "requestFingerprint": "b36f356a1175213b8f333bd23e6af4f77bd26f72fd8a5dd17b579538366d96cc",
+          "revision": "13adeacdc774814d2f1f348452060db1a261d970be2138dcafd7cdd4e9d67c1f"
+        },
+        "receiptId": "flr-kc7cyKJJKRz8Wu_BxaVobyAea37GQKzz",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "7bcc5d3694cdcc5b444620f155c8d437702c5797ec54b51071d8912739d324a6",
+        "layoutId": "fl-p11-soak-03",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "3420c68f33d34dec5a9dbfba3befea9f85b79dfcfa703dc5d3968ff47816beda",
+            "dependencyFingerprint": "094f7713e50e15a8d450398cdd2b8fab3e04b0480d96c7514199113c92a302df",
+            "diffHash": "e5f1f069404cb134d4d4cce444579272184d87ecd7a002b8ef40128cca6ead2f",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-03",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384240.9298172,
+          "idempotencyKey": "p11-approved-apply-03",
+          "payload": {
+            "alternativeId": "fla-p8-0a8429cb18c35b8460e2427d",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-2ca7b4b31f50c648d390",
+                "pl-p8-c2233c249ae50655e7f9"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "7d79b167d8e67681fb969180f365dc51277bb8ca9b98c272a26a1130c3ac0d5a",
+                "beforeRevision": "3420c68f33d34dec5a9dbfba3befea9f85b79dfcfa703dc5d3968ff47816beda",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "8f1ca5379864f29c6e0d36422f6ad13999f5ce822d8c1f2742efd120af620c2d"
+                },
+                "schemaVersion": 1,
+                "sha256": "4b2d68dd733444c1d93338135f166cf4daec082465e45b4f4ae20caa93054863"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-2ca7b4b31f50c648d390",
+                "pl-p8-c2233c249ae50655e7f9"
+              ],
+              "diffHash": "e5f1f069404cb134d4d4cce444579272184d87ecd7a002b8ef40128cca6ead2f",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:00.623576Z",
+                "updatedAt": "2026-07-30T04:04:00.623576Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "8b26d12eb817f1259522a98186336e3a84fc4d44a3f0fdfd5d8c465bc5fefc03"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "4e914b688db628236f8f6f84c2bcb66994ea9ff860fe07eaaa7b090005ca449a"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "ddca98ddf59b2ffcd3f545e334ef8f2bd4731d88904ef6871e82d9bc8706270a",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "4e914b688db628236f8f6f84c2bcb66994ea9ff860fe07eaaa7b090005ca449a"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "ddca98ddf59b2ffcd3f545e334ef8f2bd4731d88904ef6871e82d9bc8706270a",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:fb811e523470fe1a6d9b81dd3667e704"
+          },
+          "proposalId": "flp-21d5d3c454c4ab33f39e189883e8abcd9569b15a7bbaa14e6982d1e936f07c1d",
+          "receiptId": "flr--8yUgeNBxFXqCHJzpKG7vCNbXnVxUkjA",
+          "requestFingerprint": "9a0b4a0794aa139a2e5b5450c1de8182ceb3d52bc57738e88689351619dc7fa8",
+          "revision": "6e9b3e555b62580cd6bee7197cfe2acb0eea2eea06b8158b52c3c0a26d45421c"
+        },
+        "receiptId": "flr--8yUgeNBxFXqCHJzpKG7vCNbXnVxUkjA",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "d1640a6629003d4fbc6d0a796020a192fa394f44f8ba25114a9f05c233ba2f23",
+        "layoutId": "fl-p11-soak-04",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "07cd9cc1bbf38c4667367526be57d718ca2f29fca5a67e64cde4a6f4e60e2fbc",
+            "dependencyFingerprint": "6b9b3038e31a66072611409af8b7dd926abceabea32db057bfda4ca12ce9f462",
+            "diffHash": "48fda1d0efcd68159d7173264ade100e8768a348f7c9cea6a1cae1783e6c414c",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-04",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384241.2314482,
+          "idempotencyKey": "p11-approved-apply-04",
+          "payload": {
+            "alternativeId": "fla-p8-bbc5a2fceea38d3936bdf2bc",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-02f8cc2d44f9616cf6cd",
+                "pl-p8-d533357c9a7cf36b22d3"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "0854f0b30dbce2f34eb50806e4dbdb14d1a3bd8320bca3a445e0c958f351bc8d",
+                "beforeRevision": "07cd9cc1bbf38c4667367526be57d718ca2f29fca5a67e64cde4a6f4e60e2fbc",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "573eafa82d7d534c569eb717ce94b87e9cd4c96f340e84f815551b7f30dd6465"
+                },
+                "schemaVersion": 1,
+                "sha256": "a288de467281c644aa526763ce3000e810d5c7fa64365dfb0dec5bda5fedcd5a"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-02f8cc2d44f9616cf6cd",
+                "pl-p8-d533357c9a7cf36b22d3"
+              ],
+              "diffHash": "48fda1d0efcd68159d7173264ade100e8768a348f7c9cea6a1cae1783e6c414c",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:00.961028Z",
+                "updatedAt": "2026-07-30T04:04:00.961028Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "31b9dcdd27d6543b80e651e745c70ed061cbcf202ff6c0af1a23e6518ccb5e66"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "bf197f196e0f907ad926bdb3257c3ab2f080a95bdda94ef4e86f63a9bca5526b"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "3adc0cfcf4d4e6c0d4e1b49812b4625b8a22c1b2d023de4a243e09da616c7a21",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "bf197f196e0f907ad926bdb3257c3ab2f080a95bdda94ef4e86f63a9bca5526b"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "3adc0cfcf4d4e6c0d4e1b49812b4625b8a22c1b2d023de4a243e09da616c7a21",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:49e1da7f193e3d434dca486cc93c557b"
+          },
+          "proposalId": "flp-41af43389492e3aff0f1571db0dc12bffd274a79b9e053370d518d9476274684",
+          "receiptId": "flr-5g7l6i5owhGX4dJzGGlQ6j88MNDxpUnz",
+          "requestFingerprint": "d4f963c0c27b65a6a78bb6cf815cf399f61f5fe30b1a939a0d8f7186bfa0a056",
+          "revision": "77475053bc34d9bb6a2e466e5d14db08ad7b732000bb60a99e902c33720ed56e"
+        },
+        "receiptId": "flr-5g7l6i5owhGX4dJzGGlQ6j88MNDxpUnz",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "0b2efc783af818b9f4ee938c5ae7a74fc5f0d61a877b41948bca284cba2d4e07",
+        "layoutId": "fl-p11-soak-05",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "777d75cc6c63785aa75dd8f91fa831428015db67142d2ec40a817bb8e5f08943",
+            "dependencyFingerprint": "14662cfcdabc04eee1268170fe94154074c72c8ed2cb74476e4313050b7af710",
+            "diffHash": "179ee9c407f5cb1e9f8d12531c950f13c8b14c991aee560542c4d789e2b7b04b",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-05",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384241.537871,
+          "idempotencyKey": "p11-approved-apply-05",
+          "payload": {
+            "alternativeId": "fla-p8-ff71c54551712a1c0866d628",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-032641513b6e9d12754c",
+                "pl-p8-1655adfa9b760873459a"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "28fa4ce9920d9927b5e53ec2a7c2b958d4e73ff8d976eccf3ba54044c9a2d2c8",
+                "beforeRevision": "777d75cc6c63785aa75dd8f91fa831428015db67142d2ec40a817bb8e5f08943",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "0cf83b1d80d077dc25869d1e480871def7a333eaee16e9d397ff7677f863c455"
+                },
+                "schemaVersion": 1,
+                "sha256": "eb7e59b4574f469bd7c78ae4e72e5bcb2a4b436814e445de75ca149d522afc8f"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-032641513b6e9d12754c",
+                "pl-p8-1655adfa9b760873459a"
+              ],
+              "diffHash": "179ee9c407f5cb1e9f8d12531c950f13c8b14c991aee560542c4d789e2b7b04b",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:01.262749Z",
+                "updatedAt": "2026-07-30T04:04:01.262749Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "27d0aeda097a3807bfd2b431616039823cd3b1c2fe2a4ef2641351565bc2ad46"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "907dffa88470a927ca74023be520122970954da68f51ae013e32ab231207c4f7"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "dfbe29b5c00d23cc43569f8c267205ad55692e3fa608a01fb88dad4e5d3991f3",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "907dffa88470a927ca74023be520122970954da68f51ae013e32ab231207c4f7"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "dfbe29b5c00d23cc43569f8c267205ad55692e3fa608a01fb88dad4e5d3991f3",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:371da4e5d7534c1a5b63b35307143f5f"
+          },
+          "proposalId": "flp-f9329529d595a63f78255fb9632b2299f152412703b96319484d64c89f4d297c",
+          "receiptId": "flr-xZsnwrab0PonETIGugZYRrm9rJYakhXR",
+          "requestFingerprint": "7c3978dee4a32ab900c0b3f86e408419392ff9a15e8f6963dc0e30f9016c8a0c",
+          "revision": "6ee299239924fe8556527acdf95d8090da8cc6a794bc0a5e3d89b16a7c2f905c"
+        },
+        "receiptId": "flr-xZsnwrab0PonETIGugZYRrm9rJYakhXR",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "e0a9fd941200a9ce1af11f17ba1fdb7ccd39a32b89eccc8a9a420300a0866538",
+        "layoutId": "fl-p11-soak-06",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "522fff002aa9ce21ccd960f97120a8b33eeabe9d5317f1fed5c40ca86230cfc2",
+            "dependencyFingerprint": "1b3e14a3960d59cb61a14f62f9f2c977846220cd4808095fad714fc4577cb7e5",
+            "diffHash": "64d5f58797f014db3ce6a7ad675c28ec9f8a56737a52e39f5dcf4ba93f25c4df",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-06",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384241.9039743,
+          "idempotencyKey": "p11-approved-apply-06",
+          "payload": {
+            "alternativeId": "fla-p8-6ff6fff73de6e35dfe8ee0e0",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-48fb08d49ec655ae110f",
+                "pl-p8-a59a477fb59029462a1f"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "a00817bb4f179c44d47e48fd685ee494b4d1ad8e8c5c053660fab68b6f3217ea",
+                "beforeRevision": "522fff002aa9ce21ccd960f97120a8b33eeabe9d5317f1fed5c40ca86230cfc2",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "396f06eb25d417111ecaffe67c48082cf0f17a932d3ef25dacd99722ce68f314"
+                },
+                "schemaVersion": 1,
+                "sha256": "629d92da0230bc422276fd3f2e09bdcc7c90006b4c1b094d1377486b933d3523"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-48fb08d49ec655ae110f",
+                "pl-p8-a59a477fb59029462a1f"
+              ],
+              "diffHash": "64d5f58797f014db3ce6a7ad675c28ec9f8a56737a52e39f5dcf4ba93f25c4df",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:01.567785Z",
+                "updatedAt": "2026-07-30T04:04:01.567785Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "87de1adea90dcc69edf0f06408aa583d69c10861da565e24745646914d1708ef"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "0a4f3bb1d88725bb706e29bd13ed3ac47df41367dc84e22a37c75af5698abfc8"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "160ea41b8186d630c4d0e6257521a8b1a7a3dee038cb1c079b515a25143ba162",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "0a4f3bb1d88725bb706e29bd13ed3ac47df41367dc84e22a37c75af5698abfc8"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "160ea41b8186d630c4d0e6257521a8b1a7a3dee038cb1c079b515a25143ba162",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:ec7413a7570707b52a9d20e4c29ed883"
+          },
+          "proposalId": "flp-3773e0011e14312ead4f40345689ca070e0e9bf0c98a7a51babe20640fb849c9",
+          "receiptId": "flr-haQbQo06igjJfa05ckHdkXq4GxQOcge5",
+          "requestFingerprint": "6bd2b7a82e8e03b14b1918e9927ec84ac1ced9c8e98529b35d177750ae86181b",
+          "revision": "d056b7a099c64d9dbb8eeba57694b77e2da52e23d74fffe22fe7b50a411352f5"
+        },
+        "receiptId": "flr-haQbQo06igjJfa05ckHdkXq4GxQOcge5",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "cd6ada0ee8aac1ddff8fb9bd9122718d31aa0f92c52febe57728e8bb5e3f2bba",
+        "layoutId": "fl-p11-soak-07",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "1d135dba2b311ffe9c65558962f706c5c9f0dd2ed04921c450af129e2b6e2fb1",
+            "dependencyFingerprint": "0ddb33727415dd8252ac690b179625a2bdd05d515bb62fd4ceba3aca9a912720",
+            "diffHash": "071d5fbf59ebf55346c7873229bbe39ff24e5d429f45fb4dfe9727f896a9f077",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-07",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384242.285279,
+          "idempotencyKey": "p11-approved-apply-07",
+          "payload": {
+            "alternativeId": "fla-p8-6d4d3f9fb4b3a721448cdf32",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-9df1d3720c49a554d51e",
+                "pl-p8-c42c68e8da195334d530"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "38a3f30ec1e463d897619232924cce2498a79eac8fb19cdf05cb9ea6feea3e31",
+                "beforeRevision": "1d135dba2b311ffe9c65558962f706c5c9f0dd2ed04921c450af129e2b6e2fb1",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "19db4c4ee496e5bae9df4cd6f557d0b0b2da265bd899dfd391dd9c140cbedf26"
+                },
+                "schemaVersion": 1,
+                "sha256": "cb33480fab7be38d647dbb443a1a58c59d2cafdfa5e863eb5ee31eb72df25583"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-9df1d3720c49a554d51e",
+                "pl-p8-c42c68e8da195334d530"
+              ],
+              "diffHash": "071d5fbf59ebf55346c7873229bbe39ff24e5d429f45fb4dfe9727f896a9f077",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:01.939009Z",
+                "updatedAt": "2026-07-30T04:04:01.939009Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "ab4f4ee56a9f6770ef2ff5c23dcebc8b116de3320014f23a1083290032164055"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "6349b7eacd4eca426a028a06f9a3b872f93d99f4f01e77ed813056351ee55be6"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "0fda3d169256f1939a8ffe386205cf2c8da3e9ad0fdca290639701f621386f21",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "6349b7eacd4eca426a028a06f9a3b872f93d99f4f01e77ed813056351ee55be6"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "0fda3d169256f1939a8ffe386205cf2c8da3e9ad0fdca290639701f621386f21",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:2eb813a2309b988036f28517c8122f4c"
+          },
+          "proposalId": "flp-faa0458d6df2526e2e20fcc640a14a80df5e1ecb7e4cef5c9f8e4bfc6c610bb9",
+          "receiptId": "flr-Mo-5aMzMK3bqtevH8HTHxKYCqywtr_Gk",
+          "requestFingerprint": "f3909483273667133753854e7bd1c64261bc86f7255b1feb8e812c6e8886b21a",
+          "revision": "716d460ed38b957ba280b70bbb06397bcb52bba569aace3b3914d72afeba7fc1"
+        },
+        "receiptId": "flr-Mo-5aMzMK3bqtevH8HTHxKYCqywtr_Gk",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "a26036d84beef9eece7d9b356beeb7f6aeb8167695d6b5b975a531f347674173",
+        "layoutId": "fl-p11-soak-08",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "25c77551fd6e4cd6cb48ee3806eb1df83951ee62a81d488c864fa06b68b81251",
+            "dependencyFingerprint": "39a639ce26a8796c9ccad39d8817f21bc1492ef7ddc04ace81305c9ac51bb8c2",
+            "diffHash": "57637425597e81067db819de31d4a50393aca57fbe4e6f8392359c7da969a10e",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-08",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384242.5887225,
+          "idempotencyKey": "p11-approved-apply-08",
+          "payload": {
+            "alternativeId": "fla-p8-416af422955fe8440dfe9ed1",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-96c58a0e5f68afd65aaa",
+                "pl-p8-ea63083d80a5cf8703e6"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "fee465f498fc20ab999b5be0bb8a4aa8d7d6d24fafb275527ef20d771c8f30df",
+                "beforeRevision": "25c77551fd6e4cd6cb48ee3806eb1df83951ee62a81d488c864fa06b68b81251",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "4e0366e330b1deaf91ea9208eba0d9ecc4573f82067630fec97f729c483a1d84"
+                },
+                "schemaVersion": 1,
+                "sha256": "4ca127df85193c875fe8c6bfe260edc07626c29f60461e74a1f4cae3979d8f8d"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-96c58a0e5f68afd65aaa",
+                "pl-p8-ea63083d80a5cf8703e6"
+              ],
+              "diffHash": "57637425597e81067db819de31d4a50393aca57fbe4e6f8392359c7da969a10e",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:02.317905Z",
+                "updatedAt": "2026-07-30T04:04:02.317905Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "6e23dc2afc196d0f9aa4d1fdd9bba927346183b3660c3bba7ea23be4fe79c73d"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "83d51fc1bba841b79f5146a8d29600774442d0fa859edb1e8251d1956ccc93e5"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "9510aaa58f166b7affe11a37d7885965e26863ea9f5f6092d7ccc44cda0ceb2c",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "83d51fc1bba841b79f5146a8d29600774442d0fa859edb1e8251d1956ccc93e5"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "9510aaa58f166b7affe11a37d7885965e26863ea9f5f6092d7ccc44cda0ceb2c",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:ab84b8336efe581adcc1966ba05c0ab0"
+          },
+          "proposalId": "flp-ff63fdacb7a62026abd659e3fb0e72715574533ff928e20a119e45c1dab0e409",
+          "receiptId": "flr-8ofifL77WWCIDdyudrj0wzPxvEmqBucz",
+          "requestFingerprint": "653f8f4d08cbdba05d26c2f4479c53408b099a7a9974df60de068945416d526a",
+          "revision": "91e7dd5f2074769722bff91ef705cdc38476650962501278669811b3211b66d1"
+        },
+        "receiptId": "flr-8ofifL77WWCIDdyudrj0wzPxvEmqBucz",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "1267d3897a01e543f015b32e5bd6a523c5527a5afc4f47206e172365d1290334",
+        "layoutId": "fl-p11-soak-09",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "01fbc088fc3887515d857631cfd6acd986f2c7fa59a3da1c21ab3039cc347164",
+            "dependencyFingerprint": "e5453d603eec8a5d141fd0264e5b9b92c56fa85f703db0294e69c9620a567870",
+            "diffHash": "b810e85e6d2f9ff0d8a11ca11e4050797ea73cc3a9d621b581dbf166502fd19b",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-09",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384242.9172518,
+          "idempotencyKey": "p11-approved-apply-09",
+          "payload": {
+            "alternativeId": "fla-p8-ffd3277fcc37a8acc626d244",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-59c27a6e826886b4a5d6",
+                "pl-p8-6f26e42e8aea8f6e2113"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "88fe81bfd45619731a1a1422be476f5520df26aef62957e71133b7b74c23f214",
+                "beforeRevision": "01fbc088fc3887515d857631cfd6acd986f2c7fa59a3da1c21ab3039cc347164",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "337b488f9f465191bf437fa2220c9c8fc0d6ba2e12136473f72c2e8073908157"
+                },
+                "schemaVersion": 1,
+                "sha256": "58b7eca0e6253aff5638fcc03898ce8f41b4eb8b90f35500f2ae86a93ed8ef75"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-59c27a6e826886b4a5d6",
+                "pl-p8-6f26e42e8aea8f6e2113"
+              ],
+              "diffHash": "b810e85e6d2f9ff0d8a11ca11e4050797ea73cc3a9d621b581dbf166502fd19b",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:02.619228Z",
+                "updatedAt": "2026-07-30T04:04:02.619228Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "30813e0a5b4d5d885fb560a7a3ce9d271409b0b509675c03ce5a3368545aa4d1"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "6e76073efd2d97128c924989988dc6c932c5c0b690ae642ee5a70e070b37b042"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "d118eaf49ff55d5dd120e4af51de93bcee98ea291f308c6447b7483344dbb017",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "6e76073efd2d97128c924989988dc6c932c5c0b690ae642ee5a70e070b37b042"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "d118eaf49ff55d5dd120e4af51de93bcee98ea291f308c6447b7483344dbb017",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:d54128bb522cecc829edd4191d711212"
+          },
+          "proposalId": "flp-c33cd099f3b9a5808aed71617937fa9311d974a0fd104e0545c70930cec107cd",
+          "receiptId": "flr-jM2TbGBQNgXQ8KMYrzg-2oWzdBIuVdQw",
+          "requestFingerprint": "56fa49340d409596e1bd9a9cad32da1ab50b768c0238cd951c3f50881d6eb5e5",
+          "revision": "db6a80f7dc69097ca621d047b717f8f6e7e800415082f41ef056c5fa6c64e585"
+        },
+        "receiptId": "flr-jM2TbGBQNgXQ8KMYrzg-2oWzdBIuVdQw",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      },
+      {
+        "canonicalReceiptSha256": "2a000cb644e4b04a3d682616b55ab4fee0a1364bc04c6485dfb30db87169235b",
+        "layoutId": "fl-p11-soak-10",
+        "receipt": {
+          "action": "apply-layout-plan",
+          "binding": {
+            "baseRevision": "0e072e64178db46eaf59e708572f65c45d445bcd133341d0067f3abd9226651b",
+            "dependencyFingerprint": "08bc40f55d2f23b09ebf94af1c0c1bf88147ff45d58899ea3e0c0482fd19fe23",
+            "diffHash": "260f6c2885382fc281d4b6189053bf5cca4f7cb8203fc498131810255f274f0a",
+            "target": {
+              "domain": "facility-layout",
+              "resourceId": "fl-p11-soak-10",
+              "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
+            }
+          },
+          "createdAt": 1785384243.2262576,
+          "idempotencyKey": "p11-approved-apply-10",
+          "payload": {
+            "alternativeId": "fla-p8-61c663bd8acf0cb2d2625200",
+            "changed": true,
+            "dependencies": {
+              "assetRevisions": [
+                {
+                  "assetDefinitionRevision": "a180ea9617a2ca59074eb24517bb822917721082889451b434502b9917d8528c",
+                  "assetId": "asset-cnc-mill"
+                },
+                {
+                  "assetDefinitionRevision": "42437406360213e6d3a1b7ba9350226d36dfeaa9b3d0e52786aeb6aca764aa13",
+                  "assetId": "asset-pallet-rack"
+                }
+              ],
+              "policyRevision": "46134652ed3c74fbe894545d2b0c75752d920c819ddfefd383d7c215c56716b0",
+              "processMapRevisions": [],
+              "shellRevision": "736490256ac5a8721aff58517e4cf20de53e6f36517a58f8bb0f2d8c8fc6eb9f",
+              "vehicleRevisions": []
+            },
+            "metrics": {
+              "acceptedRouteCount": 0,
+              "autoDisplacementMeters": 0.0,
+              "changed": true,
+              "clearanceConflicts": 0,
+              "completeAssetSet": true,
+              "createdPlacementCount": 2,
+              "manualDisplacementMeters": 0.0,
+              "movedAutoCount": 0,
+              "movedManualCount": 0,
+              "operationCount": 2,
+              "placementCollisions": 0,
+              "requestedInstanceCount": 2,
+              "resolvedInstanceCount": 2,
+              "routeDistanceMeters": 0,
+              "routeRequestCount": 0,
+              "spatialErrorCount": 0,
+              "spatialUnverifiedCount": 10,
+              "spatialWarningCount": 0,
+              "zoneOperationCount": 0
+            },
+            "operationResult": {
+              "affectedIds": [
+                "pl-p8-7bc735faed8eab6b1ef1",
+                "pl-p8-f7a8762f21cac37d844c"
+              ],
+              "canonicalDiff": {
+                "afterRevision": "14c90fa04d2dcea6d7cf04e7853a2c05b34409dd67ff649571d35fcbc6982948",
+                "beforeRevision": "0e072e64178db46eaf59e708572f65c45d445bcd133341d0067f3abd9226651b",
+                "changed": true,
+                "entries": {
+                  "count": 1,
+                  "sha256": "c8bfdd53689232bf113057cfed38fe405e171cf5962124ab82210c2b470dd1ff"
+                },
+                "schemaVersion": 1,
+                "sha256": "c860785ba4e9f04291f9c887f31475b6ac945dbbc07ad998bb676c0f6428df3d"
+              },
+              "changed": true,
+              "createdIds": [
+                "pl-p8-7bc735faed8eab6b1ef1",
+                "pl-p8-f7a8762f21cac37d844c"
+              ],
+              "diffHash": "260f6c2885382fc281d4b6189053bf5cca4f7cb8203fc498131810255f274f0a",
+              "documentTimestamps": {
+                "createdAt": "2026-07-30T04:04:02.947378Z",
+                "updatedAt": "2026-07-30T04:04:02.947378Z"
+              },
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "operationResults": {
+                "count": 2,
+                "sha256": "79d10a0a166aaa828f0bba2695c0b0617ee2ae29ddd74b5b79f333cce052c1a3"
+              },
+              "routingDiagnostics": {
+                "findings": {
+                  "count": 0,
+                  "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+                },
+                "metrics": {
+                  "blockedCount": 0,
+                  "errorCount": 0,
+                  "processBindingCount": 0,
+                  "routeCount": 0,
+                  "utilityNetworkCount": 0
+                },
+                "routingEngineVersion": "facility-routing-v1",
+                "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+                "valid": true
+              },
+              "schemaVersion": 1,
+              "spatialDiagnostics": {
+                "findings": {
+                  "count": 10,
+                  "sha256": "44e74c540d76eaab0061ded7d7a340bb004b2a8a97ea4aaf1e5ce028514117b1"
+                },
+                "metrics": {
+                  "clearanceConflicts": 0,
+                  "errorCount": 0,
+                  "indexedPolygonCount": 2,
+                  "placementCollisions": 0,
+                  "placementCount": 2,
+                  "shellObstacleCollisions": 0,
+                  "unverifiedCount": 10,
+                  "warningCount": 0
+                },
+                "safe": false,
+                "safetyStatus": "unverified",
+                "sha256": "ec94ab1835c91eb25fc0f2da062e22c24926c112279a5de468c9e49ee6675397",
+                "spatialEngineVersion": 1,
+                "valid": true
+              }
+            },
+            "routingDiagnostics": {
+              "findings": {
+                "count": 0,
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              },
+              "metrics": {
+                "blockedCount": 0,
+                "errorCount": 0,
+                "processBindingCount": 0,
+                "routeCount": 0,
+                "utilityNetworkCount": 0
+              },
+              "routingEngineVersion": "facility-routing-v1",
+              "sha256": "7b424f758cd4c3a3aac61d8ad3f60282af025415f0ef2f0e1550d48f223e5747",
+              "valid": true
+            },
+            "spatialDiagnostics": {
+              "findings": {
+                "count": 10,
+                "sha256": "44e74c540d76eaab0061ded7d7a340bb004b2a8a97ea4aaf1e5ce028514117b1"
+              },
+              "metrics": {
+                "clearanceConflicts": 0,
+                "errorCount": 0,
+                "indexedPolygonCount": 2,
+                "placementCollisions": 0,
+                "placementCount": 2,
+                "shellObstacleCollisions": 0,
+                "unverifiedCount": 10,
+                "warningCount": 0
+              },
+              "safe": false,
+              "safetyStatus": "unverified",
+              "sha256": "ec94ab1835c91eb25fc0f2da062e22c24926c112279a5de468c9e49ee6675397",
+              "spatialEngineVersion": 1,
+              "valid": true
+            },
+            "strategy": "compact_rows"
+          },
+          "principal": {
+            "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
+            "sessionId": "ses:3d6d6e688968848a6098b57bc2f13795"
+          },
+          "proposalId": "flp-ab3a478c30d0f908fe37c411a8189c764a822a1afacc2a6d55c6924ca5a5deba",
+          "receiptId": "flr-yLMp58orJDeDeXTpzyWXCuYt0fAUvdoP",
+          "requestFingerprint": "aa125d71b9e4ba8caa0d8be90e900fee971b6ca6322b0492a5a2c9bbe7cd7763",
+          "revision": "9205aebd0653748c5fe5023a309ad1541738e3c5e606ea4da783db5989661e25"
+        },
+        "receiptId": "flr-yLMp58orJDeDeXTpzyWXCuYt0fAUvdoP",
+        "replayReceiptMatches": true,
+        "retrievedExactly": true
+      }
+    ],
+    "checks": {
+      "canonicalReceipts": true,
+      "fiveOrMoreByteIdenticalDismissals": true,
+      "fiveOrMoreRejectedAttempts": true,
+      "fiveReopenCyclesPerLayout": true,
+      "tenOrMoreApprovedApplies": true,
+      "tenOrMoreLayouts": true,
+      "twentyOrMorePreviews": true,
+      "warehouseAndCellZonesExercised": true
+    },
+    "counts": {
+      "acceleratedSessionCycles": 86,
+      "approvedReceiptBackedApplies": 10,
+      "byteIdenticalDismissals": 10,
+      "layouts": 10,
+      "proposalPreviews": 21,
+      "rejectedStaleOrUnauthorizedAttempts": 6,
+      "reopenCyclesPerLayout": 5
+    },
+    "dismissals": [
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-01",
+        "proposalId": "flp-8fa4803a6d9165a9501342bc472197e12368e6e9691bdbddd69b1d434b9c9fca"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-02",
+        "proposalId": "flp-a481d49ca3ab441d6b678507628f58dae0f8d13214e44b9c38d537837ed3c5da"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-03",
+        "proposalId": "flp-d4b473c26156089cc90f998334a941a2fd125e4a3935fbf1f870d58b27b2805e"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-04",
+        "proposalId": "flp-454ea4bd312fdcdedf833fbe2040a0f08575098b0c8d9f31d46b315f5c273794"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-05",
+        "proposalId": "flp-d2ef8881869b2b664c0b2c78498fe7eba5e88666c453705477b2f4c02dce116d"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-06",
+        "proposalId": "flp-bea265911ea6fee910102cc3961bff902d0065e05dbdeac9b5db9e6e08fe6340"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-07",
+        "proposalId": "flp-121705ada2ec57a3cccc8112cd8ae92ced96563d543d54dc63b6c17eb49753bd"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-08",
+        "proposalId": "flp-2036dc0ab83a788ad4b517abe85272bd7e6ba6f41dd1e2ed7017568832ab8fa2"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-09",
+        "proposalId": "flp-68c3af740ecd4ea44e1ed0b563692af1f780a8d4a1d4fdf01390fd9dbf9ba882"
+      },
+      {
+        "byteIdentical": true,
+        "layoutId": "fl-p11-soak-10",
+        "proposalId": "flp-67e6a715c6c5be18669bef004d8e71d2f846de6056aab8f1d3e2985ed492d8f8"
+      }
+    ],
+    "layoutIds": [
+      "fl-p11-soak-01",
+      "fl-p11-soak-02",
+      "fl-p11-soak-03",
+      "fl-p11-soak-04",
+      "fl-p11-soak-05",
+      "fl-p11-soak-06",
+      "fl-p11-soak-07",
+      "fl-p11-soak-08",
+      "fl-p11-soak-09",
+      "fl-p11-soak-10"
+    ],
+    "note": "This deterministic acceleration proves mechanics and persistence. It is not credited as elapsed self-use time.",
+    "rejectedAttempts": [
+      {
+        "errorCode": "transaction_principal_mismatch",
+        "kind": "wrong_session",
+        "layoutId": "fl-p11-soak-01",
+        "rejected": true,
+        "statusCode": 403
+      },
+      {
+        "errorCode": "transaction_principal_mismatch",
+        "kind": "wrong_session",
+        "layoutId": "fl-p11-soak-02",
+        "rejected": true,
+        "statusCode": 403
+      },
+      {
+        "errorCode": "transaction_principal_mismatch",
+        "kind": "wrong_session",
+        "layoutId": "fl-p11-soak-03",
+        "rejected": true,
+        "statusCode": 403
+      },
+      {
+        "errorCode": "transaction_principal_mismatch",
+        "kind": "wrong_session",
+        "layoutId": "fl-p11-soak-04",
+        "rejected": true,
+        "statusCode": 403
+      },
+      {
+        "errorCode": "transaction_principal_mismatch",
+        "kind": "wrong_session",
+        "layoutId": "fl-p11-soak-05",
+        "rejected": true,
+        "statusCode": 403
+      },
+      {
+        "errorCode": "revision_conflict",
+        "kind": "stale_revision",
+        "layoutId": "fl-p11-soak-10",
+        "rejected": true,
+        "statusCode": 409
+      }
+    ],
+    "reopenChecks": [
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-01",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-02",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-03",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-04",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-05",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-06",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-07",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-08",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-09",
+        "passed": true
+      },
+      {
+        "cycle": 1,
+        "layoutId": "fl-p11-soak-10",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-01",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-02",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-03",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-04",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-05",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-06",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-07",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-08",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-09",
+        "passed": true
+      },
+      {
+        "cycle": 2,
+        "layoutId": "fl-p11-soak-10",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-01",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-02",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-03",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-04",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-05",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-06",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-07",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-08",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-09",
+        "passed": true
+      },
+      {
+        "cycle": 3,
+        "layoutId": "fl-p11-soak-10",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-01",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-02",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-03",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-04",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-05",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-06",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-07",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-08",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-09",
+        "passed": true
+      },
+      {
+        "cycle": 4,
+        "layoutId": "fl-p11-soak-10",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-01",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-02",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-03",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-04",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-05",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-06",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-07",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-08",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-09",
+        "passed": true
+      },
+      {
+        "cycle": 5,
+        "layoutId": "fl-p11-soak-10",
+        "passed": true
+      }
+    ],
+    "status": "passed"
+  },
+  "generatedAtUtc": "2026-07-30T04:04:04Z",
+  "realElapsedSoak": {
+    "checks": {
+      "agentPreviews": false,
+      "approvedReceiptBackedApplies": false,
+      "byteIdenticalDismissals": false,
+      "canonicalReceiptCountMet": false,
+      "editingSessions": false,
+      "elapsedDurationMet": false,
+      "layouts": false,
+      "rejectedStaleOrUnauthorizedAttempts": false,
+      "reopenCyclesPerLayout": false
+    },
+    "elapsedDays": 0,
+    "lastEvaluatedAtUtc": "2026-07-30T04:04:04Z",
+    "note": "Accelerated test activity is excluded from these literal-time observations.",
+    "observed": {
+      "agentPreviews": 0,
+      "approvedReceiptBackedApplies": 0,
+      "byteIdenticalDismissals": 0,
+      "canonicalReceiptIds": [],
+      "editingSessions": 0,
+      "layouts": 0,
+      "rejectedStaleOrUnauthorizedAttempts": 0,
+      "reopenCyclesPerLayout": 0
+    },
+    "releaseGateMet": false,
+    "requirements": {
+      "agentPreviews": 20,
+      "approvedReceiptBackedApplies": 10,
+      "byteIdenticalDismissals": 5,
+      "editingSessions": 50,
+      "elapsedDays": 14,
+      "layouts": 10,
+      "rejectedStaleOrUnauthorizedAttempts": 5,
+      "reopenCyclesPerLayout": 5
+    },
+    "startedAtUtc": "2026-07-29T21:26:58Z",
+    "status": "elapsed_duration_pending"
+  },
+  "releaseGateMet": false,
+  "releaseGateReason": "elapsed_duration_pending",
+  "schemaVersion": "facility-layout-p11-soak-ledger-v1"
+}

@@ -1,0 +1,31 @@
+{
+  "checks": {
+    "asset_tree_role": true,
+    "asset_treeitem_role": true,
+    "busy_state": true,
+    "focus_visible": true,
+    "polite_live_region": true,
+    "pressed_state": true,
+    "reduced_motion": true,
+    "selected_state": true,
+    "tablist_role": true,
+    "tabpanel_role": true,
+    "toolbar_label": true,
+    "toolbar_role": true,
+    "workspace_label": true
+  },
+  "contrastAudit": "pending",
+  "criticalFindings": [],
+  "generatedAtUtc": "2026-07-30T04:03:57Z",
+  "manualKeyboardAudit": "pending",
+  "releaseGateMet": false,
+  "releaseGateReason": "Static checks pass, but keyboard, screen-reader, and contrast audits remain human verification tasks.",
+  "schemaVersion": "facility-layout-p11-accessibility-evidence-v1",
+  "scope": "static_aria_and_css_contract",
+  "screenReaderAudit": "pending",
+  "source": {
+    "static/facility_layout_workspace.css": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2",
+    "static/facility_layout_workspace.js": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b"
+  },
+  "staticContractPassed": true
+}

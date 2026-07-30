@@ -440,6 +440,16 @@ class JsonReceiptStore:
 
     @staticmethod
     def _atomic_write(path: Path, data: bytes) -> None:
+        if not isinstance(data, bytes) or not data:
+            raise TransactionValidationError(
+                "invalid_transaction_record",
+                "Transaction record bytes are required.",
+            )
+        if len(data) > MAX_RECORD_BYTES:
+            raise TransactionValidationError(
+                "transaction_record_too_large",
+                "Transaction record exceeds the durable store limit.",
+            )
         for attempt in range(6):
             temporary_name: Optional[str] = None
             try:

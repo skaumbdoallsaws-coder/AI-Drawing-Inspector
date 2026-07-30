@@ -43,6 +43,17 @@ from .errors import (
     FacilityNotFoundError,
     FacilityValidationError,
 )
+from .feature_flags import (
+    FACILITY_LAYOUT_FEATURE_FLAGS,
+    FacilityLayoutFeatureFlags,
+)
+from .identity import (
+    FACILITY_IDENTITY_CONFIG_ENV,
+    FACILITY_MAKER_CHECKER_ENV,
+    FacilityIdentityConfigurationError,
+    FacilityPrincipalResolver,
+    maker_checker_required_from_environment,
+)
 from .migration import (
     MigrationBundle,
     detect_layout_compatibility,
@@ -138,7 +149,9 @@ __all__ = [
     "FacilityDependencySnapshot",
     "FacilityDigestError",
     "FacilityIntegrityError",
+    "FacilityIdentityConfigurationError",
     "FacilityLayoutError",
+    "FacilityLayoutFeatureFlags",
     "FacilityLayoutAgentRuntime",
     "FacilityLayoutAgentRuntimeError",
     "FacilityLayoutOperationError",
@@ -148,11 +161,15 @@ __all__ = [
     "FacilityNotFoundError",
     "FacilityObservationError",
     "FacilityPrincipal",
+    "FacilityPrincipalResolver",
     "FacilitySpatialContext",
     "FacilitySpatialExecutor",
     "FacilityShellRepository",
     "FacilityValidationError",
     "FacilityWorkflowPackageError",
+    "FACILITY_LAYOUT_FEATURE_FLAGS",
+    "FACILITY_IDENTITY_CONFIG_ENV",
+    "FACILITY_MAKER_CHECKER_ENV",
     "MANUFACTURING_CELL_PACKAGE_TYPE",
     "MANUFACTURING_CELL_PACKAGE_VERSION",
     "MANUFACTURING_CELL_TEMPLATE_VERSION",
@@ -207,6 +224,7 @@ __all__ = [
     "generate_placement_candidates",
     "layout_revision",
     "local_facility_principal",
+    "maker_checker_required_from_environment",
     "migrate_legacy_semantic_v02",
     "persisted_route_fingerprint",
     "plan_forklift_route",

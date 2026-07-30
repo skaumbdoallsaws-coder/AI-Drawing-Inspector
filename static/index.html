@@ -27586,6 +27586,10 @@
                 const bootstrap = await response.json();
                 if (mountGeneration !== _trainFacilityLayoutMountGeneration
                         || !_trainIsFacilityLayoutMode()) return false;
+                if (!(bootstrap.capabilities
+                        && bootstrap.capabilities.viewerV2)) {
+                    return _trainMountLegacyFacilityLayoutViewer();
+                }
                 const facilityThree = await _trainLoadFacilityThreeRuntime();
                 if (mountGeneration !== _trainFacilityLayoutMountGeneration
                         || !_trainIsFacilityLayoutMode()) return false;
@@ -27597,6 +27601,7 @@
                         layoutId: bootstrap.layoutId,
                         initialReceipt: bootstrap.layout,
                         assetCatalog: bootstrap.assetCatalog || [],
+                        capabilities: bootstrap.capabilities || {},
                         topPlanOptions: {
                             worldBounds: bootstrap.worldBounds || null,
                         },
@@ -48471,6 +48476,76 @@
                     };
                 }
 
+                if (
+                    state.activeTab === 'training'
+                    && _trainIsFacilityLayoutMode()
+                    && _trainFacilityLayoutAuthoringApp
+                    && _trainFacilityLayoutAuthoringApp.session
+                    && _trainFacilityLayoutAuthoringApp.transport
+                ) {
+                    const app = _trainFacilityLayoutAuthoringApp;
+                    const facilityState = app.session.getState();
+                    if (
+                        facilityState
+                        && facilityState.loaded
+                        && facilityState.baseRevision
+                    ) {
+                        const layout = facilityState.layout || {};
+                        const selected = new Set(
+                            Array.isArray(facilityState.selection)
+                                ? facilityState.selection
+                                : []
+                        );
+                        const selectedIds = collection => (
+                            Array.isArray(collection) ? collection : []
+                        ).map(item => item && (
+                            item.placementId
+                            || item.zoneId
+                            || item.routeId
+                            || item.utilityNetworkId
+                            || item.processBindingId
+                        )).filter(id => id && selected.has(id));
+                        const proposal = facilityState.layoutProposal;
+                        const selectedAlternative = (
+                            proposal
+                            && Array.isArray(proposal.alternatives)
+                            && proposal.alternatives[proposal.selectedIndex]
+                        ) || null;
+                        const workspaceState = (
+                            app.workspace
+                            && typeof app.workspace.getState === 'function'
+                        ) ? app.workspace.getState() : null;
+                        att.facility_layout = {
+                            siteId: app.transport.siteId,
+                            layoutId: app.transport.layoutId,
+                            revision: facilityState.baseRevision,
+                            state: {
+                                dirty: !!facilityState.dirty,
+                                conflict: !!facilityState.conflict,
+                                editable: !facilityState.busy,
+                                viewportMode: workspaceState
+                                    && workspaceState.viewMode || 'plan',
+                                selection: {
+                                    placementIds: selectedIds(layout.placements),
+                                    zoneIds: selectedIds(layout.zones),
+                                    routeIds: selectedIds(layout.routes),
+                                    utilityNetworkIds: selectedIds(
+                                        layout.utilityNetworks
+                                    ),
+                                    processBindingIds: selectedIds(
+                                        layout.processBindings
+                                    ),
+                                },
+                            },
+                            proposalId: selectedAlternative
+                                ? selectedAlternative.proposalId : null,
+                            receiptIds: (
+                                facilityState.recentReceiptIds || []
+                            ).slice(-6),
+                        };
+                    }
+                }
+
                 return att;
             }
 
@@ -51167,6 +51242,158 @@
                 },
             };
 
+            function _trainFacilityAgentReference(originAgent) {
+                const app = _trainFacilityLayoutAuthoringApp;
+                if (
+                    !_trainIsFacilityLayoutMode()
+                    || !app
+                    || !app.session
+                    || !app.transport
+                ) {
+                    throw new Error('facility_layout_not_active');
+                }
+                const attachment = buildAgentAttachments(
+                    originAgent || currentAgent
+                ).facility_layout;
+                if (!attachment || !attachment.revision) {
+                    throw new Error('facility_layout_not_ready');
+                }
+                const agentSession = getAgentSession(
+                    originAgent || currentAgent
+                );
+                return {
+                    app,
+                    attachment,
+                    turnId: agentSession && agentSession.chatSessionId
+                        ? String(agentSession.chatSessionId)
+                        : 'facility-layout-agent',
+                };
+            }
+
+            async function _trainFacilityAgentRequest(
+                path,
+                body,
+                originAgent
+            ) {
+                const reference = _trainFacilityAgentReference(originAgent);
+                const response = await fetch(
+                    '/api/facility-layout-agent/'
+                    + encodeURIComponent(reference.attachment.siteId)
+                    + '/'
+                    + encodeURIComponent(reference.attachment.layoutId)
+                    + path,
+                    {
+                        method: 'POST',
+                        cache: 'no-store',
+                        credentials: 'same-origin',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-InspectorPro-Agent-Turn': reference.turnId,
+                        },
+                        body: JSON.stringify({
+                            expectedRevision:
+                                reference.attachment.revision,
+                            liveState: reference.attachment.state,
+                            proposalId:
+                                reference.attachment.proposalId || null,
+                            receiptIds:
+                                reference.attachment.receiptIds || [],
+                            ...body,
+                        }),
+                    }
+                );
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const envelope = (
+                        payload
+                        && payload.detail
+                        && payload.detail.error
+                    ) || payload.error || payload.detail || {};
+                    const error = new Error(
+                        envelope.message
+                        || ('Facility Layout request failed ('
+                            + response.status + ')')
+                    );
+                    error.code = envelope.code
+                        || 'facility_layout_agent_request_failed';
+                    error.details = envelope.details || {};
+                    error.status = response.status;
+                    throw error;
+                }
+                return { reference, payload };
+            }
+
+            async function _trainFacilityReadTool(
+                toolName,
+                args,
+                originAgent
+            ) {
+                const result = await _trainFacilityAgentRequest(
+                    '/read/' + encodeURIComponent(toolName),
+                    { arguments: args || {} },
+                    originAgent
+                );
+                return {
+                    ok: true,
+                    ...result.payload,
+                };
+            }
+
+            async function _trainBuildFacilityLayoutPreview(
+                args,
+                originAgent
+            ) {
+                const semanticPlan = args && args.semantic_plan;
+                if (!semanticPlan || typeof semanticPlan !== 'object') {
+                    return {
+                        ok: false,
+                        error: 'semantic_facility_plan_missing',
+                    };
+                }
+                const result = await _trainFacilityAgentRequest(
+                    '/preview',
+                    { semanticPlan },
+                    originAgent
+                );
+                const payload = result.payload;
+                result.reference.app.session.installLayoutProposal(
+                    payload.proposal,
+                    payload.plannerRequest
+                );
+                return {
+                    ok: true,
+                    previewOnly: true,
+                    saved: false,
+                    selectedProposalId: payload.selectedProposalId,
+                    semanticPlan: payload.semanticPlan,
+                    message: payload.message,
+                };
+            }
+
+            window.__facilityLayoutAgentV1 = Object.freeze({
+                getAttachment(originAgent) {
+                    const attachment = buildAgentAttachments(
+                        originAgent || currentAgent
+                    ).facility_layout;
+                    return attachment
+                        ? JSON.parse(JSON.stringify(attachment))
+                        : null;
+                },
+                read(toolName, args, originAgent) {
+                    return _trainFacilityReadTool(
+                        toolName,
+                        args || {},
+                        originAgent || currentAgent
+                    );
+                },
+                buildPreview(args, originAgent) {
+                    return _trainBuildFacilityLayoutPreview(
+                        args || {},
+                        originAgent || currentAgent
+                    );
+                },
+            });
+
             // === Tool Registry + Action Dispatcher ===
             const TOOL_REGISTRY = {
                 run_inspection: {
@@ -51376,6 +51603,65 @@
                             if (container) { container.innerHTML = ''; renderFaiTable(container); }
                         }
                         return { ok: applied > 0, applied };
+                    }
+                },
+                search_industrial_assets: {
+                    agents: ['deviation-analyst', 'inspector'],
+                    async execute(args, execution = {}) {
+                        return await _trainFacilityReadTool(
+                            'search_industrial_assets',
+                            args || {},
+                            execution.originAgent
+                        );
+                    }
+                },
+                inspect_facility_entities: {
+                    agents: ['deviation-analyst', 'inspector'],
+                    async execute(args, execution = {}) {
+                        return await _trainFacilityReadTool(
+                            'inspect_facility_entities',
+                            args || {},
+                            execution.originAgent
+                        );
+                    }
+                },
+                inspect_facility_region: {
+                    agents: ['deviation-analyst', 'inspector'],
+                    async execute(args, execution = {}) {
+                        return await _trainFacilityReadTool(
+                            'inspect_facility_region',
+                            args || {},
+                            execution.originAgent
+                        );
+                    }
+                },
+                inspect_facility_findings: {
+                    agents: ['deviation-analyst', 'inspector'],
+                    async execute(args, execution = {}) {
+                        return await _trainFacilityReadTool(
+                            'inspect_facility_findings',
+                            args || {},
+                            execution.originAgent
+                        );
+                    }
+                },
+                inspect_process_bindings: {
+                    agents: ['deviation-analyst', 'inspector'],
+                    async execute(args, execution = {}) {
+                        return await _trainFacilityReadTool(
+                            'inspect_process_bindings',
+                            args || {},
+                            execution.originAgent
+                        );
+                    }
+                },
+                build_facility_layout_preview: {
+                    agents: ['deviation-analyst', 'inspector'],
+                    async execute(args, execution = {}) {
+                        return await _trainBuildFacilityLayoutPreview(
+                            args || {},
+                            execution.originAgent
+                        );
                     }
                 },
                 create_edit_session: {
@@ -51590,6 +51876,12 @@
                 isolate_parts: 4000, animate_motion: 3000,
                 set_explode_level: 3000, fai_fill: 3000, fai_tol: 3000,
                 create_edit_session: 10000,
+                search_industrial_assets: 8000,
+                inspect_facility_entities: 8000,
+                inspect_facility_region: 8000,
+                inspect_facility_findings: 8000,
+                inspect_process_bindings: 8000,
+                build_facility_layout_preview: 120000,
                 // ui_actions can dispatch many sub-actions; allow longer
                 // ceiling because compare_supplier_specs fetches + renders.
                 ui_actions: 12000,

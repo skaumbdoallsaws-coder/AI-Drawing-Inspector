@@ -527,6 +527,14 @@
             state.contextRestoredHandler = function () {
                 state.contextLost = false;
                 state.degraded = false;
+                if (state.currentInput) {
+                    Promise.resolve(setScene(state.currentInput)).catch(
+                        function () {
+                            enterDegraded('webgl_restore_failed', false);
+                        }
+                    );
+                    return;
+                }
                 notifyStatus('ready', null);
                 invalidate();
             };

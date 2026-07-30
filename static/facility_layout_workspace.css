@@ -609,6 +609,61 @@ html[data-theme="dark"] .ip-flw-root {
 }
 
 @media (max-width: 640px) {
+    body:has(#trainFacilityLayoutAuthoring) .activity-bar,
+    body:has(#trainFacilityLayoutAuthoring) .left-panel,
+    body:has(#trainFacilityLayoutAuthoring) .right-activity-rail {
+        display: none !important;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) .toolbar-left .app-menu,
+    body:has(#trainFacilityLayoutAuthoring) .toolbar-left .toolbar-icons,
+    body:has(#trainFacilityLayoutAuthoring) .toolbar-right {
+        display: none !important;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) .toolbar-left {
+        width: auto;
+        min-width: 0;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) .main-content,
+    body:has(#trainFacilityLayoutAuthoring) .center-viewport,
+    body:has(#trainFacilityLayoutAuthoring) .tab-bar,
+    body:has(#trainFacilityLayoutAuthoring) .ribbon,
+    body:has(#trainFacilityLayoutAuthoring) .viewport-content {
+        width: 100%;
+        min-width: 0;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) .tab-bar,
+    body:has(#trainFacilityLayoutAuthoring) .ribbon {
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) #trainShell {
+        grid-template-columns: minmax(0, 1fr) !important;
+        width: 100%;
+        min-width: 0;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) #trainLeftRail,
+    body:has(#trainFacilityLayoutAuthoring) #trainSetupPanel,
+    body:has(#trainFacilityLayoutAuthoring) #trainPlaybackPanel,
+    body:has(#trainFacilityLayoutAuthoring) #trainRightRail {
+        display: none !important;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) #trainViewport {
+        grid-column: 1;
+    }
+
+    body:has(#trainFacilityLayoutAuthoring) #trainViewport,
+    body:has(#trainFacilityLayoutAuthoring) #trainViewportHost {
+        width: 100%;
+        min-width: 0;
+    }
+
     .ip-flw-root {
         --ip-flw-toolbar-height: 48px;
         min-width: 0;
@@ -632,6 +687,10 @@ html[data-theme="dark"] .ip-flw-root {
 
     .ip-flw-shell {
         grid-template-columns: minmax(118px, 36vw) minmax(0, 1fr);
+    }
+
+    .ip-flw-properties {
+        display: none;
     }
 
     .ip-flw-pane-header {

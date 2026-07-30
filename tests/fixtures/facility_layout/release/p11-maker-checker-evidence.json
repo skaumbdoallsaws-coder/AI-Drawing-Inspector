@@ -1,0 +1,35 @@
+{
+  "checks": {
+    "bearerAuthenticationRequired": true,
+    "bootstrapReportsPolicy": true,
+    "canonicalReceiptPersisted": true,
+    "distinctCheckerApplied": true,
+    "distinctCheckerApproved": true,
+    "pilotPolicyEnabled": true,
+    "productPrincipalIngress": true,
+    "sameMakerRejectedBeforeClaim": true
+  },
+  "generatedAtUtc": "2026-07-30T04:03:59Z",
+  "identities": {
+    "checker": "checker-p11",
+    "distinct": true,
+    "maker": "maker-p11"
+  },
+  "mode": {
+    "defaultLocalDemoUnaffected": true,
+    "principalAuthentication": "bearer",
+    "requireDistinctApprover": true
+  },
+  "observations": {
+    "bootstrapPrincipalId": "maker-p11",
+    "checkerApplyStatus": 200,
+    "checkerApprovalStatus": 200,
+    "invalidIdentityStatus": 401,
+    "receiptId": "flr-1Orl34ZZrT0JbwEbZ5WoeoQxGx4u5qlL",
+    "sameMakerErrorCode": "maker_checker_required",
+    "sameMakerStatus": 403,
+    "unauthenticatedStatus": 401
+  },
+  "releaseGateMet": true,
+  "schemaVersion": "facility-layout-p11-maker-checker-v1"
+}

@@ -1,0 +1,49 @@
+{
+  "generatedAtUtc": "2026-07-30T04:03:59Z",
+  "offlineAndCorruptArtifacts": {
+    "artifact": {
+      "byteLength": 1528,
+      "path": "tests/fixtures/facility_layout/rendering/three-offline-smoke-result.json",
+      "sha256": "d947c8b141ab9e740e818589cd12fff4eea31fe56b40e2a7e5d5a47615ac53b2"
+    },
+    "checks": {
+      "completed": true,
+      "corrupt_glb_rejected": true,
+      "no_console_errors": true,
+      "no_external_requests": true,
+      "no_page_errors": true,
+      "nonblank_pixel": true,
+      "official_loader_imported": true,
+      "render_call_recorded": true,
+      "three_revision_184": true,
+      "triangles_recorded": true,
+      "valid_glb_parsed": true,
+      "webgl2_rendered": true
+    },
+    "corruptArtifactRejected": true,
+    "externalRequestsBlocked": true,
+    "passed": true
+  },
+  "releaseGateMet": true,
+  "schemaVersion": "facility-layout-p11-recovery-evidence-v1",
+  "source": {
+    "static/facility_layout_three_adapter.js": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e",
+    "tests/test_facility_layout_three_adapter.js": "3de1cae56f80e72036b279ef2f6c29d7dcadfe49a64990e6a41077702497f23d"
+  },
+  "webglRecovery": {
+    "behavioralSuiteStatus": "passed",
+    "staticChecks": {
+      "behavioral_context_test_present": true,
+      "context_loss_prevent_default": true,
+      "context_lost_listener": true,
+      "context_restored_listener": true,
+      "degraded_state": true,
+      "edit_continuity_test_present": true,
+      "failed_asset_fallback_test_present": true,
+      "listeners_removed_on_teardown": true,
+      "restoration_invalidates": true,
+      "webgl_unavailable_test_present": true
+    },
+    "staticContractPassed": true
+  }
+}

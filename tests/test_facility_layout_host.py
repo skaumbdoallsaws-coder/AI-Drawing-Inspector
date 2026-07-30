@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,6 +12,44 @@ from ai_inspector.facility_layout.host import (
     LOCAL_SITE_ID,
     LocalFacilityLayoutHost,
 )
+from ai_inspector.facility_layout.authorization import (
+    FacilityPrincipal,
+    local_facility_principal,
+)
+from ai_inspector.facility_layout.identity import FacilityPrincipalResolver
+
+PILOT_MAKER_TOKEN = "host-maker-token-" + ("m" * 48)
+PILOT_CHECKER_TOKEN = "host-checker-token-" + ("c" * 48)
+
+
+def _pilot_resolver() -> FacilityPrincipalResolver:
+    return FacilityPrincipalResolver(
+        (
+            (
+                hashlib.sha256(
+                    PILOT_MAKER_TOKEN.encode("utf-8")
+                ).hexdigest(),
+                FacilityPrincipal(
+                    principal_id="host-maker",
+                    tenant_id="local",
+                    allowed_site_ids=(LOCAL_SITE_ID,),
+                    roles=("layout_admin",),
+                ),
+            ),
+            (
+                hashlib.sha256(
+                    PILOT_CHECKER_TOKEN.encode("utf-8")
+                ).hexdigest(),
+                FacilityPrincipal(
+                    principal_id="host-checker",
+                    tenant_id="local",
+                    allowed_site_ids=(LOCAL_SITE_ID,),
+                    roles=("approver",),
+                ),
+            ),
+        ),
+        LOCAL_SITE_ID,
+    )
 
 
 def _client(root: Path) -> tuple[TestClient, LocalFacilityLayoutHost]:
@@ -35,6 +74,45 @@ def test_local_host_bootstraps_persistent_authority_and_empty_layout(tmp_path):
     repeated = reopened.get("/api/facility-layout-bootstrap")
     assert repeated.status_code == 200
     assert repeated.json()["layout"]["revision"] == first_revision
+
+
+def test_bootstrap_reports_optional_maker_checker_policy(tmp_path):
+    default_client, default_host = _client(
+        tmp_path / "default-facility"
+    )
+    try:
+        default = default_client.get(
+            "/api/facility-layout-bootstrap"
+        ).json()
+        assert default["capabilities"]["makerCheckerRequired"] is False
+    finally:
+        default_client.close()
+        default_host.close()
+
+    root = tmp_path / "pilot-facility"
+    pilot_host = LocalFacilityLayoutHost(
+        root,
+        require_distinct_approver=True,
+        principal_resolver=_pilot_resolver(),
+    )
+    pilot_app = FastAPI()
+    pilot_app.include_router(pilot_host.create_router())
+    pilot_client = TestClient(pilot_app)
+    try:
+        pilot = pilot_client.get(
+            "/api/facility-layout-bootstrap",
+            headers={
+                "Authorization": f"Bearer {PILOT_MAKER_TOKEN}",
+            },
+        ).json()
+        assert pilot["capabilities"]["makerCheckerRequired"] is True
+        assert (
+            pilot_host.transaction_runtime.require_distinct_approver
+            is True
+        )
+    finally:
+        pilot_client.close()
+        pilot_host.close()
 
 
 def test_local_host_uses_revision_bound_preview_and_apply(tmp_path):

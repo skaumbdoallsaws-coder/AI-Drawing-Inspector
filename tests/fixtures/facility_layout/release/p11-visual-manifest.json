@@ -1,0 +1,310 @@
+{
+  "artifacts": [
+    {
+      "byteLength": 175664,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 1080,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-light.png",
+      "sampledColorCount": 921,
+      "scope": "facility_layout_workspace",
+      "sha256": "97bbd072604b66609e7ea6ed0d98ac2d9e754864b2df2af36af8fa4d6c5a516f",
+      "sourceMatchesArtifact": true,
+      "theme": "light",
+      "viewport": {
+        "height": 1080,
+        "width": 1920
+      },
+      "width": 1920
+    },
+    {
+      "byteLength": 179330,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 1080,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-dark.png",
+      "sampledColorCount": 1361,
+      "scope": "facility_layout_workspace",
+      "sha256": "04375fd85c433f6d0ed810ae56bddeedd4cbc8b026d2fee160d544df49c56882",
+      "sourceMatchesArtifact": true,
+      "theme": "dark",
+      "viewport": {
+        "height": 1080,
+        "width": 1920
+      },
+      "width": 1920
+    },
+    {
+      "byteLength": 159595,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 960,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-light.png",
+      "sampledColorCount": 1093,
+      "scope": "facility_layout_workspace",
+      "sha256": "a4407ae4b63cc21d829de32ded466ab15446e9d217ac0d7217c452a3628e12de",
+      "sourceMatchesArtifact": true,
+      "theme": "light",
+      "viewport": {
+        "height": 960,
+        "width": 1440
+      },
+      "width": 1440
+    },
+    {
+      "byteLength": 160820,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 960,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-dark.png",
+      "sampledColorCount": 1527,
+      "scope": "facility_layout_workspace",
+      "sha256": "34a21c3d056ce1d9d4b30dc102a1b63fd561b891cf4ac53e5e1e37d0acb2bc1a",
+      "sourceMatchesArtifact": true,
+      "theme": "dark",
+      "viewport": {
+        "height": 960,
+        "width": 1440
+      },
+      "width": 1440
+    },
+    {
+      "byteLength": 141902,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 768,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-light.png",
+      "sampledColorCount": 1227,
+      "scope": "facility_layout_workspace",
+      "sha256": "2bc36a1619bb5e7a367e64218dbb654f5657192ba3642b1252ed0eb57ba9955b",
+      "sourceMatchesArtifact": true,
+      "theme": "light",
+      "viewport": {
+        "height": 768,
+        "width": 1366
+      },
+      "width": 1366
+    },
+    {
+      "byteLength": 140053,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 768,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-dark.png",
+      "sampledColorCount": 1647,
+      "scope": "facility_layout_workspace",
+      "sha256": "ac265f6960041b2d03c5f7a45a9bf9402b91c24887139516a51ede1c94ead461",
+      "sourceMatchesArtifact": true,
+      "theme": "dark",
+      "viewport": {
+        "height": 768,
+        "width": 1366
+      },
+      "width": 1366
+    },
+    {
+      "byteLength": 39146,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 844,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-light.png",
+      "sampledColorCount": 1395,
+      "scope": "facility_layout_workspace",
+      "sha256": "726d7b72af41267c29c71b342ac3e9918adfc32780314543d5048f8be37e2842",
+      "sourceMatchesArtifact": true,
+      "theme": "light",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      },
+      "width": 390
+    },
+    {
+      "byteLength": 39298,
+      "captureChecksPassed": true,
+      "capturePassed": true,
+      "height": 844,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-dark.png",
+      "sampledColorCount": 1638,
+      "scope": "facility_layout_workspace",
+      "sha256": "3a1ef95e916722614cd73bf3e1da5aa032ab79fb163d2bdd7309cdbf35b2ad11",
+      "sourceMatchesArtifact": true,
+      "theme": "dark",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      },
+      "width": 390
+    }
+  ],
+  "captureSource": {
+    "byteLength": 14178,
+    "path": "tests/fixtures/facility_layout/release/visual/p11-visual-capture.json",
+    "sha256": "f37c8f4db1164f5aa29342fd9ed502e5136dcbe29d17c21ae2b071d6080a2d9e"
+  },
+  "generatedAtUtc": "2026-07-30T04:03:57Z",
+  "lightDarkArtifactRequirementMet": true,
+  "manifestValid": true,
+  "missingExactCoverage": [],
+  "observedExactCoverage": [
+    "1366x768:dark",
+    "1366x768:light",
+    "1440x960:dark",
+    "1440x960:light",
+    "1920x1080:dark",
+    "1920x1080:light",
+    "390x844:dark",
+    "390x844:light"
+  ],
+  "releaseGateMet": true,
+  "requiredCoverage": [
+    "1366x768:dark",
+    "1366x768:light",
+    "1440x960:dark",
+    "1440x960:light",
+    "1920x1080:dark",
+    "1920x1080:light",
+    "390x844:dark",
+    "390x844:light"
+  ],
+  "schemaVersion": "facility-layout-p11-visual-manifest-v2",
+  "sourceBinding": {
+    "aggregateMatches": true,
+    "algorithmsMatch": true,
+    "capturedAggregateSha256": "c7afe4bcccd5a83a90e6b1b44d5034bc2824784f39122a321da594dc3977ec6a",
+    "currentAggregateSha256": "c7afe4bcccd5a83a90e6b1b44d5034bc2824784f39122a321da594dc3977ec6a",
+    "currentFiles": [
+      {
+        "byteLength": 8581,
+        "path": "static/facility_layout_app.js",
+        "sha256": "3f0c929e3f969b8b78a1858ce8f2c0ee8a3e85b6cd7539ad38aa47d833271230"
+      },
+      {
+        "byteLength": 50734,
+        "path": "static/facility_layout_editor.js",
+        "sha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875"
+      },
+      {
+        "byteLength": 76935,
+        "path": "static/facility_layout_session.js",
+        "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a"
+      },
+      {
+        "byteLength": 7417,
+        "path": "static/facility_layout_spatial_advisor.js",
+        "sha256": "9d12f579932964a175aa63deea2f029b66d27727ff51a79a1e0accf9b0068e73"
+      },
+      {
+        "byteLength": 18021,
+        "path": "static/facility_layout_spatial_worker.js",
+        "sha256": "8213cea4565951c0a31954d12eb4e6a540d5f5c15ae1a2ae09ef4dac7ef04574"
+      },
+      {
+        "byteLength": 94154,
+        "path": "static/facility_layout_three_adapter.js",
+        "sha256": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e"
+      },
+      {
+        "byteLength": 15430,
+        "path": "static/facility_layout_transport.js",
+        "sha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6"
+      },
+      {
+        "byteLength": 16296,
+        "path": "static/facility_layout_workspace.css",
+        "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
+      },
+      {
+        "byteLength": 113873,
+        "path": "static/facility_layout_workspace.js",
+        "sha256": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b"
+      },
+      {
+        "byteLength": 2888567,
+        "path": "static/index.html",
+        "sha256": "67b040e7e0dc70449ed4b79a6f0e41f70af5c161c9c01904bd61cf1a61fcc5d7"
+      },
+      {
+        "byteLength": 603445,
+        "path": "static/vendor/three/0.128.0/build/three.min.js",
+        "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+      },
+      {
+        "byteLength": 19774,
+        "path": "tools/capture_facility_layout_p11_visuals.py",
+        "sha256": "baa95b7cae7e9ab103f33833b91b8e0d3fcf198994bfc9bd5fefa244f08e18e5"
+      }
+    ],
+    "duplicatePaths": [],
+    "filesMatch": true,
+    "inputCount": 12,
+    "matches": true,
+    "missingPaths": [],
+    "present": true,
+    "requiredInputsExact": true,
+    "stalePaths": [],
+    "unexpectedPaths": []
+  },
+  "themesRepresented": [
+    "dark",
+    "light"
+  ],
+  "unexpectedExactCoverage": [],
+  "webglContextRecovery": {
+    "after": {
+      "contextLost": false,
+      "placementCount": 4,
+      "renderedFrames": 5,
+      "status": "ready"
+    },
+    "available": true,
+    "before": {
+      "contextLost": false,
+      "placementCount": 4,
+      "status": "ready"
+    },
+    "checks": {
+      "contextLossObserved": true,
+      "contextRestored": true,
+      "extensionAvailable": true,
+      "noConsoleErrors": true,
+      "noPageErrors": true,
+      "nonblankScreenshot": true,
+      "rendererReady": true,
+      "sceneIdentityRestored": true
+    },
+    "errors": {
+      "console": [],
+      "page": []
+    },
+    "lostObserved": true,
+    "passed": true,
+    "restoredObserved": true,
+    "screenshot": {
+      "byteLength": 161869,
+      "height": 960,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-webgl-restored.png",
+      "sampledColorCount": 1542,
+      "sha256": "e9add6ccbde00730a85dad5fd799016045857cb356c0d740f6d7002736c3647f",
+      "width": 1440
+    },
+    "verified": true,
+    "verifiedScreenshot": {
+      "byteLength": 161869,
+      "height": 960,
+      "nonempty": true,
+      "path": "tests/fixtures/facility_layout/release/visual/facility-layout-webgl-restored.png",
+      "sha256": "e9add6ccbde00730a85dad5fd799016045857cb356c0d740f6d7002736c3647f",
+      "width": 1440
+    }
+  }
+}

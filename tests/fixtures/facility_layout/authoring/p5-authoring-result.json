@@ -214,7 +214,7 @@
           "demandRendering": {
             "pendingFrame": false,
             "renderRequests": 316,
-            "renderedFrames": 74
+            "renderedFrames": 75
           },
           "disposed": true,
           "ghostActive": false,
@@ -833,7 +833,7 @@
           "demandRendering": {
             "pendingFrame": false,
             "renderRequests": 315,
-            "renderedFrames": 74
+            "renderedFrames": 75
           },
           "disposed": false,
           "ghostActive": false,
@@ -2027,7 +2027,7 @@
         "demandRendering": {
           "pendingFrame": false,
           "renderRequests": 315,
-          "renderedFrames": 74
+          "renderedFrames": 75
         },
         "disposed": false,
         "ghostActive": false,
@@ -7087,7 +7087,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:64371/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:61071/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "failedRequests": [],
@@ -7095,7 +7095,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:64371/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:61071/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "offlineOnly": true,
@@ -7159,17 +7159,17 @@
     "authorityFixtureSha256": "9f199d55082a29b5ee415d68352f9d01d5688cddea3c4e24dac59e4a824f3e87",
     "facilityLayoutEditorSha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875",
     "facilityLayoutSessionSha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a",
-    "facilityLayoutWorkspaceCssSha256": "2f2593a79c98f4200cb66d93e4cb201ac8e0b69e6010da6c31ee6a852141c4f8",
-    "facilityLayoutWorkspaceSha256": "5ab0bfb622bb0cef5b0ea8dbc6756a0d76c8b182a2d52293cddd910589cc382b",
-    "facilityThreeAdapterSha256": "7a2b3322342a80da5df15c6dafd68d82ee89b8a87b7348091ad5fab26bc9e62b",
+    "facilityLayoutWorkspaceCssSha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2",
+    "facilityLayoutWorkspaceSha256": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b",
+    "facilityThreeAdapterSha256": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e",
     "fixturePageSha256": "a078d77d2b6d64b8f85911198323eb7c35764b03da92a0cd59e6290ab7d7153a",
     "fixtureScriptSha256": "a6ee0561b19bdae8f42841b0b4d40815407e8a9d3984c43a02155a0ffac32920",
     "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
     "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
     "overviewGlbSha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14",
-    "p4LayoutSeedSha256": "60892cb1ec25ba7f9b39446af4deea7c05868279063c181bfd68e54d22f3f772",
+    "p4LayoutSeedSha256": "3d9bebd3c862d9ddf099c46f827f7a48a0040807be4aaee1457ac719c2ac15c8",
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
-    "verifierSha256": "4ca515ce4954f8dc525006aff0cbf51a3f4b75d53b4abeefaec43f02b7d56b56"
+    "verifierSha256": "20c159f26a42e8c0dad4c213548fc760613bb64d9cf67711300d29a4922a0a23"
   },
   "unexpectedConsoleErrors": []
 }

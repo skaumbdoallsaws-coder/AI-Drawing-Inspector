@@ -2030,11 +2030,11 @@
   "source": {
     "assetCatalogSha256": "9dd60d2f319615c7107c60132eb88d1cc59c1103707b71aacf431ebce7975369",
     "facilityLayoutEditorSha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875",
-    "facilityThreeAdapterSha256": "7a2b3322342a80da5df15c6dafd68d82ee89b8a87b7348091ad5fab26bc9e62b",
+    "facilityThreeAdapterSha256": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e",
     "fixturePageSha256": "5e7c04cd5832731ff0756c8514430c328e6fdc8b6423b22736f63b1cd5f13183",
     "fixtureScriptSha256": "df4e024ab7220cfd7248b52f3deb3ced44a4c6917f3975b8d54b98a220a17d2c",
     "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
-    "layoutFixtureSha256": "60892cb1ec25ba7f9b39446af4deea7c05868279063c181bfd68e54d22f3f772",
+    "layoutFixtureSha256": "3d9bebd3c862d9ddf099c46f827f7a48a0040807be4aaee1457ac719c2ac15c8",
     "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
     "rackGlbSha256": "185e9914e28106b14054a8467b941eba1cf31c85593cd566ab40d608cea77c0c",
     "rackOverviewSha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14",

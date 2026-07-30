@@ -15,6 +15,7 @@ from .service import FacilityLayoutService
 
 
 PrincipalResolver = Callable[[Request], FacilityPrincipal]
+FeatureGate = Callable[[str], None]
 
 
 def _body_mapping(value: Any) -> Mapping[str, Any]:
@@ -48,6 +49,19 @@ def _result(call: Callable[[], Any]) -> Any:
         return call()
     except FacilityLayoutError as exc:
         return _error_response(exc)
+
+
+def _feature_block(
+    feature_gate: FeatureGate | None,
+    capability: str,
+) -> JSONResponse | None:
+    if feature_gate is None:
+        return None
+    try:
+        feature_gate(capability)
+    except FacilityLayoutError as exc:
+        return _error_response(exc)
+    return None
 
 
 async def _thread_result(call: Callable[[], Any]) -> Any:
@@ -191,6 +205,7 @@ def create_facility_layout_router(
     *,
     service: FacilityLayoutService,
     principal_resolver: PrincipalResolver,
+    feature_gate: FeatureGate | None = None,
 ) -> APIRouter:
     """Build an isolated router; the host app decides when to mount it."""
 
@@ -216,6 +231,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "manual_edit")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             document = _body_mapping(payload.get("layout", payload))
@@ -269,6 +287,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "manual_edit")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
         except FacilityLayoutError as exc:
@@ -322,6 +343,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "manual_edit")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
         except FacilityLayoutError as exc:
@@ -353,6 +377,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "agent_preview")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             planner_request = _body_mapping(payload.get("request"))
@@ -378,6 +405,9 @@ def create_facility_layout_router(
         proposal_id: str,
         request: Request,
     ):
+        blocked = _feature_block(feature_gate, "agent_preview")
+        if blocked is not None:
+            return blocked
         return await _thread_result(
             lambda: service.get_layout_proposal_preview(
                 principal_resolver(request),
@@ -397,6 +427,9 @@ def create_facility_layout_router(
         proposal_id: str,
         request: Request,
     ):
+        blocked = _feature_block(feature_gate, "agent_preview")
+        if blocked is not None:
+            return blocked
         try:
             session_id = _session_id(request)
         except FacilityLayoutError as exc:
@@ -420,6 +453,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "agent_write")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             binding = _body_mapping(payload.get("binding"))
@@ -452,6 +488,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "agent_write")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             binding = _body_mapping(payload.get("binding"))
@@ -500,6 +539,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "constraints")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             operations = payload.get("operations", [])
@@ -529,6 +571,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "constraints")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             candidate_request = _body_mapping(payload.get("request"))
@@ -560,6 +605,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "constraints")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             candidate_request = _body_mapping(payload.get("request"))
@@ -598,6 +646,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "routing")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             operations = payload.get("operations", [])
@@ -627,6 +678,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "routing")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             candidate_request = _body_mapping(payload.get("request"))
@@ -658,6 +712,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "routing")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
             route_request = _body_mapping(payload.get("request"))
@@ -687,6 +744,9 @@ def create_facility_layout_router(
         request: Request,
         body: Any = Body(...),
     ):
+        blocked = _feature_block(feature_gate, "manual_edit")
+        if blocked is not None:
+            return blocked
         try:
             payload = _body_mapping(body)
         except FacilityLayoutError as exc:
@@ -706,6 +766,9 @@ def create_facility_layout_router(
         layout_id: str,
         request: Request,
     ):
+        blocked = _feature_block(feature_gate, "manual_edit")
+        if blocked is not None:
+            return blocked
         return _result(
             lambda: service.set_default_layout(
                 principal_resolver(request),

@@ -559,6 +559,7 @@ class TransactionKernel:
                 idempotency_key=approval.idempotency_key,
                 request_fingerprint=approval.request_fingerprint,
                 prepared_at=now,
+                recovery=plan.recovery,
             )
             stored = self._receipts.prepare(prepared)
             if stored.state == "finalized":

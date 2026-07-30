@@ -18,14 +18,51 @@ from ai_inspector.facility_layout.host import (
     LOCAL_SITE_ID,
     LocalFacilityLayoutHost,
 )
+from ai_inspector.facility_layout.identity import FacilityPrincipalResolver
 from ai_inspector.facility_layout.transaction_adapter import (
     deterministic_facility_proposal_id,
     facility_transaction_target,
 )
+from ai_inspector.facility_layout.validate import validate_layout
+from ai_inspector.transactions import (
+    ExactBinding,
+    JsonReceiptStore,
+    PreparedRecord,
+    PrincipalBinding,
+    TransactionReceipt,
+    canonical_json_bytes,
+)
+from ai_inspector.transactions.stores import MAX_RECORD_BYTES
 
 
 SESSION = "facility-layout-p8-session"
 FIXTURES = Path(__file__).parent / "fixtures" / "facility_layout"
+
+
+def _pilot_resolver() -> FacilityPrincipalResolver:
+    return FacilityPrincipalResolver(
+        (
+            (
+                "a" * 64,
+                FacilityPrincipal(
+                    principal_id="proposal-maker",
+                    tenant_id="local",
+                    allowed_site_ids=(LOCAL_SITE_ID,),
+                    roles=("layout_admin",),
+                ),
+            ),
+            (
+                "b" * 64,
+                FacilityPrincipal(
+                    principal_id="proposal-checker",
+                    tenant_id="local",
+                    allowed_site_ids=(LOCAL_SITE_ID,),
+                    roles=("approver",),
+                ),
+            ),
+        ),
+        LOCAL_SITE_ID,
+    )
 
 
 def _client(root: Path) -> tuple[TestClient, LocalFacilityLayoutHost]:
@@ -351,11 +388,19 @@ def test_proposal_owner_and_tenant_site_target_fail_closed(tmp_path):
     app = FastAPI()
 
     def principal(request: Request):
+        roles = tuple(
+            item
+            for item in request.headers.get(
+                "X-Test-Roles",
+                "admin",
+            ).split(",")
+            if item
+        )
         return FacilityPrincipal(
             principal_id=request.headers.get("X-Test-Principal", "owner"),
             tenant_id=request.headers.get("X-Test-Tenant", "local"),
             allowed_site_ids=(LOCAL_SITE_ID,),
-            roles=("admin",),
+            roles=roles,
         )
 
     app.include_router(
@@ -381,7 +426,10 @@ def test_proposal_owner_and_tenant_site_target_fail_closed(tmp_path):
         "explicitApproval": True,
     }
 
-    other_user = {"X-Test-Principal": "other-user"}
+    other_user = {
+        "X-Test-Principal": "other-user",
+        "X-Test-Roles": "viewer",
+    }
     assert client.get(preview_path, headers=other_user).status_code == 403
     other_approval = client.post(
         approval_path,
@@ -902,13 +950,22 @@ def test_proposal_binding_and_consent_are_exact(tmp_path):
 
 
 def test_editor_and_approver_authority_remain_separate(tmp_path):
-    host = LocalFacilityLayoutHost(tmp_path / "facility")
+    host = LocalFacilityLayoutHost(
+        tmp_path / "facility",
+        require_distinct_approver=True,
+        principal_resolver=_pilot_resolver(),
+    )
     bootstrap = host.ensure_bootstrap()
     app = FastAPI()
 
     def principal(request: Request):
-        return local_facility_principal(
-            site_id=LOCAL_SITE_ID,
+        return FacilityPrincipal(
+            principal_id=request.headers.get(
+                "X-Test-Principal",
+                "viewer-1",
+            ),
+            tenant_id="local",
+            allowed_site_ids=(LOCAL_SITE_ID,),
             roles=(request.headers.get("X-Test-Role", "viewer"),),
         )
 
@@ -925,7 +982,10 @@ def test_editor_and_approver_authority_remain_separate(tmp_path):
             f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
             "/proposals"
         ),
-        headers={"X-Test-Role": "editor"},
+        headers={
+            "X-Test-Principal": "editor-1",
+            "X-Test-Role": "editor",
+        },
         json={
             "baseRevision": bootstrap["layout"]["revision"],
             "request": request,
@@ -933,10 +993,23 @@ def test_editor_and_approver_authority_remain_separate(tmp_path):
     )
     assert created.status_code == 200, created.text
     selected = created.json()["alternatives"][0]
+    preview_path = (
+        f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+        f"/proposals/{selected['proposalId']}/preview"
+    )
+    approver_headers = {
+        "X-Test-Principal": "approver-1",
+        "X-Test-Role": "approver",
+        "X-InspectorPro-Session": SESSION,
+    }
+    assert client.get(
+        preview_path,
+        headers=approver_headers,
+    ).status_code == 403
 
     direct_write = client.put(
         f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}",
-        headers={"X-Test-Role": "approver"},
+        headers=approver_headers,
         json={
             "baseRevision": bootstrap["layout"]["revision"],
             "operations": [
@@ -949,15 +1022,34 @@ def test_editor_and_approver_authority_remain_separate(tmp_path):
     )
     assert direct_write.status_code == 403
 
-    approval = client.post(
+    same_maker = client.post(
         (
             f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
             "/approvals"
         ),
         headers={
-            "X-Test-Role": "approver",
-            "X-InspectorPro-Session": SESSION,
+            "X-Test-Principal": "editor-1",
+            "X-Test-Role": "admin",
+            "X-InspectorPro-Session": "maker-admin-session",
         },
+        json={
+            "proposalId": selected["proposalId"],
+            "binding": selected["transactionBinding"],
+            "idempotencyKey": "p11-same-maker-rejected",
+            "explicitApproval": True,
+        },
+    )
+    assert same_maker.status_code == 403
+    assert same_maker.json()["error"]["code"] == (
+        "maker_checker_required"
+    )
+
+    approval = client.post(
+        (
+            f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+            "/approvals"
+        ),
+        headers=approver_headers,
         json={
             "proposalId": selected["proposalId"],
             "binding": selected["transactionBinding"],
@@ -966,13 +1058,35 @@ def test_editor_and_approver_authority_remain_separate(tmp_path):
         },
     )
     assert approval.status_code == 200, approval.text
-    applied = client.post(
+    second_approver = client.post(
+        (
+            f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+            "/approvals"
+        ),
+        headers={
+            "X-Test-Principal": "approver-2",
+            "X-Test-Role": "approver",
+            "X-InspectorPro-Session": "second-approver-session",
+        },
+        json={
+            "proposalId": selected["proposalId"],
+            "binding": selected["transactionBinding"],
+            "idempotencyKey": "p8-role-split-002",
+            "explicitApproval": True,
+        },
+    )
+    assert second_approver.status_code == 403
+    assert second_approver.json()["error"]["code"] == (
+        "transaction_principal_mismatch"
+    )
+    creator_apply = client.post(
         (
             f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
             "/apply"
         ),
         headers={
-            "X-Test-Role": "approver",
+            "X-Test-Principal": "editor-1",
+            "X-Test-Role": "layout_admin",
             "X-InspectorPro-Session": SESSION,
         },
         json={
@@ -981,8 +1095,285 @@ def test_editor_and_approver_authority_remain_separate(tmp_path):
             "idempotencyKey": "p8-role-split-001",
         },
     )
+    assert creator_apply.status_code == 403
+    assert creator_apply.json()["error"]["code"] == (
+        "transaction_principal_mismatch"
+    )
+    applied = client.post(
+        (
+            f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+            "/apply"
+        ),
+        headers=approver_headers,
+        json={
+            "approvalToken": approval.json()["approvalToken"],
+            "binding": selected["transactionBinding"],
+            "idempotencyKey": "p8-role-split-001",
+        },
+    )
     assert applied.status_code == 200, applied.text
     assert len(applied.json()["layout"]["placements"]) == 3
+    host.close()
+
+
+def test_committed_layout_recovers_receipt_after_finalize_failure(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "facility"
+    client, host = _client(root)
+    bootstrap = client.get("/api/facility-layout-bootstrap").json()
+    _, selected = _proposal(client, bootstrap)
+    approval = _approve(
+        client,
+        selected,
+        idempotency_key="p11-finalize-recovery-001",
+    )
+    receipt_store = host.transaction_runtime.kernel.receipt_store
+
+    def fail_finalize(_prepared, _receipt):
+        raise OSError("simulated receipt finalization failure")
+
+    monkeypatch.setattr(receipt_store, "finalize", fail_finalize)
+    with pytest.raises(
+        OSError,
+        match="simulated receipt finalization failure",
+    ):
+        _apply(
+            client,
+            selected,
+            approval,
+            idempotency_key="p11-finalize-recovery-001",
+        )
+
+    committed = client.get(
+        f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+    ).json()
+    assert committed["revision"] != bootstrap["layout"]["revision"]
+    assert len(committed["layout"]["placements"]) == 3
+    committed_layout_files = _layout_files(root)
+    host.close()
+
+    reopened, reopened_host = _client(root)
+    try:
+        recovered = _apply(
+            reopened,
+            selected,
+            approval,
+            idempotency_key="p11-finalize-recovery-001",
+        )
+        assert recovered.status_code == 200, recovered.text
+        result = recovered.json()
+        assert result["revision"] == committed["revision"]
+        assert result["layout"] == committed["layout"]
+        assert result["replayed"] is True
+        assert result["recovered"] is True
+        assert _layout_files(root) == committed_layout_files
+
+        receipt = result["receipt"]
+        durable = reopened.get(
+            (
+                f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+                f"/receipts/{receipt['receiptId']}"
+            )
+        )
+        assert durable.status_code == 200
+        assert durable.json() == receipt
+
+        exact_retry = _apply(
+            reopened,
+            selected,
+            approval,
+            idempotency_key="p11-finalize-recovery-001",
+        )
+        assert exact_retry.status_code == 200
+        assert exact_retry.json()["receipt"] == receipt
+        assert exact_retry.json()["replayed"] is True
+        assert exact_retry.json()["recovered"] is True
+        assert _layout_files(root) == committed_layout_files
+    finally:
+        reopened_host.close()
+
+
+def test_legacy_small_recovery_record_remains_reconcilable(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "facility"
+    client, host = _client(root)
+    bootstrap = client.get("/api/facility-layout-bootstrap").json()
+    _, selected = _proposal(client, bootstrap)
+    approval = _approve(
+        client,
+        selected,
+        idempotency_key="p11-legacy-recovery-001",
+    )
+    compact_payload = host.service._proposal_commit_payload
+
+    def legacy_recovery(alternative, prepared, dependencies):
+        return {
+            "schemaVersion": 1,
+            "kind": "facility-layout-commit",
+            "expectedChanged": bool(prepared.get("changed")),
+            "expectedLayout": deepcopy(prepared["document"]),
+            "commitPayload": compact_payload(
+                alternative,
+                prepared,
+                dependencies,
+            ),
+        }
+
+    monkeypatch.setattr(
+        host.service,
+        "_proposal_recovery_context",
+        legacy_recovery,
+    )
+    receipt_store = host.transaction_runtime.kernel.receipt_store
+
+    def fail_finalize(_prepared, _receipt):
+        raise OSError("simulated legacy receipt finalization failure")
+
+    monkeypatch.setattr(receipt_store, "finalize", fail_finalize)
+    with pytest.raises(
+        OSError,
+        match="simulated legacy receipt finalization failure",
+    ):
+        _apply(
+            client,
+            selected,
+            approval,
+            idempotency_key="p11-legacy-recovery-001",
+        )
+    committed = client.get(
+        f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+    ).json()
+    host.close()
+
+    reopened, reopened_host = _client(root)
+    try:
+        recovered = _apply(
+            reopened,
+            selected,
+            approval,
+            idempotency_key="p11-legacy-recovery-001",
+        )
+        assert recovered.status_code == 200, recovered.text
+        assert recovered.json()["revision"] == committed["revision"]
+        assert recovered.json()["layout"] == committed["layout"]
+        assert recovered.json()["recovered"] is True
+    finally:
+        reopened_host.close()
+
+
+def test_maximum_placement_recovery_and_receipt_stay_bounded(
+    tmp_path,
+):
+    client, host = _client(tmp_path / "facility")
+    bootstrap = client.get("/api/facility-layout-bootstrap").json()
+    _, selected = _proposal(client, bootstrap)
+    principal = host.principal()
+    proposal = host.transaction_runtime.get_proposal(
+        selected["proposalId"],
+        tenant_id=principal.tenant_id,
+        site_id=LOCAL_SITE_ID,
+        layout_id=LOCAL_LAYOUT_ID,
+        principal_id=principal.principal_id,
+    )
+    alternative, binding, prepared, dependencies = (
+        host.service._regenerate_proposal(
+            principal,
+            proposal,
+            site_id=LOCAL_SITE_ID,
+            layout_id=LOCAL_LAYOUT_ID,
+        )
+    )
+
+    placement = deepcopy(prepared["document"]["placements"][0])
+    placements = []
+    created_ids = []
+    operation_results = []
+    for index in range(5000):
+        placement_id = f"pl-large-{index:04d}"
+        item = deepcopy(placement)
+        item["placementId"] = placement_id
+        item["transform"]["position"]["x"] = float(index * 2)
+        item["metadata"] = {
+            "label": "x" * 128,
+            "sequence": index,
+        }
+        placements.append(item)
+        created_ids.append(placement_id)
+        operation_results.append(
+            {
+                "index": index,
+                "op": "place_asset",
+                "createdIds": [placement_id],
+                "affectedIds": [placement_id],
+            }
+        )
+    maximum_document = deepcopy(prepared["document"])
+    maximum_document["placements"] = placements
+    validate_layout(maximum_document)
+
+    maximum_prepared = deepcopy(prepared)
+    maximum_prepared["document"] = maximum_document
+    maximum_prepared["createdIds"] = created_ids
+    maximum_prepared["affectedIds"] = created_ids
+    maximum_prepared["operationResults"] = operation_results
+    recovery = host.service._proposal_recovery_context(
+        alternative,
+        maximum_prepared,
+        dependencies,
+    )
+    commit_payload = host.service._proposal_commit_payload(
+        alternative,
+        maximum_prepared,
+        dependencies,
+    )
+
+    assert recovery["schemaVersion"] == 2
+    assert "expectedLayout" not in recovery
+    assert "document" not in commit_payload["operationResult"]
+    assert len(canonical_json_bytes(recovery)) < MAX_RECORD_BYTES
+    assert len(canonical_json_bytes(commit_payload)) < MAX_RECORD_BYTES
+
+    store = JsonReceiptStore(tmp_path / "bounded-receipts")
+    prepared_record = PreparedRecord(
+        receipt_id="flr-large-layout",
+        proposal_id=proposal.proposal_id,
+        action=proposal.action,
+        binding=ExactBinding.from_dict(binding.to_dict()),
+        principal=PrincipalBinding(
+            principal_id=principal.principal_id,
+            session_id="large-layout-session",
+        ),
+        idempotency_key="large-layout-idempotency",
+        request_fingerprint="a" * 64,
+        prepared_at=1000.0,
+        recovery=recovery,
+    )
+    stored = store.prepare(prepared_record)
+    receipt = TransactionReceipt(
+        receipt_id=prepared_record.receipt_id,
+        proposal_id=prepared_record.proposal_id,
+        action=prepared_record.action,
+        binding=prepared_record.binding,
+        principal=prepared_record.principal,
+        idempotency_key=prepared_record.idempotency_key,
+        request_fingerprint=prepared_record.request_fingerprint,
+        revision="b" * 64,
+        created_at=1001.0,
+        payload=commit_payload,
+    )
+    finalized = store.finalize(prepared_record, receipt)
+    assert finalized.state == "finalized"
+    assert (
+        store.lookup(
+            prepared_record.idempotency_key,
+            prepared_record.request_fingerprint,
+        )
+        == finalized
+    )
     host.close()
 
 

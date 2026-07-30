@@ -1026,11 +1026,66 @@ test('context loss degrades 3D without throwing and context restoration resumes 
     assert.doesNotThrow(() => data.adapter.setSelection(['pl-a']));
 
     canvas.dispatch('webglcontextrestored');
+    await new Promise(resolve => setImmediate(resolve));
     diagnostics = data.adapter.getDiagnostics();
     assert.strictEqual(diagnostics.status, 'ready');
     assert.strictEqual(diagnostics.contextLost, false);
     assert.strictEqual(diagnostics.degraded, false);
     assert(statuses.includes('degraded'));
+    data.adapter.dispose();
+});
+
+test('context restoration replays edits made while 3D was degraded and clears dismissed preview', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [
+                placement('pl-before', 'asset-machine', REV_A, 0, 0, 0),
+            ],
+        },
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+    const canvas = FakeRenderer.instances.at(-1).domElement;
+    canvas.dispatch('webglcontextlost');
+
+    const editedLayout = {
+        placements: [
+            placement('pl-after-a', 'asset-machine', REV_A, 4, 0, 0),
+            placement('pl-after-b', 'asset-machine', REV_A, 8, 0, 0),
+        ],
+    };
+    await data.adapter.setScene({
+        layout: editedLayout,
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+    assert.strictEqual(data.adapter.setProposalPreview({
+        active: true,
+        newPlacementIds: ['pl-after-b'],
+        movedPlacementIds: [],
+        removedPlacementIds: [],
+        beforePlacements: [],
+        proposedPlacements: editedLayout.placements,
+    }), false);
+    assert.strictEqual(data.adapter.setProposalPreview(null), true);
+    let diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.contextLost, true);
+    assert.strictEqual(diagnostics.placementCount, 2);
+    assert.strictEqual(diagnostics.proposalPreviewActive, false);
+
+    canvas.dispatch('webglcontextrestored');
+    await new Promise(resolve => setImmediate(resolve));
+    diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.status, 'ready');
+    assert.strictEqual(diagnostics.contextLost, false);
+    assert.strictEqual(diagnostics.placementCount, 2);
+    assert.strictEqual(diagnostics.proposalPreviewActive, false);
+    assert.deepStrictEqual(
+        diagnostics.representationGroups.flatMap(
+            group => group.placementIds
+        ).sort(),
+        ['pl-after-a', 'pl-after-b']
+    );
     data.adapter.dispose();
 });
 

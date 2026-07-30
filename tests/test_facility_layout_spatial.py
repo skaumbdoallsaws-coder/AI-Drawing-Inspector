@@ -1135,6 +1135,42 @@ def test_candidate_obstacle_change_invalidates_stable_ids(golden: dict) -> None:
     )
 
 
+def test_candidate_cache_is_isolated_and_policy_bound(golden: dict) -> None:
+    arguments = {
+        "layout": golden["baseLayout"],
+        "asset_definition": _asset(golden, "asset-machine-golden"),
+        "requested_position": {"x": 3.2, "y": 0.0, "z": 5.0},
+        "asset_definitions": golden["assetDefinitions"],
+        "shell": golden["shell"],
+        "policy_set": golden["policySet"],
+        "evidence_authority": golden["authority"],
+    }
+    first = generate_placement_candidates(**arguments)
+    expected = deepcopy(first)
+    first["candidates"][0]["findings"].clear()
+
+    assert generate_placement_candidates(**arguments) == expected
+
+    changed_policy = deepcopy(golden["policySet"])
+    changed_policy.setdefault("unresolvedItems", []).append(
+        {
+            "findingId": "policy-cache-invalidation",
+            "code": "policy_cache_invalidation",
+            "message": "Policy evidence changed.",
+        }
+    )
+    changed = generate_placement_candidates(
+        **{**arguments, "policy_set": changed_policy}
+    )
+    assert changed != expected
+    assert any(
+        finding.get("details", {}).get("sourceCode")
+        == "policy_cache_invalidation"
+        for candidate in changed["candidates"]
+        for finding in candidate["findings"]
+    )
+
+
 def test_candidate_generation_reports_rejections_without_mutation(golden: dict) -> None:
     layout = deepcopy(golden["baseLayout"])
     before = canonical_spatial_bytes(layout)

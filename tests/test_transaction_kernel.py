@@ -33,6 +33,7 @@ from ai_inspector.transactions import (
     TransactionValidationError,
     canonical_json_bytes,
 )
+from ai_inspector.transactions.stores import MAX_RECORD_BYTES
 
 
 def _hash(character: str) -> str:
@@ -810,6 +811,15 @@ def test_json_store_uses_hashed_paths_and_canonical_record_bytes(tmp_path):
         parsed = json.loads(raw.decode("ascii"))
         assert raw == canonical_json_bytes(parsed)
         assert all(byte < 128 for byte in raw)
+
+
+def test_json_store_never_writes_a_record_it_cannot_read(tmp_path):
+    store = JsonReceiptStore(tmp_path / "bounded-store")
+    path = store._receipt_path("txr-bounded-record")
+    with pytest.raises(TransactionValidationError) as error:
+        store._atomic_write(path, b"x" * (MAX_RECORD_BYTES + 1))
+    assert error.value.code == "transaction_record_too_large"
+    assert not path.exists()
 
 
 def test_identifiers_and_store_paths_are_bounded_and_path_free(tmp_path):

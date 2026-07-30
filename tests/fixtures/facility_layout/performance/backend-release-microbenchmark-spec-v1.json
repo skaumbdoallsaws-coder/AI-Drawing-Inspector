@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "facility-layout-backend-release-microbenchmark-spec-v1",
+  "benchmarkId": "facility-layout-backend-release-primary-500-v1",
+  "governingPlan": "docs/industrial-layout-platform-implementation-plan.md",
+  "governingPlanSections": [
+    "18.2",
+    "18.3",
+    "19"
+  ],
+  "spatialContract": "static/contracts/facility-layout-spatial-contract-v1.json",
+  "protocol": {
+    "timer": "time.perf_counter_ns",
+    "warmupIterations": 1,
+    "measuredIterations": 30,
+    "smokeMeasuredIterations": 3,
+    "percentileMethod": "inclusive",
+    "percentile": 95
+  },
+  "primaryFixture": {
+    "fixtureId": "facility-layout-primary-500-100-200-v1",
+    "placementCount": 500,
+    "zoneCount": 100,
+    "routeCount": 200,
+    "placementsPerZone": 5,
+    "zoneColumns": 10,
+    "zoneWidthMeters": 20.0,
+    "zoneDepthMeters": 12.0,
+    "candidateMaximum": 8
+  },
+  "smokeFixture": {
+    "fixtureId": "facility-layout-smoke-50-10-20-v1",
+    "placementCount": 50,
+    "zoneCount": 10,
+    "routeCount": 20,
+    "placementsPerZone": 5,
+    "zoneColumns": 5,
+    "zoneWidthMeters": 20.0,
+    "zoneDepthMeters": 12.0,
+    "candidateMaximum": 4
+  },
+  "forkliftFixture": {
+    "fixtureId": "facility-layout-forklift-90-degree-v1",
+    "gridResolutionMeters": 0.5,
+    "maximumExpansions": 50000,
+    "allowReverse": false,
+    "loaded": false
+  },
+  "operations": [
+    {
+      "operationId": "moved_object_spatial_query",
+      "required": true,
+      "budgetP95Milliseconds": 20.0,
+      "budgetSource": "governing-plan-18.2",
+      "claimKind": "prebuilt_index_query_proxy"
+    },
+    {
+      "operationId": "candidate_generation",
+      "required": true,
+      "budgetP95Milliseconds": 50.0,
+      "budgetSource": "spatial-contract-performanceTargets.backendCandidateGenerationP95Ms",
+      "claimKind": "production_api_uncached_request_warm_obstacle_scene"
+    },
+    {
+      "operationId": "collision_clearance_query",
+      "required": true,
+      "budgetP95Milliseconds": 16.0,
+      "budgetSource": "spatial-contract-performanceTargets.backendCollisionQueryP95Ms",
+      "claimKind": "prebuilt_index_exact_narrow_phase_proxy"
+    },
+    {
+      "operationId": "full_diagnostics",
+      "required": true,
+      "budgetP95Milliseconds": 250.0,
+      "budgetSource": "spatial-contract-performanceTargets.backendFullDiagnosticsP95Ms",
+      "claimKind": "production_api"
+    },
+    {
+      "operationId": "forklift_routing",
+      "required": true,
+      "budgetP95Milliseconds": 500.0,
+      "budgetSource": "governing-plan-18.2",
+      "claimKind": "production_api"
+    }
+  ],
+  "unavailableOperations": [
+    {
+      "operationId": "browser_advisory_response",
+      "required": false,
+      "availability": "unavailable",
+      "reason": "The advisory implementation is a browser Web Worker API and is outside this deterministic backend-only harness."
+    }
+  ],
+  "claimBoundary": {
+    "approvedClaims": [
+      "Single-process CPython latency for the named deterministic backend slices on the recorded host.",
+      "The generated primary fixture contains exactly 500 placements, 100 zones, and 200 persisted route records.",
+      "The moved-object and collision-clearance measurements use prebuilt production UniformGridSpatialIndex instances and public exact geometry predicates.",
+      "Candidate generation uses the production API with distinct result-cache-miss requests after one obstacle-scene warmup.",
+      "Full diagnostics uses the production diagnose_layout API over the complete generated primary fixture.",
+      "Forklift routing covers one unloaded, forward-only, 90-degree two-aisle scenario."
+    ],
+    "forbiddenClaims": [
+      "Browser advisory, rendering, picking, asset loading, network, GPU, or main-thread performance.",
+      "Cold-process startup, concurrent throughput, service, repository, HTTP, or authorization latency.",
+      "The 5000-placement extended warehouse fixture or maximum schema-scale performance.",
+      "Validation or routing performance for all 200 persisted route records.",
+      "All vehicle profiles, loads, obstacles, route shapes, facilities, operating systems, or hardware.",
+      "End-to-end Facility Layout release readiness."
+    ]
+  }
+}

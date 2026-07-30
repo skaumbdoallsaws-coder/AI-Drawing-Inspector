@@ -1,0 +1,687 @@
+{
+  "benchmarkId": "facility-layout-backend-release-primary-500-v1",
+  "budgetsPassed": false,
+  "claimBoundary": {
+    "approvedClaims": [
+      "Single-process CPython latency for the named deterministic backend slices on the recorded host.",
+      "The generated primary fixture contains exactly 500 placements, 100 zones, and 200 persisted route records.",
+      "The moved-object and collision-clearance measurements use prebuilt production UniformGridSpatialIndex instances and public exact geometry predicates.",
+      "Candidate generation uses the production API with distinct result-cache-miss requests after one obstacle-scene warmup.",
+      "Full diagnostics uses the production diagnose_layout API over the complete generated primary fixture.",
+      "Forklift routing covers one unloaded, forward-only, 90-degree two-aisle scenario."
+    ],
+    "forbiddenClaims": [
+      "Browser advisory, rendering, picking, asset loading, network, GPU, or main-thread performance.",
+      "Cold-process startup, concurrent throughput, service, repository, HTTP, or authorization latency.",
+      "The 5000-placement extended warehouse fixture or maximum schema-scale performance.",
+      "Validation or routing performance for all 200 persisted route records.",
+      "All vehicle profiles, loads, obstacles, route shapes, facilities, operating systems, or hardware.",
+      "End-to-end Facility Layout release readiness."
+    ]
+  },
+  "determinismPassed": true,
+  "deterministicEvidenceSha256": "5f5a81439c2e0a25c1a269e4f83e264728330450b4a6e5bc80605774cc5d707a",
+  "environment": {
+    "cpu": {
+      "available": true,
+      "logicalProcessorCount": 12,
+      "name": "Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+    },
+    "operatingSystem": {
+      "machine": "AMD64",
+      "release": "11",
+      "system": "Windows",
+      "version": "10.0.26200"
+    },
+    "python": {
+      "executable": "C:\\Python314\\python.exe",
+      "implementation": "CPython",
+      "version": "3.14.0"
+    },
+    "ram": {
+      "available": true,
+      "totalBytes": 16849256448
+    }
+  },
+  "fixtures": {
+    "forklift": {
+      "canonicalByteLength": 1167,
+      "fixtureId": "facility-layout-forklift-90-degree-v1",
+      "inputSizes": {
+        "allowReverse": false,
+        "gridResolutionMeters": 0.5,
+        "loaded": false,
+        "maximumExpansions": 50000,
+        "obstacleCount": 0,
+        "traversablePolygonCount": 2,
+        "traversableVertexCount": 8
+      },
+      "sha256": "ec3cda9eada7e3e623525204523ab4dfd44c9038ded370fe05481463ef63bb64"
+    },
+    "generation": "deterministic_in_memory_from_pinned_spec",
+    "primary": {
+      "canonicalByteLength": 330904,
+      "fixtureId": "facility-layout-primary-500-100-200-v1",
+      "inputSizes": {
+        "assetDefinitionCount": 1,
+        "placementCount": 500,
+        "policyRuleCount": 0,
+        "routeCount": 200,
+        "routePointCount": 400,
+        "shellFeatureCount": 1,
+        "zoneCount": 100,
+        "zoneVertexCount": 400
+      },
+      "sha256": "5e4dfc628b092f8743912a09e924dc5033f71de386281f1cc236a2763c808926"
+    }
+  },
+  "generatedAtUtc": "2026-07-30T04:27:32Z",
+  "mode": "release",
+  "operations": [
+    {
+      "availability": "available",
+      "budget": {
+        "limit": 20.0,
+        "measured": 0.005915,
+        "metric": "p95Milliseconds",
+        "passed": true,
+        "source": "governing-plan-18.2",
+        "unit": "ms"
+      },
+      "claimKind": "prebuilt_index_query_proxy",
+      "determinism": {
+        "firstOutputSha256": "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "passed": true,
+        "probeInputIndex": 0,
+        "secondOutputSha256": "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b"
+      },
+      "inputSizes": {
+        "indexBuildIncluded": false,
+        "indexCellSizeMeters": 4.0,
+        "indexedPhysicalRecords": 499,
+        "movedPhysicalRecords": 1
+      },
+      "measuredIterations": 30,
+      "operationId": "moved_object_spatial_query",
+      "outputHashes": [
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b",
+        "d3b5aefe976f6e8e7f6bcfe82934d44a7606992c18f07f4e8f0cf7c3d402414b"
+      ],
+      "outputSequenceSha256": "59550793f59f4e0239822c857d9738b170820a19b4dba7467df51f6af92b31c6",
+      "rawSamplesMs": [
+        0.0087,
+        0.0065,
+        0.0052,
+        0.0045,
+        0.0045,
+        0.0043,
+        0.0045,
+        0.0043,
+        0.0045,
+        0.0042,
+        0.0044,
+        0.0043,
+        0.0045,
+        0.0043,
+        0.0048,
+        0.0043,
+        0.0043,
+        0.0043,
+        0.0041,
+        0.0046,
+        0.0044,
+        0.0043,
+        0.0043,
+        0.0045,
+        0.0045,
+        0.0044,
+        0.0042,
+        0.0043,
+        0.0042,
+        0.0044
+      ],
+      "required": true,
+      "sampleOutputSummary": {
+        "candidateRecordCount": 1,
+        "queryRecordCount": 1
+      },
+      "summaryMilliseconds": {
+        "maximum": 0.0087,
+        "median": 0.0044,
+        "minimum": 0.0041,
+        "p95": 0.005915
+      },
+      "warmupIterations": 1
+    },
+    {
+      "availability": "available",
+      "budget": {
+        "limit": 50.0,
+        "measured": 23.607235,
+        "metric": "p95Milliseconds",
+        "passed": true,
+        "source": "spatial-contract-performanceTargets.backendCandidateGenerationP95Ms",
+        "unit": "ms"
+      },
+      "claimKind": "production_api_uncached_request_warm_obstacle_scene",
+      "determinism": {
+        "firstOutputSha256": "bb4cb618014c3beb4bf72e25648fb0564f569309b7b5511609bfa5788136c101",
+        "passed": true,
+        "probeInputIndex": 0,
+        "secondOutputSha256": "bb4cb618014c3beb4bf72e25648fb0564f569309b7b5511609bfa5788136c101"
+      },
+      "inputSizes": {
+        "carriedRouteRecordCount": 200,
+        "enabledFamilyCount": 6,
+        "maximumCandidates": 8,
+        "obstacleScenePolicy": "warmed once",
+        "placementCount": 500,
+        "resultCachePolicy": "distinct timed requests",
+        "zoneCount": 100
+      },
+      "measuredIterations": 30,
+      "operationId": "candidate_generation",
+      "outputHashes": [
+        "bb4cb618014c3beb4bf72e25648fb0564f569309b7b5511609bfa5788136c101",
+        "344b14fa51e5884d4b21893c96dd6e0e961fe529f9cfbd4b36d726b9a7ba34df",
+        "a0c4eb1d9a20cfcd706398dc8a0b9291e6a51fd859f20e02d6b95fd9903ec72f",
+        "c595d99ef9e80116e3c249ba4ac006f1cf158d90ac779849f7311eb888fe1e76",
+        "bcd3ea523a3d80229efede9a48b03e4f4fad63db43b6cd78e6001c75ce8b622d",
+        "dd911696b88329ca160919ea3b215dff297d8f0a8a047c1bff1b7b1e56a74998",
+        "11a3c50608e84af8f40c4d378acc9236b94abe50d3a81cec3362e3596180d982",
+        "53acf5d5641bbefca3107e65188b58a902b31b6b3df1cf2d5989d571a7d6ec5b",
+        "ae956990c777d0fd85656a05a49ad7618404ddfb598fbe54adf152c1d0fbfbc1",
+        "d1d2d965963ad88359d178189faeb95b0c884c0e1c7e970f8f0812e92de1a0a9",
+        "7c6c4ec6c3dabadf99078081afc3b170957e4cb76805b2841b7faac9ac86b087",
+        "708e7a595ed693cf1ce974f5fd5f96fa3cd3431480e489d78750943d89f65162",
+        "2d6d84da8a9ea619dbfaba6a5c8a24ede06552b38bb1f8746ee949db7d218ad6",
+        "63242e749634511ba3b1a7be7fe898ccbcf0a5b5a19d15450b355bd6a8593051",
+        "b5ff2ccccb441a8687e548b442970a9104c8bacf765fdb5b675972afc04a6757",
+        "931d082420c3ef8d85d3862ab032ee68a06cddb82a9618b25e60dffcc0b833cd",
+        "b691f3d9fde085e3f63e774aa2e7871628f45bfac37a61c2cafad91f47efc5b1",
+        "f4c1900f83563199338c99741eaf454528ad5bf2b263905ed78ec70b03f8ce47",
+        "2a508d07d0a0215fc97ec7e7df83a4e3bbbed0c36d3e4535be5aeb7ecd798c61",
+        "a6ff9fb95645acb40eb6979c028d3717ff2fab82e4a1ac29fe28be1bbf43a4b5",
+        "ce2713b9cdac4f8170e9189fe93c11307bfa7952615f3140f8d7ed592bd808eb",
+        "73a7bfe52b428ce2f1f279f17a3bd764b36e09496389a1a6d9affdd6a6edce7f",
+        "70b62c499ce532281f6b5ecee9633cb436cd68f06ce7f6bc3d2245f2d1a37cd6",
+        "1a207f50d78fc5efde342716f7ef0d3a6fcccde2dd746083d8ca99db84264f5d",
+        "2c5ea21ffcfebc4c26368af348c50317c30c9a8454e51ac09993b03f2a476327",
+        "b4cdddd4e71f0e124e1f661efa5cddcdd8c4ee2a41d7adb2dcfe8473767c3a59",
+        "2163a9822f6eb4ade6b878ce4405a42c0cd39c9dc3c6a1edfbf5f70fc6993ec7",
+        "1c40c6baff502d6fe71667277f49aa9852dd09d314fbe4d39b51ff66382affe7",
+        "f0975e365c431406d763d5041d0872a0e4e6215fad2069b04f575b20444b0a8b",
+        "d673d866e5fa48ed1a614a54236b56f6e9ca199f30bdc7a79eca552b12b8529c"
+      ],
+      "outputSequenceSha256": "53bbb5ca002946f17fe1e0a2e1307cf07c283eb6538ff631ef5687201a807595",
+      "rawSamplesMs": [
+        19.2259,
+        23.209,
+        23.6269,
+        20.9543,
+        23.0127,
+        22.8129,
+        21.7688,
+        22.3106,
+        22.3822,
+        23.0451,
+        23.0166,
+        23.4294,
+        19.9919,
+        21.7569,
+        23.0538,
+        21.4066,
+        22.4418,
+        22.5837,
+        23.464,
+        20.0703,
+        22.2797,
+        23.5832,
+        23.0338,
+        23.1362,
+        20.5548,
+        23.7794,
+        21.8714,
+        21.7909,
+        22.0395,
+        21.1956
+      ],
+      "required": true,
+      "sampleOutputSummary": {
+        "candidateCount": 7,
+        "evaluatedCount": 8,
+        "rejectionCounts": {
+          "zone_containment_violation": 1
+        },
+        "seedCount": 413
+      },
+      "summaryMilliseconds": {
+        "maximum": 23.7794,
+        "median": 22.412,
+        "minimum": 19.2259,
+        "p95": 23.607235
+      },
+      "warmupIterations": 1
+    },
+    {
+      "availability": "available",
+      "budget": {
+        "limit": 16.0,
+        "measured": 0.07162,
+        "metric": "p95Milliseconds",
+        "passed": true,
+        "source": "spatial-contract-performanceTargets.backendCollisionQueryP95Ms",
+        "unit": "ms"
+      },
+      "claimKind": "prebuilt_index_exact_narrow_phase_proxy",
+      "determinism": {
+        "firstOutputSha256": "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "passed": true,
+        "probeInputIndex": 0,
+        "secondOutputSha256": "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad"
+      },
+      "inputSizes": {
+        "indexBuildIncluded": false,
+        "indexedClearanceRecords": 499,
+        "indexedPhysicalRecords": 499,
+        "movedClearanceRecords": 1,
+        "movedPhysicalRecords": 1,
+        "narrowPhaseIncluded": true
+      },
+      "measuredIterations": 30,
+      "operationId": "collision_clearance_query",
+      "outputHashes": [
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad",
+        "1b1243a5511f41c67ea07a986c6a64267bcd58b7090a9bdb8cc84b79480a21ad"
+      ],
+      "outputSequenceSha256": "621061117ce17ff7747926dc4858932e363a80d152aed4b6d3404d7128f82dd0",
+      "rawSamplesMs": [
+        0.0718,
+        0.0714,
+        0.0679,
+        0.0638,
+        0.0639,
+        0.0637,
+        0.0633,
+        0.0631,
+        0.0632,
+        0.0634,
+        0.0631,
+        0.0632,
+        0.0653,
+        0.0635,
+        0.0642,
+        0.0595,
+        0.0612,
+        0.0601,
+        0.0604,
+        0.0612,
+        0.0932,
+        0.0624,
+        0.0622,
+        0.0606,
+        0.0611,
+        0.0626,
+        0.0615,
+        0.0621,
+        0.068,
+        0.0588
+      ],
+      "required": true,
+      "sampleOutputSummary": {
+        "candidateClearanceIntersectionCount": 1,
+        "existingClearanceIntersectionCount": 1,
+        "physicalCollisionCount": 1
+      },
+      "summaryMilliseconds": {
+        "maximum": 0.0932,
+        "median": 0.06315,
+        "minimum": 0.0588,
+        "p95": 0.07162
+      },
+      "warmupIterations": 1
+    },
+    {
+      "availability": "available",
+      "budget": {
+        "limit": 250.0,
+        "measured": 550.81596,
+        "metric": "p95Milliseconds",
+        "passed": false,
+        "source": "spatial-contract-performanceTargets.backendFullDiagnosticsP95Ms",
+        "unit": "ms"
+      },
+      "claimKind": "production_api",
+      "determinism": {
+        "firstOutputSha256": "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "passed": true,
+        "probeInputIndex": 0,
+        "secondOutputSha256": "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede"
+      },
+      "inputSizes": {
+        "assetDefinitionCount": 1,
+        "carriedRouteRecordCount": 200,
+        "placementCount": 500,
+        "policyRuleCount": 0,
+        "shellFeatureCount": 1,
+        "zoneCount": 100
+      },
+      "measuredIterations": 30,
+      "operationId": "full_diagnostics",
+      "outputHashes": [
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede",
+        "5ec09f75f2f780df443cc3b3599d0adb4e3d42b9475d9590a49046f4d00abede"
+      ],
+      "outputSequenceSha256": "3815566f1d458bf3bab8cfe1f37ca7b2b4eefc517c7e62e20df158cef8fb99e4",
+      "rawSamplesMs": [
+        424.4648,
+        447.3532,
+        434.0277,
+        444.0438,
+        431.2767,
+        425.2398,
+        463.2015,
+        429.3499,
+        452.9532,
+        434.8196,
+        455.5628,
+        436.8675,
+        445.7284,
+        437.6997,
+        442.4227,
+        518.6879,
+        489.0167,
+        515.9009,
+        480.4301,
+        535.9587,
+        454.7156,
+        477.115,
+        468.2047,
+        526.1333,
+        496.6275,
+        562.9719,
+        672.5782,
+        522.9871,
+        494.3356,
+        484.4039
+      ],
+      "required": true,
+      "sampleOutputSummary": {
+        "findingCount": 1500,
+        "metrics": {
+          "clearanceConflicts": 0,
+          "errorCount": 0,
+          "indexedPolygonCount": 500,
+          "placementCollisions": 0,
+          "placementCount": 500,
+          "shellObstacleCollisions": 0,
+          "unverifiedCount": 1500,
+          "warningCount": 0
+        },
+        "safetyStatus": "unverified",
+        "valid": true
+      },
+      "summaryMilliseconds": {
+        "maximum": 672.5782,
+        "median": 459.38215,
+        "minimum": 424.4648,
+        "p95": 550.81596
+      },
+      "warmupIterations": 1
+    },
+    {
+      "availability": "available",
+      "budget": {
+        "limit": 500.0,
+        "measured": 267.76273,
+        "metric": "p95Milliseconds",
+        "passed": true,
+        "source": "governing-plan-18.2",
+        "unit": "ms"
+      },
+      "claimKind": "production_api",
+      "determinism": {
+        "firstOutputSha256": "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "passed": true,
+        "probeInputIndex": 0,
+        "secondOutputSha256": "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48"
+      },
+      "inputSizes": {
+        "allowReverse": false,
+        "gridResolutionMeters": 0.5,
+        "loaded": false,
+        "maximumExpansions": 50000,
+        "obstacleCount": 0,
+        "traversablePolygonCount": 2,
+        "traversableVertexCount": 8
+      },
+      "measuredIterations": 30,
+      "operationId": "forklift_routing",
+      "outputHashes": [
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48",
+        "c67bd33d924659858f4612ed9dfe89e8be142963f37096bbadf2c3daf73cec48"
+      ],
+      "outputSequenceSha256": "5d62cf5e8caf1397ea223df831bf40f0f0819d4a22788d4acdfad3a5c545f644",
+      "rawSamplesMs": [
+        292.4312,
+        237.268,
+        233.6486,
+        223.8568,
+        247.5079,
+        229.4018,
+        221.4385,
+        229.6541,
+        240.9837,
+        224.9206,
+        224.0248,
+        269.4496,
+        260.5995,
+        251.2999,
+        232.6223,
+        233.9753,
+        260.3251,
+        249.1299,
+        233.3949,
+        237.7927,
+        246.012,
+        228.8275,
+        231.7444,
+        217.1216,
+        221.7402,
+        242.9973,
+        238.0219,
+        226.6001,
+        242.6376,
+        265.701
+      ],
+      "required": true,
+      "sampleOutputSummary": {
+        "accepted": true,
+        "actionCount": 55,
+        "distanceMeters": 28.570796,
+        "findingCodes": [],
+        "poseCount": 62
+      },
+      "summaryMilliseconds": {
+        "maximum": 292.4312,
+        "median": 235.62165,
+        "minimum": 217.1216,
+        "p95": 267.76273
+      },
+      "warmupIterations": 1
+    }
+  ],
+  "protocol": {
+    "measuredIterations": 30,
+    "operationOrder": [
+      "moved_object_spatial_query",
+      "candidate_generation",
+      "collision_clearance_query",
+      "full_diagnostics",
+      "forklift_routing"
+    ],
+    "percentile": 95,
+    "percentileMethod": "inclusive",
+    "rawSamplesRetained": true,
+    "singleProcess": true,
+    "timer": "time.perf_counter_ns",
+    "warmupIterations": 1
+  },
+  "provenanceComplete": true,
+  "releaseEligible": true,
+  "releaseSlicePassed": false,
+  "requiredOperationsAvailable": true,
+  "schemaVersion": "facility-layout-backend-release-microbenchmark-v1",
+  "source": {
+    "aggregateFileSha256": "cf7158027d32fb71b5a08d273ea92521118ee344e4aefe644d488f64bebaf3ae",
+    "files": [
+      {
+        "byteLength": 42258,
+        "path": "tools/benchmark_facility_layout_backend_release.py",
+        "sha256": "37dad3c6395c6bbc69503619e8ed0de610c466c91379df22a9ee3fab421722ea"
+      },
+      {
+        "byteLength": 4218,
+        "path": "tests/fixtures/facility_layout/performance/backend-release-microbenchmark-spec-v1.json",
+        "sha256": "d4ac208fdfb8af2e1b686efb50d695e0cde59e9c1a7e66903e232dfac9f1b80d"
+      },
+      {
+        "byteLength": 6548,
+        "path": "static/contracts/facility-layout-spatial-contract-v1.json",
+        "sha256": "c9f478ecaec582cf97516e65f252d1b3db758884f856460097b89bbc418f1bb0"
+      },
+      {
+        "byteLength": 136311,
+        "path": "ai_inspector/facility_layout/spatial.py",
+        "sha256": "7b1ace9ab1fc74a123318048f87df1efe16a6a9bbab15203651b753378b8253e"
+      },
+      {
+        "byteLength": 104507,
+        "path": "ai_inspector/facility_layout/routing.py",
+        "sha256": "c02120dcc842918bf9d4ade8db6772f026d403ea1d17be04c65da8e3d1f81286"
+      }
+    ],
+    "sourceCommit": "5af6be2a5b0b0aef51c1925ed01ddcfa596eb055",
+    "sourceCommitAvailable": true
+  },
+  "unavailableOperations": [
+    {
+      "availability": "unavailable",
+      "operationId": "browser_advisory_response",
+      "reason": "The advisory implementation is a browser Web Worker API and is outside this deterministic backend-only harness.",
+      "required": false
+    }
+  ]
+}

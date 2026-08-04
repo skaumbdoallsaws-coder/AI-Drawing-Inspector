@@ -41,11 +41,11 @@ def _image(path: Path) -> dict[str, Any]:
 def _open_facility(page: Any) -> None:
     page.evaluate(
         """() => {
+            if (state.activeTab !== 'training') switchTab('training');
             const previous = trainingState.type;
             trainingState.type = 'facility_layout';
             trainingState.viewportMode = 'facility_layout';
             try { _trainApplyTrainingTypeDefaults(previous); } catch (_) {}
-            switchTab('training');
         }"""
     )
     page.wait_for_selector(
@@ -260,46 +260,80 @@ def verify(app_url: str, result_path: Path) -> dict[str, Any]:
 
         page.evaluate(
             """() => {
+                window.__p5RetainedFacilityApp =
+                    _trainFacilityLayoutAuthoringApp;
+                window.__p5RetainedFacilityWorkspace =
+                    _trainFacilityLayoutAuthoringApp.workspace;
                 const previous = trainingState.type;
                 trainingState.type = 'service';
                 _trainApplyTrainingTypeDefaults(previous);
             }"""
         )
         page.wait_for_function(
-            """() => (
-                document.querySelectorAll(
-                    '#trainFacilityLayoutAuthoring'
-                ).length === 0
-                && _trainFacilityLayoutAuthoringApp === null
-            )""",
+            """() => {
+                const app = window.__p5RetainedFacilityApp;
+                const workspace = window.__p5RetainedFacilityWorkspace;
+                return !!(
+                    app
+                    && workspace
+                    && app === _trainFacilityLayoutAuthoringApp
+                    && app.getState().suspended
+                    && workspace.getState().suspended
+                    && !workspace.root.isConnected
+                    && document.querySelectorAll(
+                        '#trainFacilityLayoutAuthoring'
+                    ).length === 0
+                );
+            }""",
             timeout=30_000,
         )
-        disposed = page.evaluate(
-            """() => ({
-                roots: document.querySelectorAll(
-                    '#trainFacilityLayoutAuthoring'
-                ).length,
-                canvases: document.querySelectorAll(
-                    '#trainFacilityLayoutAuthoring canvas'
-                ).length,
-                appCleared: _trainFacilityLayoutAuthoringApp === null,
-            })"""
+        suspended = page.evaluate(
+            """() => {
+                const app = window.__p5RetainedFacilityApp;
+                const workspace = window.__p5RetainedFacilityWorkspace;
+                const diagnostics = workspace.threeAdapter.getDiagnostics();
+                return {
+                    roots: document.querySelectorAll(
+                        '#trainFacilityLayoutAuthoring'
+                    ).length,
+                    canvasesInDocument: Array.from(
+                        document.querySelectorAll('canvas')
+                    ).filter(canvas => workspace.root.contains(canvas)).length,
+                    appRetained: app === _trainFacilityLayoutAuthoringApp,
+                    appSuspended: app.getState().suspended,
+                    workspaceSuspended: workspace.getState().suspended,
+                    rootConnected: workspace.root.isConnected,
+                    pendingFrame: diagnostics.demandRendering.pendingFrame,
+                    observerActive: diagnostics.lifecycle.observerActive,
+                };
+            }"""
         )
         _open_facility(page)
         remounted = page.evaluate(
-            """() => ({
-                roots: document.querySelectorAll(
-                    '#trainFacilityLayoutAuthoring'
-                ).length,
-                planSvgs: document.querySelectorAll(
-                    '#trainFacilityLayoutAuthoring '
-                    + 'svg[data-facility-layout-view="top-plan"]'
-                ).length,
-                canvases: document.querySelectorAll(
-                    '#trainFacilityLayoutAuthoring '
-                    + '.ip-flw-three-view canvas'
-                ).length,
-            })"""
+            """() => {
+                const app = _trainFacilityLayoutAuthoringApp;
+                const diagnostics = app.workspace.threeAdapter.getDiagnostics();
+                return {
+                    roots: document.querySelectorAll(
+                        '#trainFacilityLayoutAuthoring'
+                    ).length,
+                    planSvgs: document.querySelectorAll(
+                        '#trainFacilityLayoutAuthoring '
+                        + 'svg[data-facility-layout-view="top-plan"]'
+                    ).length,
+                    canvases: document.querySelectorAll(
+                        '#trainFacilityLayoutAuthoring '
+                        + '.ip-flw-three-view canvas'
+                    ).length,
+                    sameApp: app === window.__p5RetainedFacilityApp,
+                    sameWorkspace: app.workspace
+                        === window.__p5RetainedFacilityWorkspace,
+                    appSuspended: app.getState().suspended,
+                    workspaceSuspended: app.workspace.getState().suspended,
+                    rootConnected: app.workspace.root.isConnected,
+                    observerActive: diagnostics.lifecycle.observerActive,
+                };
+            }"""
         )
         browser.close()
 
@@ -325,11 +359,30 @@ def verify(app_url: str, result_path: Path) -> dict[str, Any]:
             drop["afterUndo"] == drop["before"]
             and drop["dirtyAfterUndo"] is False
         ),
-        "workflow_switch_disposes_workspace": (
-            disposed == {"roots": 0, "canvases": 0, "appCleared": True}
+        "workflow_switch_suspends_workspace": (
+            suspended == {
+                "roots": 0,
+                "canvasesInDocument": 0,
+                "appRetained": True,
+                "appSuspended": True,
+                "workspaceSuspended": True,
+                "rootConnected": False,
+                "pendingFrame": False,
+                "observerActive": False,
+            }
         ),
-        "remount_has_one_workspace": (
-            remounted == {"roots": 1, "planSvgs": 1, "canvases": 1}
+        "resume_reuses_one_workspace": (
+            remounted == {
+                "roots": 1,
+                "planSvgs": 1,
+                "canvases": 1,
+                "sameApp": True,
+                "sameWorkspace": True,
+                "appSuspended": False,
+                "workspaceSuspended": False,
+                "rootConnected": True,
+                "observerActive": True,
+            }
         ),
         "no_page_errors": not page_errors,
         "no_console_errors": not console_errors,
@@ -391,7 +444,7 @@ def verify(app_url: str, result_path: Path) -> dict[str, Any]:
         "initial": initial,
         "camera": {"before": before_camera, "after": after_camera},
         "drop": drop,
-        "disposed": disposed,
+        "suspended": suspended,
         "remounted": remounted,
         "errors": {
             "page": page_errors,

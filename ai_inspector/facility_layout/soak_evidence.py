@@ -139,6 +139,9 @@ def facility_build_identity(root: Path) -> dict[str, Any]:
             *(
                 root / "ai_inspector" / "facility_layout"
             ).rglob("*.py"),
+            *(
+                root / "ai_inspector" / "transactions"
+            ).rglob("*.py"),
             *(root / "static").rglob("facility_layout*.js"),
             *(root / "static").rglob("facility_layout*.css"),
             root / "static" / "index.html",

@@ -150,7 +150,7 @@
     "path": "tests/fixtures/facility_layout/release/visual/p11-visual-capture.json",
     "sha256": "d0bfa32aba0fd2037fcb8558979e600022d3727423bf843c60dbff0910cad943"
   },
-  "generatedAtUtc": "2026-08-04T15:21:13Z",
+  "generatedAtUtc": "2026-08-04T15:32:53Z",
   "lightDarkArtifactRequirementMet": true,
   "manifestValid": true,
   "missingExactCoverage": [],

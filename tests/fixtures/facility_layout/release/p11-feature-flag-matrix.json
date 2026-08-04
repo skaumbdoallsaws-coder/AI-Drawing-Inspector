@@ -58,7 +58,7 @@
       "runtimeWired": true
     }
   ],
-  "generatedAtUtc": "2026-08-04T15:21:14Z",
+  "generatedAtUtc": "2026-08-04T15:32:54Z",
   "matrix": [
     {
       "checks": {
@@ -297,7 +297,7 @@
       "ai_inspector/facility_layout/schema_v1.py": "8564bdc74fd11371fa22d35a057d8ba2a444cb7070db8f0bf846d684f4486053",
       "ai_inspector/facility_layout/semantic_plan.py": "feab61794b27ba7fe3992afa41ebbd25f72b63e0083c0a88435a7c6a9e4ffe24",
       "ai_inspector/facility_layout/service.py": "a216e4b0b71ed08d74548003f718f39e9c4424998ad7d501501e8725fa8a185a",
-      "ai_inspector/facility_layout/soak_evidence.py": "b5ba136458f43cb7d991644f4885cffe4c929e86bfa86943babf5e455c3f03bd",
+      "ai_inspector/facility_layout/soak_evidence.py": "c4621c71ac211fbbf133c25b9b36713a1db4c1a80c60f95382aa87df90c05a72",
       "ai_inspector/facility_layout/spatial.py": "4ad74b6e0b256f46fb2f5517f4ed2c5c551e7912d0ada6ef04bb512243783afa",
       "ai_inspector/facility_layout/spatial_executor.py": "59d29e72987fec087ec9e332cfdf9cf8e20c8d7d814001da36429ad2fcc51783",
       "ai_inspector/facility_layout/transaction_adapter.py": "adb8262d3519edcb7ad227d363dfc8c59126dee636e40ef68200f6d8ec822c16",

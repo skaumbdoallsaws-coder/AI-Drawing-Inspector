@@ -440,6 +440,11 @@ def test_build_identity_includes_nested_write_workflows(tmp_path: Path):
     recorder = tmp_path / "tools" / "record_facility_layout_soak.py"
     recorder.parent.mkdir(parents=True)
     recorder.write_text("VALUE = 1\n", encoding="ascii")
+    transaction = (
+        tmp_path / "ai_inspector" / "transactions" / "kernel.py"
+    )
+    transaction.parent.mkdir(parents=True)
+    transaction.write_text("VALUE = 1\n", encoding="ascii")
     first = facility_build_identity(tmp_path)
     assert any(
         item["path"]
@@ -450,6 +455,10 @@ def test_build_identity_includes_nested_write_workflows(tmp_path: Path):
         item["path"] == "tools/record_facility_layout_soak.py"
         for item in first["files"]
     )
+    assert any(
+        item["path"] == "ai_inspector/transactions/kernel.py"
+        for item in first["files"]
+    )
 
     nested.write_text("VALUE = 2\n", encoding="ascii")
     second = facility_build_identity(tmp_path)
@@ -458,3 +467,7 @@ def test_build_identity_includes_nested_write_workflows(tmp_path: Path):
     recorder.write_text("VALUE = 2\n", encoding="ascii")
     third = facility_build_identity(tmp_path)
     assert second["aggregateSha256"] != third["aggregateSha256"]
+
+    transaction.write_text("VALUE = 2\n", encoding="ascii")
+    fourth = facility_build_identity(tmp_path)
+    assert third["aggregateSha256"] != fourth["aggregateSha256"]

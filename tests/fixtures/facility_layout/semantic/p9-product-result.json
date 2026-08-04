@@ -22,25 +22,25 @@
   "schemaVersion": "facility-layout-p9-product-evidence-v1",
   "screenshots": {
     "plan": {
-      "bytes": 51932,
+      "bytes": 51930,
       "height": 893,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/semantic/p9-product-plan.png",
-      "sha256": "9e001f83b5278784ba77502dc6c24f0eb79c38ced2caef20422b6f44477c4251",
+      "sha256": "98be6eb52a026e54970581aab330092c01f3ffa4f3e7a19644611710db28e5c4",
       "width": 1220
     },
     "three": {
-      "bytes": 52558,
+      "bytes": 52555,
       "height": 893,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/semantic/p9-product-three.png",
-      "sha256": "5d5964af9282461eac7c3231c95dc35d99dd286d0a59e4d1377ac305ec9d8000",
+      "sha256": "216e1290ef25f314d537c99abba4208c49d9e7a425b4a1d098b189e5e3631092",
       "width": 1220
     }
   },
   "semantic": {
     "assumptionCount": 1,
-    "selectedProposalId": "flp-780d5d2df7b6b61c732420a8c928e8c7f81c77a62900af51da4a07acbe7b88ef",
+    "selectedProposalId": "flp-d64919edd168b2f2c19b5aa7d1eaeea906b781947d85b0f72317823f63ca4fc3",
     "summary": {
       "assumptionCount": 1,
       "flowCount": 0,
@@ -56,11 +56,11 @@
   "source": {
     "agentRuntimeSha256": "47729847c63e0b6b8b3027a60259609e2f1cc81ba1d1c4f2a3ddb8b54145be0d",
     "hostSha256": "e8a50c65675559b1c449432abda4456a020c49793b5e60c5239aae074d5c53f4",
-    "indexSha256": "67b040e7e0dc70449ed4b79a6f0e41f70af5c161c9c01904bd61cf1a61fcc5d7",
+    "indexSha256": "a1851a61a5a22fd9948251c8b70444aecc22257b9166ce527707ae4375263538",
     "observationSha256": "0430764d8f80ed20ebb8596d706912879a9abdc8c824802dc658ae865d00a972",
     "semanticPlanSha256": "feab61794b27ba7fe3992afa41ebbd25f72b63e0083c0a88435a7c6a9e4ffe24",
     "serverSha256": "864eae0b738afefee6f0c18fe28fbdcab9f94d23a8cc922338c97bb4b85bebdd",
     "sessionSha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a",
-    "verifierSha256": "6c2a5180f02f3dbac798cc6580f7d5f9536e06fc28b6df74cae2b3daa930016a"
+    "verifierSha256": "6159b22a4e327e9171b121dbbd3b44b520743e659a77688282b8de86906e37f1"
   }
 }

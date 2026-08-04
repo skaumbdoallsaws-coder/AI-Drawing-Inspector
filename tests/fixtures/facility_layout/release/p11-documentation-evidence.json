@@ -8,12 +8,12 @@
         "rollbackPreservesData": true,
         "safetyAuthorityBoundary": true
       },
-      "byteLength": 7615,
+      "byteLength": 7437,
       "containsSafetyDisclaimer": true,
       "contractPassed": true,
       "documentId": "pilot_runbook",
       "path": "docs/facility-layout-p11-pilot-runbook.md",
-      "sha256": "fe99172259f02c205592a37736e7605ce234c58e162f2bd96aa800ed8af82ba3"
+      "sha256": "4448d2d16387e0670338c66913522a56bb6febd18191f406eb1c1a05e34015ac"
     },
     {
       "accuracyChecks": {
@@ -25,12 +25,12 @@
         "manualScreenReaderRequired": true,
         "standardAndMinimumHardwareRequired": true
       },
-      "byteLength": 6705,
+      "byteLength": 6584,
       "containsSafetyDisclaimer": false,
       "contractPassed": true,
       "documentId": "release_gates",
       "path": "docs/facility-layout-p11-release-gates.md",
-      "sha256": "871024d28a1f0a4c46a596a7afce5c5b09f05af6beebe44423df93a2889db9ab"
+      "sha256": "0ba67a265d6a23155307a089ea493a6c73fa87c608143e99643827b75eb3e962"
     },
     {
       "accuracyChecks": {
@@ -39,12 +39,12 @@
         "machineHumanAndLegalGatesRequired": true,
         "noAutomatedLegalClearanceClaim": true
       },
-      "byteLength": 2709,
+      "byteLength": 2636,
       "containsSafetyDisclaimer": false,
       "contractPassed": true,
       "documentId": "licensing",
       "path": "docs/facility-layout-p11-licensing.md",
-      "sha256": "5b3cb43ccd5fa95d6cf3949bcc6416216cad8e0e3d2a8186094236e8fdddd705"
+      "sha256": "420ba5c02ec7129701943ed8c53b056d99bf99fa94c96667a6023f58acbb2ffc"
     },
     {
       "accuracyChecks": {
@@ -54,15 +54,15 @@
         "realAndAcceleratedSeparated": true,
         "recursiveWriteSourceBound": true
       },
-      "byteLength": 4288,
+      "byteLength": 4185,
       "containsSafetyDisclaimer": false,
       "contractPassed": true,
       "documentId": "soak_procedure",
       "path": "docs/facility-layout-p11-soak-procedure.md",
-      "sha256": "2b629c6ff66cf02426b40881781365b3c2250ccaf8eaba5f88032850de7af755"
+      "sha256": "c7f84e115d2be63c74d6f93c6b3ec93ef9a86d4f4aa0f12e1c6feb6cbc30bc30"
     }
   ],
-  "generatedAtUtc": "2026-08-04T19:43:58Z",
+  "generatedAtUtc": "2026-08-04T21:20:44Z",
   "pilotRunbookContainsSafetyDisclaimer": true,
   "releaseGateMet": true,
   "schemaVersion": "facility-layout-p11-documentation-evidence-v2"

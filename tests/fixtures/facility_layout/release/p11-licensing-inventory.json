@@ -6,7 +6,7 @@
     "python_distribution_legal_clearance_not_recorded",
     "python_distribution_inventory_gate_not_met"
   ],
-  "generatedAtUtc": "2026-08-04T19:43:58Z",
+  "generatedAtUtc": "2026-08-04T21:20:44Z",
   "industrialAssetReadiness": {
     "assets": [
       {
@@ -45,9 +45,9 @@
       "asset-wa01-e773742615b2"
     ],
     "source": {
-      "byteLength": 4965,
+      "byteLength": 4835,
       "path": "tests/fixtures/facility_layout/assets/p2-pilot-asset-readiness.json",
-      "sha256": "7af45833802c12ea49374f1021229627a7169b30a83a0560f9b7a4b04c64901b"
+      "sha256": "535e445c932867616b1fcfe96bad3160863a2b0579499bdfbb20a9926dc01354"
     }
   },
   "pythonDistributionDependencyReview": {
@@ -60,9 +60,9 @@
       "status": "not_performed"
     },
     "inventoryArtifact": {
-      "byteLength": 540121,
+      "byteLength": 536689,
       "path": "tests/fixtures/facility_layout/licensing/python-direct-dependency-inventory.json",
-      "sha256": "64890a2e772fafe758ef1332e3e9a1fa461003b13fa0149cde4726c8ab227c8c"
+      "sha256": "b49bf7dce6d8090d4cdf9d0fcf3bcd0186cdec1f249c1c0182f8bd2796364190"
     },
     "machineAssessment": {
       "blockerCodes": [
@@ -264,14 +264,14 @@
     "sourceBinding": {
       "checked": [
         {
-          "byteLength": 1257,
+          "byteLength": 1230,
           "path": "requirements.txt",
-          "sha256": "351e2a9fe4d6fa1f7f9490f0293a9dba7dfddcd8f735dafb8a7e88828bae94d4"
+          "sha256": "128637e534f4011bd9d5ac3b3ddbbbfdaf938d06a87ccc83aa339930a9e609f0"
         },
         {
-          "byteLength": 33921,
+          "byteLength": 32997,
           "path": "tools/inventory_facility_python_dependencies.py",
-          "sha256": "b73a5d0c855a34f07aa171ab192e5c3dccb47eb497461c794621f7534463c026"
+          "sha256": "e77b5ab28b510824c48e44b05a11e7fdd800c6f8daebd6a61faada89c15b947a"
         }
       ],
       "failures": [],
@@ -285,16 +285,16 @@
     {
       "artifacts": [
         {
-          "byteLength": 12670,
+          "byteLength": 12669,
           "path": "static/vendor/floating-ui/floating-ui.core.umd.min.js",
-          "sha256": "7bf31808f51395a1d991afe2488cd0bad060d6adedf19e6bfa10290f96ef0420"
+          "sha256": "fc0cca21a6cf2ef0c9c908fbede0614dcaf285e8ebfed20d0e144fafc2ebf059"
         }
       ],
       "license": "MIT",
       "licenseArtifact": {
-        "byteLength": 1109,
+        "byteLength": 1089,
         "path": "static/vendor/floating-ui/LICENSE",
-        "sha256": "4d7867ae4d0a6d39614cb0a8be01c4bc2a1b4e411611f7c36c6276ae5916fe7e"
+        "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
       },
       "licenseTextPresent": true,
       "package": "@floating-ui/core",
@@ -303,16 +303,16 @@
     {
       "artifacts": [
         {
-          "byteLength": 10013,
+          "byteLength": 10012,
           "path": "static/vendor/floating-ui/floating-ui.dom.umd.min.js",
-          "sha256": "9530c2347defe37eec9369bd2abc26362d72da10dcd0d9658330042d2f471f85"
+          "sha256": "214b5e019f70fda36c7f0a35e5eb3aa84fa53448c0f8cac4f7a4c1e26e71498c"
         }
       ],
       "license": "MIT",
       "licenseArtifact": {
-        "byteLength": 1109,
+        "byteLength": 1089,
         "path": "static/vendor/floating-ui/LICENSE",
-        "sha256": "4d7867ae4d0a6d39614cb0a8be01c4bc2a1b4e411611f7c36c6276ae5916fe7e"
+        "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
       },
       "licenseTextPresent": true,
       "package": "@floating-ui/dom",
@@ -321,16 +321,16 @@
     {
       "artifacts": [
         {
-          "byteLength": 603451,
+          "byteLength": 603445,
           "path": "static/vendor/three/0.128.0/build/three.min.js",
-          "sha256": "7ae04663bb431808bc025280122162029ea3a354efc5fcca8bd8f95d1a1933e9"
+          "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
         }
       ],
       "license": "MIT",
       "licenseArtifact": {
-        "byteLength": 1102,
+        "byteLength": 1081,
         "path": "static/vendor/three/0.128.0/LICENSE",
-        "sha256": "abe364d9a4939d4c0bae8c091c26f9e576381729f329f0d23fd428b752b71a84"
+        "sha256": "7dddf7c5b8fd10ee654db8857d75d104b5557889aa5a91fc4ca545ea7c07062f"
       },
       "licenseTextPresent": true,
       "package": "three",
@@ -339,51 +339,51 @@
     {
       "artifacts": [
         {
-          "byteLength": 384228,
+          "byteLength": 384222,
           "path": "static/vendor/three/0.184.0/build/three.core.min.js",
-          "sha256": "36c9439657066258e6ec370343ef97d2a723f2958ca50a4f23240a4108e1d5a1"
+          "sha256": "6486aa0d719cfa87ec88dc47223b59b1fb8417a1a407fc0e52467c943e2f8cc9"
         },
         {
-          "byteLength": 365004,
+          "byteLength": 364998,
           "path": "static/vendor/three/0.184.0/build/three.module.min.js",
-          "sha256": "d58eb29e87e57583b6cdcfdd6b1823b82ad1024256c6dde07d4947f02e9cd465"
+          "sha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a"
         },
         {
-          "byteLength": 42467,
+          "byteLength": 40504,
           "path": "static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js",
-          "sha256": "32f65512ad637a6698af1c290ecd59b33dbe7a996e5520483854222f2783df31"
+          "sha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93"
         },
         {
-          "byteLength": 119819,
+          "byteLength": 114959,
           "path": "static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js",
-          "sha256": "19cda8c7a0166b2faacd4ec19854c2496013792fe57f9854da91c46c6e5a6dba"
+          "sha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2"
         },
         {
-          "byteLength": 11136,
+          "byteLength": 10715,
           "path": "static/vendor/three/0.184.0/examples/jsm/loaders/STLLoader.js",
-          "sha256": "a9c8567cb2b20b0d3322614f7726022a202eff4c1351095c6416be28a6de89a2"
+          "sha256": "023ed97f848b633d8bcd53d4db3b996d29d0c644088700691297c552257d480b"
         },
         {
-          "byteLength": 7712,
+          "byteLength": 7384,
           "path": "static/vendor/three/0.184.0/examples/jsm/renderers/CSS2DRenderer.js",
-          "sha256": "7fb6747b2839afb8cd648050a4d9f4b84ab3fcae5443fa76d2a908358b0e3aa6"
+          "sha256": "dc5f4c5075a3a330b7e679da943343dd86a0f2d745422194b5287e48d7204197"
         },
         {
-          "byteLength": 36973,
+          "byteLength": 35539,
           "path": "static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js",
-          "sha256": "35a1733acd210b70671102de210c36504e82498c9c7864e6afb3323d67195923"
+          "sha256": "d700b4c4584b9ff53a04692624d2363019f6d1df2978a207389168c6ae647a65"
         },
         {
-          "byteLength": 12031,
+          "byteLength": 11535,
           "path": "static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js",
-          "sha256": "219f89d236e63a7df9ec32cf45bb61652c8a86191b6a460430985b52699b5b20"
+          "sha256": "b1632a703206c3d830de9fcbe515696770d04b71a15ee6b50afa6d2c3298c86f"
         }
       ],
       "license": "MIT",
       "licenseArtifact": {
-        "byteLength": 1102,
+        "byteLength": 1081,
         "path": "static/vendor/three/0.184.0/LICENSE",
-        "sha256": "5d5dad8147523d59bc15cca838ae0bdaae7075230ec49132c551a1d18e7b3412"
+        "sha256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc"
       },
       "licenseTextPresent": true,
       "package": "three",

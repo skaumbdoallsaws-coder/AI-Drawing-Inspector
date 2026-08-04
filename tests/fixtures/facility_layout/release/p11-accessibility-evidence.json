@@ -122,7 +122,7 @@
   },
   "contrastAudit": "covered_by_automated_browser_audit",
   "criticalFindings": [],
-  "generatedAtUtc": "2026-08-04T19:43:55Z",
+  "generatedAtUtc": "2026-08-04T21:20:41Z",
   "manualKeyboardAudit": "covered_by_automated_browser_audit",
   "releaseGateMet": false,
   "releaseGateReason": "Automated browser evidence cannot clear the pending manual screen-reader audit.",
@@ -131,21 +131,21 @@
   "screenReaderAudit": "pending",
   "sourceArtifacts": [
     {
-      "byteLength": 201931,
+      "byteLength": 195448,
       "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-raw.json",
-      "sha256": "d53e45e894184cf5de911310aaff22bb9465f0809b184bd3f1931efbf28528bb"
+      "sha256": "d2db2938a39d4d2fc233811368de46f81e5b36bcfce3dc905bd195f7eba4b25d"
     },
     {
-      "byteLength": 5404,
+      "byteLength": 5240,
       "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-summary.json",
-      "sha256": "5e2c0b8a2c2f8c782209bcb3580b849759aeda63d5e438e4ea4088fba8b08b3b"
+      "sha256": "c78cbdea830f21df2b3a9b23ca750c05c91e9def8758b27ff9906d475a842cc7"
     }
   ],
   "sourceBinding": {
     "aggregateMatches": true,
     "algorithmsMatch": true,
-    "capturedAggregateSha256": "2d932f223aa3ff36dceeda3162fc0493c2c669df9637e7b9163ecf02f16363f8",
-    "currentAggregateSha256": "2d932f223aa3ff36dceeda3162fc0493c2c669df9637e7b9163ecf02f16363f8",
+    "capturedAggregateSha256": "f30f6c1bb20d45f2e82d639d806b19c4dd69b5a68b5623b2f0cd00d5d005543b",
+    "currentAggregateSha256": "f30f6c1bb20d45f2e82d639d806b19c4dd69b5a68b5623b2f0cd00d5d005543b",
     "duplicatePaths": [],
     "matches": true,
     "missingPaths": [],

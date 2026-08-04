@@ -8,9 +8,9 @@
 
 ## Inventory Binding
 
-- Generated: `2026-08-04T19:42:14Z`
-- Requirements SHA-256: `351e2a9fe4d6fa1f7f9490f0293a9dba7dfddcd8f735dafb8a7e88828bae94d4`
-- Inventory tool SHA-256: `b73a5d0c855a34f07aa171ab192e5c3dccb47eb497461c794621f7534463c026`
+- Generated: `2026-08-04T20:58:55Z`
+- Requirements SHA-256: `128637e534f4011bd9d5ac3b3ddbbbfdaf938d06a87ccc83aa339930a9e609f0`
+- Inventory tool SHA-256: `e77b5ab28b510824c48e44b05a11e7fdd800c6f8daebd6a61faada89c15b947a`
 - Machine assessment: **BLOCKED** (29 blockers)
 - Human legal approval: **NOT PERFORMED**
 - Release clearance claimed: **NO**

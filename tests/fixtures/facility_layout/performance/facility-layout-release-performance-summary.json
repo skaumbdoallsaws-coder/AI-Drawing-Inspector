@@ -1,6 +1,6 @@
 {
   "artifactShapeValid": true,
-  "benchmarkId": "0ad79f84-bcef-42fa-a909-131604938478",
+  "benchmarkId": "7fc355cf-d766-4453-b213-19a29e7b895c",
   "blockers": [],
   "budgetChecks": [
     {
@@ -26,7 +26,7 @@
       "available": true,
       "budgetId": "three-picking-p95",
       "limit": 50,
-      "measured": 6.685000005364416,
+      "measured": 4.209999984502792,
       "passed": true,
       "unit": "ms"
     },
@@ -35,7 +35,7 @@
       "available": true,
       "budgetId": "idle-render-stop",
       "limit": 250,
-      "measured": 3.599999964237213,
+      "measured": 11.0,
       "passed": true,
       "unit": "ms"
     },
@@ -44,7 +44,7 @@
       "available": true,
       "budgetId": "memory-growth-after-20-remounts",
       "limit": 10,
-      "measured": 9.53585768962066,
+      "measured": 9.570985319860311,
       "passed": true,
       "unit": "percent"
     },
@@ -53,7 +53,7 @@
       "available": true,
       "budgetId": "javascript-heap",
       "limit": 419430400,
-      "measured": 5617743,
+      "measured": 5599039,
       "passed": true,
       "unit": "bytes"
     },
@@ -120,11 +120,11 @@
         "language": "en-US",
         "platform": "Win32",
         "preciseMemoryInfo": {
-          "capturedAtMs": 838.3000000119209,
+          "capturedAtMs": 703.3000000119209,
           "jsHeapSizeLimit": 4395630592,
           "source": "performance.memory",
-          "totalJSHeapSize": 69553196,
-          "usedJSHeapSize": 61347616
+          "totalJSHeapSize": 69534484,
+          "usedJSHeapSize": 61317772
         },
         "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
         "viewport": {
@@ -246,7 +246,7 @@
     },
     "zoneCount": 1
   },
-  "generatedAtUtc": "2026-08-04T19:41:15Z",
+  "generatedAtUtc": "2026-08-04T21:15:51Z",
   "network": {
     "attemptedExternalRequestCount": 0,
     "externalRequestsBlocked": true,
@@ -292,9 +292,9 @@
     "smoke": false
   },
   "rawArtifact": {
-    "byteLength": 11797041,
+    "byteLength": 11769241,
     "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-raw.json",
-    "sha256": "494b282950e9c6a9ab322d37de76bee183759b49d80feea2454db153b2649a92"
+    "sha256": "f6d7f80d58d6c7888b257cfa0f5fbdc603968064f9c7a39aa65f9171bdf04585"
   },
   "releaseEligible": true,
   "releaseGateMet": true,
@@ -311,46 +311,46 @@
         "networkProfile": "50mbps",
         "stages": {
           "detail": {
-            "maximumMs": 2531.1,
-            "medianMs": 2472.2,
-            "p95Ms": 2524.11,
-            "p99Ms": 2529.621,
+            "maximumMs": 2512.2,
+            "medianMs": 2483.0,
+            "p95Ms": 2503.525,
+            "p99Ms": 2510.141,
             "sampleCount": 30
           },
           "footprint": {
             "maximumMs": 0.7,
             "medianMs": 0.2,
-            "p95Ms": 0.555,
+            "p95Ms": 0.465,
             "p99Ms": 0.671,
             "sampleCount": 30
           },
           "manifest": {
-            "maximumMs": 4.5,
-            "medianMs": 2.4,
-            "p95Ms": 3.455,
-            "p99Ms": 4.21,
+            "maximumMs": 6.5,
+            "medianMs": 2.95,
+            "p95Ms": 5.16,
+            "p99Ms": 6.268,
             "sampleCount": 30
           },
           "overview": {
-            "maximumMs": 45.2,
-            "medianMs": 25.95,
-            "p95Ms": 38.865,
-            "p99Ms": 44.707,
+            "maximumMs": 39.8,
+            "medianMs": 30.85,
+            "p95Ms": 37.745,
+            "p99Ms": 39.713,
             "sampleCount": 30
           },
           "proxy": {
-            "maximumMs": 81.2,
-            "medianMs": 36.05,
-            "p95Ms": 55.225,
-            "p99Ms": 74.385,
+            "maximumMs": 65.0,
+            "medianMs": 40.85,
+            "p95Ms": 60.7,
+            "p99Ms": 64.014,
             "sampleCount": 30
           }
         },
         "total": {
-          "maximumMs": 2761.6,
-          "medianMs": 2659.8,
-          "p95Ms": 2717.27,
-          "p99Ms": 2749.188,
+          "maximumMs": 2797.5,
+          "medianMs": 2691.7,
+          "p95Ms": 2776.26,
+          "p99Ms": 2793.846,
           "sampleCount": 30
         },
         "transferredBytes": {
@@ -367,46 +367,46 @@
         "networkProfile": "50mbps",
         "stages": {
           "detail": {
-            "maximumMs": 2563.4,
-            "medianMs": 2480.45,
-            "p95Ms": 2519.85,
-            "p99Ms": 2551.945,
+            "maximumMs": 2533.9,
+            "medianMs": 2483.9,
+            "p95Ms": 2527.075,
+            "p99Ms": 2532.769,
             "sampleCount": 30
           },
           "footprint": {
-            "maximumMs": 0.6,
+            "maximumMs": 0.8,
             "medianMs": 0.2,
-            "p95Ms": 0.4,
-            "p99Ms": 0.542,
+            "p95Ms": 0.6,
+            "p99Ms": 0.742,
             "sampleCount": 30
           },
           "manifest": {
-            "maximumMs": 5.5,
-            "medianMs": 1.75,
-            "p95Ms": 4.51,
-            "p99Ms": 5.239,
+            "maximumMs": 6.9,
+            "medianMs": 2.35,
+            "p95Ms": 3.755,
+            "p99Ms": 6.001,
             "sampleCount": 30
           },
           "overview": {
-            "maximumMs": 41.4,
-            "medianMs": 27.65,
-            "p95Ms": 35.985,
-            "p99Ms": 39.921,
+            "maximumMs": 49.5,
+            "medianMs": 29.9,
+            "p95Ms": 45.415,
+            "p99Ms": 49.268,
             "sampleCount": 30
           },
           "proxy": {
-            "maximumMs": 86.7,
-            "medianMs": 31.1,
-            "p95Ms": 62.595,
-            "p99Ms": 80.088,
+            "maximumMs": 56.5,
+            "medianMs": 40.85,
+            "p95Ms": 56.275,
+            "p99Ms": 56.5,
             "sampleCount": 30
           }
         },
         "total": {
-          "maximumMs": 2829.6,
-          "medianMs": 2666.05,
-          "p95Ms": 2800.36,
-          "p99Ms": 2823.365,
+          "maximumMs": 2788.8,
+          "medianMs": 2693.8,
+          "p95Ms": 2756.0,
+          "p99Ms": 2781.376,
           "sampleCount": 30
         },
         "transferredBytes": {
@@ -423,46 +423,46 @@
         "networkProfile": "local",
         "stages": {
           "detail": {
-            "maximumMs": 272.3,
-            "medianMs": 212.05,
-            "p95Ms": 258.79,
-            "p99Ms": 269.4,
+            "maximumMs": 207.0,
+            "medianMs": 147.25,
+            "p95Ms": 198.905,
+            "p99Ms": 206.362,
             "sampleCount": 30
           },
           "footprint": {
-            "maximumMs": 0.9,
-            "medianMs": 0.3,
-            "p95Ms": 0.71,
-            "p99Ms": 0.871,
+            "maximumMs": 0.3,
+            "medianMs": 0.2,
+            "p95Ms": 0.3,
+            "p99Ms": 0.3,
             "sampleCount": 30
           },
           "manifest": {
-            "maximumMs": 6.3,
-            "medianMs": 3.35,
-            "p95Ms": 6.055,
-            "p99Ms": 6.242,
+            "maximumMs": 4.0,
+            "medianMs": 1.9,
+            "p95Ms": 2.965,
+            "p99Ms": 3.739,
             "sampleCount": 30
           },
           "overview": {
-            "maximumMs": 45.1,
-            "medianMs": 30.45,
-            "p95Ms": 39.22,
-            "p99Ms": 44.752,
+            "maximumMs": 46.1,
+            "medianMs": 31.25,
+            "p95Ms": 41.48,
+            "p99Ms": 44.969,
             "sampleCount": 30
           },
           "proxy": {
-            "maximumMs": 87.7,
-            "medianMs": 58.7,
-            "p95Ms": 72.295,
-            "p99Ms": 83.611,
+            "maximumMs": 66.6,
+            "medianMs": 35.2,
+            "p95Ms": 54.365,
+            "p99Ms": 64.135,
             "sampleCount": 30
           }
         },
         "total": {
-          "maximumMs": 606.5,
-          "medianMs": 494.15,
-          "p95Ms": 561.35,
-          "p99Ms": 594.059,
+          "maximumMs": 458.2,
+          "medianMs": 343.9,
+          "p95Ms": 411.21,
+          "p99Ms": 445.382,
           "sampleCount": 30
         },
         "transferredBytes": {
@@ -479,46 +479,46 @@
         "networkProfile": "local",
         "stages": {
           "detail": {
-            "maximumMs": 252.7,
-            "medianMs": 194.6,
-            "p95Ms": 232.415,
-            "p99Ms": 247.248,
+            "maximumMs": 212.4,
+            "medianMs": 151.1,
+            "p95Ms": 190.34,
+            "p99Ms": 206.368,
             "sampleCount": 30
           },
           "footprint": {
-            "maximumMs": 0.6,
-            "medianMs": 0.3,
-            "p95Ms": 0.5,
-            "p99Ms": 0.571,
+            "maximumMs": 0.4,
+            "medianMs": 0.2,
+            "p95Ms": 0.4,
+            "p99Ms": 0.4,
             "sampleCount": 30
           },
           "manifest": {
-            "maximumMs": 5.3,
-            "medianMs": 2.75,
-            "p95Ms": 4.7,
-            "p99Ms": 5.126,
+            "maximumMs": 3.9,
+            "medianMs": 1.85,
+            "p95Ms": 3.42,
+            "p99Ms": 3.813,
             "sampleCount": 30
           },
           "overview": {
-            "maximumMs": 48.5,
-            "medianMs": 31.4,
-            "p95Ms": 43.175,
-            "p99Ms": 47.282,
+            "maximumMs": 44.4,
+            "medianMs": 28.1,
+            "p95Ms": 40.05,
+            "p99Ms": 43.269,
             "sampleCount": 30
           },
           "proxy": {
-            "maximumMs": 85.5,
-            "medianMs": 51.65,
-            "p95Ms": 73.105,
-            "p99Ms": 82.31,
+            "maximumMs": 52.6,
+            "medianMs": 32.35,
+            "p95Ms": 48.28,
+            "p99Ms": 51.556,
             "sampleCount": 30
           }
         },
         "total": {
-          "maximumMs": 607.9,
-          "medianMs": 449.85,
-          "p95Ms": 530.855,
-          "p99Ms": 586.614,
+          "maximumMs": 430.9,
+          "medianMs": 336.15,
+          "p95Ms": 409.15,
+          "p99Ms": 425.245,
           "sampleCount": 30
         },
         "transferredBytes": {
@@ -528,54 +528,54 @@
       }
     },
     "idleRenderStop": {
-      "maximumMs": 3.6,
-      "medianMs": 1.15,
-      "p95Ms": 1.81,
-      "p99Ms": 3.107,
+      "maximumMs": 11.0,
+      "medianMs": 0.9,
+      "p95Ms": 6.725,
+      "p99Ms": 10.739,
       "sampleCount": 30
     },
     "picking": {
-      "maximumMs": 7.5,
-      "medianMs": 3.65,
-      "p95Ms": 6.685,
-      "p99Ms": 7.355,
+      "maximumMs": 5.2,
+      "medianMs": 3.3,
+      "p95Ms": 4.21,
+      "p99Ms": 4.939,
       "sampleCount": 30
     },
     "planFrames": {
       "callbackDurations": {
-        "maximumMs": 10.0,
+        "maximumMs": 9.5,
         "medianMs": 0.1,
         "p95Ms": 0.6,
-        "p99Ms": 1.3,
-        "sampleCount": 36066
+        "p99Ms": 1.4,
+        "sampleCount": 36049
       },
-      "effectiveFps": 120.1923,
+      "effectiveFps": 120.1317,
       "frameIntervals": {
-        "maximumMs": 16.6,
+        "maximumMs": 25.1,
         "medianMs": 8.3,
         "p95Ms": 8.5,
-        "p99Ms": 8.8,
-        "sampleCount": 36061
+        "p99Ms": 8.7,
+        "sampleCount": 36044
       },
-      "framesOver22Ms": 0,
+      "framesOver22Ms": 5,
       "framesOver33Ms": 0,
       "longTaskCount": 0,
       "maximumLongTaskMs": 0.0,
-      "measuredWallDurationMs": 300027.6,
+      "measuredWallDurationMs": 300037.5,
       "runCount": 5
     },
     "planRenderLatency": {
-      "maximumMs": 3.4,
-      "medianMs": 0.4,
-      "p95Ms": 1.42,
-      "p99Ms": 2.878,
+      "maximumMs": 0.7,
+      "medianMs": 0.2,
+      "p95Ms": 0.355,
+      "p99Ms": 0.613,
       "sampleCount": 30
     },
     "remountMemoryGrowthPercent": {
-      "maximumMs": 9.5359,
-      "medianMs": 9.5357,
-      "p95Ms": 9.5358,
-      "p99Ms": 9.5359,
+      "maximumMs": 9.571,
+      "medianMs": 9.5706,
+      "p95Ms": 9.5709,
+      "p99Ms": 9.571,
       "sampleCount": 5
     },
     "threeFrames": {
@@ -586,19 +586,19 @@
         "p99Ms": null,
         "sampleCount": 0
       },
-      "effectiveFps": 118.9956,
+      "effectiveFps": 118.8305,
       "frameIntervals": {
-        "maximumMs": 1564.0,
+        "maximumMs": 1971.6,
         "medianMs": 8.3,
         "p95Ms": 8.6,
         "p99Ms": 8.9,
-        "sampleCount": 36082
+        "sampleCount": 36104
       },
       "framesOver22Ms": 5,
-      "framesOver33Ms": 4,
+      "framesOver33Ms": 5,
       "longTaskCount": 0,
       "maximumLongTaskMs": 0.0,
-      "measuredWallDurationMs": 303221.4,
+      "measuredWallDurationMs": 303827.7,
       "runCount": 5
     }
   },

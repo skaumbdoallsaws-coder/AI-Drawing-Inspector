@@ -1,7 +1,7 @@
 {
   "allPassed": true,
-  "executedAtUtc": "2026-08-04T19:43:55Z",
-  "generatedAtUtc": "2026-08-04T19:43:22Z",
+  "executedAtUtc": "2026-08-04T21:20:41Z",
+  "generatedAtUtc": "2026-08-04T21:20:08Z",
   "releaseGateMet": true,
   "requiredCoverage": [
     "rbac",
@@ -24,7 +24,7 @@
   ],
   "results": {
     "node-p11-static-contracts": {
-      "durationSeconds": 0.072,
+      "durationSeconds": 0.07,
       "outputTail": [
         "PASS facility workspace exposes the static ARIA contract",
         "PASS WebGL loss and restoration are symmetric and demand driven",
@@ -37,7 +37,7 @@
       "returnCode": 0
     },
     "node-three-adapter": {
-      "durationSeconds": 0.213,
+      "durationSeconds": 0.124,
       "outputTail": [
         "ok - exports the classic UMD global, CommonJS API, and complete adapter contract",
         "ok - bounded renderer pool reuses one WebGL renderer across adapter remounts",
@@ -66,7 +66,7 @@
       "returnCode": 0
     },
     "node-workspace-accessibility": {
-      "durationSeconds": 0.182,
+      "durationSeconds": 0.12,
       "outputTail": [
         "PASS exports UMD and CommonJS API with pure helpers",
         "PASS drag payload is stable, minimal, and strictly parseable",
@@ -105,13 +105,13 @@
       "returnCode": 0
     },
     "python-security-authority": {
-      "durationSeconds": 32.05,
+      "durationSeconds": 32.448,
       "outputTail": [
         "........................................................................ [ 29%]",
         "........................................................................ [ 59%]",
         ".............................................................ss......... [ 88%]",
         "...........................                                              [100%]",
-        "241 passed, 2 skipped in 29.17s",
+        "241 passed, 2 skipped in 29.54s",
         "",
         "C:\\Users\\might\\AppData\\Roaming\\Python\\Python314\\site-packages\\langsmith\\schemas.py:23: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.",
         "  from pydantic.v1 import ("

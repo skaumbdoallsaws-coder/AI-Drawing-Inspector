@@ -1,5 +1,5 @@
 {
-  "appUrl": "http://127.0.0.1:8055/",
+  "appUrl": "http://127.0.0.1:8034/",
   "camera": {
     "after": {
       "position": {
@@ -34,14 +34,9 @@
     "orbit_changes_camera": true,
     "production_three_tab_enabled": true,
     "production_workspace_mounted": true,
-    "remount_has_one_workspace": true,
+    "resume_reuses_one_workspace": true,
     "undo_restores_exact_draft": true,
-    "workflow_switch_disposes_workspace": true
-  },
-  "disposed": {
-    "appCleared": true,
-    "canvases": 0,
-    "roots": 0
+    "workflow_switch_suspends_workspace": true
   },
   "drop": {
     "acceptedCandidateId": "fsc-340f39aee4f630792f8f922a",
@@ -141,6 +136,7 @@
       "selectedPlacementIds": [],
       "status": "ready",
       "statusReason": null,
+      "suspended": false,
       "warnings": [],
       "worldBounds": {
         "maximum": {
@@ -162,40 +158,56 @@
   },
   "passed": true,
   "remounted": {
+    "appSuspended": false,
     "canvases": 1,
+    "observerActive": true,
     "planSvgs": 1,
-    "roots": 1
+    "rootConnected": true,
+    "roots": 1,
+    "sameApp": true,
+    "sameWorkspace": true,
+    "workspaceSuspended": false
   },
   "schemaVersion": "facility-layout-p5-product-evidence-v1",
   "screenshots": {
     "plan": {
-      "bytes": 178403,
+      "bytes": 178632,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-integration.png",
-      "sha256": "f9197d891bfb94a796533b799b040ee82bf3878f12ea5866cb69c4549bb371c0",
+      "sha256": "657251fce6cd035a55f28c9d5f17f662ecd873ef046038ba6ab89c71a35c033b",
       "width": 1920
     },
     "three": {
-      "bytes": 178679,
+      "bytes": 179003,
       "height": 1080,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/authoring/p5-product-three-integration.png",
-      "sha256": "919eea73395ea2b1c0960f019997ce8c027f4ea43a4d0e5730321fd6a04be0f2",
+      "sha256": "03608e2845029126043bbef9c1d517cb69a970f7a86dcc090b4504146c678be3",
       "width": 1920
     }
   },
   "source": {
-    "appSha256": "3f0c929e3f969b8b78a1858ce8f2c0ee8a3e85b6cd7539ad38aa47d833271230",
-    "editorSha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875",
+    "appSha256": "9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de",
+    "editorSha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
     "hostSha256": "e8a50c65675559b1c449432abda4456a020c49793b5e60c5239aae074d5c53f4",
-    "indexSha256": "67b040e7e0dc70449ed4b79a6f0e41f70af5c161c9c01904bd61cf1a61fcc5d7",
+    "indexSha256": "a1851a61a5a22fd9948251c8b70444aecc22257b9166ce527707ae4375263538",
     "orbitControlsSha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
-    "threeAdapterSha256": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e",
+    "threeAdapterSha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639",
     "threeClassicSha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2",
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
     "transportSha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6",
-    "verifierSha256": "c5b48108fc57a6077f060f204f04a811ae8e767fb1a43fc55d19a9c3c4e52251",
-    "workspaceSha256": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b"
+    "verifierSha256": "ee3d9cfd247d01d234519fd08a8699dafab367fb7ffafd8f459077245e01f0d5",
+    "workspaceSha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878"
+  },
+  "suspended": {
+    "appRetained": true,
+    "appSuspended": true,
+    "canvasesInDocument": 0,
+    "observerActive": false,
+    "pendingFrame": false,
+    "rootConnected": false,
+    "roots": 0,
+    "workspaceSuspended": true
   }
 }

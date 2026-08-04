@@ -1,5 +1,5 @@
 {
-  "capturedAtUtc": "2026-08-04T19:43:16.562912Z",
+  "capturedAtUtc": "2026-08-04T20:58:06.274331Z",
   "machineLabel": "dell-15-dc15250-standard",
   "measurement": {
     "browser": {
@@ -41,7 +41,7 @@
   "schemaVersion": "facility-layout-reference-hardware-v1",
   "source": {
     "path": "tools/capture_facility_layout_hardware.py",
-    "sha256": "23a2cb6d12b53f61dc14e1b9e784ef911dee39cc65e7ad2f1b7f0041bc1baeae"
+    "sha256": "75edf261dc0b5a999727311103741588b61d07e8ec414d84927d5ab5903f6e85"
   },
   "status": "measured"
 }

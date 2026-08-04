@@ -1,8 +1,8 @@
 {
-  "benchmarkId": "0c588ef0-d120-4a5d-bacb-0f7331af2c9a",
+  "benchmarkId": "01094c29-9516-4a41-bd0e-38e039e9f434",
   "benchmarkScope": "Production FacilityLayoutWorkspace with the actual TopPlanAdapter, FacilitySession, and Three adapter over the P4 full-layer layout and P5 workspace composition pattern.",
-  "completedAtUtc": "2026-08-04T19:41:57Z",
-  "elapsedSeconds": 11.44,
+  "completedAtUtc": "2026-08-04T20:58:33Z",
+  "elapsedSeconds": 13.996,
   "environment": {
     "browser": {
       "executable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -29,11 +29,11 @@
         "language": "en-US",
         "platform": "Win32",
         "preciseMemoryInfo": {
-          "capturedAtMs": 859.4000000357628,
+          "capturedAtMs": 1179.5,
           "jsHeapSizeLimit": 4395630592,
           "source": "performance.memory",
-          "totalJSHeapSize": 68504620,
-          "usedJSHeapSize": 61364060
+          "totalJSHeapSize": 69534484,
+          "usedJSHeapSize": 61345636
         },
         "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
         "viewport": {
@@ -167,130 +167,122 @@
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "1778",
+        "contentLength": "1715",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "17028",
+        "contentLength": "16296",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_workspace.css"
+        "url": "http://127.0.0.1:54840/static/facility_layout_workspace.css"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "55603",
+        "contentLength": "54235",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_editor.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_editor.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "78951",
+        "contentLength": "101827",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_session.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_three_adapter.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "104298",
+        "contentLength": "76935",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_three_adapter.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_session.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "120660",
+        "contentLength": "117766",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_workspace.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_workspace.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "39480",
+        "contentLength": "38282",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "42467",
+        "contentLength": "40504",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "119819",
+        "contentLength": "364998",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/build/three.module.min.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "365004",
+        "contentLength": "114959",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/build/three.module.min.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "36973",
+        "contentLength": "35539",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "12031",
+        "contentLength": "11535",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "384228",
+        "contentLength": "384222",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/build/three.core.min.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/build/three.core.min.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "6851",
+        "contentLength": "6567",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "1664",
+        "contentLength": "1604",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
-      },
-      {
-        "cacheControl": null,
-        "contentEncoding": null,
-        "contentLength": "916",
-        "page": "core",
-        "status": 200,
-        "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
       },
       {
         "cacheControl": null,
@@ -298,7 +290,15 @@
         "contentLength": "916",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+      },
+      {
+        "cacheControl": null,
+        "contentEncoding": null,
+        "contentLength": "916",
+        "page": "core",
+        "status": 200,
+        "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       },
       {
         "cacheControl": null,
@@ -306,135 +306,127 @@
         "contentLength": "13493420",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
+        "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "1778",
+        "contentLength": "1715",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "17028",
+        "contentLength": "16296",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_workspace.css"
+        "url": "http://127.0.0.1:54840/static/facility_layout_workspace.css"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "55603",
+        "contentLength": "54235",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_editor.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_editor.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "104298",
+        "contentLength": "101827",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_three_adapter.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_three_adapter.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "78951",
+        "contentLength": "76935",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_session.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_session.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "120660",
+        "contentLength": "117766",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_workspace.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_workspace.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "39480",
+        "contentLength": "38282",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "42467",
+        "contentLength": "40504",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "365004",
+        "contentLength": "364998",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/build/three.module.min.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/build/three.module.min.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "119819",
+        "contentLength": "114959",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "36973",
+        "contentLength": "35539",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "12031",
+        "contentLength": "11535",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "384228",
+        "contentLength": "384222",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/build/three.core.min.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/build/three.core.min.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "6851",
+        "contentLength": "6567",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "1664",
+        "contentLength": "1604",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
-      },
-      {
-        "cacheControl": null,
-        "contentEncoding": null,
-        "contentLength": "916",
-        "page": "load-local-cold-0",
-        "status": 200,
-        "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
       },
       {
         "cacheControl": null,
@@ -442,7 +434,15 @@
         "contentLength": "916",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+      },
+      {
+        "cacheControl": null,
+        "contentEncoding": null,
+        "contentLength": "916",
+        "page": "load-local-cold-0",
+        "status": 200,
+        "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       },
       {
         "cacheControl": null,
@@ -450,127 +450,127 @@
         "contentLength": "13493420",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
+        "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "1778",
+        "contentLength": "1715",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "17028",
+        "contentLength": "16296",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_workspace.css"
+        "url": "http://127.0.0.1:54840/static/facility_layout_workspace.css"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "55603",
+        "contentLength": "54235",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_editor.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_editor.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "104298",
+        "contentLength": "101827",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_three_adapter.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_three_adapter.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "78951",
+        "contentLength": "76935",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_session.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_session.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "120660",
+        "contentLength": "38282",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/facility_layout_workspace.js"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "39480",
+        "contentLength": "117766",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
+        "url": "http://127.0.0.1:54840/static/facility_layout_workspace.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "42467",
+        "contentLength": "40504",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "365004",
+        "contentLength": "364998",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/build/three.module.min.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/build/three.module.min.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "119819",
+        "contentLength": "114959",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "36973",
+        "contentLength": "35539",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "12031",
+        "contentLength": "11535",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "384228",
+        "contentLength": "384222",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/static/vendor/three/0.184.0/build/three.core.min.js"
+        "url": "http://127.0.0.1:54840/static/vendor/three/0.184.0/build/three.core.min.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "6851",
+        "contentLength": "6567",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "1664",
+        "contentLength": "1604",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
+        "url": "http://127.0.0.1:54840/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
       },
       {
         "cacheControl": null,
@@ -578,7 +578,7 @@
         "contentLength": "916",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       }
     ]
   },
@@ -1092,7 +1092,7 @@
             "contentLength": "916",
             "page": "load-local-cold-0",
             "status": 200,
-            "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+            "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
           },
           {
             "cacheControl": null,
@@ -1100,7 +1100,7 @@
             "contentLength": "916",
             "page": "load-local-cold-0",
             "status": 200,
-            "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+            "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
           },
           {
             "cacheControl": null,
@@ -1108,74 +1108,74 @@
             "contentLength": "13493420",
             "page": "load-local-cold-0",
             "status": 200,
-            "url": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
+            "url": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
           }
         ],
         "iteration": 0,
         "load": {
-          "endedAtMs": 560.9000000357628,
+          "endedAtMs": 687.5,
           "resources": [
             {
               "decodedBodySize": 916,
-              "durationMs": 9.5,
+              "durationMs": 10.900000035762787,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 296.9000000357628,
-              "startTimeMs": 287.4000000357628,
+              "responseEndMs": 342.10000002384186,
+              "startTimeMs": 331.19999998807907,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 916,
-              "durationMs": 25.5,
+              "durationMs": 16.69999998807907,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 349.80000001192093,
-              "startTimeMs": 324.30000001192093,
+              "responseEndMs": 391.10000002384186,
+              "startTimeMs": 374.4000000357628,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 13493420,
-              "durationMs": 83.30000001192093,
+              "durationMs": 120.79999995231628,
               "encodedBodySize": 13493420,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
+              "name": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 461.4000000357628,
-              "startTimeMs": 378.10000002384186,
+              "responseEndMs": 531.6999999880791,
+              "startTimeMs": 410.9000000357628,
               "transferSize": 13493720
             }
           ],
           "stages": [
             {
-              "durationMs": 1.699999988079071,
-              "endedAtMs": 284.10000002384186,
+              "durationMs": 2.099999964237213,
+              "endedAtMs": 328.5,
               "error": null,
               "stage": "manifest",
-              "startedAtMs": 282.4000000357628,
+              "startedAtMs": 326.4000000357628,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 0.19999998807907104,
-              "endedAtMs": 284.80000001192093,
+              "durationMs": 0.10000002384185791,
+              "endedAtMs": 329.30000001192093,
               "error": null,
               "stage": "footprint",
-              "startedAtMs": 284.60000002384186,
+              "startedAtMs": 329.19999998807907,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 37.69999998807907,
-              "endedAtMs": 322.80000001192093,
+              "durationMs": 43,
+              "endedAtMs": 372.69999998807907,
               "error": null,
               "stage": "proxy",
-              "startedAtMs": 285.10000002384186,
+              "startedAtMs": 329.69999998807907,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -1192,11 +1192,11 @@
               }
             },
             {
-              "durationMs": 51.80000001192093,
-              "endedAtMs": 375.7000000476837,
+              "durationMs": 35.10000002384186,
+              "endedAtMs": 409.10000002384186,
               "error": null,
               "stage": "overview",
-              "startedAtMs": 323.9000000357628,
+              "startedAtMs": 374,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -1213,11 +1213,11 @@
               }
             },
             {
-              "durationMs": 144.30000001192093,
-              "endedAtMs": 521.3000000119209,
+              "durationMs": 215.0999999642372,
+              "endedAtMs": 625,
               "error": null,
               "stage": "detail",
-              "startedAtMs": 377,
+              "startedAtMs": 409.9000000357628,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "visualAllocation": {
@@ -1234,8 +1234,8 @@
               }
             }
           ],
-          "startedAtMs": 203.20000004768372,
-          "totalDurationMs": 357.69999998807907
+          "startedAtMs": 239.10000002384186,
+          "totalDurationMs": 448.39999997615814
         },
         "networkEmulation": {
           "connectionType": "wifi",
@@ -1728,7 +1728,7 @@
             "programs": 1,
             "render": {
               "calls": 10,
-              "frame": 49,
+              "frame": 47,
               "lines": 0,
               "points": 0,
               "triangles": 968880
@@ -1750,14 +1750,14 @@
             "assetGroupCount": 1,
             "camera": {
               "position": {
-                "x": 3.674901415129682,
-                "y": 24.80029972710463,
-                "z": 8.695907338716552
+                "x": 3.846482595764403,
+                "y": 24.81967976146658,
+                "z": 8.568304502246539
               },
               "target": {
-                "x": 3.9296066668313205,
-                "y": 3.1478910864217493,
-                "z": 4.440749036206579
+                "x": 4.071481849358197,
+                "y": 3.16407045769221,
+                "z": 4.327784733875424
               }
             },
             "contextLost": false,
@@ -1765,8 +1765,8 @@
             "degraded": false,
             "demandRendering": {
               "pendingFrame": false,
-              "renderRequests": 70,
-              "renderedFrames": 49
+              "renderRequests": 68,
+              "renderedFrames": 47
             },
             "disposed": false,
             "ghostActive": false,
@@ -2065,7 +2065,7 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 89,
+            "renderCount": 86,
             "selection": "pl-rack-06",
             "selections": [
               "pl-rack-06"
@@ -2094,8 +2094,8 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 71,
-            "renderedFrames": 49
+            "renderRequests": 69,
+            "renderedFrames": 47
           },
           "disposed": true,
           "ghostActive": false,
@@ -2194,7 +2194,7 @@
           "programs": 1,
           "render": {
             "calls": 10,
-            "frame": 49,
+            "frame": 47,
             "lines": 0,
             "points": 0,
             "triangles": 968880
@@ -2216,14 +2216,14 @@
           "assetGroupCount": 1,
           "camera": {
             "position": {
-              "x": 3.674901415129682,
-              "y": 24.80029972710463,
-              "z": 8.695907338716552
+              "x": 3.846482595764403,
+              "y": 24.81967976146658,
+              "z": 8.568304502246539
             },
             "target": {
-              "x": 3.9296066668313205,
-              "y": 3.1478910864217493,
-              "z": 4.440749036206579
+              "x": 4.071481849358197,
+              "y": 3.16407045769221,
+              "z": 4.327784733875424
             }
           },
           "contextLost": false,
@@ -2231,8 +2231,8 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 70,
-            "renderedFrames": 49
+            "renderRequests": 68,
+            "renderedFrames": 47
           },
           "disposed": false,
           "ghostActive": false,
@@ -2531,7 +2531,7 @@
           "proposalMovedCount": 0,
           "proposalNewCount": 0,
           "proposalPreviewActive": false,
-          "renderCount": 89,
+          "renderCount": 86,
           "selection": "pl-rack-06",
           "selections": [
             "pl-rack-06"
@@ -2556,11 +2556,11 @@
           "language": "en-US",
           "platform": "Win32",
           "preciseMemoryInfo": {
-            "capturedAtMs": 859.4000000357628,
+            "capturedAtMs": 1179.5,
             "jsHeapSizeLimit": 4395630592,
             "source": "performance.memory",
-            "totalJSHeapSize": 68504620,
-            "usedJSHeapSize": 61364060
+            "totalJSHeapSize": 69534484,
+            "usedJSHeapSize": 61345636
           },
           "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
           "viewport": {
@@ -2570,69 +2570,69 @@
           }
         },
         "load": {
-          "endedAtMs": 858.3000000119209,
+          "endedAtMs": 1177.2000000476837,
           "resources": [
             {
               "decodedBodySize": 916,
-              "durationMs": 13.5,
+              "durationMs": 15.400000035762787,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 445.9000000357628,
-              "startTimeMs": 432.4000000357628,
+              "responseEndMs": 614.4000000357628,
+              "startTimeMs": 599,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 916,
-              "durationMs": 9.300000011920929,
+              "durationMs": 16.30000001192093,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 514.9000000357628,
-              "startTimeMs": 505.60000002384186,
+              "responseEndMs": 711.3000000119209,
+              "startTimeMs": 695,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 13493420,
-              "durationMs": 105.40000003576279,
+              "durationMs": 104.69999998807907,
               "encodedBodySize": 13493420,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
+              "name": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 741.7000000476837,
-              "startTimeMs": 636.3000000119209,
+              "responseEndMs": 1006.1000000238419,
+              "startTimeMs": 901.4000000357628,
               "transferSize": 13493720
             }
           ],
           "stages": [
             {
-              "durationMs": 2.099999964237213,
-              "endedAtMs": 430,
+              "durationMs": 5.099999964237213,
+              "endedAtMs": 591,
               "error": null,
               "stage": "manifest",
-              "startedAtMs": 427.9000000357628,
+              "startedAtMs": 585.9000000357628,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 0.19999998807907104,
-              "endedAtMs": 430.9000000357628,
+              "durationMs": 1,
+              "endedAtMs": 595.3000000119209,
               "error": null,
               "stage": "footprint",
-              "startedAtMs": 430.7000000476837,
+              "startedAtMs": 594.3000000119209,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 72.89999997615814,
-              "endedAtMs": 504.10000002384186,
+              "durationMs": 96.19999998807907,
+              "endedAtMs": 693,
               "error": null,
               "stage": "proxy",
-              "startedAtMs": 431.2000000476837,
+              "startedAtMs": 596.8000000119209,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -2649,11 +2649,11 @@
               }
             },
             {
-              "durationMs": 130.39999997615814,
-              "endedAtMs": 635.6000000238419,
+              "durationMs": 205.89999997615814,
+              "endedAtMs": 900.1000000238419,
               "error": null,
               "stage": "overview",
-              "startedAtMs": 505.2000000476837,
+              "startedAtMs": 694.2000000476837,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -2670,11 +2670,11 @@
               }
             },
             {
-              "durationMs": 153.30000001192093,
-              "endedAtMs": 789.3000000119209,
+              "durationMs": 186.5,
+              "endedAtMs": 1087.4000000357628,
               "error": null,
               "stage": "detail",
-              "startedAtMs": 636,
+              "startedAtMs": 900.9000000357628,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "visualAllocation": {
@@ -2691,8 +2691,8 @@
               }
             }
           ],
-          "startedAtMs": 338.7000000476837,
-          "totalDurationMs": 519.5999999642372
+          "startedAtMs": 466,
+          "totalDurationMs": 711.2000000476837
         },
         "snapshot": {
           "dom": {
@@ -3117,17 +3117,17 @@
       },
       "preciseMemory": {
         "cdpRuntimeHeapUsage": {
-          "backingStorageSize": 14872395,
-          "embedderHeapUsedSize": 1047976,
+          "backingStorageSize": 14853683,
+          "embedderHeapUsedSize": 1050328,
           "totalSize": 5017600,
-          "usedSize": 4299756
+          "usedSize": 4300944
         },
         "performanceMemory": {
-          "capturedAtMs": 897.5,
+          "capturedAtMs": 1236.6000000238419,
           "jsHeapSizeLimit": 4395630592,
           "source": "performance.memory",
-          "totalJSHeapSize": 19889995,
-          "usedJSHeapSize": 19166311
+          "totalJSHeapSize": 19871283,
+          "usedJSHeapSize": 19148787
         }
       }
     },
@@ -3158,9 +3158,9 @@
             "renderRequests": 24,
             "renderedFrames": 6
           },
-          "startedAtMs": 2621.5,
-          "stopLatencyMs": 0.7000000476837158,
-          "stoppedAtMs": 2622.2000000476837
+          "startedAtMs": 3627.100000023842,
+          "stopLatencyMs": 1.399999976158142,
+          "stoppedAtMs": 3628.5
         }
       ]
     },
@@ -3177,12 +3177,12 @@
       },
       "samples": [
         {
-          "durationMs": 2.5,
-          "endedAtMs": 2617.100000023842,
+          "durationMs": 10.100000023841858,
+          "endedAtMs": 3620.600000023842,
           "instanceId": 5,
           "iteration": 0,
           "placementId": "pl-rack-06",
-          "startedAtMs": 2614.600000023842
+          "startedAtMs": 3610.5
         }
       ]
     },
@@ -3590,7 +3590,7 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 84,
+            "renderCount": 81,
             "selection": "pl-rack-02",
             "selections": [
               "pl-rack-02"
@@ -4001,7 +4001,7 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 17,
+            "renderCount": 16,
             "selection": "pl-rack-01",
             "selections": [
               "pl-rack-01"
@@ -4011,128 +4011,124 @@
           }
         },
         "callbackDurationsMs": [
-          0.699999988079071,
-          0,
+          1.399999976158142,
+          0.19999998807907104,
+          0.3999999761581421,
           0.10000002384185791,
-          0,
-          0.10000002384185791,
-          0,
-          0.09999996423721313,
-          0.10000002384185791,
-          0,
           0.19999998807907104,
           0.09999996423721313,
           0.09999996423721313,
-          0.40000003576278687,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.09999996423721313,
+          0.30000001192092896,
+          0.5,
+          1.100000023841858,
           0.09999996423721313,
           0,
-          0,
-          0,
-          0.19999998807907104,
-          0,
-          0.19999998807907104,
-          0.09999996423721313,
-          0,
-          0,
-          0,
-          0.8999999761581421,
-          0.09999996423721313,
-          0,
+          0.10000002384185791,
           0.19999998807907104,
           0.10000002384185791,
           0,
-          1.199999988079071,
+          0.19999998807907104,
           0,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.10000002384185791,
+          1.5,
+          0.10000002384185791,
+          0.20000004768371582,
+          0.09999996423721313,
+          0.30000001192092896,
+          0.10000002384185791,
+          2,
+          0.10000002384185791,
+          0.19999998807907104,
+          0.10000002384185791,
+          0.19999998807907104,
+          0.10000002384185791,
+          1.5,
+          0.19999998807907104,
+          0,
+          0.10000002384185791,
           0.09999996423721313,
           0.09999996423721313,
+          0.10000002384185791,
+          0.19999998807907104,
           0.09999996423721313,
+          0.10000002384185791,
+          0.09999996423721313,
+          0.19999998807907104,
+          1.100000023841858,
+          0.20000004768371582,
+          0,
+          0.19999998807907104,
+          0.19999998807907104,
           0.10000002384185791,
           0.3999999761581421,
-          0.09999996423721313,
-          0.10000002384185791,
-          0.09999996423721313,
-          0.10000002384185791,
-          0.19999998807907104,
-          0.20000004768371582,
-          0.19999998807907104,
-          0.10000002384185791,
-          0.10000002384185791,
-          0,
-          0.10000002384185791,
-          0.800000011920929,
-          0.10000002384185791,
-          0.19999998807907104,
           0.30000001192092896,
           0.09999996423721313,
-          0,
-          0.10000002384185791,
-          0.40000003576278687,
-          0.3999999761581421,
-          0.10000002384185791,
-          0.09999996423721313,
-          0.19999998807907104
+          0.10000002384185791
         ],
-        "frameCount": 60,
+        "frameCount": 58,
         "frameIntervalsMs": [
+          8.199999999999818,
           8.599999999999909,
-          8.199999999999818,
-          8.200000000000273,
-          8.299999999999727,
-          8.300000000000182,
-          8.299999999999727,
-          8.400000000000091,
-          8.300000000000182,
-          8.400000000000091,
-          8.199999999999818,
-          8.300000000000182,
-          8.5,
-          8.099999999999909,
-          8.400000000000091,
-          8.299999999999727,
-          8.5,
-          8.200000000000273,
-          8.199999999999818,
-          8.300000000000182,
-          8.399999999999636,
-          8.300000000000182,
-          8.400000000000091,
-          8.299999999999727,
-          8.200000000000273,
-          8.400000000000091,
-          8.399999999999636,
-          8.100000000000364,
-          8.399999999999636,
-          8.200000000000273,
-          8.5,
-          8.400000000000091,
-          8.299999999999727,
-          8.099999999999909,
           8.600000000000364,
-          8.099999999999909,
-          8.400000000000091,
-          8.399999999999636,
-          8.100000000000364,
-          8.399999999999636,
+          8,
+          8,
           8.5,
-          8.300000000000182,
-          8.300000000000182,
-          8.199999999999818,
+          8.299999999999727,
           8.400000000000091,
-          8.400000000000091,
-          8.199999999999818,
-          8.599999999999909,
+          8.300000000000182,
+          8.299999999999727,
           8.200000000000273,
-          8.299999999999727,
-          8.400000000000091,
-          8.199999999999818,
-          8.5,
-          16.40000000000009,
-          8.400000000000091,
-          8.300000000000182,
-          8.299999999999727,
+          8.599999999999909,
           8.099999999999909,
+          8.300000000000182,
+          8.899999999999636,
+          7.700000000000273,
+          8.400000000000091,
+          8.299999999999727,
+          8.300000000000182,
+          8.599999999999909,
+          8.300000000000182,
+          8.199999999999818,
+          8.300000000000182,
           8.5,
-          8.300000000000182
+          8.099999999999909,
+          8.299999999999727,
+          8.800000000000182,
+          7.800000000000182,
+          16.59999999999991,
+          8.400000000000091,
+          8.399999999999636,
+          8.300000000000182,
+          8.400000000000091,
+          25.299999999999727,
+          7.800000000000182,
+          8.199999999999818,
+          8.300000000000182,
+          9.199999999999818,
+          7.5,
+          8.300000000000182,
+          8.300000000000182,
+          8.399999999999636,
+          8.400000000000546,
+          8.299999999999272,
+          8.300000000000182,
+          8.300000000000182,
+          8.300000000000182,
+          8.399999999999636,
+          8.300000000000182,
+          8.199999999999818,
+          8.400000000000546,
+          8.5,
+          8.099999999999454,
+          8.300000000000182,
+          8.300000000000182,
+          8.300000000000182,
+          8.299999999999272
         ],
         "layerFacts": {
           "clearances": {
@@ -4174,7 +4170,7 @@
         },
         "longTasks": [],
         "runIndex": 0,
-        "wallDurationMs": 507.10000002384186
+        "wallDurationMs": 506.2000000476837
       }
     ],
     "planRender": {
@@ -4254,10 +4250,10 @@
       },
       "samples": [
         {
-          "durationMs": 0.6000000238418579,
-          "endedAtMs": 911.2000000476837,
+          "durationMs": 0.5999999642372131,
+          "endedAtMs": 1245,
           "iteration": 0,
-          "startedAtMs": 910.6000000238419
+          "startedAtMs": 1244.4000000357628
         }
       ]
     },
@@ -4265,35 +4261,35 @@
       {
         "after": {
           "cdpRuntimeHeapUsage": {
-            "backingStorageSize": 1382959,
-            "embedderHeapUsedSize": 989048,
-            "totalSize": 4755456,
-            "usedSize": 3859636
+            "backingStorageSize": 1364247,
+            "embedderHeapUsedSize": 988888,
+            "totalSize": 4493312,
+            "usedSize": 3859496
           },
           "performanceMemory": {
-            "capturedAtMs": 1507.7000000476837,
+            "capturedAtMs": 1602.7000000476837,
             "jsHeapSizeLimit": 4395630592,
             "source": "performance.memory",
-            "totalJSHeapSize": 6138415,
-            "usedJSHeapSize": 5236571
+            "totalJSHeapSize": 5857559,
+            "usedJSHeapSize": 5217719
           }
         },
         "before": {
           "cdpRuntimeHeapUsage": {
-            "backingStorageSize": 1382757,
-            "embedderHeapUsedSize": 1053600,
+            "backingStorageSize": 1364045,
+            "embedderHeapUsedSize": 1053520,
             "totalSize": 4493312,
-            "usedSize": 3751904
+            "usedSize": 3751924
           },
           "performanceMemory": {
-            "capturedAtMs": 868.4000000357628,
+            "capturedAtMs": 988.4000000357628,
             "jsHeapSizeLimit": 4395630592,
             "source": "performance.memory",
-            "totalJSHeapSize": 5876069,
-            "usedJSHeapSize": 5128669
+            "totalJSHeapSize": 5857357,
+            "usedJSHeapSize": 5109977
           }
         },
-        "browserContextId": "79fadada-a156-4aff-9f28-9db910dcd4f0",
+        "browserContextId": "66b47b8f-9f00-4b13-b64f-3cdd4db8f485",
         "cycleCount": 2,
         "cycles": [
           {
@@ -5128,7 +5124,7 @@
                 "workspaceRoots": 0
               }
             },
-            "wallDurationMs": 48.216700030025095
+            "wallDurationMs": 44.52240001410246
           },
           {
             "cycleIndex": 1,
@@ -5962,13 +5958,13 @@
                 "workspaceRoots": 0
               }
             },
-            "wallDurationMs": 39.595400041434914
+            "wallDurationMs": 49.739699985366315
           }
         ],
         "discardedWarmups": 0,
         "freshBrowserContext": true,
-        "growthBytes": 107902,
-        "growthPercent": 2.1038986918438294,
+        "growthBytes": 107742,
+        "growthPercent": 2.108463501890517,
         "initialMount": {
           "browser": {
             "crossOriginIsolated": false,
@@ -5985,11 +5981,11 @@
             "language": "en-US",
             "platform": "Win32",
             "preciseMemoryInfo": {
-              "capturedAtMs": 330.2000000476837,
+              "capturedAtMs": 448.9000000357628,
               "jsHeapSizeLimit": 4395630592,
               "source": "performance.memory",
-              "totalJSHeapSize": 11142853,
-              "usedJSHeapSize": 7120069
+              "totalJSHeapSize": 11385941,
+              "usedJSHeapSize": 7101581
             },
             "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
             "viewport": {
@@ -5999,47 +5995,47 @@
             }
           },
           "load": {
-            "endedAtMs": 327.7000000476837,
+            "endedAtMs": 446.5,
             "resources": [
               {
                 "decodedBodySize": 916,
-                "durationMs": 7.399999976158142,
+                "durationMs": 12.300000011920929,
                 "encodedBodySize": 916,
                 "initiatorType": "fetch",
-                "name": "http://127.0.0.1:56155/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+                "name": "http://127.0.0.1:54840/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
                 "nextHopProtocol": "http/1.0",
-                "responseEndMs": 287.80000001192093,
-                "startTimeMs": 280.4000000357628,
+                "responseEndMs": 383.9000000357628,
+                "startTimeMs": 371.60000002384186,
                 "transferSize": 1216
               }
             ],
             "stages": [
               {
-                "durationMs": 1.699999988079071,
-                "endedAtMs": 278.30000001192093,
+                "durationMs": 2.199999988079071,
+                "endedAtMs": 367.4000000357628,
                 "error": null,
                 "stage": "manifest",
-                "startedAtMs": 276.60000002384186,
+                "startedAtMs": 365.2000000476837,
                 "status": "resolved",
                 "url": null,
                 "visualAllocation": null
               },
               {
-                "durationMs": 0.09999996423721313,
-                "endedAtMs": 279,
+                "durationMs": 0.2999999523162842,
+                "endedAtMs": 368.5,
                 "error": null,
                 "stage": "footprint",
-                "startedAtMs": 278.9000000357628,
+                "startedAtMs": 368.2000000476837,
                 "status": "resolved",
                 "url": null,
                 "visualAllocation": null
               },
               {
-                "durationMs": 21.899999976158142,
-                "endedAtMs": 301.30000001192093,
+                "durationMs": 42.19999998807907,
+                "endedAtMs": 411.5,
                 "error": null,
                 "stage": "proxy",
-                "startedAtMs": 279.4000000357628,
+                "startedAtMs": 369.30000001192093,
                 "status": "resolved",
                 "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
                 "visualAllocation": {
@@ -6057,27 +6053,27 @@
               },
               {
                 "durationMs": 0,
-                "endedAtMs": 301.9000000357628,
+                "endedAtMs": 412.30000001192093,
                 "error": null,
                 "stage": "overview",
-                "startedAtMs": 301.9000000357628,
+                "startedAtMs": 412.30000001192093,
                 "status": "skipped",
                 "url": null,
                 "visualAllocation": null
               },
               {
-                "durationMs": 0,
-                "endedAtMs": 302,
+                "durationMs": 0.10000002384185791,
+                "endedAtMs": 412.7000000476837,
                 "error": null,
                 "stage": "detail",
-                "startedAtMs": 302,
+                "startedAtMs": 412.60000002384186,
                 "status": "skipped",
                 "url": null,
                 "visualAllocation": null
               }
             ],
-            "startedAtMs": 219,
-            "totalDurationMs": 108.70000004768372
+            "startedAtMs": 266.4000000357628,
+            "totalDurationMs": 180.0999999642372
           },
           "snapshot": {
             "dom": {
@@ -6476,7 +6472,7 @@
             "programs": 1,
             "render": {
               "calls": 10,
-              "frame": 49,
+              "frame": 47,
               "lines": 0,
               "points": 0,
               "triangles": 968880
@@ -6498,14 +6494,14 @@
             "assetGroupCount": 1,
             "camera": {
               "position": {
-                "x": 3.674901415129682,
-                "y": 24.80029972710463,
-                "z": 8.695907338716552
+                "x": 3.846482595764403,
+                "y": 24.81967976146658,
+                "z": 8.568304502246539
               },
               "target": {
-                "x": 3.9296066668313205,
-                "y": 3.1478910864217493,
-                "z": 4.440749036206579
+                "x": 4.071481849358197,
+                "y": 3.16407045769221,
+                "z": 4.327784733875424
               }
             },
             "contextLost": false,
@@ -6513,8 +6509,8 @@
             "degraded": false,
             "demandRendering": {
               "pendingFrame": false,
-              "renderRequests": 70,
-              "renderedFrames": 49
+              "renderRequests": 68,
+              "renderedFrames": 47
             },
             "disposed": false,
             "ghostActive": false,
@@ -6813,7 +6809,7 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 89,
+            "renderCount": 86,
             "selection": "pl-rack-06",
             "selections": [
               "pl-rack-06"
@@ -6891,7 +6887,7 @@
             "programs": 1,
             "render": {
               "calls": 10,
-              "frame": 14,
+              "frame": 12,
               "lines": 0,
               "points": 0,
               "triangles": 968880
@@ -6911,14 +6907,14 @@
             "assetGroupCount": 1,
             "camera": {
               "position": {
-                "x": 12.568415929676704,
-                "y": 22.83828519871729,
-                "z": 12.44506092571369
+                "x": 12.662198326013167,
+                "y": 22.839988136445072,
+                "z": 12.355096881289338
               },
               "target": {
-                "x": 6.033979016702455,
-                "y": 2.9989196061914334,
-                "z": 5.3247551735536405
+                "x": 6.088259015734632,
+                "y": 2.999862719482769,
+                "z": 5.273374472738997
               }
             },
             "contextLost": false,
@@ -6926,8 +6922,8 @@
             "degraded": false,
             "demandRendering": {
               "pendingFrame": false,
-              "renderRequests": 33,
-              "renderedFrames": 14
+              "renderRequests": 31,
+              "renderedFrames": 12
             },
             "disposed": false,
             "ghostActive": false,
@@ -7224,7 +7220,7 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 86,
+            "renderCount": 83,
             "selection": "pl-rack-02",
             "selections": [
               "pl-rack-02"
@@ -7233,82 +7229,82 @@
             "type": "top-plan"
           }
         },
-        "endedAtMs": 6424.200000047684,
+        "endedAtMs": 8473.600000023842,
         "frameCount": 74,
         "frameIntervalsMs": [
           8.200000000000728,
-          8.5,
-          8.5,
-          8,
           8.399999999999636,
-          8.300000000000182,
           8.399999999999636,
-          8.300000000000182,
-          8.300000000000182,
-          8.199999999999818,
-          8.300000000000182,
+          8.200000000000728,
           8.399999999999636,
           8.199999999999818,
           8.400000000000546,
-          8.300000000000182,
-          8.299999999999272,
-          8.300000000000182,
-          8.400000000000546,
-          8.299999999999272,
-          8.5,
+          8.399999999999636,
+          8.399999999999636,
           8.100000000000364,
-          8.600000000000364,
-          8,
           8.5,
-          8.399999999999636,
-          8.199999999999818,
-          8.199999999999818,
-          8.400000000000546,
-          8.399999999999636,
-          8.300000000000182,
-          8.399999999999636,
-          8.300000000000182,
-          8.199999999999818,
-          8.400000000000546,
-          8.300000000000182,
-          8.399999999999636,
           8.300000000000182,
           8.099999999999454,
           8.300000000000182,
-          8.600000000000364,
-          8.300000000000182,
-          8.199999999999818,
+          8.400000000000546,
           8.399999999999636,
           8.300000000000182,
-          8.199999999999818,
-          8.400000000000546,
-          8.299999999999272,
           8.300000000000182,
-          8.400000000000546,
-          8.299999999999272,
-          8.400000000000546,
+          8.5,
           8.199999999999818,
-          8.399999999999636,
-          8.300000000000182,
           8.199999999999818,
           8.5,
+          8.199999999999818,
+          8.199999999999818,
+          8.400000000000546,
+          8.399999999999636,
+          8.199999999999818,
+          8.400000000000546,
+          8.399999999999636,
+          8.199999999999818,
+          8.400000000000546,
+          8.399999999999636,
           8.100000000000364,
           8.399999999999636,
-          8.300000000000182,
           8.400000000000546,
           8.299999999999272,
-          8.200000000000728,
-          8.299999999999272,
-          8.600000000000364,
+          8.400000000000546,
           8.199999999999818,
           8.300000000000182,
           8.199999999999818,
           8.300000000000182,
-          748.6999999999998,
-          8.199999999999818,
+          8.399999999999636,
           8.5,
           8.100000000000364,
-          8.399999999999636
+          8.300000000000182,
+          8.299999999999272,
+          8.400000000000546,
+          8.300000000000182,
+          8.799999999999272,
+          7.900000000000546,
+          8.899999999999636,
+          7.800000000000182,
+          8.300000000000182,
+          8.5,
+          8,
+          8.399999999999636,
+          8.699999999999818,
+          8,
+          8.300000000000182,
+          8.300000000000182,
+          8.300000000000182,
+          8.5,
+          8.199999999999818,
+          8.399999999999636,
+          8.600000000000364,
+          7.899999999999636,
+          8.5,
+          823.6000000000004,
+          8.100000000000364,
+          8.399999999999636,
+          8.100000000000364,
+          8.399999999999636,
+          8.299999999999272
         ],
         "interaction": {
           "operations": [
@@ -7316,30 +7312,30 @@
               "button": "left",
               "eventBatches": 7,
               "interaction": "orbit",
-              "wallDurationMs": 252.56569997873157
+              "wallDurationMs": 250.8302999776788
             },
             {
               "button": "right",
               "eventBatches": 10,
               "interaction": "pan",
-              "wallDurationMs": 265.38400002755225
+              "wallDurationMs": 267.868000024464
             }
           ],
           "requestedDurationMs": 500.0,
-          "wallDurationMs": 542.9444999899715
+          "wallDurationMs": 536.5369999781251
         },
         "longTasks": [],
         "runIndex": 0,
         "selection": {
-          "durationMs": 12.83049996709451,
+          "durationMs": 22.986399999354035,
           "placementId": "pl-rack-06",
           "sessionSelection": [
             "pl-rack-06"
           ],
           "synchronized": true
         },
-        "startedAtMs": 5078.100000023842,
-        "wallDurationMs": 1346.1000000238419
+        "startedAtMs": 7043.300000011921,
+        "wallDurationMs": 1430.300000011921
       }
     ]
   },
@@ -7347,115 +7343,115 @@
   "source": {
     "files": [
       {
-        "byteLength": 83303,
+        "byteLength": 81096,
         "path": "tools/benchmark_facility_layout_release_browser.py",
         "role": "benchmark_runner",
-        "sha256": "385fa1c238db8439c569faf38fccd2fef26047090a26c8db9416e3bfe10c4b4f",
+        "sha256": "b77ff7702300a07d1dac2a7941d22fd5a989ee67607b80d0c57dbd4d33373756",
         "sourceId": "benchmark_runner"
       },
       {
-        "byteLength": 1778,
+        "byteLength": 1715,
         "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance.html",
         "role": "benchmark_harness",
-        "sha256": "d24dbeff5b51711d31270844b54596908bc0f86bb9d10c28f18728624e6ff3a7",
+        "sha256": "90ee49e77373afe108b2ab602023545ea929b9f11b4b268ec8cdb27403afe7dc",
         "sourceId": "benchmark_page"
       },
       {
-        "byteLength": 39480,
+        "byteLength": 38282,
         "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance.js",
         "role": "benchmark_harness",
-        "sha256": "bd10cf5fdb5f9d20f7b7397bcb5d6ed1d5ff773d1b9bf4d4749ebf0a8831e4b3",
+        "sha256": "bf84e8c715adf0103a4e92a98964fca2717e8019b85b9e82d8315555c8a65e25",
         "sourceId": "benchmark_script"
       },
       {
-        "byteLength": 6851,
+        "byteLength": 6567,
         "path": "tests/fixtures/facility_layout/rendering/p4-facility-layout.json",
         "role": "authoritative_fixture",
-        "sha256": "60892cb1ec25ba7f9b39446af4deea7c05868279063c181bfd68e54d22f3f772",
+        "sha256": "3d9bebd3c862d9ddf099c46f827f7a48a0040807be4aaee1457ac719c2ac15c8",
         "sourceId": "p4_layout"
       },
       {
-        "byteLength": 1664,
+        "byteLength": 1604,
         "path": "tests/fixtures/facility_layout/rendering/p4-asset-catalog.json",
         "role": "authoritative_fixture",
-        "sha256": "2adeff17c90b5979416dc3f368bfc020191e2fae3d89bdfb02ad1310ce76d218",
+        "sha256": "9dd60d2f319615c7107c60132eb88d1cc59c1103707b71aacf431ebce7975369",
         "sourceId": "p4_asset_catalog"
       },
       {
-        "byteLength": 4396,
+        "byteLength": 4208,
         "path": "tests/fixtures/facility_layout/authoring/p5-authoring.html",
         "role": "workspace_composition_reference",
-        "sha256": "95d787ff644f8346c27afd38188878c41ac06608bcdfb8dbc72f4fd92d486b40",
+        "sha256": "a078d77d2b6d64b8f85911198323eb7c35764b03da92a0cd59e6290ab7d7153a",
         "sourceId": "p5_authoring_page"
       },
       {
-        "byteLength": 33692,
+        "byteLength": 32630,
         "path": "tests/fixtures/facility_layout/authoring/p5-authoring.js",
         "role": "workspace_composition_reference",
-        "sha256": "8a80464c9c4f4ea378aec9c0e4a7dec679d8c97e7b40efcbd68d090c12d5081b",
+        "sha256": "a6ee0561b19bdae8f42841b0b4d40815407e8a9d3984c43a02155a0ffac32920",
         "sourceId": "p5_authoring_script"
       },
       {
-        "byteLength": 238087,
+        "byteLength": 224296,
         "path": "tests/fixtures/facility_layout/authoring/p5-authoring-result.json",
         "role": "workspace_composition_reference",
-        "sha256": "dea8813bb7bcaab7ecbcd0973933f7ba92c33dcb7de1d2d66f47ce3add0618b5",
+        "sha256": "210bd9f0401203da07d6ad997a306bc9af8cc31ba452728aa1c11eb392d2cdc9",
         "sourceId": "p5_authoring_result"
       },
       {
-        "byteLength": 55603,
+        "byteLength": 54235,
         "path": "static/facility_layout_editor.js",
         "role": "production_adapter",
-        "sha256": "9289ef6e817692ed8263e3c6fc418fbb9280816876d5f9c41d4c16a862001f0b",
+        "sha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
         "sourceId": "facility_layout_editor"
       },
       {
-        "byteLength": 78951,
+        "byteLength": 76935,
         "path": "static/facility_layout_session.js",
         "role": "production_adapter",
-        "sha256": "f3e3138aefe8c9212470ba5d96edfb1e9e4083c8542c1d3c240300b87ed37c34",
+        "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a",
         "sourceId": "facility_layout_session"
       },
       {
-        "byteLength": 120660,
+        "byteLength": 117766,
         "path": "static/facility_layout_workspace.js",
         "role": "production_adapter",
-        "sha256": "0334bdc75a63c47a18541d2290de18d33108afa98cbb3c55adcd9f54786b38b1",
+        "sha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878",
         "sourceId": "facility_layout_workspace"
       },
       {
-        "byteLength": 17028,
+        "byteLength": 16296,
         "path": "static/facility_layout_workspace.css",
         "role": "production_style",
-        "sha256": "0481a0ebbb17b2c124c073ee5248f3e5c953714c333d7eb7febc0d3191288f3c",
+        "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2",
         "sourceId": "facility_layout_workspace_css"
       },
       {
-        "byteLength": 104298,
+        "byteLength": 101827,
         "path": "static/facility_layout_three_adapter.js",
         "role": "production_adapter",
-        "sha256": "3e96bee4be252449702ee4a52ed928eda7ddcd806da3402d91b95d9ec3eef731",
+        "sha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639",
         "sourceId": "facility_layout_three_adapter"
       },
       {
-        "byteLength": 365004,
+        "byteLength": 364998,
         "path": "static/vendor/three/0.184.0/build/three.module.min.js",
         "role": "vendored_runtime",
-        "sha256": "d58eb29e87e57583b6cdcfdd6b1823b82ad1024256c6dde07d4947f02e9cd465",
+        "sha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
         "sourceId": "three_module"
       },
       {
-        "byteLength": 42467,
+        "byteLength": 40504,
         "path": "static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js",
         "role": "vendored_runtime",
-        "sha256": "32f65512ad637a6698af1c290ecd59b33dbe7a996e5520483854222f2783df31",
+        "sha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
         "sourceId": "orbit_controls"
       },
       {
-        "byteLength": 119819,
+        "byteLength": 114959,
         "path": "static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js",
         "role": "vendored_runtime",
-        "sha256": "19cda8c7a0166b2faacd4ec19854c2496013792fe57f9854da91c46c6e5a6dba",
+        "sha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
         "sourceId": "gltf_loader"
       },
       {
@@ -7473,23 +7469,23 @@
         "sourceId": "rack_detail_glb"
       },
       {
-        "byteLength": 5385,
+        "byteLength": 5222,
         "path": "tests/fixtures/facility_layout/benchmark-fixture-manifest.json",
         "role": "governing_fixture",
-        "sha256": "df605ee8cc938e74584a46ee4a28cfb3a7d7343c31369cd289799a77ea88cf9c",
+        "sha256": "a9d2adb7ca04f01c1c48851aad2d7326c2341512bff21fa0615cde69abaed68a",
         "sourceId": "benchmark_fixture_manifest"
       },
       {
-        "byteLength": 105503,
+        "byteLength": 102251,
         "path": "docs/industrial-layout-platform-implementation-plan.md",
         "role": "governing_contract",
-        "sha256": "6aad7abc66d5be7937b93db23290062d1b22857cc06c9a966bc1ba688344001d",
+        "sha256": "80e2168d3b84f61efaae7cc120b46b8bb0bc3c4b503bdb76853d8e1d0958b454",
         "sourceId": "implementation_plan"
       }
     ],
-    "gitCommit": "e7f74bfddf360e027085518dd3822fe825341a67",
+    "gitCommit": "044f05283df2f4c426c8bae41a8d0ef83e837a42",
     "trackedWorktreeDirty": true
   },
-  "startedAtUtc": "2026-08-04T19:41:46Z",
+  "startedAtUtc": "2026-08-04T20:58:19Z",
   "unavailableRequiredMeasurements": []
 }

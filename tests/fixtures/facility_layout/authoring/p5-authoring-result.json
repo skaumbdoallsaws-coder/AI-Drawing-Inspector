@@ -206,7 +206,7 @@
         "rootChildren": 0,
         "secondDestroy": false,
         "three": {
-          "assetGroupCount": 1,
+          "assetGroupCount": 0,
           "camera": null,
           "contextLost": false,
           "controlsActive": false,
@@ -218,19 +218,7 @@
           },
           "disposed": true,
           "ghostActive": false,
-          "lastFit": {
-            "center": {
-              "x": 8.674699992333519,
-              "y": 2.43840003,
-              "z": 5.75
-            },
-            "rootUnchanged": true,
-            "size": {
-              "x": 11.877799927332962,
-              "y": 4.87680006,
-              "z": 9.028399944
-            }
-          },
+          "lastFit": null,
           "lifecycle": {
             "canvasCount": 0,
             "listenerCount": 0,
@@ -238,82 +226,11 @@
             "observerActive": false,
             "teardownCount": 1
           },
-          "loadTrace": [
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "manifest",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "manifest",
-              "status": "resolved"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "footprint",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "footprint",
-              "status": "resolved"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "proxy",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "proxy",
-              "status": "resolved"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "overview",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "overview",
-              "status": "skipped"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "detail",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "detail",
-              "status": "skipped"
-            }
-          ],
+          "loadTrace": [],
           "modelRootTransform": null,
           "mounted": false,
           "pendingLoads": 0,
-          "placementCount": 5,
+          "placementCount": 0,
           "proposalBeforeCount": 0,
           "proposalPreviewActive": false,
           "proposalProposedCount": 0,
@@ -321,19 +238,9 @@
           "selectedPlacementIds": [],
           "status": "disposed",
           "statusReason": null,
+          "suspended": false,
           "warnings": [],
-          "worldBounds": {
-            "maximum": {
-              "x": 14.613599956,
-              "y": 4.87680006,
-              "z": 10.264199972
-            },
-            "minimum": {
-              "x": 2.7358000286670374,
-              "y": 0,
-              "z": 1.235800028
-            }
-          }
+          "worldBounds": null
         }
       },
       "before": {
@@ -985,6 +892,7 @@
           "selectedPlacementIds": [],
           "status": "ready",
           "statusReason": null,
+          "suspended": false,
           "warnings": [],
           "worldBounds": {
             "maximum": {
@@ -1030,6 +938,7 @@
           "renderCount": 139,
           "selection": null,
           "selections": [],
+          "suspended": false,
           "type": "top-plan"
         },
         "tracker": {
@@ -1525,6 +1434,7 @@
             "recentReceiptIds": [],
             "selection": []
           },
+          "suspended": false,
           "toolMode": "polygon-zone",
           "viewMode": "plan"
         }
@@ -2179,6 +2089,7 @@
         "selectedPlacementIds": [],
         "status": "ready",
         "statusReason": null,
+        "suspended": false,
         "warnings": [],
         "worldBounds": {
           "maximum": {
@@ -2224,6 +2135,7 @@
         "renderCount": 139,
         "selection": null,
         "selections": [],
+        "suspended": false,
         "type": "top-plan"
       },
       "tracker": {
@@ -2719,6 +2631,7 @@
           "recentReceiptIds": [],
           "selection": []
         },
+        "suspended": false,
         "toolMode": "polygon-zone",
         "viewMode": "plan"
       }
@@ -3162,6 +3075,7 @@
         "selectedPlacementIds": [],
         "status": "ready",
         "statusReason": null,
+        "suspended": false,
         "warnings": [],
         "worldBounds": {
           "maximum": {
@@ -3205,6 +3119,7 @@
         "renderCount": 5,
         "selection": null,
         "selections": [],
+        "suspended": false,
         "type": "top-plan"
       },
       "tracker": {
@@ -3474,6 +3389,7 @@
           "recentReceiptIds": [],
           "selection": []
         },
+        "suspended": false,
         "toolMode": "select",
         "viewMode": "plan"
       }
@@ -4556,7 +4472,7 @@
         "rootChildren": 0,
         "secondDestroy": false,
         "three": {
-          "assetGroupCount": 1,
+          "assetGroupCount": 0,
           "camera": null,
           "contextLost": false,
           "controlsActive": false,
@@ -4568,19 +4484,7 @@
           },
           "disposed": true,
           "ghostActive": false,
-          "lastFit": {
-            "center": {
-              "x": 8.674699992333519,
-              "y": 2.43840003,
-              "z": 5.75
-            },
-            "rootUnchanged": true,
-            "size": {
-              "x": 11.877799927332962,
-              "y": 4.87680006,
-              "z": 9.028399944
-            }
-          },
+          "lastFit": null,
           "lifecycle": {
             "canvasCount": 0,
             "listenerCount": 0,
@@ -4588,82 +4492,11 @@
             "observerActive": false,
             "teardownCount": 1
           },
-          "loadTrace": [
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "manifest",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "manifest",
-              "status": "resolved"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "footprint",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "footprint",
-              "status": "resolved"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "proxy",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "proxy",
-              "status": "resolved"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "overview",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "overview",
-              "status": "skipped"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "detail",
-              "status": "started"
-            },
-            {
-              "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-              "assetId": "asset-pallet-rack-185e9914e281",
-              "detail": null,
-              "stage": "detail",
-              "status": "skipped"
-            }
-          ],
+          "loadTrace": [],
           "modelRootTransform": null,
           "mounted": false,
           "pendingLoads": 0,
-          "placementCount": 5,
+          "placementCount": 0,
           "proposalBeforeCount": 0,
           "proposalPreviewActive": false,
           "proposalProposedCount": 0,
@@ -4671,19 +4504,9 @@
           "selectedPlacementIds": [],
           "status": "disposed",
           "statusReason": null,
+          "suspended": false,
           "warnings": [],
-          "worldBounds": {
-            "maximum": {
-              "x": 14.613599956,
-              "y": 4.87680006,
-              "z": 10.264199972
-            },
-            "minimum": {
-              "x": 2.7358000286670374,
-              "y": 0,
-              "z": 1.235800028
-            }
-          }
+          "worldBounds": null
         }
       },
       "before": {
@@ -5335,6 +5158,7 @@
           "selectedPlacementIds": [],
           "status": "ready",
           "statusReason": null,
+          "suspended": false,
           "warnings": [],
           "worldBounds": {
             "maximum": {
@@ -5380,6 +5204,7 @@
           "renderCount": 16,
           "selection": null,
           "selections": [],
+          "suspended": false,
           "type": "top-plan"
         },
         "tracker": {
@@ -5855,6 +5680,7 @@
             "recentReceiptIds": [],
             "selection": []
           },
+          "suspended": false,
           "toolMode": "select",
           "viewMode": "plan"
         }
@@ -6556,6 +6382,7 @@
         "selectedPlacementIds": [],
         "status": "ready",
         "statusReason": null,
+        "suspended": false,
         "warnings": [],
         "worldBounds": {
           "maximum": {
@@ -6601,6 +6428,7 @@
         "renderCount": 16,
         "selection": null,
         "selections": [],
+        "suspended": false,
         "type": "top-plan"
       },
       "tracker": {
@@ -7076,6 +6904,7 @@
           "recentReceiptIds": [],
           "selection": []
         },
+        "suspended": false,
         "toolMode": "select",
         "viewMode": "plan"
       }
@@ -7087,7 +6916,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:61071/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:50562/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "failedRequests": [],
@@ -7095,7 +6924,7 @@
       {
         "page": "desktop",
         "status": 422,
-        "url": "http://127.0.0.1:61071/api/facility-layouts/site-a/fl-p5-authoring/preview"
+        "url": "http://127.0.0.1:50562/api/facility-layouts/site-a/fl-p5-authoring/preview"
       }
     ],
     "offlineOnly": true,
@@ -7157,11 +6986,11 @@
   "source": {
     "assetCatalogSha256": "9dd60d2f319615c7107c60132eb88d1cc59c1103707b71aacf431ebce7975369",
     "authorityFixtureSha256": "9f199d55082a29b5ee415d68352f9d01d5688cddea3c4e24dac59e4a824f3e87",
-    "facilityLayoutEditorSha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875",
+    "facilityLayoutEditorSha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
     "facilityLayoutSessionSha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a",
     "facilityLayoutWorkspaceCssSha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2",
-    "facilityLayoutWorkspaceSha256": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b",
-    "facilityThreeAdapterSha256": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e",
+    "facilityLayoutWorkspaceSha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878",
+    "facilityThreeAdapterSha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639",
     "fixturePageSha256": "a078d77d2b6d64b8f85911198323eb7c35764b03da92a0cd59e6290ab7d7153a",
     "fixtureScriptSha256": "a6ee0561b19bdae8f42841b0b4d40815407e8a9d3984c43a02155a0ffac32920",
     "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
@@ -7169,7 +6998,7 @@
     "overviewGlbSha256": "eb016a7a4bd71ce21e0ffd9a318fda2f2e6d6042ced4ec009e631e8d30cc1f14",
     "p4LayoutSeedSha256": "3d9bebd3c862d9ddf099c46f827f7a48a0040807be4aaee1457ac719c2ac15c8",
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
-    "verifierSha256": "20c159f26a42e8c0dad4c213548fc760613bb64d9cf67711300d29a4922a0a23"
+    "verifierSha256": "d650e1404116700294a6d14e0607c2a485798739166dceb8507a72e5e26cb333"
   },
   "unexpectedConsoleErrors": []
 }

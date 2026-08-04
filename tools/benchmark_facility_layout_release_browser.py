@@ -211,6 +211,7 @@ def protocol_for(smoke: bool) -> dict[str, Any]:
                 "cacheStates": ["cold"],
             },
             "remount": {
+                "lifecycleMode": "bounded-suspend-resume",
                 "discardedWarmupsPerSequence": 0,
                 "independentSequences": 1,
                 "cyclesPerSequence": 2,
@@ -241,6 +242,7 @@ def protocol_for(smoke: bool) -> dict[str, Any]:
         "remount": {
             # The release claim covers the first 20 remounts in each fresh
             # browser context. Hidden remount warmups would change that claim.
+            "lifecycleMode": "bounded-suspend-resume",
             "discardedWarmupsPerSequence": 0,
             "independentSequences": 5,
             "cyclesPerSequence": 20,
@@ -1437,6 +1439,10 @@ def validate_raw_artifact(
                 "cycleCount"
             ):
                 errors.append("remount_cycle_samples_missing")
+            if remount_protocol.get("lifecycleMode") != (
+                "bounded-suspend-resume"
+            ):
+                errors.append("remount_lifecycle_mode_invalid")
             for memory_point in (
                 sequence.get("before"),
                 sequence.get("after"),
@@ -1498,9 +1504,16 @@ def validate_raw_artifact(
             elif isinstance(before_used, (int, float)) and before_used <= 0:
                 errors.append("remount_heap_baseline_invalid")
             for cycle in sequence.get("cycles", []):
-                destroyed = cycle.get("lifecycle", {}).get("destroyed", {})
+                lifecycle = cycle.get("lifecycle", {})
+                if lifecycle.get("lifecycleMode") != (
+                    "bounded-suspend-resume"
+                ):
+                    errors.append("remount_lifecycle_mode_invalid")
+                suspended = lifecycle.get("suspended", {})
+                if suspended.get("suspended") is not True:
+                    errors.append("remount_workspace_suspend_invalid")
                 if any(
-                    destroyed.get(field) != 0
+                    suspended.get(field) != 0
                     for field in (
                         "workspaceRoots",
                         "canvases",
@@ -1511,14 +1524,25 @@ def validate_raw_artifact(
                     )
                 ):
                     errors.append("remount_lifecycle_leak")
-                destroyed_pool = destroyed.get("rendererPool", {})
+                suspended_pool = suspended.get("rendererPool", {})
                 if (
-                    destroyed_pool.get("createdCount") != 1
-                    or destroyed_pool.get("leasedCount") != 0
-                    or destroyed_pool.get("availableCount") != 1
+                    suspended_pool.get("createdCount") != 1
+                    or suspended_pool.get("leasedCount") != 1
+                    or suspended_pool.get("availableCount") != 0
                 ):
-                    errors.append("remount_renderer_pool_release_invalid")
-                mounted = cycle.get("lifecycle", {}).get("mounted", {})
+                    errors.append("remount_renderer_pool_suspend_invalid")
+                three_after = suspended.get("threeAfter", {})
+                if (
+                    three_after.get("suspended") is not True
+                    or three_after.get("lifecycle", {}).get(
+                        "observerActive"
+                    ) is not False
+                    or three_after.get("demandRendering", {}).get(
+                        "pendingFrame"
+                    ) is not False
+                ):
+                    errors.append("remount_three_suspend_invalid")
+                mounted = lifecycle.get("mounted", {})
                 if (
                     mounted.get("dom", {}).get("canvases") != 1
                     or mounted.get("dom", {}).get("planSvgs") != 1
@@ -1530,7 +1554,7 @@ def validate_raw_artifact(
                     or mounted_pool.get("leasedCount") != 1
                     or mounted_pool.get("availableCount") != 0
                 ):
-                    errors.append("remount_renderer_pool_reuse_invalid")
+                    errors.append("remount_renderer_pool_resume_invalid")
 
     core = samples.get("core", {})
     module_proof = (
@@ -1964,6 +1988,10 @@ def benchmark(
             )
             browser_version = browser.version
             try:
+                print(
+                    "Benchmark phase 1/3: core rendering and interaction",
+                    flush=True,
+                )
                 try:
                     core = run_core_measurements(
                         browser,
@@ -1988,6 +2016,11 @@ def benchmark(
                             "precise_memory",
                         ]
                     )
+                print("Benchmark phase 1/3 complete", flush=True)
+                print(
+                    "Benchmark phase 2/3: progressive asset loading",
+                    flush=True,
+                )
                 try:
                     loading = run_asset_loading(
                         browser,
@@ -2004,6 +2037,11 @@ def benchmark(
                         }
                     )
                     unavailable.append("progressive_asset_loading")
+                print("Benchmark phase 2/3 complete", flush=True)
+                print(
+                    "Benchmark phase 3/3: suspend/resume memory",
+                    flush=True,
+                )
                 try:
                     remount = run_remount_memory(
                         browser,
@@ -2020,6 +2058,7 @@ def benchmark(
                         }
                     )
                     unavailable.append("twenty_remount_precise_memory")
+                print("Benchmark phase 3/3 complete", flush=True)
             finally:
                 browser.close()
     finally:

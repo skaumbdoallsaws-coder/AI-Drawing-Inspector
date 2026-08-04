@@ -25,12 +25,12 @@
         "manualScreenReaderRequired": true,
         "standardAndMinimumHardwareRequired": true
       },
-      "byteLength": 6152,
+      "byteLength": 6584,
       "containsSafetyDisclaimer": false,
       "contractPassed": true,
       "documentId": "release_gates",
       "path": "docs/facility-layout-p11-release-gates.md",
-      "sha256": "e231203f7aa2e9555a6e4a8037e160f9c391a685039cf7b6af67c3966adddcc4"
+      "sha256": "0ba67a265d6a23155307a089ea493a6c73fa87c608143e99643827b75eb3e962"
     },
     {
       "accuracyChecks": {
@@ -62,7 +62,7 @@
       "sha256": "c7f84e115d2be63c74d6f93c6b3ec93ef9a86d4f4aa0f12e1c6feb6cbc30bc30"
     }
   ],
-  "generatedAtUtc": "2026-08-04T15:32:56Z",
+  "generatedAtUtc": "2026-08-04T18:11:44Z",
   "pilotRunbookContainsSafetyDisclaimer": true,
   "releaseGateMet": true,
   "schemaVersion": "facility-layout-p11-documentation-evidence-v2"

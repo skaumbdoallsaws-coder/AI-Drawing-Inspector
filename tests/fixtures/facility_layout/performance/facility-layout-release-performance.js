@@ -1096,22 +1096,42 @@ async function remountOnce() {
   if (!state.runtime) {
     throw new Error('A remount requires an existing mounted runtime.');
   }
-  const destroyed = await destroyRuntime();
-  const mounted = await mount({ profile: 'proxy' });
+  const runtime = state.runtime;
+  const before = snapshot(runtime);
+  const didSuspend = runtime.workspace.suspend();
+  await nextFrame();
+  await nextFrame();
+  const suspended = {
+    suspended: didSuspend,
+    before,
+    workspaceRoots: root.querySelectorAll('[data-facility-workspace]').length,
+    canvases: root.querySelectorAll('canvas').length,
+    planSvgs: root.querySelectorAll('svg').length,
+    rootChildren: root.children.length,
+    activeObserverTargets: tracker.activeObserverTargets,
+    activeAdapterFrames: tracker.activeAdapterFrames.size,
+    rendererPool: rendererPool.getDiagnostics(),
+    threeAfter: runtime.three.getDiagnostics()
+  };
+  const didResume = runtime.workspace.resume(root);
+  if (!didSuspend || !didResume) {
+    throw new Error('Facility workspace suspend/resume transition failed.');
+  }
   state.runtime.workspace._setViewMode('3d');
   state.runtime.workspace.controller.fit();
   await settle(3);
-  if (destroyed.workspaceRoots !== 0
-      || destroyed.canvases !== 0
-      || destroyed.planSvgs !== 0
-      || destroyed.rootChildren !== 0
-      || destroyed.activeObserverTargets !== 0
-      || destroyed.activeAdapterFrames !== 0) {
-    throw new Error('Facility workspace remount teardown leaked browser state.');
+  if (suspended.workspaceRoots !== 0
+      || suspended.canvases !== 0
+      || suspended.planSvgs !== 0
+      || suspended.rootChildren !== 0
+      || suspended.activeObserverTargets !== 0
+      || suspended.activeAdapterFrames !== 0) {
+    throw new Error('Facility workspace suspension leaked active browser state.');
   }
   return {
-    runtimeId: mounted.snapshot.runtimeId,
-    destroyed,
+    runtimeId: state.runtime.runtimeId,
+    lifecycleMode: 'bounded-suspend-resume',
+    suspended,
     mounted: snapshot()
   };
 }

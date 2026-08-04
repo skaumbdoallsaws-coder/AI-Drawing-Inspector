@@ -808,6 +808,7 @@ class FakeAdapter {
         this.selections = [];
         this.layouts = [];
         this.mounted = false;
+        this.suspended = false;
         this.disposed = false;
         this.invalidations = 0;
         this.camera = null;
@@ -882,8 +883,20 @@ class FakeAdapter {
         this.invalidations += 1;
     }
 
+    suspend() {
+        if (this.suspended) return false;
+        this.suspended = true;
+        return true;
+    }
+
+    resume() {
+        if (!this.suspended) return false;
+        this.suspended = false;
+        return true;
+    }
+
     getDiagnostics() {
-        return { mounted: this.mounted };
+        return { mounted: this.mounted && !this.suspended };
     }
 
     emitSelection(id) {
@@ -903,6 +916,8 @@ class FakeController {
         this.selections = [];
         this.fitCount = 0;
         this.disposeCount = 0;
+        this.suspendCount = 0;
+        this.resumeCount = 0;
     }
 
     setAssetCatalog(value) {
@@ -931,6 +946,18 @@ class FakeController {
     fit() {
         this.fitCount += 1;
         this.adapters.forEach(adapter => adapter.fit());
+    }
+
+    suspend() {
+        this.suspendCount += 1;
+        this.adapters.forEach(adapter => adapter.suspend());
+        return true;
+    }
+
+    resume() {
+        this.resumeCount += 1;
+        this.adapters.forEach(adapter => adapter.resume());
+        return true;
     }
 
     dispose() {
@@ -1235,6 +1262,37 @@ async function main() {
                 null
             );
             data.workspace.destroy();
+        });
+
+    await check('bounded suspension detaches and restores one workspace without rebuilding',
+        async () => {
+            const data = fixture();
+            const listenerCount = FakeElement.listenerCount;
+            const children = data.root.children.slice();
+            for (let index = 0; index < 20; index += 1) {
+                assert.strictEqual(data.workspace.suspend(), true);
+                assert.strictEqual(data.workspace.suspend(), false);
+                assert.strictEqual(data.workspace.getState().suspended, true);
+                assert.strictEqual(data.root.children.length, 0);
+                assert.strictEqual(
+                    data.root.getAttribute('data-facility-workspace'),
+                    null
+                );
+                assert.strictEqual(data.top.suspended, true);
+                assert.strictEqual(data.three.suspended, true);
+                assert.strictEqual(data.workspace.resume(data.root), true);
+                assert.strictEqual(data.workspace.resume(data.root), false);
+                assert.strictEqual(data.workspace.getState().suspended, false);
+                assert.deepStrictEqual(data.root.children, children);
+                assert.strictEqual(data.top.suspended, false);
+                assert.strictEqual(data.three.suspended, false);
+            }
+            assert.strictEqual(data.controller.suspendCount, 20);
+            assert.strictEqual(data.controller.resumeCount, 20);
+            assert.strictEqual(data.controller.disposeCount, 0);
+            assert.strictEqual(FakeElement.listenerCount, listenerCount);
+            data.workspace.destroy();
+            assert.strictEqual(data.controller.disposeCount, 1);
         });
 
     await check('latest drag advisory is visible and never controls validity',

@@ -57,7 +57,6 @@
     }
   },
   "blockers": [
-    "browser:budget_failed:memory-growth-after-20-remounts",
     "minimum_hardware_release_benchmark_not_recorded",
     "minimum_reference_hardware_unresolved"
   ],
@@ -89,11 +88,11 @@
           "language": "en-US",
           "platform": "Win32",
           "preciseMemoryInfo": {
-            "capturedAtMs": 1320.5,
+            "capturedAtMs": 696.3999999761581,
             "jsHeapSizeLimit": 4395630592,
             "source": "performance.memory",
-            "totalJSHeapSize": 68476516,
-            "usedJSHeapSize": 61330652
+            "totalJSHeapSize": 68748052,
+            "usedJSHeapSize": 61344080
           },
           "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
           "viewport": {
@@ -279,24 +278,25 @@
         "explicitInitialMountBeforeBaseline": true,
         "freshBrowserContextPerSequence": true,
         "independentSequences": 5,
+        "lifecycleMode": "bounded-suspend-resume",
         "quiescenceMsBeforeMemorySample": 1000
       },
       "smoke": false
     },
     "raw": {
-      "byteLength": 11132083,
+      "byteLength": 11707316,
       "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-raw.json",
-      "sha256": "9c9d85e4d7524eb7b714acf3d3417a763c2aaf9770e91e86325da49c96cd0346"
+      "sha256": "9e6925226fb22c151a2bccda98bfc726e12a3048fc0deafd88672be133b8d02e"
     },
     "storedSummaryMatchesRaw": true,
     "summary": {
-      "byteLength": 16104,
+      "byteLength": 16122,
       "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-summary.json",
-      "sha256": "63a533fc9a8da406192ad1d7a326b4a5edb15e642da3418bf66e1f895624334d"
+      "sha256": "5bc615791489242283141ab3a99a9d9821cdc79be2e6cf6da9dc34b5c335ab91"
     },
     "validationErrors": []
   },
-  "generatedAtUtc": "2026-08-04T15:32:53Z",
+  "generatedAtUtc": "2026-08-04T18:11:42Z",
   "observedBudgetChecks": [
     {
       "applicable": true,
@@ -314,7 +314,7 @@
       "budgetId": "three-frame-p95-standard",
       "evidenceSource": "browser_release_protocol",
       "limit": 22,
-      "measured": 8.6,
+      "measured": 8.7,
       "passed": true,
       "unit": "ms"
     },
@@ -324,7 +324,7 @@
       "budgetId": "three-picking-p95",
       "evidenceSource": "browser_release_protocol",
       "limit": 50,
-      "measured": 9.5,
+      "measured": 4.264999970793723,
       "passed": true,
       "unit": "ms"
     },
@@ -334,7 +334,7 @@
       "budgetId": "idle-render-stop",
       "evidenceSource": "browser_release_protocol",
       "limit": 250,
-      "measured": 3.5,
+      "measured": 2.399999976158142,
       "passed": true,
       "unit": "ms"
     },
@@ -344,8 +344,8 @@
       "budgetId": "memory-growth-after-20-remounts",
       "evidenceSource": "browser_release_protocol",
       "limit": 10,
-      "measured": 25.659449408047415,
-      "passed": false,
+      "measured": 9.571075224900913,
+      "passed": true,
       "unit": "percent"
     },
     {
@@ -354,7 +354,7 @@
       "budgetId": "javascript-heap",
       "evidenceSource": "browser_release_protocol",
       "limit": 419430400,
-      "measured": 6402883,
+      "measured": 5599035,
       "passed": true,
       "unit": "bytes"
     },
@@ -449,7 +449,7 @@
       "unit": "ms"
     }
   ],
-  "observedChecksPassed": false,
+  "observedChecksPassed": true,
   "protocol": {
     "backend": {
       "measuredIterations": 30,
@@ -500,6 +500,7 @@
         "explicitInitialMountBeforeBaseline": true,
         "freshBrowserContextPerSequence": true,
         "independentSequences": 5,
+        "lifecycleMode": "bounded-suspend-resume",
         "quiescenceMsBeforeMemorySample": 1000
       },
       "smoke": false
@@ -599,14 +600,14 @@
   "schemaVersion": "facility-layout-p11-performance-evidence-v2",
   "sourceArtifacts": [
     {
-      "byteLength": 11132083,
+      "byteLength": 11707316,
       "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-raw.json",
-      "sha256": "9c9d85e4d7524eb7b714acf3d3417a763c2aaf9770e91e86325da49c96cd0346"
+      "sha256": "9e6925226fb22c151a2bccda98bfc726e12a3048fc0deafd88672be133b8d02e"
     },
     {
-      "byteLength": 16104,
+      "byteLength": 16122,
       "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-summary.json",
-      "sha256": "63a533fc9a8da406192ad1d7a326b4a5edb15e642da3418bf66e1f895624334d"
+      "sha256": "5bc615791489242283141ab3a99a9d9821cdc79be2e6cf6da9dc34b5c335ab91"
     },
     {
       "byteLength": 26829,
@@ -629,6 +630,6 @@
       "sha256": "35295888dc88ca7f611f90e4c47eddd5b8dcd671dc2918c97a97c3e1805dd8b2"
     }
   ],
-  "standardHardwareSlicePassed": false,
-  "status": "failed"
+  "standardHardwareSlicePassed": true,
+  "status": "standard_hardware_passed_minimum_pending"
 }

@@ -75,11 +75,15 @@ code, browser-native caches, or one-time compilation. A result above 10
 percent blocks release even when heap diagnostics show that canvases,
 WebGL contexts, observers, and render loops are bounded.
 
-The production Facility Layout shell uses a renderer pool of maximum size one.
-The raw browser artifact must prove one renderer was created, released between
-workspaces, and reused for every measured remount. Heap snapshots and lifecycle
-diagnostics may explain a failure, but they cannot replace or override the raw
-release measurement.
+The production Facility Layout shell uses a bounded suspend/resume lifecycle
+for workflow tab changes and reserves final disposal for permanent teardown.
+The raw browser artifact must prove that each suspended state detaches the
+workspace DOM and pauses resize observers and animation frames, while retaining
+at most one initialized workspace and one leased renderer. Resume must restore
+that same workspace without duplicate canvases, observers, listeners, scenes,
+or renderer leases. Final disposal must release the renderer and scene
+resources. Heap snapshots and lifecycle diagnostics may explain a failure, but
+they cannot replace or override the raw release measurement.
 
 ## Current Non-Negotiable Blockers
 
@@ -87,14 +91,15 @@ The verifier must report rather than conceal:
 
 - Minimum reference hardware is unresolved.
 - The standard-hardware browser run completed the full Section 18.3 protocol
-  on 2026-08-04 with a structurally valid artifact. Nine of ten budgets passed,
-  but 20-remount JavaScript heap growth measured 25.66 percent against the
-  10-percent limit. Renderer-pool evidence remained bounded at one created
-  renderer across every measured sequence, so the release gate remains closed
-  on the raw total-heap measurement rather than a renewed WebGL-context leak.
-  The backend release microbenchmark passes every required deterministic
-  slice. A separate full run is still required on the named minimum-hardware
-  profile.
+  on 2026-08-04 with a structurally valid, hardware- and source-bound artifact.
+  All ten browser budgets passed. The worst of five independent 20-cycle
+  suspend/resume sequences measured 9.5711 percent raw JavaScript heap growth
+  against the 10-percent limit, with one retained renderer, zero suspended DOM,
+  zero active observer targets, and zero pending frames. The 2D plan workload
+  recorded no main-thread long tasks after pan and zoom moved to affine layer
+  transforms. The backend release microbenchmark passes every required
+  deterministic slice. A separate full run is still required on the named
+  minimum-hardware profile.
 - The seven Facility Layout flags are runtime-wired, default off, and the
   five-stage rollout matrix is exercised through the HTTP boundary.
 - The exact eight-artifact light/dark viewport matrix is complete and

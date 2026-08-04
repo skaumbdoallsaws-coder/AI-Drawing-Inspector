@@ -126,7 +126,7 @@
     "screenReaderSimulation": false
   },
   "contrastRecordsValid": true,
-  "generatedAtUtc": "2026-08-04T14:56:27Z",
+  "generatedAtUtc": "2026-08-04T18:11:02Z",
   "integrityFindings": [],
   "manualScreenReaderAudit": {
     "artifact": {
@@ -139,9 +139,9 @@
     "status": "pending"
   },
   "rawArtifact": {
-    "byteLength": 264505,
+    "byteLength": 264533,
     "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-raw.json",
-    "sha256": "afceea1d4f03c1a757fbe04d99595f02b9b5d5514f66403cf71703439887ab3a"
+    "sha256": "63def7fd02fd70604fbfbb81bcfd5e45994d162eca95af262ede8e78f2cedcf0"
   },
   "releaseGateMet": false,
   "releaseGateReason": "Automated browser evidence cannot clear the pending manual screen-reader audit.",
@@ -150,8 +150,8 @@
   "sourceBinding": {
     "aggregateMatches": true,
     "algorithmsMatch": true,
-    "capturedAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
-    "currentAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
+    "capturedAggregateSha256": "083bf780b8c3ae249281362977bcddbaee1d0405f190599c86f4b0359ea95d29",
+    "currentAggregateSha256": "083bf780b8c3ae249281362977bcddbaee1d0405f190599c86f4b0359ea95d29",
     "duplicatePaths": [],
     "matches": true,
     "missingPaths": [],

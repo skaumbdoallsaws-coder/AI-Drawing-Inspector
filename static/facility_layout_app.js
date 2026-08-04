@@ -121,6 +121,7 @@
         let spatialAdvisor = options.spatialAdvisor || null;
         let ownsSpatialAdvisor = false;
         let destroyed = false;
+        let suspended = false;
         let loadReceipt = null;
         let error = null;
 
@@ -170,6 +171,9 @@
                 onStateChange: options.onStateChange,
                 onError: options.onError,
             });
+            if (suspended && typeof workspace.suspend === 'function') {
+                workspace.suspend();
+            }
             return app;
         }).catch(function (caught) {
             if (caught && caught.code === 'facility_layout_app_destroyed') {
@@ -190,6 +194,7 @@
                 return {
                     apiVersion: API_VERSION,
                     destroyed: destroyed,
+                    suspended: suspended,
                     loaded: Boolean(workspace),
                     error: error,
                     loadReceipt: clone(loadReceipt),
@@ -200,9 +205,26 @@
                     workspace: workspace ? workspace.getState() : null,
                 };
             },
+            suspend: function () {
+                if (destroyed || suspended) return false;
+                suspended = true;
+                if (workspace && typeof workspace.suspend === 'function') {
+                    workspace.suspend();
+                }
+                return true;
+            },
+            resume: function (nextRoot) {
+                if (destroyed || !suspended) return false;
+                suspended = false;
+                if (workspace && typeof workspace.resume === 'function') {
+                    workspace.resume(nextRoot || host);
+                }
+                return true;
+            },
             destroy: function () {
                 if (destroyed) return false;
                 destroyed = true;
+                suspended = false;
                 if (workspace) workspace.destroy();
                 workspace = null;
                 if (ownsSpatialAdvisor && spatialAdvisor

@@ -27542,10 +27542,15 @@
             return _trainFacilityThreeRuntimePromise;
         }
 
-        function _trainDisposeFacilityLayoutAuthoring() {
+        function _trainDisposeFacilityLayoutAuthoring(finalDispose) {
             _trainFacilityLayoutMountGeneration += 1;
             if (_trainFacilityLayoutAuthoringApp) {
-                try { _trainFacilityLayoutAuthoringApp.destroy(); } catch (_) {}
+                const app = _trainFacilityLayoutAuthoringApp;
+                if (!finalDispose && typeof app.suspend === 'function') {
+                    try { app.suspend(); } catch (_) {}
+                    return;
+                }
+                try { app.destroy(); } catch (_) {}
             }
             _trainFacilityLayoutAuthoringApp = null;
         }
@@ -27561,10 +27566,21 @@
             if (!runtimesReady) return _trainMountLegacyFacilityLayoutViewer();
             if (_trainFacilityLayoutAuthoringApp) {
                 const appState = _trainFacilityLayoutAuthoringApp.getState();
-                if (!appState.destroyed && appState.loaded) return true;
+                if (!appState.destroyed && appState.loaded) {
+                    if (appState.suspended
+                            && typeof _trainFacilityLayoutAuthoringApp.resume
+                                === 'function') {
+                        host.innerHTML = '';
+                        const retainedRoot = _trainFacilityLayoutAuthoringApp
+                            .workspace.root;
+                        host.appendChild(retainedRoot);
+                        _trainFacilityLayoutAuthoringApp.resume(retainedRoot);
+                    }
+                    return true;
+                }
             }
 
-            _trainDisposeFacilityLayoutAuthoring();
+            _trainDisposeFacilityLayoutAuthoring(true);
             try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
             host.innerHTML = '';
             const mountGeneration = _trainFacilityLayoutMountGeneration;
@@ -27647,7 +27663,7 @@
                 if (mountGeneration !== _trainFacilityLayoutMountGeneration) {
                     return false;
                 }
-                _trainDisposeFacilityLayoutAuthoring();
+                _trainDisposeFacilityLayoutAuthoring(true);
                 return _trainMountLegacyFacilityLayoutViewer();
             }
         }

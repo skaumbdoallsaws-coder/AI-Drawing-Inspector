@@ -618,6 +618,8 @@ test('exports the classic UMD global, CommonJS API, and complete adapter contrac
     [
         'mount',
         'initialize',
+        'suspend',
+        'resume',
         'setScene',
         'setSelection',
         'setSelectionHandler',
@@ -680,6 +682,85 @@ test('renderer pool capacity limits concurrent leases and factory calls', () => 
     });
     assert.strictEqual(pool.release(first), true);
     assert.strictEqual(pool.dispose(), true);
+});
+
+test('suspend and resume preserve one scene while pausing observers and frames', async () => {
+    const pool = runtime.createRendererPool({ maximumSize: 1 });
+    const data = fixture({ rendererPool: pool });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [
+                placement('pl-a', 'asset-machine', REV_A, 0, 0, 0),
+            ],
+        },
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+    const renderer = FakeRenderer.instances.at(-1);
+    const controls = FakeControls.instances.at(-1);
+    const observer = FakeResizeObserver.instances.at(-1);
+    const disposedGeometry = FakeGeometry.totalDisposed;
+    const disposedMaterial = FakeMaterial.totalDisposed;
+
+    assert.strictEqual(data.adapter.suspend(), true);
+    assert.strictEqual(data.adapter.suspend(), false);
+    let diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.suspended, true);
+    assert.strictEqual(diagnostics.lifecycle.observerActive, false);
+    assert.strictEqual(diagnostics.demandRendering.pendingFrame, false);
+    assert.strictEqual(observer.active, false);
+    assert.strictEqual(FakeGeometry.totalDisposed, disposedGeometry);
+    assert.strictEqual(FakeMaterial.totalDisposed, disposedMaterial);
+    assert.strictEqual(pool.getDiagnostics().leasedCount, 1);
+
+    assert.strictEqual(data.adapter.resume(), true);
+    assert.strictEqual(data.adapter.resume(), false);
+    diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.suspended, false);
+    assert.strictEqual(diagnostics.lifecycle.observerActive, true);
+    assert.strictEqual(FakeRenderer.instances.length, 1);
+    assert.strictEqual(FakeControls.instances.at(-1), controls);
+    assert.strictEqual(FakeResizeObserver.instances.length, 1);
+    assert.strictEqual(renderer.disposeCount, 0);
+    data.adapter.dispose();
+    pool.dispose();
+});
+
+test('resume rebuilds a scene changed while the adapter was suspended', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [
+                placement('pl-before', 'asset-machine', REV_A, 0, 0, 0),
+            ],
+        },
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+
+    assert.strictEqual(data.adapter.suspend(), true);
+    await data.adapter.setScene({
+        layout: {
+            placements: [
+                placement('pl-after', 'asset-machine', REV_A, 12, 0, 4),
+            ],
+        },
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+    let diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.suspended, true);
+    assert.strictEqual(diagnostics.placementCount, 1);
+
+    assert.strictEqual(data.adapter.resume(), true);
+    await settleAsync();
+    diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.suspended, false);
+    assert.deepStrictEqual(
+        diagnostics.representationGroups.flatMap(group => group.placementIds),
+        ['pl-after']
+    );
+    assert.strictEqual(diagnostics.pendingLoads, 0);
+    data.adapter.dispose();
 });
 
 test('resolves every asset progressively in the required deterministic order', async () => {

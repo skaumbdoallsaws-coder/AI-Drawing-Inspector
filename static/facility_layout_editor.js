@@ -491,6 +491,7 @@
         this.layout = null;
         this.geometry = null;
         this.projection = null;
+        this.renderProjection = null;
         this.ghostPlacement = null;
         this.proposalPreview = null;
         this.selection = null;
@@ -499,6 +500,7 @@
         this.renderCount = 0;
         this.observerCount = 0;
         this.disposed = false;
+        this.suspended = false;
 
         this.svg = svgElement(this.document, 'svg');
         setAttributes(this.svg, {
@@ -515,18 +517,25 @@
         this.svg.addEventListener('keydown', this._handleKeyPick);
         this.host.appendChild(this.svg);
 
-        const ResizeObserverCtor = this.options.ResizeObserver
+        this.ResizeObserverCtor = this.options.ResizeObserver
             || (root && root.ResizeObserver);
-        if (typeof ResizeObserverCtor === 'function') {
-            this.resizeObserver = new ResizeObserverCtor(function () {
+        this.resizeObserver = null;
+        this.resizeObserverActive = false;
+        this._observeHost();
+    }
+
+    TopPlanAdapter.prototype._observeHost = function () {
+        if (this.disposed || this.suspended || this.resizeObserverActive
+                || typeof this.ResizeObserverCtor !== 'function') return;
+        if (!this.resizeObserver) {
+            this.resizeObserver = new this.ResizeObserverCtor(function () {
                 if (!this.disposed) this.fit();
             }.bind(this));
-            this.resizeObserver.observe(this.host);
-            this.observerCount = 1;
-        } else {
-            this.resizeObserver = null;
         }
-    }
+        this.resizeObserver.observe(this.host);
+        this.resizeObserverActive = true;
+        this.observerCount = 1;
+    };
 
     TopPlanAdapter.prototype._measure = function () {
         if (typeof this.options.getSize === 'function') {
@@ -549,12 +558,13 @@
     };
 
     TopPlanAdapter.prototype._render = function () {
-        if (this.disposed || !this.svg) return;
+        if (this.disposed || this.suspended || !this.svg) return;
         const size = this._measure();
         setAttributes(this.svg, {
             viewBox: '0 0 ' + size.width + ' ' + size.height,
         });
         removeChildren(this.svg);
+        this.renderProjection = null;
         this.renderCount += 1;
         if (!this.layout) return;
 
@@ -758,6 +768,37 @@
             ghostLayer.appendChild(ghost);
             this.svg.appendChild(ghostLayer);
         }
+        this.renderProjection = Object.freeze(Object.assign(
+            {},
+            this.projection
+        ));
+    };
+
+    TopPlanAdapter.prototype._applyProjectionTransform = function () {
+        if (this.disposed || this.suspended || !this.svg
+                || !this.projection || !this.renderProjection) return false;
+        const current = this.projection;
+        const rendered = this.renderProjection;
+        if (current.minX !== rendered.minX
+                || current.maxZ !== rendered.maxZ
+                || !finite(current.scale)
+                || !finite(rendered.scale)
+                || rendered.scale <= 0) return false;
+        const scale = current.scale / rendered.scale;
+        const translateX = current.offsetX - rendered.offsetX * scale;
+        const translateY = current.offsetY - rendered.offsetY * scale;
+        if (!finite(scale) || !finite(translateX) || !finite(translateY)) {
+            return false;
+        }
+        const transform = 'matrix(' + scale + ' 0 0 ' + scale + ' '
+            + translateX + ' ' + translateY + ')';
+        Array.prototype.forEach.call(this.svg.children, function (layer) {
+            if (layer && typeof layer.setAttribute === 'function') {
+                layer.setAttribute('transform', transform);
+            }
+        });
+        this.renderCount += 1;
+        return true;
     };
 
     TopPlanAdapter.prototype._handlePick = function (event) {
@@ -933,7 +974,7 @@
             offsetX: this.projection.offsetX + finiteOr(deltaX, 0),
             offsetY: this.projection.offsetY + finiteOr(deltaY, 0),
         }));
-        this._render();
+        if (!this._applyProjectionTransform()) this._render();
         return true;
     };
 
@@ -954,7 +995,7 @@
             offsetX: planPoint.x - (world.x - this.projection.minX) * scale,
             offsetY: planPoint.y - (this.projection.maxZ - world.z) * scale,
         }));
-        this._render();
+        if (!this._applyProjectionTransform()) this._render();
         return true;
     };
 
@@ -991,7 +1032,9 @@
         return {
             id: this.id,
             type: this.type,
-            mounted: !this.disposed && !!this.svg && this.svg.parentNode === this.host,
+            mounted: !this.disposed && !this.suspended
+                && !!this.svg && this.svg.parentNode === this.host,
+            suspended: this.suspended,
             observerCount: this.observerCount,
             renderCount: this.renderCount,
             selection: this.selection,
@@ -1013,11 +1056,30 @@
         };
     };
 
+    TopPlanAdapter.prototype.suspend = function () {
+        if (this.disposed || this.suspended) return false;
+        this.suspended = true;
+        if (this.resizeObserver) this.resizeObserver.disconnect();
+        this.resizeObserverActive = false;
+        this.observerCount = 0;
+        return true;
+    };
+
+    TopPlanAdapter.prototype.resume = function () {
+        if (this.disposed || !this.suspended) return false;
+        this.suspended = false;
+        this._observeHost();
+        this._render();
+        return true;
+    };
+
     TopPlanAdapter.prototype.dispose = function () {
         if (this.disposed) return;
         this.disposed = true;
+        this.suspended = false;
         if (this.resizeObserver) this.resizeObserver.disconnect();
         this.resizeObserver = null;
+        this.resizeObserverActive = false;
         this.observerCount = 0;
         if (this.svg) {
             this.svg.removeEventListener('click', this._handlePick);
@@ -1029,6 +1091,7 @@
         this.layout = null;
         this.geometry = null;
         this.projection = null;
+        this.renderProjection = null;
         this.ghostPlacement = null;
         this.proposalPreview = null;
     };
@@ -1059,6 +1122,7 @@
         this.pendingViewUpdates = [];
         this.viewUpdateGeneration = 0;
         this.disposed = false;
+        this.suspended = false;
         const adapters = parsed.options.adapters || parsed.options.views || [];
         if (!Array.isArray(adapters)) {
             throw new TypeError('facility layout adapters must be an array');
@@ -1183,6 +1247,7 @@
 
     FacilityLayoutEditorController.prototype.fit = function () {
         this._assertActive();
+        if (this.suspended) return [];
         const results = [];
         this.views.forEach(function (entry) {
             if (typeof entry.adapter.fit === 'function') {
@@ -1190,6 +1255,31 @@
             }
         });
         return results;
+    };
+
+    FacilityLayoutEditorController.prototype.suspend = function () {
+        this._assertActive();
+        if (this.suspended) return false;
+        this.suspended = true;
+        this.views.forEach(function (entry) {
+            if (typeof entry.adapter.suspend === 'function') {
+                entry.adapter.suspend();
+            }
+        });
+        return true;
+    };
+
+    FacilityLayoutEditorController.prototype.resume = function () {
+        this._assertActive();
+        if (!this.suspended) return false;
+        this.suspended = false;
+        this.views.forEach(function (entry) {
+            if (typeof entry.adapter.resume === 'function') {
+                entry.adapter.resume();
+            }
+        });
+        this._notifySelection();
+        return true;
     };
 
     FacilityLayoutEditorController.prototype.getState = function () {
@@ -1216,6 +1306,7 @@
         return {
             apiVersion: API_VERSION,
             disposed: this.disposed,
+            suspended: this.suspended,
             layout: clone(this.layout),
             layoutId: this.layout && this.layout.layoutId || null,
             selectedPlacementId: this.selection,
@@ -1248,6 +1339,7 @@
         this.viewUpdateGeneration += 1;
         this.assetCatalog = [];
         this.selection = null;
+        this.suspended = false;
         this.disposed = true;
     };
 

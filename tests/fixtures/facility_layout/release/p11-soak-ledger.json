@@ -2,25 +2,25 @@
   "acceleratedDeterministicSoak": {
     "canonicalReceipts": [
       {
-        "canonicalReceiptSha256": "29dd69fdd72e7533facaddb17a9e247c4a5d890200b1baa172ee2c25f0269e7d",
+        "canonicalReceiptSha256": "0810c782c6db89e379a3e496651c17730c6ce066198e28b7a8c0a8e15b4f4922",
         "layoutId": "fl-p11-soak-01",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "5156e7ca57adab6158cb100e2e2e53bfaf3cd42e8dc16b7f2c8e071c2f5c2c8d",
+          "approvalFingerprint": "f81752a71d5c419346de20219bef0f5d4ab325f7a577c0fc68bc6e533f8728a3",
           "binding": {
-            "baseRevision": "7d6754250a3eebde31e4e4ddf7fd7e94c1477f510d75733301f25212c99c006b",
-            "dependencyFingerprint": "4c4cd4b8861e88c8274126af690571b9857493e088b83a093528c35b769fb4a9",
-            "diffHash": "fdbca4da99b30c2ae3653fab60d56aa178be8ad0495e447b54d2f07d2aca6df4",
+            "baseRevision": "7cffae69a356bea6216df5f32258a0148dc913769d918b04f16ded1cfab6520c",
+            "dependencyFingerprint": "61094ecad39a346390b2ddbc017935de5ce57f6fcedb7088f0e7c77dfaa15f74",
+            "diffHash": "0da222974659a6664a2888f8ccd83bb0424c626d902c3f89a8e5373d3ca1432a",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-01",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857578.4171515,
+          "createdAt": 1785867106.4524605,
           "idempotencyKey": "p11-approved-apply-01",
           "payload": {
-            "alternativeId": "fla-p8-f1b51fc14717a1babfa26036",
+            "alternativeId": "fla-p8-1dbcb2329f2c67d8cf8713db",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -65,25 +65,25 @@
                 "pl-p8-f10c9b4f9f362800bc59"
               ],
               "canonicalDiff": {
-                "afterRevision": "3eaa35d865aa59fcd783d839eda62da90a60f206e164cf0ab2278d4fcc842ab1",
-                "beforeRevision": "7d6754250a3eebde31e4e4ddf7fd7e94c1477f510d75733301f25212c99c006b",
+                "afterRevision": "59a1d4dec46f93b11c1925127ed3250ed4325f0d92e6867937e069e9efeff557",
+                "beforeRevision": "7cffae69a356bea6216df5f32258a0148dc913769d918b04f16ded1cfab6520c",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "6ca69c33391cdde30cfcb177cb9b8323db8fe96ea669bb7781eaabf59aaabefe"
                 },
                 "schemaVersion": 1,
-                "sha256": "e23080903f474b6bf8b023f0a668edebfc7f030ff7868f5132866c99a89a5809"
+                "sha256": "2dc472d32f1e5ad675f5c2b59053f362320aa464faf73c52cbc99a1a24298e1a"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-eb23b1e9e5fad6715494",
                 "pl-p8-f10c9b4f9f362800bc59"
               ],
-              "diffHash": "fdbca4da99b30c2ae3653fab60d56aa178be8ad0495e447b54d2f07d2aca6df4",
+              "diffHash": "0da222974659a6664a2888f8ccd83bb0424c626d902c3f89a8e5373d3ca1432a",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:32:57.930438Z",
-                "updatedAt": "2026-08-04T15:32:57.930438Z"
+                "createdAt": "2026-08-04T18:11:46.018641Z",
+                "updatedAt": "2026-08-04T18:11:46.018641Z"
               },
               "findings": {
                 "count": 0,
@@ -175,35 +175,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:f5b0d3c866e53b57e52d536fabe301e5"
           },
-          "proposalId": "flp-5ac961694b909cce65ede17fd8e9fe100a601bf0ac96e21777a4e18b98f669bc",
-          "receiptId": "flr-jtbjvTvC80EHPAN6gk-uCbReUyIjJFLw",
-          "requestFingerprint": "7d0b2bec48b68cfeabdd15ea3b6b599ebf13605fddb827b664de59c8aea38833",
-          "revision": "4c0001dec67e94e7f87461410bd3951f4bf1d56ca201dae9a41cfd6c22a9da05"
+          "proposalId": "flp-08fee7d30b37a4ed0ba732cf1259d554feaa2f68dd22fc21f95a611c83c7d33d",
+          "receiptId": "flr-zVEf5FVgqLpY5OTxUxzv2m4TUm7XEo2D",
+          "requestFingerprint": "ac0a836ab9c409d63bc49ccb0b5212bd2738e39e742278efcf1a933d49bae6a2",
+          "revision": "bddc1584a3bf48017358ecb12699034d492febb1b26139b0f24f662ac972cae6"
         },
-        "receiptId": "flr-jtbjvTvC80EHPAN6gk-uCbReUyIjJFLw",
+        "receiptId": "flr-zVEf5FVgqLpY5OTxUxzv2m4TUm7XEo2D",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "a3b70e3a49c653df720c956a55870163ffdd1b7b666f1c21be3418c19c25f47d",
+        "canonicalReceiptSha256": "c0c21f494d70afcf46c7458eee81fe1a513a2b41ecdb0a1e3f9208b6e2e70c7d",
         "layoutId": "fl-p11-soak-02",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "7aae77f216c581bab276288eb80c32df6fd37ba1199271124e7a6ecce081d576",
+          "approvalFingerprint": "ec62bdd1ee356952023f705f9df278e7e3b8d3ba7e7e21add6fdca33308f3059",
           "binding": {
-            "baseRevision": "e555112c67131f52f08eda9f00743acd42eb96472826b5139da3058dc38a96f9",
-            "dependencyFingerprint": "5ec93e12c25cc2ad58c5ba2be740648fe41685e65bfb7d30ad71029ccff9394f",
-            "diffHash": "e1257c63982b0e2165f590a45cb0f9d084fba365783aff331787b6fefe468204",
+            "baseRevision": "d232c2bb303b8dd329627942fbc408fe61bca2cbcf3b11371fcbe6cf7d0001fe",
+            "dependencyFingerprint": "7afa5264f422ff7a1b9a096b07864f06ab1dcb9a2bdeed8af9a9cec84b72cb03",
+            "diffHash": "a7719786a9326b3be3278b39e6fbed64ad8db2e992cf09069ae80ea3665e7f98",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-02",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857578.9431655,
+          "createdAt": 1785867106.9736476,
           "idempotencyKey": "p11-approved-apply-02",
           "payload": {
-            "alternativeId": "fla-p8-195b55c23adf1142f4eea92a",
+            "alternativeId": "fla-p8-c5436a33d062622b21b1fcbe",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -248,25 +248,25 @@
                 "pl-p8-58dab005fc85b4920c19"
               ],
               "canonicalDiff": {
-                "afterRevision": "36a6be1f55a386a3dacd5171bc31ecc614f1c185b2f47503a73b1efeda1d943a",
-                "beforeRevision": "e555112c67131f52f08eda9f00743acd42eb96472826b5139da3058dc38a96f9",
+                "afterRevision": "61ec597cca419d0f474778f77702b678cd00d3817275a770831743be419f5e44",
+                "beforeRevision": "d232c2bb303b8dd329627942fbc408fe61bca2cbcf3b11371fcbe6cf7d0001fe",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "d34523a7c00e7f6a8403ea57d1bb4a21769ab7d79cb5f04e2ae7ba6f2441e082"
                 },
                 "schemaVersion": 1,
-                "sha256": "072a2f2f9187c98db16029c462e9e1aabb121d25ed0d6dc7a51a28038a4c4214"
+                "sha256": "9e6038f91ccc4bf9edf00a794f606ae8ad2d704e6667a73396b17a8e5bad442e"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-36027f3fd0218ba1d17d",
                 "pl-p8-58dab005fc85b4920c19"
               ],
-              "diffHash": "e1257c63982b0e2165f590a45cb0f9d084fba365783aff331787b6fefe468204",
+              "diffHash": "a7719786a9326b3be3278b39e6fbed64ad8db2e992cf09069ae80ea3665e7f98",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:32:58.477725Z",
-                "updatedAt": "2026-08-04T15:32:58.477725Z"
+                "createdAt": "2026-08-04T18:11:46.487880Z",
+                "updatedAt": "2026-08-04T18:11:46.487880Z"
               },
               "findings": {
                 "count": 0,
@@ -358,35 +358,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:f3a7bf7db7a4ca13c8dd3eb7c77e0f46"
           },
-          "proposalId": "flp-62e3d044782b77a2558274c46552ca527bdb670ad457100272df1c0b5b462117",
-          "receiptId": "flr-jI8thNf5GLxHtWIr3mpXmBaFlwhlMwps",
-          "requestFingerprint": "079860248da86ac4986fd604b12b37617dab5a7a3f5dfccf1f43f4fbf95fa0b0",
-          "revision": "0478899976c59d76c8449988abe6fba414ccc1fedbf43598b3d66a78cce6d8cc"
+          "proposalId": "flp-30541fea53848be890dcefb643d9c5ae278a5006f3374ccc994b1f46b0d04ba6",
+          "receiptId": "flr-lsfxUMj3aCUKGNIeYhl88fcyCm0qQ7rR",
+          "requestFingerprint": "a8aafee81770e57d3f4605368a9a45641f10b03629d3097aac786b15828c0f61",
+          "revision": "6a6ef3165ed93e317be5d4d2e85f323a867a434c9167ce4ad7d580b74374ddb1"
         },
-        "receiptId": "flr-jI8thNf5GLxHtWIr3mpXmBaFlwhlMwps",
+        "receiptId": "flr-lsfxUMj3aCUKGNIeYhl88fcyCm0qQ7rR",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "fbdf474dca3313405dcfa9f89bbc74c83536087e1a9b283d33063990290e4399",
+        "canonicalReceiptSha256": "244f1b249a3ef712b64d2391350f82b374adf28944a9d2ee13190d3bdc6b11cf",
         "layoutId": "fl-p11-soak-03",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "bb78c6c16595155fed77a29fe1f82a61664a5913e4d858e5f2510bfe2fec9cce",
+          "approvalFingerprint": "e293de3ea37515ca1a3b624e458d99aaec1e54de8866b4f996401a5218a53a13",
           "binding": {
-            "baseRevision": "0997cf42a9036c7f70d46e8e475f9eda62fdc757d4087f927a1cf520189df692",
-            "dependencyFingerprint": "3a64e290970ab1d08f5b267e5470e9d3afc55e2ea16524f808e878d7f9815e01",
-            "diffHash": "8b0425307e4432f8b8568e417b00cf81f13f9dac20e7b52e0a352f7688b52db7",
+            "baseRevision": "69431f40803d43e5f08381ea0225e94f1af577f6de03a5c4e47fd412b244ff57",
+            "dependencyFingerprint": "dc8f7a27c55f82a09d5ae51406e1b8f2dc6735e8daf34882fb8f997855068cf0",
+            "diffHash": "b4d0eb379fe602fed8596d6a5053794fd539ccf07bec0862e9b74ad5285585e2",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-03",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857579.4764187,
+          "createdAt": 1785867107.3354077,
           "idempotencyKey": "p11-approved-apply-03",
           "payload": {
-            "alternativeId": "fla-p8-4622da3484753f0664fee4db",
+            "alternativeId": "fla-p8-10819452ac033ca4fcc71e6b",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -431,25 +431,25 @@
                 "pl-p8-c2233c249ae50655e7f9"
               ],
               "canonicalDiff": {
-                "afterRevision": "78ec714bab8a04543b8798fe39c35713c3f177d75d048ca8d792a833beb693e1",
-                "beforeRevision": "0997cf42a9036c7f70d46e8e475f9eda62fdc757d4087f927a1cf520189df692",
+                "afterRevision": "3716f055d8c0b838a08f70d7b5f678fea60e7f54e7c82ddf6b79ba296dc17079",
+                "beforeRevision": "69431f40803d43e5f08381ea0225e94f1af577f6de03a5c4e47fd412b244ff57",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "8f1ca5379864f29c6e0d36422f6ad13999f5ce822d8c1f2742efd120af620c2d"
                 },
                 "schemaVersion": 1,
-                "sha256": "02e442b52e5cba73dc9ef8bec744d0820ceb33f57982508ce15e2902b2b42d06"
+                "sha256": "7f5fa760fceeef77a0233f28922da83ccae12934de13bde9f60a7d4069a1a213"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-2ca7b4b31f50c648d390",
                 "pl-p8-c2233c249ae50655e7f9"
               ],
-              "diffHash": "8b0425307e4432f8b8568e417b00cf81f13f9dac20e7b52e0a352f7688b52db7",
+              "diffHash": "b4d0eb379fe602fed8596d6a5053794fd539ccf07bec0862e9b74ad5285585e2",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:32:59.001418Z",
-                "updatedAt": "2026-08-04T15:32:59.001418Z"
+                "createdAt": "2026-08-04T18:11:47.019808Z",
+                "updatedAt": "2026-08-04T18:11:47.019808Z"
               },
               "findings": {
                 "count": 0,
@@ -541,35 +541,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:fb811e523470fe1a6d9b81dd3667e704"
           },
-          "proposalId": "flp-0d5a69deb030447a3af359f82ea20a84d1b7cab569d468b32e08d482974d432f",
-          "receiptId": "flr-Fubmee-q9gV4s7Dr_vSnwxD3qiLaWETS",
-          "requestFingerprint": "a04dc0b0ddddba0965aaf8be824a0d08bfe12c09e2dd96c15d42361859984222",
-          "revision": "ab5e4d8bde3c72f0eeef15b2e1c17883d17ef7f40afc96db2b641db53f79962a"
+          "proposalId": "flp-e96939c4ed9521d415cd3cbddd4f19e9bbd1961eceec397e10a493a289a698ab",
+          "receiptId": "flr-IQo5kMeL8_u3BWwHrCLG2Hq3waP9Tpdd",
+          "requestFingerprint": "3e0aaa51ea85cd56540661e2ddf0125899fb55d52e7d189909a49a8aa22445e6",
+          "revision": "0d2146767d20d2ff5611f7a788838d72f8c12062d4da18005c1fa1db6e7068c8"
         },
-        "receiptId": "flr-Fubmee-q9gV4s7Dr_vSnwxD3qiLaWETS",
+        "receiptId": "flr-IQo5kMeL8_u3BWwHrCLG2Hq3waP9Tpdd",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "9a7aed9b14ba51e64a2db81736909877397e714a9b2c2ab2fc40bb353903d1f9",
+        "canonicalReceiptSha256": "157181c8f76b47967cf7adf85deba45814cbad1731e9156e99444799bba590e1",
         "layoutId": "fl-p11-soak-04",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "b0f5d631e46e88c0364e5a4f7dddb719110b35378d3d9c7d5cf58f027c877ec9",
+          "approvalFingerprint": "bda56aff5dffff6104553058858cbd439616dc21ca1c744e83698e762d2d3eb2",
           "binding": {
-            "baseRevision": "cee2e3aee61580ba1343c55110f8f07909c684bb1bf622499a61a4528855c2b9",
-            "dependencyFingerprint": "1599e066575f6c008892fb83ff9fa45ee4ca2bb3c656aabe0ffecd07b2b59ee8",
-            "diffHash": "ef78de78858f1777266831c5d2d40ae9a18bc66865215477adeb3568de55c6e9",
+            "baseRevision": "a2cb3a17a633ace42fe4012e12a99f581a538b73c1d4ba850b07358ff8d48af2",
+            "dependencyFingerprint": "071e858c6633bce21de9aa8778ebb3a252142372ef510fbeb3038a6574dddb82",
+            "diffHash": "28f147b27beaa75431806e0e4b58baf210474d7a723ce7d83fd79dc1c2e0932c",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-04",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857580.0545738,
+          "createdAt": 1785867107.6897275,
           "idempotencyKey": "p11-approved-apply-04",
           "payload": {
-            "alternativeId": "fla-p8-18399dc16fbd8954c5e63edf",
+            "alternativeId": "fla-p8-5996ac14be1f0f6f09d3fba6",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -614,25 +614,25 @@
                 "pl-p8-d533357c9a7cf36b22d3"
               ],
               "canonicalDiff": {
-                "afterRevision": "0a86aa3b2682918dac7f9c2454ed615ac9daa0190c0f0fec936565cd46354665",
-                "beforeRevision": "cee2e3aee61580ba1343c55110f8f07909c684bb1bf622499a61a4528855c2b9",
+                "afterRevision": "08e46c878a3d27d85cf684a62c51bf4e6921078589077d19ea61b340cc187a37",
+                "beforeRevision": "a2cb3a17a633ace42fe4012e12a99f581a538b73c1d4ba850b07358ff8d48af2",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "573eafa82d7d534c569eb717ce94b87e9cd4c96f340e84f815551b7f30dd6465"
                 },
                 "schemaVersion": 1,
-                "sha256": "586c444f7726669d3ffb3ddcebb5ce7d5e8368dc029c6afb4ea1692dea3f54b6"
+                "sha256": "2b2735f0bbd69c6d4bb073eeb31fa5f1411c118178e0a9bfa35c272ff4a557c4"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-02f8cc2d44f9616cf6cd",
                 "pl-p8-d533357c9a7cf36b22d3"
               ],
-              "diffHash": "ef78de78858f1777266831c5d2d40ae9a18bc66865215477adeb3568de55c6e9",
+              "diffHash": "28f147b27beaa75431806e0e4b58baf210474d7a723ce7d83fd79dc1c2e0932c",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:32:59.527441Z",
-                "updatedAt": "2026-08-04T15:32:59.527441Z"
+                "createdAt": "2026-08-04T18:11:47.377993Z",
+                "updatedAt": "2026-08-04T18:11:47.377993Z"
               },
               "findings": {
                 "count": 0,
@@ -724,35 +724,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:49e1da7f193e3d434dca486cc93c557b"
           },
-          "proposalId": "flp-19e4d98a5d6c1f8cab1010a80f4d8524af221afc548ce2909bf192bba84f7416",
-          "receiptId": "flr-9oJAtkbTzl0BnroC2TbxHkcnoMAFf7HR",
-          "requestFingerprint": "987c063ebab3b2a1a2bdf69aead64ae591913b5be31173568e472754a5805345",
-          "revision": "f2c589aa1f720156a15b5ec8d16df6f68b7a998567b55e8c6e6c39bac4aac8df"
+          "proposalId": "flp-1d586f8623fc4c7ea3f5dbd978f921f0463b90e87e00df4a18d088efd3b990e9",
+          "receiptId": "flr-ZTAWEpd8AAqgdrr1S-vxLdkEW4rCjKGR",
+          "requestFingerprint": "4de9944c88fc90c50b2505733d3bcaafa1920160709d3636443f3109bc7293ca",
+          "revision": "56f0c6e859449f198cd8d30b361d6d07c50fab44f28e91e6e6b98f27edad3ff9"
         },
-        "receiptId": "flr-9oJAtkbTzl0BnroC2TbxHkcnoMAFf7HR",
+        "receiptId": "flr-ZTAWEpd8AAqgdrr1S-vxLdkEW4rCjKGR",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "d3144b031c73f409ac086dcd3b3a17ad8a3c8584419cbcd1cfab93ea2cbd6fa2",
+        "canonicalReceiptSha256": "9e41dd2f48ed43d2c56a123143c1ef1b44151c65ecbee18a26942e01bd661216",
         "layoutId": "fl-p11-soak-05",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "24b7e8f505ca2e58bd863c1a30cade1f800ad9a31a38dac856662f2f6adf6b65",
+          "approvalFingerprint": "d7e82351a69bd6811983259e8e77dd27b9233c72ad00b44f02a7e342b3e0c513",
           "binding": {
-            "baseRevision": "1a0cded3823a72fc4cc41f6527f3418e416ffdebb34fe6af12a8d20f78fe2ca2",
-            "dependencyFingerprint": "84e43467b2b80ef44cb4ceb829f9177599205481b3a0d73c92c19d8a95e6e672",
-            "diffHash": "4afc8215a8858ded6efd96b6c2d70fd192d916c83244953952816db93ab3a565",
+            "baseRevision": "555f4ec998b80055955c4eed8f5d548cc7d426af4561789a0ccb76bab05aed7f",
+            "dependencyFingerprint": "eb07031bfd6f66e7f618c5d1041b037a4e5782d51a8839168f3a5a97d11cfaca",
+            "diffHash": "73c8694640c03d2e4428a8f2a710cc3cdb012e0caa3d957dfd4c605c6c9016e1",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-05",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857580.5924954,
+          "createdAt": 1785867108.0632143,
           "idempotencyKey": "p11-approved-apply-05",
           "payload": {
-            "alternativeId": "fla-p8-f110665edd427bc86ef475cb",
+            "alternativeId": "fla-p8-7b10e28c9772b49e11a7304a",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -797,25 +797,25 @@
                 "pl-p8-1655adfa9b760873459a"
               ],
               "canonicalDiff": {
-                "afterRevision": "8144dd02d47fe745242387d8f7ca6362c31347f1eed212b93e62057be558048e",
-                "beforeRevision": "1a0cded3823a72fc4cc41f6527f3418e416ffdebb34fe6af12a8d20f78fe2ca2",
+                "afterRevision": "255407f39581e8be3ddb0fe1a3a1878a75d15db4cb03edbf8bf32505fb3a5c69",
+                "beforeRevision": "555f4ec998b80055955c4eed8f5d548cc7d426af4561789a0ccb76bab05aed7f",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "0cf83b1d80d077dc25869d1e480871def7a333eaee16e9d397ff7677f863c455"
                 },
                 "schemaVersion": 1,
-                "sha256": "d6ea24cfead4b55df7fb92d8043dee526b9dc859038a9b82b93b2a4b38be3329"
+                "sha256": "3c58d92fc72cedf5d24a05b6ff842e144ffd978b06e17359bafeb34a8a264201"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-032641513b6e9d12754c",
                 "pl-p8-1655adfa9b760873459a"
               ],
-              "diffHash": "4afc8215a8858ded6efd96b6c2d70fd192d916c83244953952816db93ab3a565",
+              "diffHash": "73c8694640c03d2e4428a8f2a710cc3cdb012e0caa3d957dfd4c605c6c9016e1",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:33:00.146158Z",
-                "updatedAt": "2026-08-04T15:33:00.146158Z"
+                "createdAt": "2026-08-04T18:11:47.723452Z",
+                "updatedAt": "2026-08-04T18:11:47.723452Z"
               },
               "findings": {
                 "count": 0,
@@ -907,35 +907,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:371da4e5d7534c1a5b63b35307143f5f"
           },
-          "proposalId": "flp-9ea67f0bf20e86ac81d678b8f79fff437b55475a409d94a730788a0892a0aaf3",
-          "receiptId": "flr-RaKkjdtp2wFDp0JI4A1rHjmSQnHExXWC",
-          "requestFingerprint": "587d8a9323f3d05292baf86611ab9834aa3a617ced9b9540a61446610d8397e6",
-          "revision": "cc468e3cb77ba730174b93e77e00748b4ea71e25d668fe0ceed44979b489ca51"
+          "proposalId": "flp-4172378239a9cf0040a5fbeec94de329102b2010a427e14acf8821f8e6b83c58",
+          "receiptId": "flr-jYs7oGjjU_yoBxGsJBAtgWPc6yIuRgnC",
+          "requestFingerprint": "74c54daae594866c162a2054ab1a0108ef76b599c87809a8452798759b67b0d8",
+          "revision": "2b591b6980f6c12132b6acb0c6178f140ae7ac69fb8888eeedba811cc9d75d77"
         },
-        "receiptId": "flr-RaKkjdtp2wFDp0JI4A1rHjmSQnHExXWC",
+        "receiptId": "flr-jYs7oGjjU_yoBxGsJBAtgWPc6yIuRgnC",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "726da068578a16b48de36818ee63fef08676b40b623515d15a587b317e9b8d26",
+        "canonicalReceiptSha256": "8c2da6e8ac032a5c546b049d4f881cd9afbf9815839a19225709bad0b2233fe5",
         "layoutId": "fl-p11-soak-06",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "29b19b805ab2db811d72771495a629288aeb0760e47f77adc71dfc0afeaa6c9e",
+          "approvalFingerprint": "47868790bba6dd1f8e5cd6cca32e102f7ee5605e1194fab0a5a07d310dbbbd6f",
           "binding": {
-            "baseRevision": "b4de3af3b950e44c559249ac87e4c86150e3439487e2314630e2797863d7ce60",
-            "dependencyFingerprint": "6cc9c43965507208136854e5d4d7dc712ba20d2fe5f2a30e00b070f6bdaf5f8e",
-            "diffHash": "11aa1bbd854d2b0c8f99674f8ad37d320eb7c5842b1d17ee81d0778b8dc77658",
+            "baseRevision": "7b59a9696505bd4edcc64031a67479e8debc799faadd51e9273e17ce0556fa35",
+            "dependencyFingerprint": "8bedae2934b8deeed732e3069c09e983cb697a877a2a4773db1001f61c66ab79",
+            "diffHash": "5347390e653b9cc158a992057853ec14bd2dbdeecabc4ffda051829cbbbd3ab1",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-06",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857581.076252,
+          "createdAt": 1785867108.4681628,
           "idempotencyKey": "p11-approved-apply-06",
           "payload": {
-            "alternativeId": "fla-p8-c5daf0950018ec83cb398365",
+            "alternativeId": "fla-p8-3156b6c26c7139e2e85c5a21",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -980,25 +980,25 @@
                 "pl-p8-a59a477fb59029462a1f"
               ],
               "canonicalDiff": {
-                "afterRevision": "49c26270f6670c111b258455b54405d3f0a100f603d72d96a24a01a0485c31e8",
-                "beforeRevision": "b4de3af3b950e44c559249ac87e4c86150e3439487e2314630e2797863d7ce60",
+                "afterRevision": "ac1bb41fc4a0d39d732784ca9e5d8092932e979432e0b898f8c946fd8dcd8bac",
+                "beforeRevision": "7b59a9696505bd4edcc64031a67479e8debc799faadd51e9273e17ce0556fa35",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "396f06eb25d417111ecaffe67c48082cf0f17a932d3ef25dacd99722ce68f314"
                 },
                 "schemaVersion": 1,
-                "sha256": "741cebf1f680775cfb9693577e266059285da8a5fd73b1ff25a5db16bb619158"
+                "sha256": "a04d3b42bfd5f52f95ab76abd3aabc32383d66cb8b5ba1af764bdddf32fcd77c"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-48fb08d49ec655ae110f",
                 "pl-p8-a59a477fb59029462a1f"
               ],
-              "diffHash": "11aa1bbd854d2b0c8f99674f8ad37d320eb7c5842b1d17ee81d0778b8dc77658",
+              "diffHash": "5347390e653b9cc158a992057853ec14bd2dbdeecabc4ffda051829cbbbd3ab1",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:33:00.647990Z",
-                "updatedAt": "2026-08-04T15:33:00.647990Z"
+                "createdAt": "2026-08-04T18:11:48.110704Z",
+                "updatedAt": "2026-08-04T18:11:48.110704Z"
               },
               "findings": {
                 "count": 0,
@@ -1090,35 +1090,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:ec7413a7570707b52a9d20e4c29ed883"
           },
-          "proposalId": "flp-1785ff84dc1fc4668f85a342f19fe9c29e382c6554be1c5d5f9387e5c441bc8c",
-          "receiptId": "flr-rHDJOjPLxIFGcD1YedjLUNxwlXtIHX-e",
-          "requestFingerprint": "f0bf97bcdebad525a4c2e4185891d9c6eebf3b165774b54b947d141e4cbb9bf3",
-          "revision": "f1798995858ece3140ec2157922bd85a07cb83fdb37f0bcc24fe1bf7757b9235"
+          "proposalId": "flp-7ae7b099ceaaff3a38e10ba6309938003e7ee0c8447c3acdc9d194c17b54bdff",
+          "receiptId": "flr-kttk0Y9Xt0YnZh9VxcAuUnzC1tjQetKW",
+          "requestFingerprint": "953bb8e52a9c45de7771ce2ebf29f23e17da52583fdfb918db489dfceb3aecf6",
+          "revision": "d5b2b21779d2f980ad5e0035772ec2c5f7b8780e8098a81a4b4e6ad707d01253"
         },
-        "receiptId": "flr-rHDJOjPLxIFGcD1YedjLUNxwlXtIHX-e",
+        "receiptId": "flr-kttk0Y9Xt0YnZh9VxcAuUnzC1tjQetKW",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "cdd824dceab7f5cfd4c04fc5781f2f81ed7d38434f08b50f180d0fc22290e29c",
+        "canonicalReceiptSha256": "d2e48992e942193453659e7af3a989a96e64519ca345b2d6564d816ae8179e3a",
         "layoutId": "fl-p11-soak-07",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "683b1e7b204aa2b649a24b178a537a01e1b475c69286dda1cb14307403e86b66",
+          "approvalFingerprint": "de1ed3d5dd6814df5fdf1d2f45ee90057f0f47768693f520e5dacfa94cc08cec",
           "binding": {
-            "baseRevision": "af0bad51c7d7153e379e13f78e5577107aff1d1ae40eb2cf1d1b535ae12e783f",
-            "dependencyFingerprint": "785c2837af593d3c9c4f1be8513d4e5ac8f58c384948e632407ca2f15c66bfea",
-            "diffHash": "800a3c0b7522046666aafd64b05adad33f5fc6eaf05181f98632b45e5ee003c0",
+            "baseRevision": "990f995a0bd7db6e49a06d50b5f4becb14f1abcb9e854999e93dfcbdbac12867",
+            "dependencyFingerprint": "3915efe81a5c4c229e07f3b03d382b4cdf1c9486457f2267bc6dc3167db86dcd",
+            "diffHash": "d1e3eebec0d96df4c698d388dd315141e6cc3e9582657e89f2d7c859b05bfc9d",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-07",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857581.6730566,
+          "createdAt": 1785867108.9014232,
           "idempotencyKey": "p11-approved-apply-07",
           "payload": {
-            "alternativeId": "fla-p8-9681a7465883a56ab0b33caf",
+            "alternativeId": "fla-p8-a8377d33f12299e7472c44b5",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -1163,25 +1163,25 @@
                 "pl-p8-c42c68e8da195334d530"
               ],
               "canonicalDiff": {
-                "afterRevision": "b5a793de3085fc2b165913ce4cd46ea12b59c7463873ffbfc1a69ed6ffc0915e",
-                "beforeRevision": "af0bad51c7d7153e379e13f78e5577107aff1d1ae40eb2cf1d1b535ae12e783f",
+                "afterRevision": "9f1520906daf6cf5ecf83be4a99f3a95b3cce4526bbe1a23e2992b638e3c2e02",
+                "beforeRevision": "990f995a0bd7db6e49a06d50b5f4becb14f1abcb9e854999e93dfcbdbac12867",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "19db4c4ee496e5bae9df4cd6f557d0b0b2da265bd899dfd391dd9c140cbedf26"
                 },
                 "schemaVersion": 1,
-                "sha256": "88827d0d65ff322f7bea2074513945fd0a1922645bb580896f2dcd1534add415"
+                "sha256": "eda25b4d08403822be98c879d506155d566ef1c49ee9421ea87887860358a36c"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-9df1d3720c49a554d51e",
                 "pl-p8-c42c68e8da195334d530"
               ],
-              "diffHash": "800a3c0b7522046666aafd64b05adad33f5fc6eaf05181f98632b45e5ee003c0",
+              "diffHash": "d1e3eebec0d96df4c698d388dd315141e6cc3e9582657e89f2d7c859b05bfc9d",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:33:01.156775Z",
-                "updatedAt": "2026-08-04T15:33:01.156775Z"
+                "createdAt": "2026-08-04T18:11:48.501925Z",
+                "updatedAt": "2026-08-04T18:11:48.501925Z"
               },
               "findings": {
                 "count": 0,
@@ -1273,35 +1273,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:2eb813a2309b988036f28517c8122f4c"
           },
-          "proposalId": "flp-4239ed436e1b27952dfc395ab5d2d1ac9acd1d9216922547d5f263e8e30a8b39",
-          "receiptId": "flr-KBpOf0zG4aRbl8WNdiZzTnzCKEAbf9_7",
-          "requestFingerprint": "3289b7cb74af79a281fe848fa88288c077c0cc0b1e0aa138a9c1476dfef1a9d6",
-          "revision": "2fa92d63abdd07d5cf09a5f39dde269772b697d771545a7c424e7a9bbbadb0c8"
+          "proposalId": "flp-d66088eeaa76506bf890c8a0124c2d3e925245b84219bb78c2be7cfc7d726f47",
+          "receiptId": "flr-UIOw7W8P7onZHqnhOMHjrs-orxXzb71c",
+          "requestFingerprint": "e67f9fb1e18ec41e572ae805f82a64987c336e973e4e2432b578c968e69c9309",
+          "revision": "6065e7bd8eee8c112effa279c1e6f123cd69fc02e159d27d752b08e83ba1b737"
         },
-        "receiptId": "flr-KBpOf0zG4aRbl8WNdiZzTnzCKEAbf9_7",
+        "receiptId": "flr-UIOw7W8P7onZHqnhOMHjrs-orxXzb71c",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "ca60e3da45912684a9b5acf641b13f0cc53fe1522874866e2930c0b10e5c1950",
+        "canonicalReceiptSha256": "a0973656d2801b301f83f8bc39d60272745e551373c00dac85c1206cc256aebc",
         "layoutId": "fl-p11-soak-08",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "53f90461a1da391e8550fb0b84d1bc3c0a6193781e91537495ecbe5842711d2b",
+          "approvalFingerprint": "3e6296fe61834118db4b6c2a58020ff34026d2e00efb0f712cbd433dca36f6b8",
           "binding": {
-            "baseRevision": "5ac58068dd71da0b1edbfa32d1b885283bf1b9b3d44e3c0e899cc6fa23be4e20",
-            "dependencyFingerprint": "c7d0cac7b9404d490f3dec6571dd9aff0986262e32898416053958bb42d8f593",
-            "diffHash": "9fb9a2cab48256fb8cdd8c1a5742d299d415f08e86258c77fbe81586e2a960ec",
+            "baseRevision": "bd913ceef059dfe629dcc499063c89b7b6f3541d1c543e44cb7fa01e327f60fc",
+            "dependencyFingerprint": "313eed01fbbad08bd086a1fdf7e1074ceda82dbd4135d6a238eeddea0cb10f09",
+            "diffHash": "702c2f9d0247f616f19caaf2e1629f81c0b440f0ab3d676d3c3e1ef41470ac1b",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-08",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857582.188921,
+          "createdAt": 1785867109.3133032,
           "idempotencyKey": "p11-approved-apply-08",
           "payload": {
-            "alternativeId": "fla-p8-f75120a52e2c50275c0c7ea7",
+            "alternativeId": "fla-p8-fe0c0740d8cdedcf6c6f123c",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -1346,25 +1346,25 @@
                 "pl-p8-ea63083d80a5cf8703e6"
               ],
               "canonicalDiff": {
-                "afterRevision": "d3d4c81076b27a268603ee69f861aa98668b8120f567b67b0c2f4cb85b723760",
-                "beforeRevision": "5ac58068dd71da0b1edbfa32d1b885283bf1b9b3d44e3c0e899cc6fa23be4e20",
+                "afterRevision": "da93fea61ed17fa88ead59bc261e22616ee1761c17bdf9be8d499945302f6fc7",
+                "beforeRevision": "bd913ceef059dfe629dcc499063c89b7b6f3541d1c543e44cb7fa01e327f60fc",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "4e0366e330b1deaf91ea9208eba0d9ecc4573f82067630fec97f729c483a1d84"
                 },
                 "schemaVersion": 1,
-                "sha256": "547f8e9ef99baf969b0a5becdef2fa95becb6dae2d80df38759631cbf535011b"
+                "sha256": "a51a096c56238b59358ceeb9d7dbe3ef9bac6f7f0ff4bf323c22f4984ed3cd89"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-96c58a0e5f68afd65aaa",
                 "pl-p8-ea63083d80a5cf8703e6"
               ],
-              "diffHash": "9fb9a2cab48256fb8cdd8c1a5742d299d415f08e86258c77fbe81586e2a960ec",
+              "diffHash": "702c2f9d0247f616f19caaf2e1629f81c0b440f0ab3d676d3c3e1ef41470ac1b",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:33:01.763134Z",
-                "updatedAt": "2026-08-04T15:33:01.763134Z"
+                "createdAt": "2026-08-04T18:11:48.936244Z",
+                "updatedAt": "2026-08-04T18:11:48.936244Z"
               },
               "findings": {
                 "count": 0,
@@ -1456,35 +1456,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:ab84b8336efe581adcc1966ba05c0ab0"
           },
-          "proposalId": "flp-6494c82a885da9738c3412cc8776e535aac786a25a131456135030a4ed2b4cf7",
-          "receiptId": "flr-Sbi-4VaeUqbuYAscYtIzqXJfi4xsNRnQ",
-          "requestFingerprint": "bc9f380cc4ec7e914ffe532aa9f368045faccaf3fc0dcf305cbadd16abafbd09",
-          "revision": "69ee476060d9f8c0b2d88599f7017ef4c9538eedd3f3108c95b7f618ba1b4927"
+          "proposalId": "flp-b07d143d0595b71bf0c6d3e48000d22764e780d332b8fa7aff20d255b4136957",
+          "receiptId": "flr-AvwfZJboW6dpBFQ1xXX9pYW9XGSqKNv_",
+          "requestFingerprint": "8cc9b0b76f8415abea566c9b04a491e454d304c04de7ebc9767580947bac33dc",
+          "revision": "4a4cbb3ceffca5d9673c7e06a0f09a42a3dbd987cbd387ba791fe8f7dc2eb78b"
         },
-        "receiptId": "flr-Sbi-4VaeUqbuYAscYtIzqXJfi4xsNRnQ",
+        "receiptId": "flr-AvwfZJboW6dpBFQ1xXX9pYW9XGSqKNv_",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "6e7ec6ecb8d8e9b60c9ae024cbc35a944198576f8a68a54fd951afd0303857b1",
+        "canonicalReceiptSha256": "7eaeb02f6918faede7b8ee850b58cb1d03aa04dc46b128a29ab084dbd07fbe2b",
         "layoutId": "fl-p11-soak-09",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "8df1a24ab8fb8115e11039151fec628a63bba2a3d0ef841d63232c4b16560a71",
+          "approvalFingerprint": "81f7bf0de415ab885f53ad4206be3d03c8f3bcb3d8505ff7ee92bd1a25a0ab41",
           "binding": {
-            "baseRevision": "273da611a52292a40aa468a8e6a3db4474076d05118f59a3796c14790c9f4d40",
-            "dependencyFingerprint": "018046f262d3284064dd097a590029a2f0767e4ea945bb4cc413412326d3d17c",
-            "diffHash": "2f9d9e2fe07f9c06befb5b31a7b8db8d0298b5c9e6635db0ad90718549e96575",
+            "baseRevision": "c7e379b18c74f127faf924d6074c77b7f4f156cf5ef73dea868c5b42b948b7f3",
+            "dependencyFingerprint": "1d00eb2c0a5a171619a4e657b49769bbd3855424fb8b5ed07698ded0012a361b",
+            "diffHash": "4398f7081d861856c50a4c9d5e5e6b4e655717765af27986b68c08f1896377f0",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-09",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857582.7074807,
+          "createdAt": 1785867109.665317,
           "idempotencyKey": "p11-approved-apply-09",
           "payload": {
-            "alternativeId": "fla-p8-82621f5381e861638eabec6c",
+            "alternativeId": "fla-p8-522f8da7d7e44f81b3cd7a64",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -1529,25 +1529,25 @@
                 "pl-p8-6f26e42e8aea8f6e2113"
               ],
               "canonicalDiff": {
-                "afterRevision": "908773f9688a7133ff9e304e6f52be364cfdabd9a673c5612410d030ea5934da",
-                "beforeRevision": "273da611a52292a40aa468a8e6a3db4474076d05118f59a3796c14790c9f4d40",
+                "afterRevision": "29dc6929aaa635dbcd096f5de13d17b270cdd6262549e5647d93864868a04565",
+                "beforeRevision": "c7e379b18c74f127faf924d6074c77b7f4f156cf5ef73dea868c5b42b948b7f3",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "337b488f9f465191bf437fa2220c9c8fc0d6ba2e12136473f72c2e8073908157"
                 },
                 "schemaVersion": 1,
-                "sha256": "286bec992fd9e4b6b7c5974211d1c509d15eb3c3574c338e136abba53dd2cf78"
+                "sha256": "34b6a2daba8f64c32499fd58979bd51ac6845256a82efd1a82fb0e822e137a8e"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-59c27a6e826886b4a5d6",
                 "pl-p8-6f26e42e8aea8f6e2113"
               ],
-              "diffHash": "2f9d9e2fe07f9c06befb5b31a7b8db8d0298b5c9e6635db0ad90718549e96575",
+              "diffHash": "4398f7081d861856c50a4c9d5e5e6b4e655717765af27986b68c08f1896377f0",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:33:02.237930Z",
-                "updatedAt": "2026-08-04T15:33:02.237930Z"
+                "createdAt": "2026-08-04T18:11:49.345253Z",
+                "updatedAt": "2026-08-04T18:11:49.345253Z"
               },
               "findings": {
                 "count": 0,
@@ -1639,35 +1639,35 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:d54128bb522cecc829edd4191d711212"
           },
-          "proposalId": "flp-a4d626abcdd6eca11e10f1af962ec44b662f6b90bffac1add360572d03adfd49",
-          "receiptId": "flr-FMMlegmSZFjnpkMKbzGel1aW7Ggz9WV2",
-          "requestFingerprint": "10c025598c9da17f807708c3092a1a2836b4e623379a7b3396d5ca48ef93a516",
-          "revision": "f819b74eb1ecbec74a950b2547ee30ae716807ceb0ed811263ba74fa74e6831f"
+          "proposalId": "flp-7df470b922711087a1dd47ccdc7780be3e73c273d2ec9e895ab42657fabf45e7",
+          "receiptId": "flr-lhLLeoLK8hHEWtLpEmbGuNCrglQo_nAk",
+          "requestFingerprint": "e6619f545fd119dea32fe23a017b46dd7fb166f9d1ec6d872b973b3b7d4185d4",
+          "revision": "c5da42ede95f695a89f6496f866e64acdca148e91ea28fdfe501109a93a7fb51"
         },
-        "receiptId": "flr-FMMlegmSZFjnpkMKbzGel1aW7Ggz9WV2",
+        "receiptId": "flr-lhLLeoLK8hHEWtLpEmbGuNCrglQo_nAk",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       },
       {
-        "canonicalReceiptSha256": "60c5576e29e24761c685e6dea27a9021f7c8907292a1ff2e1c8925d94e724968",
+        "canonicalReceiptSha256": "1ec55da8a28a0325ba3e386b953e3c74ca48fb884dff407ae15afb6098c3ed30",
         "layoutId": "fl-p11-soak-10",
         "receipt": {
           "action": "apply-layout-plan",
-          "approvalFingerprint": "cfec18fd27287e5c565a291a61fb731cabdfff682ec00565a6af43d1b052dc12",
+          "approvalFingerprint": "93c8eb67093e23d059d5308e8b62faea2e3be60ad84180657256d1638910af5a",
           "binding": {
-            "baseRevision": "cd7e15d574afc305e8a128dc4a2e3e95bd0aa15b904b52fe607a2ef81e4f77ea",
-            "dependencyFingerprint": "14e4b26180ddcc6352b4e3396ba3d26e13f70a6b6aaecb17ad18f0ee14cdb905",
-            "diffHash": "e718da38c57658e5657f43ba2d0549bf694103138ecc44166c324b3b72f5a744",
+            "baseRevision": "ccf33e3774216a532dbf54873d020060c63ac6a50f7605b1810ff1360274f303",
+            "dependencyFingerprint": "6506e40c09a4f1eca0fdf5209ecb1086181b3cb8443bc61fb7834a415cf1e5a0",
+            "diffHash": "9b795e65efbaf6e6e7ad4db9237b9e25739f5f211037dac731b83354ea0648cb",
             "target": {
               "domain": "facility-layout",
               "resourceId": "fl-p11-soak-10",
               "scopeId": "fls:ca3218478c151f0b3680794b118e3b6e2b897125a41d6d78a8360d9f845e3272"
             }
           },
-          "createdAt": 1785857583.2033792,
+          "createdAt": 1785867110.0739672,
           "idempotencyKey": "p11-approved-apply-10",
           "payload": {
-            "alternativeId": "fla-p8-0704b697ea1f934e2edee336",
+            "alternativeId": "fla-p8-22ff22da523ec6c351f92165",
             "changed": true,
             "dependencies": {
               "assetRevisions": [
@@ -1712,25 +1712,25 @@
                 "pl-p8-f7a8762f21cac37d844c"
               ],
               "canonicalDiff": {
-                "afterRevision": "077ef2d306a0a4c88b8ff4eaf550a8cbbc2357d2343cfb625698867680ff1471",
-                "beforeRevision": "cd7e15d574afc305e8a128dc4a2e3e95bd0aa15b904b52fe607a2ef81e4f77ea",
+                "afterRevision": "d34748ae85e58f6d80c9f5fafd46dcd84dc958aec71ccfa46dab4f661d2acbed",
+                "beforeRevision": "ccf33e3774216a532dbf54873d020060c63ac6a50f7605b1810ff1360274f303",
                 "changed": true,
                 "entries": {
                   "count": 1,
                   "sha256": "c8bfdd53689232bf113057cfed38fe405e171cf5962124ab82210c2b470dd1ff"
                 },
                 "schemaVersion": 1,
-                "sha256": "0b7bcb51ceadbd62029861cb6e4d9ebc731d7fed079089cd3d59ae16c1805af4"
+                "sha256": "7fe41e296f4bfabc23fc6597632b5777a19fa6860bc24ab80692aa35105b861c"
               },
               "changed": true,
               "createdIds": [
                 "pl-p8-7bc735faed8eab6b1ef1",
                 "pl-p8-f7a8762f21cac37d844c"
               ],
-              "diffHash": "e718da38c57658e5657f43ba2d0549bf694103138ecc44166c324b3b72f5a744",
+              "diffHash": "9b795e65efbaf6e6e7ad4db9237b9e25739f5f211037dac731b83354ea0648cb",
               "documentTimestamps": {
-                "createdAt": "2026-08-04T15:33:02.757571Z",
-                "updatedAt": "2026-08-04T15:33:02.757571Z"
+                "createdAt": "2026-08-04T18:11:49.697556Z",
+                "updatedAt": "2026-08-04T18:11:49.697556Z"
               },
               "findings": {
                 "count": 0,
@@ -1822,12 +1822,12 @@
             "principalId": "usr:810c2527e34f99c76b40bbac269a0b54",
             "sessionId": "ses:3d6d6e688968848a6098b57bc2f13795"
           },
-          "proposalId": "flp-21ebac240976d33b4ce48332d0ee77c886e7cf29f9d1c28c67f69a262a2ed95e",
-          "receiptId": "flr-ulNotosJ1uk3UWhyIUJNeHao79LPsipv",
-          "requestFingerprint": "b0256fa027d160a371b703cadb1b0279b5e722c54a916716a550c54f3d41d4da",
-          "revision": "3c32474d4d12b19966850ba1514b50cc68529ce27862f4a70a8ac6bdc312d65c"
+          "proposalId": "flp-370dab7ffb26f71f39911dcdd36bad747ba33e4333288af9735ec8dda6a01a95",
+          "receiptId": "flr-n2M2e2CZ694sHJc1x1epBIdIINyCLscx",
+          "requestFingerprint": "fed15bc7e43b47ba79e4c181cb900749e0bf3c4d7d471933c573dac5246fd1a0",
+          "revision": "1d4dc00509acea7a6d14575c4d05039b00f5dbcf7c48622488e6aab0ad0a3346"
         },
-        "receiptId": "flr-ulNotosJ1uk3UWhyIUJNeHao79LPsipv",
+        "receiptId": "flr-n2M2e2CZ694sHJc1x1epBIdIINyCLscx",
         "replayReceiptMatches": true,
         "retrievedExactly": true
       }
@@ -1855,52 +1855,52 @@
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-01",
-        "proposalId": "flp-0da9b7a2df3e7e31698562d82450bcebc1c8995fc487f05ad6af84b5163b4efc"
+        "proposalId": "flp-d448193654446fbd9e8e05212db5dbd18f440925f19f6dc65748afcb9ff0530c"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-02",
-        "proposalId": "flp-b3789aec5922c642d0d9051b11b47a9794640038db0b76f8a2279938a505d41e"
+        "proposalId": "flp-d68ce1d612ab5314e0b2c40e4198bc18927b301256a9e4fa414411cd00924ae7"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-03",
-        "proposalId": "flp-4b2f6ed05add5f3dfd0db248e58bd181af644a1ee1150d82095873319c58f0fe"
+        "proposalId": "flp-e198e5c4e9383f584f423c9eb212643747185442b4504a0ff278473e02793da9"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-04",
-        "proposalId": "flp-f412910bf7f69d9f7288c125822cad6da1783d170d218d39fecf1eac3824fbe6"
+        "proposalId": "flp-868b903d1e92d941b80cb26934bf1d5bb523c95f6158429dc991544684924c16"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-05",
-        "proposalId": "flp-b36305c4a38c9aea2c1e4ce5334b424a3565fbf0c2d8642803a626e4001506d5"
+        "proposalId": "flp-91de31d4b4dfcfe3373a7f7bb6b59b7b1b254c88c9997c24c531241e3c5b642e"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-06",
-        "proposalId": "flp-14a2efbc6b64f9a498d50939ecd75e545af3a0d68928bc8b026e9ee9fc372dc6"
+        "proposalId": "flp-9d1d3693ad5fdb848c2eacd393aa063e0c1b130ca16eddefec6f705f939d3484"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-07",
-        "proposalId": "flp-232c45dc79f1586134b1baca3303cc26191cf64b9201f9318c090e17c4803319"
+        "proposalId": "flp-dc6d341598b38edd6f68e50a8310ff698d7c7041621978b0be3b36fd0f411feb"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-08",
-        "proposalId": "flp-163e711e9921eaba569434043b8239e7a50cb458d478fb822ce32c31db1401f3"
+        "proposalId": "flp-a750a7dfd1917f924e9d430bf81dab759a22b474efffc1b9b589229eb6db4c4b"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-09",
-        "proposalId": "flp-6575a8f99155cc65327d234c66a0853584956de1194fbefe405dad0a2f7f78d7"
+        "proposalId": "flp-6b88772eb597c04b1b30bf483af0570a2aab04cc810c106e1ac85d529ed7323e"
       },
       {
         "byteIdentical": true,
         "layoutId": "fl-p11-soak-10",
-        "proposalId": "flp-145b9d6fa5b6203a717d22d3eee1db2b1c188d3a5f405cb050e202017b13aa9a"
+        "proposalId": "flp-fc8760418368b33b73b86cb5448161b14f05763d66e184828d0ac8bab9fa9e58"
       }
     ],
     "layoutIds": [
@@ -2214,19 +2214,513 @@
     ],
     "status": "passed"
   },
-  "generatedAtUtc": "2026-08-04T15:33:06Z",
+  "generatedAtUtc": "2026-08-04T18:11:51Z",
   "realElapsedSoak": {
-    "blockers": [
-      "real_soak_not_started"
-    ],
-    "checks": {
-      "buildIdentityMatchesCurrent": false,
-      "eventChainValid": false,
-      "evidenceLedgerPresent": false
+    "artifact": {
+      "byteLength": 10153,
+      "path": ".runtime/facility_layout/p11-real-soak-events.json",
+      "sha256": "fb1d77932dbc0d3bfd011f0ad105ed5dbb73816dbe0fe6aaa2c3bcdff54dddeb"
     },
-    "elapsedDays": 0,
-    "lastEvaluatedAtUtc": "2026-08-04T15:32:57Z",
-    "note": "Real self-use is credited only from the source-bound, append-only runtime evidence ledger.",
+    "blockers": [
+      "real_soak_build_changed"
+    ],
+    "campaignBuildIdentity": {
+      "aggregateSha256": "6c5f0594fa23ad26eadcbdfbe891126559257f7e083c95ceb8e6e9cc0e82a3ad",
+      "algorithm": "sha256-canonical-source-list-v1",
+      "files": [
+        {
+          "byteLength": 7098,
+          "path": "ai_inspector/facility_layout/__init__.py",
+          "sha256": "29d7da57ae2d0f1fc1715b8ca666b23cb31f14c2e37de267f3401edc81197d5a"
+        },
+        {
+          "byteLength": 40282,
+          "path": "ai_inspector/facility_layout/agent_runtime.py",
+          "sha256": "47729847c63e0b6b8b3027a60259609e2f1cc81ba1d1c4f2a3ddb8b54145be0d"
+        },
+        {
+          "byteLength": 26264,
+          "path": "ai_inspector/facility_layout/api.py",
+          "sha256": "20225045a0ed9caa1e9e3345d0de1b6f68a9cc33235a6b5df644c04f72d23658"
+        },
+        {
+          "byteLength": 54463,
+          "path": "ai_inspector/facility_layout/authority_repository.py",
+          "sha256": "5c31782d07a1a3fe957a5d2e8504cff94ddc2391653ad924439871cf6410f896"
+        },
+        {
+          "byteLength": 8811,
+          "path": "ai_inspector/facility_layout/authorization.py",
+          "sha256": "c90c07dc3569e3bba781229476fceb1fa9d01800a3b3ebc3156583502d7fbb7b"
+        },
+        {
+          "byteLength": 14436,
+          "path": "ai_inspector/facility_layout/canonical.py",
+          "sha256": "f0a72601604d83e95ffe34914cb53c0719d2257173c1c2efe70e22fe190cdb6d"
+        },
+        {
+          "byteLength": 4280,
+          "path": "ai_inspector/facility_layout/diff.py",
+          "sha256": "f6ad0fda3aa91fa718885a1669449ce51789113514267cb0dce40aed0a84eb27"
+        },
+        {
+          "byteLength": 24427,
+          "path": "ai_inspector/facility_layout/digest.py",
+          "sha256": "bdfed534489e960358ccbb6289aef8e78728bd6f71278582d2663ad052f8039e"
+        },
+        {
+          "byteLength": 2804,
+          "path": "ai_inspector/facility_layout/errors.py",
+          "sha256": "293201ad541c2011a36e58db2519dbd02c67589e85fd236bdc99582290e253e8"
+        },
+        {
+          "byteLength": 4149,
+          "path": "ai_inspector/facility_layout/feature_flags.py",
+          "sha256": "62cb8114f08a24a40b2748e6e7eb1da468ab3ff1568f9742b07eb89fbd7ae31c"
+        },
+        {
+          "byteLength": 30178,
+          "path": "ai_inspector/facility_layout/host.py",
+          "sha256": "e8a50c65675559b1c449432abda4456a020c49793b5e60c5239aae074d5c53f4"
+        },
+        {
+          "byteLength": 7386,
+          "path": "ai_inspector/facility_layout/identity.py",
+          "sha256": "7631819df871e8533b9f2954351dbce2bcfc456bfd166d02a74aee348037ee83"
+        },
+        {
+          "byteLength": 23153,
+          "path": "ai_inspector/facility_layout/migration.py",
+          "sha256": "f251ac23a0baf54f1cabc3f46403b6d100a247920962898b4aa8ea40507d399a"
+        },
+        {
+          "byteLength": 45251,
+          "path": "ai_inspector/facility_layout/observation.py",
+          "sha256": "0430764d8f80ed20ebb8596d706912879a9abdc8c824802dc658ae865d00a972"
+        },
+        {
+          "byteLength": 41238,
+          "path": "ai_inspector/facility_layout/operations.py",
+          "sha256": "a0600bf70b3603890d019a6d741a984349bfaac4115882496171965783bcb1f0"
+        },
+        {
+          "byteLength": 73345,
+          "path": "ai_inspector/facility_layout/planner.py",
+          "sha256": "915c871a71301eea349b4a6f12faf504e081a5c41f99d33829eb1f378f0f3a0e"
+        },
+        {
+          "byteLength": 41616,
+          "path": "ai_inspector/facility_layout/repository.py",
+          "sha256": "8e8554de499542093d665d43a3aafe7549ff3d6ae8b1683c3a633e1ddddf9e09"
+        },
+        {
+          "byteLength": 105621,
+          "path": "ai_inspector/facility_layout/routing.py",
+          "sha256": "7520d3381351546459ccc72fa24de9b5abc9908d6c3121c19e843b401c4d7ae9"
+        },
+        {
+          "byteLength": 6276,
+          "path": "ai_inspector/facility_layout/schema_v1.py",
+          "sha256": "8564bdc74fd11371fa22d35a057d8ba2a444cb7070db8f0bf846d684f4486053"
+        },
+        {
+          "byteLength": 94361,
+          "path": "ai_inspector/facility_layout/semantic_plan.py",
+          "sha256": "feab61794b27ba7fe3992afa41ebbd25f72b63e0083c0a88435a7c6a9e4ffe24"
+        },
+        {
+          "byteLength": 116518,
+          "path": "ai_inspector/facility_layout/service.py",
+          "sha256": "a216e4b0b71ed08d74548003f718f39e9c4424998ad7d501501e8725fa8a185a"
+        },
+        {
+          "byteLength": 23480,
+          "path": "ai_inspector/facility_layout/soak_evidence.py",
+          "sha256": "c4621c71ac211fbbf133c25b9b36713a1db4c1a80c60f95382aa87df90c05a72"
+        },
+        {
+          "byteLength": 144661,
+          "path": "ai_inspector/facility_layout/spatial.py",
+          "sha256": "4ad74b6e0b256f46fb2f5517f4ed2c5c551e7912d0ada6ef04bb512243783afa"
+        },
+        {
+          "byteLength": 7118,
+          "path": "ai_inspector/facility_layout/spatial_executor.py",
+          "sha256": "59d29e72987fec087ec9e332cfdf9cf8e20c8d7d814001da36429ad2fcc51783"
+        },
+        {
+          "byteLength": 15979,
+          "path": "ai_inspector/facility_layout/transaction_adapter.py",
+          "sha256": "adb8262d3519edcb7ad227d363dfc8c59126dee636e40ef68200f6d8ec822c16"
+        },
+        {
+          "byteLength": 43966,
+          "path": "ai_inspector/facility_layout/validate.py",
+          "sha256": "04f12cb8cbe9623f44ad36e91fdec8c223faeae5732b7ea7db1f30120e2a9d02"
+        },
+        {
+          "byteLength": 966,
+          "path": "ai_inspector/facility_layout/workflows/__init__.py",
+          "sha256": "3e66db20ef8a09f98c6a7d0f4470a1323d815b41f9040b549b236213b3439161"
+        },
+        {
+          "byteLength": 23660,
+          "path": "ai_inspector/facility_layout/workflows/common.py",
+          "sha256": "f1d22443bd54cadd5b4a6b5076cce9a43c6d144a21293fda2d83221a1e629305"
+        },
+        {
+          "byteLength": 34740,
+          "path": "ai_inspector/facility_layout/workflows/manufacturing_cell.py",
+          "sha256": "9e0efcce500446e4f2c2cf4732274b5dc640c513ed99ff165a0184a3561ba8b2"
+        },
+        {
+          "byteLength": 22859,
+          "path": "ai_inspector/facility_layout/workflows/warehouse.py",
+          "sha256": "f26de71553f43bf9af626723c79b7135684f8e537c1e78e0f1f04e4227731c30"
+        },
+        {
+          "byteLength": 1895,
+          "path": "ai_inspector/transactions/__init__.py",
+          "sha256": "41176b20857229bbdbc6c0ade7819f0007700c776ca5770923d6a4d1ca096175"
+        },
+        {
+          "byteLength": 21614,
+          "path": "ai_inspector/transactions/kernel.py",
+          "sha256": "8295ae5c10ea89a956d16fd13159307886b93d6685d27584e16db0acdae6099e"
+        },
+        {
+          "byteLength": 24944,
+          "path": "ai_inspector/transactions/stores.py",
+          "sha256": "b9256f3f7996004ca1bafd896c4cc50fbead16bbf68a17ea1c583b77ac53edc3"
+        },
+        {
+          "byteLength": 32422,
+          "path": "ai_inspector/transactions/types.py",
+          "sha256": "244feaa115221679274dae1d07a83e1076907ddbe058475154b57f6a5b30b284"
+        },
+        {
+          "byteLength": 1291714,
+          "path": "server.py",
+          "sha256": "330c2fc05fd135f716337f74fe88574deae31c34a378c82d71eb5e073e53506e"
+        },
+        {
+          "byteLength": 8581,
+          "path": "static/facility_layout_app.js",
+          "sha256": "3f0c929e3f969b8b78a1858ce8f2c0ee8a3e85b6cd7539ad38aa47d833271230"
+        },
+        {
+          "byteLength": 50734,
+          "path": "static/facility_layout_editor.js",
+          "sha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875"
+        },
+        {
+          "byteLength": 76935,
+          "path": "static/facility_layout_session.js",
+          "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a"
+        },
+        {
+          "byteLength": 7417,
+          "path": "static/facility_layout_spatial_advisor.js",
+          "sha256": "9d12f579932964a175aa63deea2f029b66d27727ff51a79a1e0accf9b0068e73"
+        },
+        {
+          "byteLength": 18021,
+          "path": "static/facility_layout_spatial_worker.js",
+          "sha256": "8213cea4565951c0a31954d12eb4e6a540d5f5c15ae1a2ae09ef4dac7ef04574"
+        },
+        {
+          "byteLength": 99366,
+          "path": "static/facility_layout_three_adapter.js",
+          "sha256": "deaea5d9a25ec0ec53756d0ba743f54ec4f65a47bbee6da618c828431548d86b"
+        },
+        {
+          "byteLength": 15430,
+          "path": "static/facility_layout_transport.js",
+          "sha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6"
+        },
+        {
+          "byteLength": 16296,
+          "path": "static/facility_layout_workspace.css",
+          "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
+        },
+        {
+          "byteLength": 115114,
+          "path": "static/facility_layout_workspace.js",
+          "sha256": "d4aa7c4327949062068dbb9c1d665a81edd1688f406c04a05c6a6919d51b3709"
+        },
+        {
+          "byteLength": 3002184,
+          "path": "static/index.html",
+          "sha256": "777be06eb834f437bfe2e570db29265edc263c81a82f7376d2c79fa59a8f5526"
+        },
+        {
+          "byteLength": 4710,
+          "path": "tools/record_facility_layout_soak.py",
+          "sha256": "676102204316c96d9da64b57f90d47d7c50ceb98594ffa7c53b6fe5fb7df5120"
+        }
+      ],
+      "gitCommit": "d2e448668af5d01561251b479ddbfe4f74518f8e"
+    },
+    "campaignId": "fls-8897c8feefe058155046c1da",
+    "chainHeadSha256": "96190bd1db43df9c0e93a0492e087de95242d6062369833dfe5481e2512dd8ed",
+    "checks": {
+      "agentPreviews": false,
+      "approvedReceiptBackedApplies": false,
+      "buildIdentityMatchesCurrent": false,
+      "byteIdenticalDismissals": false,
+      "canonicalReceiptCountMet": false,
+      "editingSessions": false,
+      "elapsedDurationMet": false,
+      "eventChainValid": true,
+      "evidenceLedgerPresent": true,
+      "layouts": false,
+      "rejectedStaleOrUnauthorizedAttempts": false,
+      "reopenCyclesPerLayout": false,
+      "requiredWorkflowsExercised": false
+    },
+    "currentBuildIdentity": {
+      "aggregateSha256": "81bfa5f1b8ce8f05fea6276168d4998e49441bf6deed1f5951993622ff387f2a",
+      "algorithm": "sha256-canonical-source-list-v1",
+      "files": [
+        {
+          "byteLength": 7098,
+          "path": "ai_inspector/facility_layout/__init__.py",
+          "sha256": "29d7da57ae2d0f1fc1715b8ca666b23cb31f14c2e37de267f3401edc81197d5a"
+        },
+        {
+          "byteLength": 40282,
+          "path": "ai_inspector/facility_layout/agent_runtime.py",
+          "sha256": "47729847c63e0b6b8b3027a60259609e2f1cc81ba1d1c4f2a3ddb8b54145be0d"
+        },
+        {
+          "byteLength": 26264,
+          "path": "ai_inspector/facility_layout/api.py",
+          "sha256": "20225045a0ed9caa1e9e3345d0de1b6f68a9cc33235a6b5df644c04f72d23658"
+        },
+        {
+          "byteLength": 54463,
+          "path": "ai_inspector/facility_layout/authority_repository.py",
+          "sha256": "5c31782d07a1a3fe957a5d2e8504cff94ddc2391653ad924439871cf6410f896"
+        },
+        {
+          "byteLength": 8811,
+          "path": "ai_inspector/facility_layout/authorization.py",
+          "sha256": "c90c07dc3569e3bba781229476fceb1fa9d01800a3b3ebc3156583502d7fbb7b"
+        },
+        {
+          "byteLength": 14436,
+          "path": "ai_inspector/facility_layout/canonical.py",
+          "sha256": "f0a72601604d83e95ffe34914cb53c0719d2257173c1c2efe70e22fe190cdb6d"
+        },
+        {
+          "byteLength": 4280,
+          "path": "ai_inspector/facility_layout/diff.py",
+          "sha256": "f6ad0fda3aa91fa718885a1669449ce51789113514267cb0dce40aed0a84eb27"
+        },
+        {
+          "byteLength": 24427,
+          "path": "ai_inspector/facility_layout/digest.py",
+          "sha256": "bdfed534489e960358ccbb6289aef8e78728bd6f71278582d2663ad052f8039e"
+        },
+        {
+          "byteLength": 2804,
+          "path": "ai_inspector/facility_layout/errors.py",
+          "sha256": "293201ad541c2011a36e58db2519dbd02c67589e85fd236bdc99582290e253e8"
+        },
+        {
+          "byteLength": 4149,
+          "path": "ai_inspector/facility_layout/feature_flags.py",
+          "sha256": "62cb8114f08a24a40b2748e6e7eb1da468ab3ff1568f9742b07eb89fbd7ae31c"
+        },
+        {
+          "byteLength": 30178,
+          "path": "ai_inspector/facility_layout/host.py",
+          "sha256": "e8a50c65675559b1c449432abda4456a020c49793b5e60c5239aae074d5c53f4"
+        },
+        {
+          "byteLength": 7386,
+          "path": "ai_inspector/facility_layout/identity.py",
+          "sha256": "7631819df871e8533b9f2954351dbce2bcfc456bfd166d02a74aee348037ee83"
+        },
+        {
+          "byteLength": 23153,
+          "path": "ai_inspector/facility_layout/migration.py",
+          "sha256": "f251ac23a0baf54f1cabc3f46403b6d100a247920962898b4aa8ea40507d399a"
+        },
+        {
+          "byteLength": 45251,
+          "path": "ai_inspector/facility_layout/observation.py",
+          "sha256": "0430764d8f80ed20ebb8596d706912879a9abdc8c824802dc658ae865d00a972"
+        },
+        {
+          "byteLength": 41238,
+          "path": "ai_inspector/facility_layout/operations.py",
+          "sha256": "a0600bf70b3603890d019a6d741a984349bfaac4115882496171965783bcb1f0"
+        },
+        {
+          "byteLength": 73345,
+          "path": "ai_inspector/facility_layout/planner.py",
+          "sha256": "915c871a71301eea349b4a6f12faf504e081a5c41f99d33829eb1f378f0f3a0e"
+        },
+        {
+          "byteLength": 41616,
+          "path": "ai_inspector/facility_layout/repository.py",
+          "sha256": "8e8554de499542093d665d43a3aafe7549ff3d6ae8b1683c3a633e1ddddf9e09"
+        },
+        {
+          "byteLength": 105621,
+          "path": "ai_inspector/facility_layout/routing.py",
+          "sha256": "7520d3381351546459ccc72fa24de9b5abc9908d6c3121c19e843b401c4d7ae9"
+        },
+        {
+          "byteLength": 6276,
+          "path": "ai_inspector/facility_layout/schema_v1.py",
+          "sha256": "8564bdc74fd11371fa22d35a057d8ba2a444cb7070db8f0bf846d684f4486053"
+        },
+        {
+          "byteLength": 94361,
+          "path": "ai_inspector/facility_layout/semantic_plan.py",
+          "sha256": "feab61794b27ba7fe3992afa41ebbd25f72b63e0083c0a88435a7c6a9e4ffe24"
+        },
+        {
+          "byteLength": 116518,
+          "path": "ai_inspector/facility_layout/service.py",
+          "sha256": "a216e4b0b71ed08d74548003f718f39e9c4424998ad7d501501e8725fa8a185a"
+        },
+        {
+          "byteLength": 23480,
+          "path": "ai_inspector/facility_layout/soak_evidence.py",
+          "sha256": "c4621c71ac211fbbf133c25b9b36713a1db4c1a80c60f95382aa87df90c05a72"
+        },
+        {
+          "byteLength": 144661,
+          "path": "ai_inspector/facility_layout/spatial.py",
+          "sha256": "4ad74b6e0b256f46fb2f5517f4ed2c5c551e7912d0ada6ef04bb512243783afa"
+        },
+        {
+          "byteLength": 7118,
+          "path": "ai_inspector/facility_layout/spatial_executor.py",
+          "sha256": "59d29e72987fec087ec9e332cfdf9cf8e20c8d7d814001da36429ad2fcc51783"
+        },
+        {
+          "byteLength": 15979,
+          "path": "ai_inspector/facility_layout/transaction_adapter.py",
+          "sha256": "adb8262d3519edcb7ad227d363dfc8c59126dee636e40ef68200f6d8ec822c16"
+        },
+        {
+          "byteLength": 43966,
+          "path": "ai_inspector/facility_layout/validate.py",
+          "sha256": "04f12cb8cbe9623f44ad36e91fdec8c223faeae5732b7ea7db1f30120e2a9d02"
+        },
+        {
+          "byteLength": 966,
+          "path": "ai_inspector/facility_layout/workflows/__init__.py",
+          "sha256": "3e66db20ef8a09f98c6a7d0f4470a1323d815b41f9040b549b236213b3439161"
+        },
+        {
+          "byteLength": 23660,
+          "path": "ai_inspector/facility_layout/workflows/common.py",
+          "sha256": "f1d22443bd54cadd5b4a6b5076cce9a43c6d144a21293fda2d83221a1e629305"
+        },
+        {
+          "byteLength": 34740,
+          "path": "ai_inspector/facility_layout/workflows/manufacturing_cell.py",
+          "sha256": "9e0efcce500446e4f2c2cf4732274b5dc640c513ed99ff165a0184a3561ba8b2"
+        },
+        {
+          "byteLength": 22859,
+          "path": "ai_inspector/facility_layout/workflows/warehouse.py",
+          "sha256": "f26de71553f43bf9af626723c79b7135684f8e537c1e78e0f1f04e4227731c30"
+        },
+        {
+          "byteLength": 1895,
+          "path": "ai_inspector/transactions/__init__.py",
+          "sha256": "41176b20857229bbdbc6c0ade7819f0007700c776ca5770923d6a4d1ca096175"
+        },
+        {
+          "byteLength": 21614,
+          "path": "ai_inspector/transactions/kernel.py",
+          "sha256": "8295ae5c10ea89a956d16fd13159307886b93d6685d27584e16db0acdae6099e"
+        },
+        {
+          "byteLength": 24944,
+          "path": "ai_inspector/transactions/stores.py",
+          "sha256": "b9256f3f7996004ca1bafd896c4cc50fbead16bbf68a17ea1c583b77ac53edc3"
+        },
+        {
+          "byteLength": 32422,
+          "path": "ai_inspector/transactions/types.py",
+          "sha256": "244feaa115221679274dae1d07a83e1076907ddbe058475154b57f6a5b30b284"
+        },
+        {
+          "byteLength": 1291714,
+          "path": "server.py",
+          "sha256": "330c2fc05fd135f716337f74fe88574deae31c34a378c82d71eb5e073e53506e"
+        },
+        {
+          "byteLength": 9447,
+          "path": "static/facility_layout_app.js",
+          "sha256": "9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de"
+        },
+        {
+          "byteLength": 54235,
+          "path": "static/facility_layout_editor.js",
+          "sha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24"
+        },
+        {
+          "byteLength": 76935,
+          "path": "static/facility_layout_session.js",
+          "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a"
+        },
+        {
+          "byteLength": 7417,
+          "path": "static/facility_layout_spatial_advisor.js",
+          "sha256": "9d12f579932964a175aa63deea2f029b66d27727ff51a79a1e0accf9b0068e73"
+        },
+        {
+          "byteLength": 18021,
+          "path": "static/facility_layout_spatial_worker.js",
+          "sha256": "8213cea4565951c0a31954d12eb4e6a540d5f5c15ae1a2ae09ef4dac7ef04574"
+        },
+        {
+          "byteLength": 101827,
+          "path": "static/facility_layout_three_adapter.js",
+          "sha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639"
+        },
+        {
+          "byteLength": 15430,
+          "path": "static/facility_layout_transport.js",
+          "sha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6"
+        },
+        {
+          "byteLength": 16296,
+          "path": "static/facility_layout_workspace.css",
+          "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
+        },
+        {
+          "byteLength": 117766,
+          "path": "static/facility_layout_workspace.js",
+          "sha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878"
+        },
+        {
+          "byteLength": 2947711,
+          "path": "static/index.html",
+          "sha256": "41d15a8fdbe767c5373cdd3e3471b704394f3ebe91a2b233c3395796ff64bffe"
+        },
+        {
+          "byteLength": 4710,
+          "path": "tools/record_facility_layout_soak.py",
+          "sha256": "676102204316c96d9da64b57f90d47d7c50ceb98594ffa7c53b6fe5fb7df5120"
+        }
+      ],
+      "gitCommit": "d2e448668af5d01561251b479ddbfe4f74518f8e"
+    },
+    "elapsedDays": 0.10951063065972223,
+    "elapsedHours": 2.6282551358333337,
+    "elapsedSeconds": 9461.718489,
+    "eventCount": 0,
+    "lastEvaluatedAtUtc": "2026-08-04T18:11:45.632846Z",
+    "note": "Only source-bound, real self-use events in the append-only evidence chain are credited.",
     "observed": {
       "agentPreviews": 0,
       "approvedReceiptBackedApplies": 0,
@@ -2248,11 +2742,11 @@
       "rejectedStaleOrUnauthorizedAttempts": 5,
       "reopenCyclesPerLayout": 5
     },
-    "startedAtUtc": null,
-    "status": "not_started",
+    "startedAtUtc": "2026-08-04T15:34:03.914357Z",
+    "status": "build_changed",
     "workflowsExercised": []
   },
   "releaseGateMet": false,
-  "releaseGateReason": "not_started",
+  "releaseGateReason": "build_changed",
   "schemaVersion": "facility-layout-p11-soak-ledger-v1"
 }

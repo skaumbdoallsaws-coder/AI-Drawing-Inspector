@@ -1,8 +1,8 @@
 {
-  "benchmarkId": "04bb979f-3396-480b-92e5-f0bbebbb40bb",
+  "benchmarkId": "55cd4792-f926-47a4-9306-da39f4b5b06a",
   "benchmarkScope": "Production FacilityLayoutWorkspace with the actual TopPlanAdapter, FacilitySession, and Three adapter over the P4 full-layer layout and P5 workspace composition pattern.",
-  "completedAtUtc": "2026-08-04T14:30:47Z",
-  "elapsedSeconds": 15.239,
+  "completedAtUtc": "2026-08-04T17:49:05Z",
+  "elapsedSeconds": 10.334,
   "environment": {
     "browser": {
       "executable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -29,11 +29,11 @@
         "language": "en-US",
         "platform": "Win32",
         "preciseMemoryInfo": {
-          "capturedAtMs": 1031.5,
+          "capturedAtMs": 868.6999999880791,
           "jsHeapSizeLimit": 4395630592,
           "source": "performance.memory",
-          "totalJSHeapSize": 69262948,
-          "usedJSHeapSize": 61311964
+          "totalJSHeapSize": 65883283,
+          "usedJSHeapSize": 60710011
         },
         "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
         "viewport": {
@@ -162,7 +162,7 @@
     "externalRequestsBlocked": true,
     "localFailedRequests": [],
     "pageErrors": [],
-    "requestCount": 54,
+    "requestCount": 52,
     "responses": [
       {
         "cacheControl": null,
@@ -170,7 +170,7 @@
         "contentLength": "1715",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
       },
       {
         "cacheControl": null,
@@ -178,23 +178,23 @@
         "contentLength": "16296",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_workspace.css"
+        "url": "http://127.0.0.1:50237/static/facility_layout_workspace.css"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "50734",
+        "contentLength": "54235",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_editor.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_editor.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "99366",
+        "contentLength": "101827",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_three_adapter.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_three_adapter.js"
       },
       {
         "cacheControl": null,
@@ -202,23 +202,23 @@
         "contentLength": "76935",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_session.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_session.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "115114",
+        "contentLength": "38282",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_workspace.js"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "37504",
+        "contentLength": "117766",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_workspace.js"
       },
       {
         "cacheControl": null,
@@ -226,7 +226,7 @@
         "contentLength": "40504",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
       },
       {
         "cacheControl": null,
@@ -234,7 +234,7 @@
         "contentLength": "364998",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/build/three.module.min.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/build/three.module.min.js"
       },
       {
         "cacheControl": null,
@@ -242,7 +242,7 @@
         "contentLength": "114959",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
       },
       {
         "cacheControl": null,
@@ -250,7 +250,7 @@
         "contentLength": "35539",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
       },
       {
         "cacheControl": null,
@@ -258,7 +258,7 @@
         "contentLength": "11535",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
       },
       {
         "cacheControl": null,
@@ -266,7 +266,7 @@
         "contentLength": "384222",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/build/three.core.min.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/build/three.core.min.js"
       },
       {
         "cacheControl": null,
@@ -274,7 +274,7 @@
         "contentLength": "6851",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
       },
       {
         "cacheControl": null,
@@ -282,7 +282,7 @@
         "contentLength": "1604",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
       },
       {
         "cacheControl": null,
@@ -290,7 +290,7 @@
         "contentLength": "916",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       },
       {
         "cacheControl": null,
@@ -298,7 +298,7 @@
         "contentLength": "916",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       },
       {
         "cacheControl": null,
@@ -306,7 +306,7 @@
         "contentLength": "13493420",
         "page": "core",
         "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
+        "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
       },
       {
         "cacheControl": null,
@@ -314,7 +314,7 @@
         "contentLength": "1715",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
       },
       {
         "cacheControl": null,
@@ -322,23 +322,23 @@
         "contentLength": "16296",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_workspace.css"
+        "url": "http://127.0.0.1:50237/static/facility_layout_workspace.css"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "50734",
+        "contentLength": "54235",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_editor.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_editor.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "99366",
+        "contentLength": "101827",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_three_adapter.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_three_adapter.js"
       },
       {
         "cacheControl": null,
@@ -346,31 +346,23 @@
         "contentLength": "76935",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_session.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_session.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "115114",
+        "contentLength": "117766",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_workspace.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_workspace.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "37504",
+        "contentLength": "38282",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
-      },
-      {
-        "cacheControl": null,
-        "contentEncoding": null,
-        "contentLength": "364998",
-        "page": "load-local-cold-0",
-        "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/build/three.module.min.js"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
       },
       {
         "cacheControl": null,
@@ -378,7 +370,15 @@
         "contentLength": "40504",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
+      },
+      {
+        "cacheControl": null,
+        "contentEncoding": null,
+        "contentLength": "364998",
+        "page": "load-local-cold-0",
+        "status": 200,
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/build/three.module.min.js"
       },
       {
         "cacheControl": null,
@@ -386,7 +386,7 @@
         "contentLength": "114959",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
       },
       {
         "cacheControl": null,
@@ -394,7 +394,7 @@
         "contentLength": "35539",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
       },
       {
         "cacheControl": null,
@@ -402,7 +402,7 @@
         "contentLength": "11535",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
       },
       {
         "cacheControl": null,
@@ -410,7 +410,7 @@
         "contentLength": "384222",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/build/three.core.min.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/build/three.core.min.js"
       },
       {
         "cacheControl": null,
@@ -418,7 +418,7 @@
         "contentLength": "6851",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
       },
       {
         "cacheControl": null,
@@ -426,7 +426,7 @@
         "contentLength": "1604",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
       },
       {
         "cacheControl": null,
@@ -434,7 +434,7 @@
         "contentLength": "916",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       },
       {
         "cacheControl": null,
@@ -442,7 +442,7 @@
         "contentLength": "916",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       },
       {
         "cacheControl": null,
@@ -450,7 +450,7 @@
         "contentLength": "13493420",
         "page": "load-local-cold-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
+        "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
       },
       {
         "cacheControl": null,
@@ -458,7 +458,7 @@
         "contentLength": "1715",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/performance/facility-layout-release-performance.html"
       },
       {
         "cacheControl": null,
@@ -466,23 +466,23 @@
         "contentLength": "16296",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_workspace.css"
+        "url": "http://127.0.0.1:50237/static/facility_layout_workspace.css"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "50734",
+        "contentLength": "54235",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_editor.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_editor.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "99366",
+        "contentLength": "101827",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_three_adapter.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_three_adapter.js"
       },
       {
         "cacheControl": null,
@@ -490,23 +490,23 @@
         "contentLength": "76935",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_session.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_session.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "115114",
+        "contentLength": "117766",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/facility_layout_workspace.js"
+        "url": "http://127.0.0.1:50237/static/facility_layout_workspace.js"
       },
       {
         "cacheControl": null,
         "contentEncoding": null,
-        "contentLength": "37504",
+        "contentLength": "38282",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/performance/facility-layout-release-performance.js"
       },
       {
         "cacheControl": null,
@@ -514,15 +514,7 @@
         "contentLength": "40504",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
-      },
-      {
-        "cacheControl": null,
-        "contentEncoding": null,
-        "contentLength": "364998",
-        "page": "remount-0",
-        "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/build/three.module.min.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js"
       },
       {
         "cacheControl": null,
@@ -530,7 +522,15 @@
         "contentLength": "114959",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js"
+      },
+      {
+        "cacheControl": null,
+        "contentEncoding": null,
+        "contentLength": "364998",
+        "page": "remount-0",
+        "status": 200,
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/build/three.module.min.js"
       },
       {
         "cacheControl": null,
@@ -538,7 +538,7 @@
         "contentLength": "35539",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js"
       },
       {
         "cacheControl": null,
@@ -546,7 +546,7 @@
         "contentLength": "11535",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
       },
       {
         "cacheControl": null,
@@ -554,7 +554,7 @@
         "contentLength": "384222",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/static/vendor/three/0.184.0/build/three.core.min.js"
+        "url": "http://127.0.0.1:50237/static/vendor/three/0.184.0/build/three.core.min.js"
       },
       {
         "cacheControl": null,
@@ -562,7 +562,7 @@
         "contentLength": "6851",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/rendering/p4-facility-layout.json"
       },
       {
         "cacheControl": null,
@@ -570,7 +570,7 @@
         "contentLength": "1604",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
+        "url": "http://127.0.0.1:50237/tests/fixtures/facility_layout/rendering/p4-asset-catalog.json"
       },
       {
         "cacheControl": null,
@@ -578,23 +578,7 @@
         "contentLength": "916",
         "page": "remount-0",
         "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
-      },
-      {
-        "cacheControl": null,
-        "contentEncoding": null,
-        "contentLength": "916",
-        "page": "remount-0",
-        "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
-      },
-      {
-        "cacheControl": null,
-        "contentEncoding": null,
-        "contentLength": "916",
-        "page": "remount-0",
-        "status": 200,
-        "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+        "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
       }
     ]
   },
@@ -629,6 +613,7 @@
       "explicitInitialMountBeforeBaseline": true,
       "freshBrowserContextPerSequence": true,
       "independentSequences": 1,
+      "lifecycleMode": "bounded-suspend-resume",
       "quiescenceMsBeforeMemorySample": 500
     },
     "smoke": true
@@ -998,6 +983,7 @@
               "selectedPlacementIds": [],
               "status": "ready",
               "statusReason": null,
+              "suspended": false,
               "warnings": [],
               "worldBounds": {
                 "maximum": {
@@ -1044,6 +1030,7 @@
               "renderCount": 5,
               "selection": null,
               "selections": [],
+              "suspended": false,
               "type": "top-plan"
             }
           },
@@ -1092,6 +1079,7 @@
             "selectedPlacementIds": [],
             "status": "disposed",
             "statusReason": null,
+            "suspended": false,
             "warnings": [],
             "worldBounds": null
           },
@@ -1104,7 +1092,7 @@
             "contentLength": "916",
             "page": "load-local-cold-0",
             "status": 200,
-            "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+            "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
           },
           {
             "cacheControl": null,
@@ -1112,7 +1100,7 @@
             "contentLength": "916",
             "page": "load-local-cold-0",
             "status": 200,
-            "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
+            "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb"
           },
           {
             "cacheControl": null,
@@ -1120,74 +1108,74 @@
             "contentLength": "13493420",
             "page": "load-local-cold-0",
             "status": 200,
-            "url": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
+            "url": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb"
           }
         ],
         "iteration": 0,
         "load": {
-          "endedAtMs": 1147.6000000238419,
+          "endedAtMs": 515.5,
           "resources": [
             {
               "decodedBodySize": 916,
-              "durationMs": 23.19999998807907,
+              "durationMs": 7.099999964237213,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 713.3000000119209,
-              "startTimeMs": 690.1000000238419,
+              "responseEndMs": 323.0999999642372,
+              "startTimeMs": 316,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 916,
-              "durationMs": 29.80000001192093,
+              "durationMs": 10.800000011920929,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 787.6000000238419,
-              "startTimeMs": 757.8000000119209,
+              "responseEndMs": 351.5,
+              "startTimeMs": 340.69999998807907,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 13493420,
-              "durationMs": 146.4000000357628,
+              "durationMs": 60.90000003576279,
               "encodedBodySize": 13493420,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
+              "name": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 959.3000000119209,
-              "startTimeMs": 812.8999999761581,
+              "responseEndMs": 418.19999998807907,
+              "startTimeMs": 357.2999999523163,
               "transferSize": 13493720
             }
           ],
           "stages": [
             {
-              "durationMs": 2,
-              "endedAtMs": 687.1999999880791,
+              "durationMs": 2.200000047683716,
+              "endedAtMs": 313.5,
               "error": null,
               "stage": "manifest",
-              "startedAtMs": 685.1999999880791,
+              "startedAtMs": 311.2999999523163,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 0.19999998807907104,
-              "endedAtMs": 688.1999999880791,
+              "durationMs": 0.09999996423721313,
+              "endedAtMs": 314.2999999523163,
               "error": null,
               "stage": "footprint",
-              "startedAtMs": 688,
+              "startedAtMs": 314.19999998807907,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 67.39999997615814,
-              "endedAtMs": 755.8999999761581,
+              "durationMs": 24.5,
+              "endedAtMs": 339.19999998807907,
               "error": null,
               "stage": "proxy",
-              "startedAtMs": 688.5,
+              "startedAtMs": 314.69999998807907,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -1204,11 +1192,11 @@
               }
             },
             {
-              "durationMs": 53.89999997615814,
-              "endedAtMs": 811.1999999880791,
+              "durationMs": 16.600000023841858,
+              "endedAtMs": 356.69999998807907,
               "error": null,
               "stage": "overview",
-              "startedAtMs": 757.3000000119209,
+              "startedAtMs": 340.0999999642372,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -1225,11 +1213,11 @@
               }
             },
             {
-              "durationMs": 240,
-              "endedAtMs": 1052.199999988079,
+              "durationMs": 121.80000001192093,
+              "endedAtMs": 478.69999998807907,
               "error": null,
               "stage": "detail",
-              "startedAtMs": 812.1999999880791,
+              "startedAtMs": 356.89999997615814,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "visualAllocation": {
@@ -1246,8 +1234,8 @@
               }
             }
           ],
-          "startedAtMs": 505.30000001192093,
-          "totalDurationMs": 642.3000000119209
+          "startedAtMs": 225.19999998807907,
+          "totalDurationMs": 290.30000001192093
         },
         "networkEmulation": {
           "connectionType": "wifi",
@@ -1614,6 +1602,7 @@
             "selectedPlacementIds": [],
             "status": "ready",
             "statusReason": null,
+            "suspended": false,
             "warnings": [],
             "worldBounds": {
               "maximum": {
@@ -1660,6 +1649,7 @@
             "renderCount": 5,
             "selection": null,
             "selections": [],
+            "suspended": false,
             "type": "top-plan"
           }
         }
@@ -1738,7 +1728,7 @@
             "programs": 1,
             "render": {
               "calls": 10,
-              "frame": 43,
+              "frame": 46,
               "lines": 0,
               "points": 0,
               "triangles": 968880
@@ -1760,14 +1750,14 @@
             "assetGroupCount": 1,
             "camera": {
               "position": {
-                "x": 3.7657033234864885,
-                "y": 24.795020772209433,
-                "z": 8.617576465895574
+                "x": 3.9424035384197325,
+                "y": 24.83553269309245,
+                "z": 8.422623770466636
               },
               "target": {
-                "x": 4.120730703904246,
-                "y": 3.1676968514438273,
-                "z": 4.243692325544303
+                "x": 4.09850447563414,
+                "y": 3.154462648436312,
+                "z": 4.311069185653477
               }
             },
             "contextLost": false,
@@ -1775,8 +1765,8 @@
             "degraded": false,
             "demandRendering": {
               "pendingFrame": false,
-              "renderRequests": 64,
-              "renderedFrames": 43
+              "renderRequests": 68,
+              "renderedFrames": 46
             },
             "disposed": false,
             "ghostActive": false,
@@ -2031,6 +2021,7 @@
             ],
             "status": "ready",
             "statusReason": null,
+            "suspended": false,
             "warnings": [],
             "worldBounds": {
               "maximum": {
@@ -2074,11 +2065,12 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 92,
+            "renderCount": 91,
             "selection": "pl-rack-06",
             "selections": [
               "pl-rack-06"
             ],
+            "suspended": false,
             "type": "top-plan"
           }
         },
@@ -2102,8 +2094,8 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 65,
-            "renderedFrames": 43
+            "renderRequests": 69,
+            "renderedFrames": 46
           },
           "disposed": true,
           "ghostActive": false,
@@ -2127,6 +2119,7 @@
           "selectedPlacementIds": [],
           "status": "disposed",
           "statusReason": null,
+          "suspended": false,
           "warnings": [],
           "worldBounds": null
         },
@@ -2201,7 +2194,7 @@
           "programs": 1,
           "render": {
             "calls": 10,
-            "frame": 43,
+            "frame": 46,
             "lines": 0,
             "points": 0,
             "triangles": 968880
@@ -2223,14 +2216,14 @@
           "assetGroupCount": 1,
           "camera": {
             "position": {
-              "x": 3.7657033234864885,
-              "y": 24.795020772209433,
-              "z": 8.617576465895574
+              "x": 3.9424035384197325,
+              "y": 24.83553269309245,
+              "z": 8.422623770466636
             },
             "target": {
-              "x": 4.120730703904246,
-              "y": 3.1676968514438273,
-              "z": 4.243692325544303
+              "x": 4.09850447563414,
+              "y": 3.154462648436312,
+              "z": 4.311069185653477
             }
           },
           "contextLost": false,
@@ -2238,8 +2231,8 @@
           "degraded": false,
           "demandRendering": {
             "pendingFrame": false,
-            "renderRequests": 64,
-            "renderedFrames": 43
+            "renderRequests": 68,
+            "renderedFrames": 46
           },
           "disposed": false,
           "ghostActive": false,
@@ -2494,6 +2487,7 @@
           ],
           "status": "ready",
           "statusReason": null,
+          "suspended": false,
           "warnings": [],
           "worldBounds": {
             "maximum": {
@@ -2537,11 +2531,12 @@
           "proposalMovedCount": 0,
           "proposalNewCount": 0,
           "proposalPreviewActive": false,
-          "renderCount": 92,
+          "renderCount": 91,
           "selection": "pl-rack-06",
           "selections": [
             "pl-rack-06"
           ],
+          "suspended": false,
           "type": "top-plan"
         }
       },
@@ -2561,11 +2556,11 @@
           "language": "en-US",
           "platform": "Win32",
           "preciseMemoryInfo": {
-            "capturedAtMs": 1031.5,
+            "capturedAtMs": 868.6999999880791,
             "jsHeapSizeLimit": 4395630592,
             "source": "performance.memory",
-            "totalJSHeapSize": 69262948,
-            "usedJSHeapSize": 61311964
+            "totalJSHeapSize": 65883283,
+            "usedJSHeapSize": 60710011
           },
           "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
           "viewport": {
@@ -2575,69 +2570,69 @@
           }
         },
         "load": {
-          "endedAtMs": 1029.6000000238419,
+          "endedAtMs": 867.1999999880791,
           "resources": [
             {
               "decodedBodySize": 916,
-              "durationMs": 16,
+              "durationMs": 9.099999964237213,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 528.9000000357628,
-              "startTimeMs": 512.9000000357628,
+              "responseEndMs": 427.39999997615814,
+              "startTimeMs": 418.30000001192093,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 916,
-              "durationMs": 9.599999964237213,
+              "durationMs": 15.399999976158142,
               "encodedBodySize": 916,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+              "name": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 612.6999999880791,
-              "startTimeMs": 603.1000000238419,
+              "responseEndMs": 520.8999999761581,
+              "startTimeMs": 505.5,
               "transferSize": 1216
             },
             {
               "decodedBodySize": 13493420,
-              "durationMs": 90.5,
+              "durationMs": 194.9000000357628,
               "encodedBodySize": 13493420,
               "initiatorType": "fetch",
-              "name": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
+              "name": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "nextHopProtocol": "http/1.0",
-              "responseEndMs": 859.6000000238419,
-              "startTimeMs": 769.1000000238419,
+              "responseEndMs": 722.6000000238419,
+              "startTimeMs": 527.6999999880791,
               "transferSize": 13493720
             }
           ],
           "stages": [
             {
-              "durationMs": 7.399999976158142,
-              "endedAtMs": 509.69999998807907,
+              "durationMs": 1.899999976158142,
+              "endedAtMs": 415,
               "error": null,
               "stage": "manifest",
-              "startedAtMs": 502.30000001192093,
+              "startedAtMs": 413.10000002384186,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 0.20000004768371582,
-              "endedAtMs": 510.9000000357628,
+              "durationMs": 0.30000001192092896,
+              "endedAtMs": 416.69999998807907,
               "error": null,
               "stage": "footprint",
-              "startedAtMs": 510.69999998807907,
+              "startedAtMs": 416.39999997615814,
               "status": "resolved",
               "url": null,
               "visualAllocation": null
             },
             {
-              "durationMs": 90.80000001192093,
-              "endedAtMs": 602.1000000238419,
+              "durationMs": 86.5,
+              "endedAtMs": 503.39999997615814,
               "error": null,
               "stage": "proxy",
-              "startedAtMs": 511.30000001192093,
+              "startedAtMs": 416.89999997615814,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -2654,11 +2649,11 @@
               }
             },
             {
-              "durationMs": 165.5,
-              "endedAtMs": 768.3000000119209,
+              "durationMs": 20.700000047683716,
+              "endedAtMs": 525.6000000238419,
               "error": null,
               "stage": "overview",
-              "startedAtMs": 602.8000000119209,
+              "startedAtMs": 504.89999997615814,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
               "visualAllocation": {
@@ -2675,11 +2670,11 @@
               }
             },
             {
-              "durationMs": 168.9000000357628,
-              "endedAtMs": 937.6000000238419,
+              "durationMs": 263.9000000357628,
+              "endedAtMs": 790.6000000238419,
               "error": null,
               "stage": "detail",
-              "startedAtMs": 768.6999999880791,
+              "startedAtMs": 526.6999999880791,
               "status": "resolved",
               "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored.glb",
               "visualAllocation": {
@@ -2696,10 +2691,504 @@
               }
             }
           ],
-          "startedAtMs": 378.30000001192093,
-          "totalDurationMs": 651.3000000119209
+          "startedAtMs": 308,
+          "totalDurationMs": 559.1999999880791
         },
         "snapshot": {
+          "dom": {
+            "canvases": 1,
+            "planSvgs": 1,
+            "workspaceRoots": 0
+          },
+          "lifecycleTracker": {
+            "activeAdapterFrames": 0,
+            "activeObserverTargets": 2,
+            "observerInstances": 2
+          },
+          "moduleProof": {
+            "actualThreeAdapter": true,
+            "actualTopPlanAdapter": true,
+            "actualWorkspace": true,
+            "sessionApiVersion": 1,
+            "threeAdapterStatus": "ready",
+            "topAdapterType": "top-plan",
+            "workspaceApiVersion": 1,
+            "workspaceConstructor": "Workspace"
+          },
+          "plan": {
+            "clearances": {
+              "placementClearanceVolumeCount": 0,
+              "placementClearanceVolumesSupported": false,
+              "routeCorridorCount": 1,
+              "routeCorridors": [
+                {
+                  "pointCount": 4,
+                  "routeId": "rt-forklift-rack-a",
+                  "strokeWidth": 64.68
+                }
+              ],
+              "routeCorridorsSupported": true,
+              "unavailableReason": "TopPlanAdapter does not currently render per-placement clearance volume elements; no timing is fabricated."
+            },
+            "labels": {
+              "accessibilityLabelCount": 7,
+              "accessibilityLabelsSupported": true,
+              "unavailableReason": "TopPlanAdapter currently exposes labels through aria-label only.",
+              "visibleTextLabelCount": 0,
+              "visibleTextLabelsSupported": false
+            },
+            "layerOrder": [
+              "zones",
+              "routes",
+              "placements"
+            ],
+            "layoutCounts": {
+              "placements": 6,
+              "routes": 1,
+              "zones": 1
+            },
+            "renderedCounts": {
+              "placements": 6,
+              "routes": 1,
+              "zones": 1
+            }
+          },
+          "profile": "full-detail",
+          "renderer": {
+            "autoReset": true,
+            "memory": {
+              "geometries": 10,
+              "textures": 1
+            },
+            "programs": 1,
+            "render": {
+              "calls": 10,
+              "frame": 4,
+              "lines": 0,
+              "points": 0,
+              "triangles": 968880
+            }
+          },
+          "rendererPool": {
+            "availableCount": 0,
+            "createdCount": 1,
+            "disposed": false,
+            "leasedCount": 1,
+            "maximumSize": 1,
+            "reusedCount": 0
+          },
+          "runtimeId": "facility-release-runtime-1",
+          "selection": [],
+          "threeDiagnostics": {
+            "assetGroupCount": 1,
+            "camera": {
+              "position": {
+                "x": 19.74098435349199,
+                "y": 15.17938438349199,
+                "z": 18.74098435349199
+              },
+              "target": {
+                "x": 7,
+                "y": 2.43840003,
+                "z": 5.999999999999999
+              }
+            },
+            "contextLost": false,
+            "controlsActive": true,
+            "degraded": false,
+            "demandRendering": {
+              "pendingFrame": false,
+              "renderRequests": 23,
+              "renderedFrames": 4
+            },
+            "disposed": false,
+            "ghostActive": false,
+            "lastFit": {
+              "center": {
+                "x": 7,
+                "y": 2.43840003,
+                "z": 6
+              },
+              "rootUnchanged": true,
+              "size": {
+                "x": 9.227199912,
+                "y": 4.87680006,
+                "z": 8.528399944
+              }
+            },
+            "lifecycle": {
+              "canvasCount": 1,
+              "listenerCount": 4,
+              "mountCount": 1,
+              "observerActive": true,
+              "teardownCount": 0
+            },
+            "loadTrace": [
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "manifest",
+                "status": "started"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "manifest",
+                "status": "resolved"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "footprint",
+                "status": "started"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "footprint",
+                "status": "resolved"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "proxy",
+                "status": "started"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "proxy",
+                "status": "resolved"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "overview",
+                "status": "started"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "overview",
+                "status": "resolved"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "detail",
+                "status": "started"
+              },
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "detail": null,
+                "stage": "detail",
+                "status": "resolved"
+              }
+            ],
+            "modelRootTransform": {
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "quaternion": {
+                "w": 1,
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              }
+            },
+            "mounted": true,
+            "pendingLoads": 0,
+            "placementCount": 6,
+            "proposalBeforeCount": 0,
+            "proposalPreviewActive": false,
+            "proposalProposedCount": 0,
+            "representationGroups": [
+              {
+                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                "assetId": "asset-pallet-rack-185e9914e281",
+                "instanceMappings": [
+                  {
+                    "meshIndex": 0,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 1,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 2,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 3,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 4,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 5,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 6,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 7,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 8,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  },
+                  {
+                    "meshIndex": 9,
+                    "placementIds": [
+                      "pl-rack-01",
+                      "pl-rack-02",
+                      "pl-rack-03",
+                      "pl-rack-04",
+                      "pl-rack-05",
+                      "pl-rack-06"
+                    ]
+                  }
+                ],
+                "instanced": true,
+                "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
+                "meshCount": 10,
+                "placementIds": [
+                  "pl-rack-01",
+                  "pl-rack-02",
+                  "pl-rack-03",
+                  "pl-rack-04",
+                  "pl-rack-05",
+                  "pl-rack-06"
+                ],
+                "representation": "detail"
+              }
+            ],
+            "selectedPlacementIds": [],
+            "status": "ready",
+            "statusReason": null,
+            "suspended": false,
+            "warnings": [],
+            "worldBounds": {
+              "maximum": {
+                "x": 11.613599956,
+                "y": 4.87680006,
+                "z": 10.264199972
+              },
+              "minimum": {
+                "x": 2.386400044,
+                "y": 0,
+                "z": 1.735800028
+              }
+            }
+          },
+          "topDiagnostics": {
+            "ghostActive": false,
+            "id": "top-plan",
+            "mounted": true,
+            "observerCount": 1,
+            "placementIds": [
+              "pl-rack-01",
+              "pl-rack-02",
+              "pl-rack-03",
+              "pl-rack-04",
+              "pl-rack-05",
+              "pl-rack-06"
+            ],
+            "projection": {
+              "height": 795,
+              "maxX": 15,
+              "maxZ": 12,
+              "minX": 0,
+              "minZ": 0,
+              "offsetX": 24,
+              "offsetY": 44.700000000000045,
+              "padding": 24,
+              "scale": 58.8,
+              "width": 930
+            },
+            "proposalBeforeCount": 0,
+            "proposalMovedCount": 0,
+            "proposalNewCount": 0,
+            "proposalPreviewActive": false,
+            "renderCount": 5,
+            "selection": null,
+            "selections": [],
+            "suspended": false,
+            "type": "top-plan"
+          }
+        },
+        "webgl": {
+          "contextType": "webgl2",
+          "maxRenderbufferSize": 16384,
+          "maxTextureSize": 16384,
+          "renderer": "WebKit WebGL",
+          "shadingLanguageVersion": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+          "unmaskedRenderer": "ANGLE (Intel, Intel(R) UHD Graphics (0x0000A721) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+          "unmaskedVendor": "Google Inc. (Intel)",
+          "vendor": "WebKit",
+          "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+        }
+      },
+      "preciseMemory": {
+        "cdpRuntimeHeapUsage": {
+          "backingStorageSize": 14853683,
+          "embedderHeapUsedSize": 1050920,
+          "totalSize": 5017600,
+          "usedSize": 4295684
+        },
+        "performanceMemory": {
+          "capturedAtMs": 906.1000000238419,
+          "jsHeapSizeLimit": 4395630592,
+          "source": "performance.memory",
+          "totalJSHeapSize": 19871283,
+          "usedJSHeapSize": 19143527
+        }
+      }
+    },
+    "idleRenderStop": {
+      "discardedWarmups": 0,
+      "samples": [
+        {
+          "activeAdapterFrames": 0,
+          "atStop": {
+            "pendingFrame": false,
+            "renderRequests": 24,
+            "renderedFrames": 5
+          },
+          "before": {
+            "pendingFrame": false,
+            "renderRequests": 23,
+            "renderedFrames": 4
+          },
+          "iteration": 0,
+          "quietWindowMs": 40,
+          "stableAfter": {
+            "pendingFrame": false,
+            "renderRequests": 24,
+            "renderedFrames": 5
+          },
+          "stableBefore": {
+            "pendingFrame": false,
+            "renderRequests": 24,
+            "renderedFrames": 5
+          },
+          "startedAtMs": 2517.5,
+          "stopLatencyMs": 0.699999988079071,
+          "stoppedAtMs": 2518.199999988079
+        }
+      ]
+    },
+    "picking": {
+      "discardedWarmups": 0,
+      "point": {
+        "clientX": 0,
+        "clientY": 0,
+        "ndc": {
+          "x": 0.15492957746478875,
+          "y": -0.04225352112676051
+        },
+        "placementId": "pl-rack-06"
+      },
+      "samples": [
+        {
+          "durationMs": 3.300000011920929,
+          "endedAtMs": 2514.100000023842,
+          "instanceId": 5,
+          "iteration": 0,
+          "placementId": "pl-rack-06",
+          "startedAtMs": 2510.800000011921
+        }
+      ]
+    },
+    "planFrames": [
+      {
+        "after": {
           "dom": {
             "canvases": 1,
             "planSvgs": 1,
@@ -2803,7 +3292,7 @@
             "degraded": false,
             "demandRendering": {
               "pendingFrame": false,
-              "renderRequests": 23,
+              "renderRequests": 24,
               "renderedFrames": 5
             },
             "disposed": false,
@@ -3057,6 +3546,7 @@
             "selectedPlacementIds": [],
             "status": "ready",
             "statusReason": null,
+            "suspended": false,
             "warnings": [],
             "worldBounds": {
               "maximum": {
@@ -3100,503 +3590,12 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 5,
-            "selection": null,
-            "selections": [],
-            "type": "top-plan"
-          }
-        },
-        "webgl": {
-          "contextType": "webgl2",
-          "maxRenderbufferSize": 16384,
-          "maxTextureSize": 16384,
-          "renderer": "WebKit WebGL",
-          "shadingLanguageVersion": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
-          "unmaskedRenderer": "ANGLE (Intel, Intel(R) UHD Graphics (0x0000A721) Direct3D11 vs_5_0 ps_5_0, D3D11)",
-          "unmaskedVendor": "Google Inc. (Intel)",
-          "vendor": "WebKit",
-          "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
-        }
-      },
-      "preciseMemory": {
-        "cdpRuntimeHeapUsage": {
-          "backingStorageSize": 14844291,
-          "embedderHeapUsedSize": 1054384,
-          "totalSize": 5279744,
-          "usedSize": 4295868
-        },
-        "performanceMemory": {
-          "capturedAtMs": 1067.9000000357628,
-          "jsHeapSizeLimit": 4395630592,
-          "source": "performance.memory",
-          "totalJSHeapSize": 20124035,
-          "usedJSHeapSize": 19134319
-        }
-      }
-    },
-    "idleRenderStop": {
-      "discardedWarmups": 0,
-      "samples": [
-        {
-          "activeAdapterFrames": 0,
-          "atStop": {
-            "pendingFrame": false,
-            "renderRequests": 24,
-            "renderedFrames": 6
-          },
-          "before": {
-            "pendingFrame": false,
-            "renderRequests": 23,
-            "renderedFrames": 5
-          },
-          "iteration": 0,
-          "quietWindowMs": 40,
-          "stableAfter": {
-            "pendingFrame": false,
-            "renderRequests": 24,
-            "renderedFrames": 6
-          },
-          "stableBefore": {
-            "pendingFrame": false,
-            "renderRequests": 24,
-            "renderedFrames": 6
-          },
-          "startedAtMs": 3305.5,
-          "stopLatencyMs": 1.300000011920929,
-          "stoppedAtMs": 3306.800000011921
-        }
-      ]
-    },
-    "picking": {
-      "discardedWarmups": 0,
-      "point": {
-        "clientX": 0,
-        "clientY": 0,
-        "ndc": {
-          "x": 0.15492957746478875,
-          "y": -0.04225352112676051
-        },
-        "placementId": "pl-rack-06"
-      },
-      "samples": [
-        {
-          "durationMs": 7.699999988079071,
-          "endedAtMs": 3300.800000011921,
-          "instanceId": 5,
-          "iteration": 0,
-          "placementId": "pl-rack-06",
-          "startedAtMs": 3293.100000023842
-        }
-      ]
-    },
-    "planFrames": [
-      {
-        "after": {
-          "dom": {
-            "canvases": 1,
-            "planSvgs": 1,
-            "workspaceRoots": 0
-          },
-          "lifecycleTracker": {
-            "activeAdapterFrames": 0,
-            "activeObserverTargets": 2,
-            "observerInstances": 2
-          },
-          "moduleProof": {
-            "actualThreeAdapter": true,
-            "actualTopPlanAdapter": true,
-            "actualWorkspace": true,
-            "sessionApiVersion": 1,
-            "threeAdapterStatus": "ready",
-            "topAdapterType": "top-plan",
-            "workspaceApiVersion": 1,
-            "workspaceConstructor": "Workspace"
-          },
-          "plan": {
-            "clearances": {
-              "placementClearanceVolumeCount": 0,
-              "placementClearanceVolumesSupported": false,
-              "routeCorridorCount": 1,
-              "routeCorridors": [
-                {
-                  "pointCount": 4,
-                  "routeId": "rt-forklift-rack-a",
-                  "strokeWidth": 64.68
-                }
-              ],
-              "routeCorridorsSupported": true,
-              "unavailableReason": "TopPlanAdapter does not currently render per-placement clearance volume elements; no timing is fabricated."
-            },
-            "labels": {
-              "accessibilityLabelCount": 7,
-              "accessibilityLabelsSupported": true,
-              "unavailableReason": "TopPlanAdapter currently exposes labels through aria-label only.",
-              "visibleTextLabelCount": 0,
-              "visibleTextLabelsSupported": false
-            },
-            "layerOrder": [
-              "zones",
-              "routes",
-              "placements"
-            ],
-            "layoutCounts": {
-              "placements": 6,
-              "routes": 1,
-              "zones": 1
-            },
-            "renderedCounts": {
-              "placements": 6,
-              "routes": 1,
-              "zones": 1
-            }
-          },
-          "profile": "full-detail",
-          "renderer": {
-            "autoReset": true,
-            "memory": {
-              "geometries": 10,
-              "textures": 1
-            },
-            "programs": 1,
-            "render": {
-              "calls": 10,
-              "frame": 6,
-              "lines": 0,
-              "points": 0,
-              "triangles": 968880
-            }
-          },
-          "rendererPool": {
-            "availableCount": 0,
-            "createdCount": 1,
-            "disposed": false,
-            "leasedCount": 1,
-            "maximumSize": 1,
-            "reusedCount": 0
-          },
-          "runtimeId": "facility-release-runtime-1",
-          "selection": [],
-          "threeDiagnostics": {
-            "assetGroupCount": 1,
-            "camera": {
-              "position": {
-                "x": 19.74098435349199,
-                "y": 15.17938438349199,
-                "z": 18.74098435349199
-              },
-              "target": {
-                "x": 7,
-                "y": 2.43840003,
-                "z": 5.999999999999999
-              }
-            },
-            "contextLost": false,
-            "controlsActive": true,
-            "degraded": false,
-            "demandRendering": {
-              "pendingFrame": false,
-              "renderRequests": 24,
-              "renderedFrames": 6
-            },
-            "disposed": false,
-            "ghostActive": false,
-            "lastFit": {
-              "center": {
-                "x": 7,
-                "y": 2.43840003,
-                "z": 6
-              },
-              "rootUnchanged": true,
-              "size": {
-                "x": 9.227199912,
-                "y": 4.87680006,
-                "z": 8.528399944
-              }
-            },
-            "lifecycle": {
-              "canvasCount": 1,
-              "listenerCount": 4,
-              "mountCount": 1,
-              "observerActive": true,
-              "teardownCount": 0
-            },
-            "loadTrace": [
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "manifest",
-                "status": "started"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "manifest",
-                "status": "resolved"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "footprint",
-                "status": "started"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "footprint",
-                "status": "resolved"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "proxy",
-                "status": "started"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "proxy",
-                "status": "resolved"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "overview",
-                "status": "started"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "overview",
-                "status": "resolved"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "detail",
-                "status": "started"
-              },
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "detail": null,
-                "stage": "detail",
-                "status": "resolved"
-              }
-            ],
-            "modelRootTransform": {
-              "position": {
-                "x": 0,
-                "y": 0,
-                "z": 0
-              },
-              "quaternion": {
-                "w": 1,
-                "x": 0,
-                "y": 0,
-                "z": 0
-              },
-              "scale": {
-                "x": 1,
-                "y": 1,
-                "z": 1
-              }
-            },
-            "mounted": true,
-            "pendingLoads": 0,
-            "placementCount": 6,
-            "proposalBeforeCount": 0,
-            "proposalPreviewActive": false,
-            "proposalProposedCount": 0,
-            "representationGroups": [
-              {
-                "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
-                "assetId": "asset-pallet-rack-185e9914e281",
-                "instanceMappings": [
-                  {
-                    "meshIndex": 0,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 1,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 2,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 3,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 4,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 5,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 6,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 7,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 8,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  },
-                  {
-                    "meshIndex": 9,
-                    "placementIds": [
-                      "pl-rack-01",
-                      "pl-rack-02",
-                      "pl-rack-03",
-                      "pl-rack-04",
-                      "pl-rack-05",
-                      "pl-rack-06"
-                    ]
-                  }
-                ],
-                "instanced": true,
-                "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|detail",
-                "meshCount": 10,
-                "placementIds": [
-                  "pl-rack-01",
-                  "pl-rack-02",
-                  "pl-rack-03",
-                  "pl-rack-04",
-                  "pl-rack-05",
-                  "pl-rack-06"
-                ],
-                "representation": "detail"
-              }
-            ],
-            "selectedPlacementIds": [],
-            "status": "ready",
-            "statusReason": null,
-            "warnings": [],
-            "worldBounds": {
-              "maximum": {
-                "x": 11.613599956,
-                "y": 4.87680006,
-                "z": 10.264199972
-              },
-              "minimum": {
-                "x": 2.386400044,
-                "y": 0,
-                "z": 1.735800028
-              }
-            }
-          },
-          "topDiagnostics": {
-            "ghostActive": false,
-            "id": "top-plan",
-            "mounted": true,
-            "observerCount": 1,
-            "placementIds": [
-              "pl-rack-01",
-              "pl-rack-02",
-              "pl-rack-03",
-              "pl-rack-04",
-              "pl-rack-05",
-              "pl-rack-06"
-            ],
-            "projection": {
-              "height": 795,
-              "maxX": 15,
-              "maxZ": 12,
-              "minX": 0,
-              "minZ": 0,
-              "offsetX": 24,
-              "offsetY": 44.700000000000045,
-              "padding": 24,
-              "scale": 58.8,
-              "width": 930
-            },
-            "proposalBeforeCount": 0,
-            "proposalMovedCount": 0,
-            "proposalNewCount": 0,
-            "proposalPreviewActive": false,
-            "renderCount": 87,
+            "renderCount": 86,
             "selection": "pl-rack-03",
             "selections": [
               "pl-rack-03"
             ],
+            "suspended": false,
             "type": "top-plan"
           }
         },
@@ -3669,7 +3668,7 @@
             "programs": 1,
             "render": {
               "calls": 10,
-              "frame": 6,
+              "frame": 5,
               "lines": 0,
               "points": 0,
               "triangles": 968880
@@ -3705,7 +3704,7 @@
             "demandRendering": {
               "pendingFrame": false,
               "renderRequests": 24,
-              "renderedFrames": 6
+              "renderedFrames": 5
             },
             "disposed": false,
             "ghostActive": false,
@@ -3958,6 +3957,7 @@
             "selectedPlacementIds": [],
             "status": "ready",
             "statusReason": null,
+            "suspended": false,
             "warnings": [],
             "worldBounds": {
               "maximum": {
@@ -4001,139 +4001,140 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 17,
+            "renderCount": 16,
             "selection": "pl-rack-01",
             "selections": [
               "pl-rack-01"
             ],
+            "suspended": false,
             "type": "top-plan"
           }
         },
         "callbackDurationsMs": [
-          1,
-          0.3999999761581421,
-          1,
-          0.5999999642372131,
-          0.30000001192092896,
           0.5,
-          0.40000003576278687,
-          0.5,
-          0.30000001192092896,
-          0.5,
-          0.800000011920929,
-          1.199999988079071,
-          1.5,
+          0,
           0.30000001192092896,
           0.30000001192092896,
+          0.09999996423721313,
+          0.09999996423721313,
+          0.10000002384185791,
+          0.09999996423721313,
+          0.10000002384185791,
+          0,
+          0.10000002384185791,
+          0.09999996423721313,
           0.6000000238418579,
-          0.3999999761581421,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.19999998807907104,
+          0,
+          0.19999998807907104,
+          0.09999996423721313,
+          0,
+          0,
+          0.09999996423721313,
+          0.19999998807907104,
+          0.20000004768371582,
+          0.800000011920929,
+          0.20000004768371582,
+          0.2999999523162842,
           0.19999998807907104,
           0.30000001192092896,
-          0.800000011920929,
-          0.30000001192092896,
-          0.30000001192092896,
-          0.800000011920929,
-          0.7999999523162842,
-          1.699999988079071,
-          0.40000003576278687,
-          0.699999988079071,
-          0.699999988079071,
-          0.5999999642372131,
-          0.6000000238418579,
-          1.5,
-          0.800000011920929,
-          0.2999999523162842,
-          0.6000000238418579,
-          0.40000003576278687,
-          0.5,
-          1.199999988079071,
-          0.30000001192092896,
           0.3999999761581421,
-          0.40000003576278687,
-          0.5999999642372131,
-          0.30000001192092896,
-          0.3999999761581421,
-          0.5999999642372131,
-          0.5,
-          0.5,
-          0.40000003576278687,
-          0.5,
-          1.800000011920929,
-          0.800000011920929,
-          0.6000000238418579,
-          0.3999999761581421,
-          0.800000011920929,
-          0.30000001192092896,
-          0.5,
-          0.699999988079071,
-          0.699999988079071,
+          1.4000000357627869,
+          0.09999996423721313,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.09999996423721313,
+          0.19999998807907104,
           1,
-          0.800000011920929,
-          0.699999988079071,
-          4.099999964237213
+          0.30000001192092896,
+          0,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.10000002384185791,
+          0,
+          0,
+          0.10000002384185791,
+          0.10000002384185791,
+          0.5999999642372131,
+          0.10000002384185791,
+          0.10000002384185791,
+          0,
+          0.10000002384185791,
+          0.20000004768371582,
+          0,
+          0,
+          0.19999998807907104,
+          0.19999998807907104,
+          0.10000002384185791,
+          0.10000002384185791,
+          1.300000011920929
         ],
         "frameCount": 61,
         "frameIntervalsMs": [
-          8.099999999999909,
+          8.400000000000091,
+          8.199999999999818,
           8.5,
+          8.200000000000273,
+          8.399999999999636,
+          8.200000000000273,
+          8.5,
+          8.099999999999909,
+          8.400000000000091,
+          8.299999999999727,
+          8.200000000000273,
+          8.400000000000091,
           8.299999999999727,
           8.300000000000182,
           8.400000000000091,
+          8.299999999999727,
+          8.300000000000182,
+          8.299999999999727,
+          8.400000000000091,
+          8.300000000000182,
+          8.400000000000091,
+          8.299999999999727,
+          8.300000000000182,
+          8.299999999999727,
+          8.5,
+          8.700000000000273,
+          7.599999999999909,
+          8.400000000000091,
+          8.299999999999727,
+          8.300000000000182,
+          8.400000000000091,
+          8.299999999999727,
+          8.400000000000091,
+          8.200000000000273,
+          8.599999999999909,
+          8.099999999999909,
+          8.300000000000182,
           8.199999999999818,
+          8.599999999999909,
+          8.099999999999909,
+          8.5,
+          8.100000000000364,
+          8.299999999999727,
+          8.400000000000091,
+          8.300000000000182,
+          8.299999999999727,
+          8.400000000000091,
+          8.199999999999818,
+          8.5,
+          8.200000000000273,
+          8.299999999999727,
+          8.400000000000091,
           8.400000000000091,
           8.099999999999909,
           8.599999999999909,
-          8.300000000000182,
-          8.199999999999818,
-          8.200000000000273,
-          8.299999999999727,
-          8.5,
-          8.300000000000182,
-          8.199999999999818,
-          8.5,
-          8.200000000000273,
-          8.400000000000091,
-          8.399999999999636,
-          8.100000000000364,
-          8.399999999999636,
-          8.400000000000091,
-          8.300000000000182,
-          8.299999999999727,
-          9.5,
-          7,
-          8.300000000000182,
-          8.300000000000182,
-          8.399999999999636,
-          8.400000000000091,
-          8.400000000000091,
-          8.300000000000182,
-          8.299999999999727,
-          8.200000000000273,
-          8.399999999999636,
-          8.200000000000273,
-          8.400000000000091,
-          8.399999999999636,
-          8.200000000000273,
-          8.299999999999727,
-          8.400000000000091,
-          8.300000000000182,
-          8.400000000000091,
-          8.299999999999727,
-          8.300000000000182,
           8.400000000000091,
           8.099999999999909,
-          8.400000000000091,
-          8.299999999999727,
-          8.5,
-          8.099999999999909,
-          8.600000000000364,
-          8.199999999999818,
-          8.199999999999818,
-          8.400000000000091,
           8.300000000000182,
-          8.400000000000091,
-          8.299999999999727,
-          8.300000000000182
+          8.300000000000182,
+          8.299999999999727
         ],
         "layerFacts": {
           "clearances": {
@@ -4175,7 +4176,7 @@
         },
         "longTasks": [],
         "runIndex": 0,
-        "wallDurationMs": 507.7999999523163
+        "wallDurationMs": 506.5999999642372
       }
     ],
     "planRender": {
@@ -4211,6 +4212,7 @@
         "renderCount": 6,
         "selection": null,
         "selections": [],
+        "suspended": false,
         "type": "top-plan"
       },
       "discardedWarmups": 0,
@@ -4254,10 +4256,10 @@
       },
       "samples": [
         {
-          "durationMs": 0.3999999761581421,
-          "endedAtMs": 1075.5,
+          "durationMs": 0.30000001192092896,
+          "endedAtMs": 915.1999999880791,
           "iteration": 0,
-          "startedAtMs": 1075.1000000238419
+          "startedAtMs": 914.8999999761581
         }
       ]
     },
@@ -4265,41 +4267,353 @@
       {
         "after": {
           "cdpRuntimeHeapUsage": {
-            "backingStorageSize": 1354855,
-            "embedderHeapUsedSize": 960968,
-            "totalSize": 5017600,
-            "usedSize": 4215696
+            "backingStorageSize": 1364247,
+            "embedderHeapUsedSize": 989040,
+            "totalSize": 4755456,
+            "usedSize": 3859596
           },
           "performanceMemory": {
-            "capturedAtMs": 2048.899999976158,
+            "capturedAtMs": 1469.2999999523163,
             "jsHeapSizeLimit": 4395630592,
             "source": "performance.memory",
-            "totalJSHeapSize": 6372455,
-            "usedJSHeapSize": 5564643
+            "totalJSHeapSize": 6119703,
+            "usedJSHeapSize": 5217819
           }
         },
         "before": {
           "cdpRuntimeHeapUsage": {
-            "backingStorageSize": 1354653,
-            "embedderHeapUsedSize": 1054248,
+            "backingStorageSize": 1364045,
+            "embedderHeapUsedSize": 1053592,
             "totalSize": 4493312,
-            "usedSize": 3746764
+            "usedSize": 3751864
           },
           "performanceMemory": {
-            "capturedAtMs": 1202.199999988079,
+            "capturedAtMs": 833.1999999880791,
             "jsHeapSizeLimit": 4395630592,
             "source": "performance.memory",
-            "totalJSHeapSize": 5847965,
-            "usedJSHeapSize": 5095425
+            "totalJSHeapSize": 5857357,
+            "usedJSHeapSize": 5109917
           }
         },
-        "browserContextId": "623536cc-e3c1-4a1d-a2fc-e3c5d24ca2e8",
+        "browserContextId": "1a06c869-da00-4002-907f-44655d1d5116",
         "cycleCount": 2,
         "cycles": [
           {
             "cycleIndex": 0,
             "lifecycle": {
-              "destroyed": {
+              "lifecycleMode": "bounded-suspend-resume",
+              "mounted": {
+                "dom": {
+                  "canvases": 1,
+                  "planSvgs": 1,
+                  "workspaceRoots": 0
+                },
+                "lifecycleTracker": {
+                  "activeAdapterFrames": 0,
+                  "activeObserverTargets": 2,
+                  "observerInstances": 2
+                },
+                "moduleProof": {
+                  "actualThreeAdapter": true,
+                  "actualTopPlanAdapter": true,
+                  "actualWorkspace": true,
+                  "sessionApiVersion": 1,
+                  "threeAdapterStatus": "ready",
+                  "topAdapterType": "top-plan",
+                  "workspaceApiVersion": 1,
+                  "workspaceConstructor": "Workspace"
+                },
+                "plan": {
+                  "clearances": {
+                    "placementClearanceVolumeCount": 0,
+                    "placementClearanceVolumesSupported": false,
+                    "routeCorridorCount": 1,
+                    "routeCorridors": [
+                      {
+                        "pointCount": 4,
+                        "routeId": "rt-forklift-rack-a",
+                        "strokeWidth": 2
+                      }
+                    ],
+                    "routeCorridorsSupported": true,
+                    "unavailableReason": "TopPlanAdapter does not currently render per-placement clearance volume elements; no timing is fabricated."
+                  },
+                  "labels": {
+                    "accessibilityLabelCount": 7,
+                    "accessibilityLabelsSupported": true,
+                    "unavailableReason": "TopPlanAdapter currently exposes labels through aria-label only.",
+                    "visibleTextLabelCount": 0,
+                    "visibleTextLabelsSupported": false
+                  },
+                  "layerOrder": [
+                    "zones",
+                    "routes",
+                    "placements"
+                  ],
+                  "layoutCounts": {
+                    "placements": 6,
+                    "routes": 1,
+                    "zones": 1
+                  },
+                  "renderedCounts": {
+                    "placements": 6,
+                    "routes": 1,
+                    "zones": 1
+                  }
+                },
+                "profile": "proxy",
+                "renderer": {
+                  "autoReset": true,
+                  "memory": {
+                    "geometries": 1,
+                    "textures": 1
+                  },
+                  "programs": 1,
+                  "render": {
+                    "calls": 1,
+                    "frame": 4,
+                    "lines": 0,
+                    "points": 0,
+                    "triangles": 72
+                  }
+                },
+                "rendererPool": {
+                  "availableCount": 0,
+                  "createdCount": 1,
+                  "disposed": false,
+                  "leasedCount": 1,
+                  "maximumSize": 1,
+                  "reusedCount": 0
+                },
+                "runtimeId": "facility-release-runtime-1",
+                "selection": [],
+                "threeDiagnostics": {
+                  "assetGroupCount": 1,
+                  "camera": {
+                    "position": {
+                      "x": 19.74098435349199,
+                      "y": 15.17938438349199,
+                      "z": 18.74098435349199
+                    },
+                    "target": {
+                      "x": 7,
+                      "y": 2.43840003,
+                      "z": 5.999999999999999
+                    }
+                  },
+                  "contextLost": false,
+                  "controlsActive": true,
+                  "degraded": false,
+                  "demandRendering": {
+                    "pendingFrame": false,
+                    "renderRequests": 25,
+                    "renderedFrames": 4
+                  },
+                  "disposed": false,
+                  "ghostActive": false,
+                  "lastFit": {
+                    "center": {
+                      "x": 7,
+                      "y": 2.43840003,
+                      "z": 6
+                    },
+                    "rootUnchanged": true,
+                    "size": {
+                      "x": 9.227199912,
+                      "y": 4.87680006,
+                      "z": 8.528399944
+                    }
+                  },
+                  "lifecycle": {
+                    "canvasCount": 1,
+                    "listenerCount": 4,
+                    "mountCount": 1,
+                    "observerActive": true,
+                    "teardownCount": 0
+                  },
+                  "loadTrace": [
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "manifest",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "manifest",
+                      "status": "resolved"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "footprint",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "footprint",
+                      "status": "resolved"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "proxy",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "proxy",
+                      "status": "resolved"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "overview",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "overview",
+                      "status": "skipped"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "detail",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "detail",
+                      "status": "skipped"
+                    }
+                  ],
+                  "modelRootTransform": {
+                    "position": {
+                      "x": 0,
+                      "y": 0,
+                      "z": 0
+                    },
+                    "quaternion": {
+                      "w": 1,
+                      "x": 0,
+                      "y": 0,
+                      "z": 0
+                    },
+                    "scale": {
+                      "x": 1,
+                      "y": 1,
+                      "z": 1
+                    }
+                  },
+                  "mounted": true,
+                  "pendingLoads": 0,
+                  "placementCount": 6,
+                  "proposalBeforeCount": 0,
+                  "proposalPreviewActive": false,
+                  "proposalProposedCount": 0,
+                  "representationGroups": [
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "instanceMappings": [
+                        {
+                          "meshIndex": 0,
+                          "placementIds": [
+                            "pl-rack-01",
+                            "pl-rack-02",
+                            "pl-rack-03",
+                            "pl-rack-04",
+                            "pl-rack-05",
+                            "pl-rack-06"
+                          ]
+                        }
+                      ],
+                      "instanced": true,
+                      "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|proxy",
+                      "meshCount": 1,
+                      "placementIds": [
+                        "pl-rack-01",
+                        "pl-rack-02",
+                        "pl-rack-03",
+                        "pl-rack-04",
+                        "pl-rack-05",
+                        "pl-rack-06"
+                      ],
+                      "representation": "proxy"
+                    }
+                  ],
+                  "selectedPlacementIds": [],
+                  "status": "ready",
+                  "statusReason": null,
+                  "suspended": false,
+                  "warnings": [],
+                  "worldBounds": {
+                    "maximum": {
+                      "x": 11.613599956,
+                      "y": 4.87680006,
+                      "z": 10.264199972
+                    },
+                    "minimum": {
+                      "x": 2.386400044,
+                      "y": 0,
+                      "z": 1.735800028
+                    }
+                  }
+                },
+                "topDiagnostics": {
+                  "ghostActive": false,
+                  "id": "top-plan",
+                  "mounted": true,
+                  "observerCount": 1,
+                  "placementIds": [
+                    "pl-rack-01",
+                    "pl-rack-02",
+                    "pl-rack-03",
+                    "pl-rack-04",
+                    "pl-rack-05",
+                    "pl-rack-06"
+                  ],
+                  "projection": {
+                    "height": 1,
+                    "maxX": 15,
+                    "maxZ": 12,
+                    "minX": 0,
+                    "minZ": 0,
+                    "offsetX": 0,
+                    "offsetY": 0.09999999999999998,
+                    "padding": 0,
+                    "scale": 0.06666666666666667,
+                    "width": 1
+                  },
+                  "proposalBeforeCount": 0,
+                  "proposalMovedCount": 0,
+                  "proposalNewCount": 0,
+                  "proposalPreviewActive": false,
+                  "renderCount": 8,
+                  "selection": null,
+                  "selections": [],
+                  "suspended": false,
+                  "type": "top-plan"
+                }
+              },
+              "runtimeId": "facility-release-runtime-1",
+              "suspended": {
                 "activeAdapterFrames": 0,
                 "activeObserverTargets": 0,
                 "before": {
@@ -4561,6 +4875,7 @@
                     "selectedPlacementIds": [],
                     "status": "ready",
                     "statusReason": null,
+                    "suspended": false,
                     "warnings": [],
                     "worldBounds": {
                       "maximum": {
@@ -4607,59 +4922,220 @@
                     "renderCount": 5,
                     "selection": null,
                     "selections": [],
+                    "suspended": false,
                     "type": "top-plan"
                   }
                 },
                 "canvases": 0,
-                "destroyed": true,
                 "planSvgs": 0,
                 "rendererPool": {
-                  "availableCount": 1,
+                  "availableCount": 0,
                   "createdCount": 1,
                   "disposed": false,
-                  "leasedCount": 0,
+                  "leasedCount": 1,
                   "maximumSize": 1,
                   "reusedCount": 0
                 },
                 "rootChildren": 0,
+                "suspended": true,
                 "threeAfter": {
-                  "assetGroupCount": 0,
-                  "camera": null,
+                  "assetGroupCount": 1,
+                  "camera": {
+                    "position": {
+                      "x": 19.74098435349199,
+                      "y": 15.17938438349199,
+                      "z": 18.74098435349199
+                    },
+                    "target": {
+                      "x": 7,
+                      "y": 2.43840003,
+                      "z": 5.999999999999999
+                    }
+                  },
                   "contextLost": false,
-                  "controlsActive": false,
+                  "controlsActive": true,
                   "degraded": false,
                   "demandRendering": {
                     "pendingFrame": false,
-                    "renderRequests": 20,
+                    "renderRequests": 19,
                     "renderedFrames": 3
                   },
-                  "disposed": true,
+                  "disposed": false,
                   "ghostActive": false,
-                  "lastFit": null,
+                  "lastFit": {
+                    "center": {
+                      "x": 7,
+                      "y": 2.43840003,
+                      "z": 6
+                    },
+                    "rootUnchanged": true,
+                    "size": {
+                      "x": 9.227199912,
+                      "y": 4.87680006,
+                      "z": 8.528399944
+                    }
+                  },
                   "lifecycle": {
-                    "canvasCount": 0,
-                    "listenerCount": 0,
+                    "canvasCount": 1,
+                    "listenerCount": 4,
                     "mountCount": 1,
                     "observerActive": false,
-                    "teardownCount": 1
+                    "teardownCount": 0
                   },
-                  "loadTrace": [],
-                  "modelRootTransform": null,
-                  "mounted": false,
+                  "loadTrace": [
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "manifest",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "manifest",
+                      "status": "resolved"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "footprint",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "footprint",
+                      "status": "resolved"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "proxy",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "proxy",
+                      "status": "resolved"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "overview",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "overview",
+                      "status": "skipped"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "detail",
+                      "status": "started"
+                    },
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "detail": null,
+                      "stage": "detail",
+                      "status": "skipped"
+                    }
+                  ],
+                  "modelRootTransform": {
+                    "position": {
+                      "x": 0,
+                      "y": 0,
+                      "z": 0
+                    },
+                    "quaternion": {
+                      "w": 1,
+                      "x": 0,
+                      "y": 0,
+                      "z": 0
+                    },
+                    "scale": {
+                      "x": 1,
+                      "y": 1,
+                      "z": 1
+                    }
+                  },
+                  "mounted": true,
                   "pendingLoads": 0,
-                  "placementCount": 0,
+                  "placementCount": 6,
                   "proposalBeforeCount": 0,
                   "proposalPreviewActive": false,
                   "proposalProposedCount": 0,
-                  "representationGroups": [],
+                  "representationGroups": [
+                    {
+                      "assetDefinitionRevision": "24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e",
+                      "assetId": "asset-pallet-rack-185e9914e281",
+                      "instanceMappings": [
+                        {
+                          "meshIndex": 0,
+                          "placementIds": [
+                            "pl-rack-01",
+                            "pl-rack-02",
+                            "pl-rack-03",
+                            "pl-rack-04",
+                            "pl-rack-05",
+                            "pl-rack-06"
+                          ]
+                        }
+                      ],
+                      "instanced": true,
+                      "key": "asset-pallet-rack-185e9914e281|24803f24628b6dd2e004cade4f493cee1ecd68a78db5eb2276e2aab36606f11e|proxy",
+                      "meshCount": 1,
+                      "placementIds": [
+                        "pl-rack-01",
+                        "pl-rack-02",
+                        "pl-rack-03",
+                        "pl-rack-04",
+                        "pl-rack-05",
+                        "pl-rack-06"
+                      ],
+                      "representation": "proxy"
+                    }
+                  ],
                   "selectedPlacementIds": [],
-                  "status": "disposed",
+                  "status": "suspended",
                   "statusReason": null,
+                  "suspended": true,
                   "warnings": [],
-                  "worldBounds": null
+                  "worldBounds": {
+                    "maximum": {
+                      "x": 11.613599956,
+                      "y": 4.87680006,
+                      "z": 10.264199972
+                    },
+                    "minimum": {
+                      "x": 2.386400044,
+                      "y": 0,
+                      "z": 1.735800028
+                    }
+                  }
                 },
                 "workspaceRoots": 0
-              },
+              }
+            },
+            "wallDurationMs": 45.89080001460388
+          },
+          {
+            "cycleIndex": 1,
+            "lifecycle": {
+              "lifecycleMode": "bounded-suspend-resume",
               "mounted": {
                 "dom": {
                   "canvases": 1,
@@ -4669,7 +5145,7 @@
                 "lifecycleTracker": {
                   "activeAdapterFrames": 0,
                   "activeObserverTargets": 2,
-                  "observerInstances": 4
+                  "observerInstances": 2
                 },
                 "moduleProof": {
                   "actualThreeAdapter": true,
@@ -4729,7 +5205,7 @@
                   "programs": 1,
                   "render": {
                     "calls": 1,
-                    "frame": 6,
+                    "frame": 5,
                     "lines": 0,
                     "points": 0,
                     "triangles": 72
@@ -4741,9 +5217,9 @@
                   "disposed": false,
                   "leasedCount": 1,
                   "maximumSize": 1,
-                  "reusedCount": 1
+                  "reusedCount": 0
                 },
-                "runtimeId": "facility-release-runtime-2",
+                "runtimeId": "facility-release-runtime-1",
                 "selection": [],
                 "threeDiagnostics": {
                   "assetGroupCount": 1,
@@ -4764,8 +5240,8 @@
                   "degraded": false,
                   "demandRendering": {
                     "pendingFrame": false,
-                    "renderRequests": 22,
-                    "renderedFrames": 3
+                    "renderRequests": 32,
+                    "renderedFrames": 5
                   },
                   "disposed": false,
                   "ghostActive": false,
@@ -4919,6 +5395,7 @@
                   "selectedPlacementIds": [],
                   "status": "ready",
                   "statusReason": null,
+                  "suspended": false,
                   "warnings": [],
                   "worldBounds": {
                     "maximum": {
@@ -4962,20 +5439,15 @@
                   "proposalMovedCount": 0,
                   "proposalNewCount": 0,
                   "proposalPreviewActive": false,
-                  "renderCount": 7,
+                  "renderCount": 11,
                   "selection": null,
                   "selections": [],
+                  "suspended": false,
                   "type": "top-plan"
                 }
               },
-              "runtimeId": "facility-release-runtime-2"
-            },
-            "wallDurationMs": 144.24729999154806
-          },
-          {
-            "cycleIndex": 1,
-            "lifecycle": {
-              "destroyed": {
+              "runtimeId": "facility-release-runtime-1",
+              "suspended": {
                 "activeAdapterFrames": 0,
                 "activeObserverTargets": 0,
                 "before": {
@@ -4987,7 +5459,7 @@
                   "lifecycleTracker": {
                     "activeAdapterFrames": 0,
                     "activeObserverTargets": 2,
-                    "observerInstances": 4
+                    "observerInstances": 2
                   },
                   "moduleProof": {
                     "actualThreeAdapter": true,
@@ -5047,7 +5519,7 @@
                     "programs": 1,
                     "render": {
                       "calls": 1,
-                      "frame": 6,
+                      "frame": 4,
                       "lines": 0,
                       "points": 0,
                       "triangles": 72
@@ -5059,9 +5531,9 @@
                     "disposed": false,
                     "leasedCount": 1,
                     "maximumSize": 1,
-                    "reusedCount": 1
+                    "reusedCount": 0
                   },
-                  "runtimeId": "facility-release-runtime-2",
+                  "runtimeId": "facility-release-runtime-1",
                   "selection": [],
                   "threeDiagnostics": {
                     "assetGroupCount": 1,
@@ -5082,8 +5554,8 @@
                     "degraded": false,
                     "demandRendering": {
                       "pendingFrame": false,
-                      "renderRequests": 22,
-                      "renderedFrames": 3
+                      "renderRequests": 25,
+                      "renderedFrames": 4
                     },
                     "disposed": false,
                     "ghostActive": false,
@@ -5237,6 +5709,7 @@
                     "selectedPlacementIds": [],
                     "status": "ready",
                     "statusReason": null,
+                    "suspended": false,
                     "warnings": [],
                     "worldBounds": {
                       "maximum": {
@@ -5280,148 +5753,26 @@
                     "proposalMovedCount": 0,
                     "proposalNewCount": 0,
                     "proposalPreviewActive": false,
-                    "renderCount": 7,
+                    "renderCount": 8,
                     "selection": null,
                     "selections": [],
+                    "suspended": false,
                     "type": "top-plan"
                   }
                 },
                 "canvases": 0,
-                "destroyed": true,
                 "planSvgs": 0,
-                "rendererPool": {
-                  "availableCount": 1,
-                  "createdCount": 1,
-                  "disposed": false,
-                  "leasedCount": 0,
-                  "maximumSize": 1,
-                  "reusedCount": 1
-                },
-                "rootChildren": 0,
-                "threeAfter": {
-                  "assetGroupCount": 0,
-                  "camera": null,
-                  "contextLost": false,
-                  "controlsActive": false,
-                  "degraded": false,
-                  "demandRendering": {
-                    "pendingFrame": false,
-                    "renderRequests": 23,
-                    "renderedFrames": 3
-                  },
-                  "disposed": true,
-                  "ghostActive": false,
-                  "lastFit": null,
-                  "lifecycle": {
-                    "canvasCount": 0,
-                    "listenerCount": 0,
-                    "mountCount": 1,
-                    "observerActive": false,
-                    "teardownCount": 1
-                  },
-                  "loadTrace": [],
-                  "modelRootTransform": null,
-                  "mounted": false,
-                  "pendingLoads": 0,
-                  "placementCount": 0,
-                  "proposalBeforeCount": 0,
-                  "proposalPreviewActive": false,
-                  "proposalProposedCount": 0,
-                  "representationGroups": [],
-                  "selectedPlacementIds": [],
-                  "status": "disposed",
-                  "statusReason": null,
-                  "warnings": [],
-                  "worldBounds": null
-                },
-                "workspaceRoots": 0
-              },
-              "mounted": {
-                "dom": {
-                  "canvases": 1,
-                  "planSvgs": 1,
-                  "workspaceRoots": 0
-                },
-                "lifecycleTracker": {
-                  "activeAdapterFrames": 0,
-                  "activeObserverTargets": 2,
-                  "observerInstances": 6
-                },
-                "moduleProof": {
-                  "actualThreeAdapter": true,
-                  "actualTopPlanAdapter": true,
-                  "actualWorkspace": true,
-                  "sessionApiVersion": 1,
-                  "threeAdapterStatus": "ready",
-                  "topAdapterType": "top-plan",
-                  "workspaceApiVersion": 1,
-                  "workspaceConstructor": "Workspace"
-                },
-                "plan": {
-                  "clearances": {
-                    "placementClearanceVolumeCount": 0,
-                    "placementClearanceVolumesSupported": false,
-                    "routeCorridorCount": 1,
-                    "routeCorridors": [
-                      {
-                        "pointCount": 4,
-                        "routeId": "rt-forklift-rack-a",
-                        "strokeWidth": 2
-                      }
-                    ],
-                    "routeCorridorsSupported": true,
-                    "unavailableReason": "TopPlanAdapter does not currently render per-placement clearance volume elements; no timing is fabricated."
-                  },
-                  "labels": {
-                    "accessibilityLabelCount": 7,
-                    "accessibilityLabelsSupported": true,
-                    "unavailableReason": "TopPlanAdapter currently exposes labels through aria-label only.",
-                    "visibleTextLabelCount": 0,
-                    "visibleTextLabelsSupported": false
-                  },
-                  "layerOrder": [
-                    "zones",
-                    "routes",
-                    "placements"
-                  ],
-                  "layoutCounts": {
-                    "placements": 6,
-                    "routes": 1,
-                    "zones": 1
-                  },
-                  "renderedCounts": {
-                    "placements": 6,
-                    "routes": 1,
-                    "zones": 1
-                  }
-                },
-                "profile": "proxy",
-                "renderer": {
-                  "autoReset": true,
-                  "memory": {
-                    "geometries": 1,
-                    "textures": 1
-                  },
-                  "programs": 1,
-                  "render": {
-                    "calls": 1,
-                    "frame": 9,
-                    "lines": 0,
-                    "points": 0,
-                    "triangles": 72
-                  }
-                },
                 "rendererPool": {
                   "availableCount": 0,
                   "createdCount": 1,
                   "disposed": false,
                   "leasedCount": 1,
                   "maximumSize": 1,
-                  "reusedCount": 2
+                  "reusedCount": 0
                 },
-                "runtimeId": "facility-release-runtime-3",
-                "selection": [],
-                "threeDiagnostics": {
+                "rootChildren": 0,
+                "suspended": true,
+                "threeAfter": {
                   "assetGroupCount": 1,
                   "camera": {
                     "position": {
@@ -5440,8 +5791,8 @@
                   "degraded": false,
                   "demandRendering": {
                     "pendingFrame": false,
-                    "renderRequests": 22,
-                    "renderedFrames": 3
+                    "renderRequests": 25,
+                    "renderedFrames": 4
                   },
                   "disposed": false,
                   "ghostActive": false,
@@ -5462,7 +5813,7 @@
                     "canvasCount": 1,
                     "listenerCount": 4,
                     "mountCount": 1,
-                    "observerActive": true,
+                    "observerActive": false,
                     "teardownCount": 0
                   },
                   "loadTrace": [
@@ -5593,8 +5944,9 @@
                     }
                   ],
                   "selectedPlacementIds": [],
-                  "status": "ready",
+                  "status": "suspended",
                   "statusReason": null,
+                  "suspended": true,
                   "warnings": [],
                   "worldBounds": {
                     "maximum": {
@@ -5609,50 +5961,16 @@
                     }
                   }
                 },
-                "topDiagnostics": {
-                  "ghostActive": false,
-                  "id": "top-plan",
-                  "mounted": true,
-                  "observerCount": 1,
-                  "placementIds": [
-                    "pl-rack-01",
-                    "pl-rack-02",
-                    "pl-rack-03",
-                    "pl-rack-04",
-                    "pl-rack-05",
-                    "pl-rack-06"
-                  ],
-                  "projection": {
-                    "height": 1,
-                    "maxX": 15,
-                    "maxZ": 12,
-                    "minX": 0,
-                    "minZ": 0,
-                    "offsetX": 0,
-                    "offsetY": 0.09999999999999998,
-                    "padding": 0,
-                    "scale": 0.06666666666666667,
-                    "width": 1
-                  },
-                  "proposalBeforeCount": 0,
-                  "proposalMovedCount": 0,
-                  "proposalNewCount": 0,
-                  "proposalPreviewActive": false,
-                  "renderCount": 7,
-                  "selection": null,
-                  "selections": [],
-                  "type": "top-plan"
-                }
-              },
-              "runtimeId": "facility-release-runtime-3"
+                "workspaceRoots": 0
+              }
             },
-            "wallDurationMs": 164.16809998918325
+            "wallDurationMs": 51.2933999998495
           }
         ],
         "discardedWarmups": 0,
         "freshBrowserContext": true,
-        "growthBytes": 469218,
-        "growthPercent": 9.208613609267138,
+        "growthBytes": 107902,
+        "growthPercent": 2.1116194255210017,
         "initialMount": {
           "browser": {
             "crossOriginIsolated": false,
@@ -5669,11 +5987,11 @@
             "language": "en-US",
             "platform": "Win32",
             "preciseMemoryInfo": {
-              "capturedAtMs": 645.3000000119209,
+              "capturedAtMs": 305.19999998807907,
               "jsHeapSizeLimit": 4395630592,
               "source": "performance.memory",
-              "totalJSHeapSize": 11376833,
-              "usedJSHeapSize": 7086097
+              "totalJSHeapSize": 11648369,
+              "usedJSHeapSize": 7195529
             },
             "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
             "viewport": {
@@ -5683,47 +6001,47 @@
             }
           },
           "load": {
-            "endedAtMs": 641.6999999880791,
+            "endedAtMs": 304.2999999523163,
             "resources": [
               {
                 "decodedBodySize": 916,
-                "durationMs": 12.400000035762787,
+                "durationMs": 8.600000023841858,
                 "encodedBodySize": 916,
                 "initiatorType": "fetch",
-                "name": "http://127.0.0.1:52416/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
+                "name": "http://127.0.0.1:50237/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
                 "nextHopProtocol": "http/1.0",
-                "responseEndMs": 529,
-                "startTimeMs": 516.5999999642372,
+                "responseEndMs": 263.89999997615814,
+                "startTimeMs": 255.29999995231628,
                 "transferSize": 1216
               }
             ],
             "stages": [
               {
-                "durationMs": 2.5,
-                "endedAtMs": 513.1999999880791,
+                "durationMs": 1.600000023841858,
+                "endedAtMs": 253.39999997615814,
                 "error": null,
                 "stage": "manifest",
-                "startedAtMs": 510.69999998807907,
+                "startedAtMs": 251.79999995231628,
                 "status": "resolved",
                 "url": null,
                 "visualAllocation": null
               },
               {
                 "durationMs": 0.19999998807907104,
-                "endedAtMs": 514.5999999642372,
+                "endedAtMs": 254.0999999642372,
                 "error": null,
                 "stage": "footprint",
-                "startedAtMs": 514.3999999761581,
+                "startedAtMs": 253.89999997615814,
                 "status": "resolved",
                 "url": null,
                 "visualAllocation": null
               },
               {
-                "durationMs": 55.40000003576279,
-                "endedAtMs": 570.3000000119209,
+                "durationMs": 25.700000047683716,
+                "endedAtMs": 280,
                 "error": null,
                 "stage": "proxy",
-                "startedAtMs": 514.8999999761581,
+                "startedAtMs": 254.29999995231628,
                 "status": "resolved",
                 "url": "/generated/industrial_assets/p0_spike/rack_prototypes/Pallet%20Racking_colored_overview_proxy.glb",
                 "visualAllocation": {
@@ -5740,28 +6058,28 @@
                 }
               },
               {
-                "durationMs": 0.10000002384185791,
-                "endedAtMs": 575,
+                "durationMs": 0,
+                "endedAtMs": 280.5999999642372,
                 "error": null,
                 "stage": "overview",
-                "startedAtMs": 574.8999999761581,
+                "startedAtMs": 280.5999999642372,
                 "status": "skipped",
                 "url": null,
                 "visualAllocation": null
               },
               {
-                "durationMs": 0.19999998807907104,
-                "endedAtMs": 575.6999999880791,
+                "durationMs": 0.09999996423721313,
+                "endedAtMs": 280.7999999523163,
                 "error": null,
                 "stage": "detail",
-                "startedAtMs": 575.5,
+                "startedAtMs": 280.69999998807907,
                 "status": "skipped",
                 "url": null,
                 "visualAllocation": null
               }
             ],
-            "startedAtMs": 413,
-            "totalDurationMs": 228.69999998807907
+            "startedAtMs": 179.89999997615814,
+            "totalDurationMs": 124.39999997615814
           },
           "snapshot": {
             "dom": {
@@ -6022,6 +6340,7 @@
               "selectedPlacementIds": [],
               "status": "ready",
               "statusReason": null,
+              "suspended": false,
               "warnings": [],
               "worldBounds": {
                 "maximum": {
@@ -6068,6 +6387,7 @@
               "renderCount": 5,
               "selection": null,
               "selections": [],
+              "suspended": false,
               "type": "top-plan"
             }
           },
@@ -6158,7 +6478,7 @@
             "programs": 1,
             "render": {
               "calls": 10,
-              "frame": 43,
+              "frame": 46,
               "lines": 0,
               "points": 0,
               "triangles": 968880
@@ -6180,14 +6500,14 @@
             "assetGroupCount": 1,
             "camera": {
               "position": {
-                "x": 3.7657033234864885,
-                "y": 24.795020772209433,
-                "z": 8.617576465895574
+                "x": 3.9424035384197325,
+                "y": 24.83553269309245,
+                "z": 8.422623770466636
               },
               "target": {
-                "x": 4.120730703904246,
-                "y": 3.1676968514438273,
-                "z": 4.243692325544303
+                "x": 4.09850447563414,
+                "y": 3.154462648436312,
+                "z": 4.311069185653477
               }
             },
             "contextLost": false,
@@ -6195,8 +6515,8 @@
             "degraded": false,
             "demandRendering": {
               "pendingFrame": false,
-              "renderRequests": 64,
-              "renderedFrames": 43
+              "renderRequests": 68,
+              "renderedFrames": 46
             },
             "disposed": false,
             "ghostActive": false,
@@ -6451,6 +6771,7 @@
             ],
             "status": "ready",
             "statusReason": null,
+            "suspended": false,
             "warnings": [],
             "worldBounds": {
               "maximum": {
@@ -6494,11 +6815,12 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 92,
+            "renderCount": 91,
             "selection": "pl-rack-06",
             "selections": [
               "pl-rack-06"
             ],
+            "suspended": false,
             "type": "top-plan"
           }
         },
@@ -6571,7 +6893,7 @@
             "programs": 1,
             "render": {
               "calls": 10,
-              "frame": 12,
+              "frame": 11,
               "lines": 0,
               "points": 0,
               "triangles": 968880
@@ -6591,14 +6913,14 @@
             "assetGroupCount": 1,
             "camera": {
               "position": {
-                "x": 12.570782257381467,
-                "y": 22.83773519387774,
-                "z": 12.441830252476775
+                "x": 12.785220041275702,
+                "y": 22.84144365088727,
+                "z": 12.236799935773487
               },
               "target": {
-                "x": 6.127314194237364,
-                "y": 3.000528544675029,
-                "z": 5.2331550230152155
+                "x": 6.164345089477626,
+                "y": 3.000553871780653,
+                "z": 5.201094247373896
               }
             },
             "contextLost": false,
@@ -6607,7 +6929,7 @@
             "demandRendering": {
               "pendingFrame": false,
               "renderRequests": 31,
-              "renderedFrames": 12
+              "renderedFrames": 11
             },
             "disposed": false,
             "ghostActive": false,
@@ -6860,6 +7182,7 @@
             "selectedPlacementIds": [],
             "status": "ready",
             "statusReason": null,
+            "suspended": false,
             "warnings": [],
             "worldBounds": {
               "maximum": {
@@ -6903,120 +7226,117 @@
             "proposalMovedCount": 0,
             "proposalNewCount": 0,
             "proposalPreviewActive": false,
-            "renderCount": 89,
+            "renderCount": 88,
             "selection": "pl-rack-03",
             "selections": [
               "pl-rack-03"
             ],
+            "suspended": false,
             "type": "top-plan"
           }
         },
-        "endedAtMs": 8100.400000035763,
-        "frameCount": 73,
+        "endedAtMs": 5656.399999976158,
+        "frameCount": 69,
         "frameIntervalsMs": [
           8.100000000000364,
+          8.399999999999636,
+          8.199999999999818,
+          8.400000000000546,
+          8.300000000000182,
+          9.199999999999818,
+          7.399999999999636,
+          8.400000000000546,
           8.299999999999272,
           8.300000000000182,
           8.400000000000546,
+          8.299999999999272,
+          8.400000000000546,
+          8.300000000000182,
           8.099999999999454,
-          8.5,
-          8.199999999999818,
           8.400000000000546,
           8.399999999999636,
           8.300000000000182,
           8.300000000000182,
           8.199999999999818,
+          8.300000000000182,
+          8.5,
           8.399999999999636,
-          8.600000000000364,
+          8.300000000000182,
+          8.300000000000182,
+          8.299999999999272,
+          8.300000000000182,
+          8.199999999999818,
+          8.400000000000546,
+          8.300000000000182,
+          8.399999999999636,
           8.100000000000364,
-          8.199999999999818,
           8.399999999999636,
           8.300000000000182,
-          8.300000000000182,
-          8.300000000000182,
-          8.5,
-          8.099999999999454,
           8.5,
           8.199999999999818,
           8.300000000000182,
+          8.399999999999636,
+          8.300000000000182,
+          8.300000000000182,
+          8.199999999999818,
+          8.399999999999636,
+          8.300000000000182,
+          8.300000000000182,
+          8.300000000000182,
+          8.399999999999636,
+          8.400000000000546,
+          8.299999999999272,
+          8.300000000000182,
+          8.300000000000182,
+          8.300000000000182,
+          8.199999999999818,
+          8.399999999999636,
           8.300000000000182,
           8.300000000000182,
           8.399999999999636,
           8.300000000000182,
           8.199999999999818,
-          8.400000000000546,
-          8.299999999999272,
-          8.300000000000182,
           8.5,
-          8.199999999999818,
-          8.200000000000728,
-          8.399999999999636,
           8.300000000000182,
-          8.300000000000182,
-          8.399999999999636,
-          8.300000000000182,
-          8.399999999999636,
-          8.300000000000182,
-          8.300000000000182,
-          8.300000000000182,
-          8.299999999999272,
-          8.300000000000182,
-          8.199999999999818,
-          8.400000000000546,
-          8.300000000000182,
-          8.299999999999272,
-          8.300000000000182,
-          8.300000000000182,
-          8.399999999999636,
-          8.300000000000182,
-          8.400000000000546,
-          8.199999999999818,
-          8.399999999999636,
           8.300000000000182,
           8.399999999999636,
           8.200000000000728,
-          8.399999999999636,
-          8.399999999999636,
-          8.300000000000182,
-          8.300000000000182,
-          8.5,
-          8.100000000000364,
-          990,
-          8.099999999999454,
-          8.400000000000546,
           8.299999999999272,
-          8.5
+          8.300000000000182,
+          499.10000000000036,
+          8.300000000000182,
+          8.299999999999272
         ],
         "interaction": {
           "operations": [
             {
               "button": "left",
-              "eventBatches": 6,
+              "eventBatches": 7,
               "interaction": "orbit",
-              "wallDurationMs": 253.90549999428913
+              "wallDurationMs": 242.67740000505
             },
             {
               "button": "right",
-              "eventBatches": 9,
+              "eventBatches": 10,
               "interaction": "pan",
-              "wallDurationMs": 256.6013000323437
+              "wallDurationMs": 260.7175000011921
             }
           ],
           "requestedDurationMs": 500.0,
-          "wallDurationMs": 538.4303999599069
+          "wallDurationMs": 524.6642999700271
         },
         "longTasks": [],
         "runIndex": 0,
         "selection": {
-          "durationMs": 21.378899982664734,
+          "durationMs": 10.060400003567338,
           "placementId": "pl-rack-06",
           "sessionSelection": [
             "pl-rack-06"
           ],
           "synchronized": true
         },
-        "startedAtMs": 6510.699999988079,
-        "wallDurationMs": 1589.800000011921
+        "startedAtMs": 4593.899999976158,
+        "wallDurationMs": 1062.5
       }
     ]
   },
@@ -7024,10 +7344,10 @@
   "source": {
     "files": [
       {
-        "byteLength": 79329,
+        "byteLength": 81096,
         "path": "tools/benchmark_facility_layout_release_browser.py",
         "role": "benchmark_runner",
-        "sha256": "8df4a8ffba3a8ac686e63bf511e575cc42fb61fd162029e6ade6d6fb0220ce2c",
+        "sha256": "b77ff7702300a07d1dac2a7941d22fd5a989ee67607b80d0c57dbd4d33373756",
         "sourceId": "benchmark_runner"
       },
       {
@@ -7038,10 +7358,10 @@
         "sourceId": "benchmark_page"
       },
       {
-        "byteLength": 37504,
+        "byteLength": 38282,
         "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance.js",
         "role": "benchmark_harness",
-        "sha256": "ead9e6fbf88ddce5ddb53c19ffde408336d6fc42c889557e874d6932cfc9697c",
+        "sha256": "bf84e8c715adf0103a4e92a98964fca2717e8019b85b9e82d8315555c8a65e25",
         "sourceId": "benchmark_script"
       },
       {
@@ -7080,10 +7400,10 @@
         "sourceId": "p5_authoring_result"
       },
       {
-        "byteLength": 50734,
+        "byteLength": 54235,
         "path": "static/facility_layout_editor.js",
         "role": "production_adapter",
-        "sha256": "a79cfb598eba9e10fe91240eee439b145ad187eae82dcb3c35eb90161d59a875",
+        "sha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
         "sourceId": "facility_layout_editor"
       },
       {
@@ -7094,10 +7414,10 @@
         "sourceId": "facility_layout_session"
       },
       {
-        "byteLength": 115114,
+        "byteLength": 117766,
         "path": "static/facility_layout_workspace.js",
         "role": "production_adapter",
-        "sha256": "d4aa7c4327949062068dbb9c1d665a81edd1688f406c04a05c6a6919d51b3709",
+        "sha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878",
         "sourceId": "facility_layout_workspace"
       },
       {
@@ -7108,10 +7428,10 @@
         "sourceId": "facility_layout_workspace_css"
       },
       {
-        "byteLength": 99366,
+        "byteLength": 101827,
         "path": "static/facility_layout_three_adapter.js",
         "role": "production_adapter",
-        "sha256": "deaea5d9a25ec0ec53756d0ba743f54ec4f65a47bbee6da618c828431548d86b",
+        "sha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639",
         "sourceId": "facility_layout_three_adapter"
       },
       {
@@ -7157,16 +7477,16 @@
         "sourceId": "benchmark_fixture_manifest"
       },
       {
-        "byteLength": 101658,
+        "byteLength": 102251,
         "path": "docs/industrial-layout-platform-implementation-plan.md",
         "role": "governing_contract",
-        "sha256": "d3021f3e078bf6f95731d50c536b8ff4347b094350b191fed66e60f41b3bb980",
+        "sha256": "80e2168d3b84f61efaae7cc120b46b8bb0bc3c4b503bdb76853d8e1d0958b454",
         "sourceId": "implementation_plan"
       }
     ],
-    "gitCommit": "01910306fed9442781765951b5f91b9ca614e88d",
+    "gitCommit": "d2e448668af5d01561251b479ddbfe4f74518f8e",
     "trackedWorktreeDirty": true
   },
-  "startedAtUtc": "2026-08-04T14:30:32Z",
+  "startedAtUtc": "2026-08-04T17:48:55Z",
   "unavailableRequiredMeasurements": []
 }

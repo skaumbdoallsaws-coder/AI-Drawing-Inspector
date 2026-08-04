@@ -61,6 +61,13 @@ def test_smoke_artifacts_are_source_bound_and_cover_real_adapters():
     assert proof["workspaceConstructor"] == "Workspace"
     assert proof["topAdapterType"] == "top-plan"
     assert proof["threeAdapterStatus"] == "ready"
+    remount = raw["samples"]["remountMemory"][0]
+    assert raw["protocol"]["remount"]["lifecycleMode"] == (
+        "bounded-suspend-resume"
+    )
+    assert remount["cycles"][0]["lifecycle"]["suspended"][
+        "suspended"
+    ] is True
 
     source_ids = {
         item["sourceId"] for item in raw["source"]["files"]
@@ -153,7 +160,7 @@ def test_artifact_has_every_required_raw_measurement_family():
     assert final_pool["createdCount"] == 1
     assert final_pool["leasedCount"] == 1
     assert final_pool["availableCount"] == 0
-    assert final_pool["reusedCount"] == 2
+    assert final_pool["reusedCount"] == 0
     assert isinstance(
         sequence["before"]["performanceMemory"]["usedJSHeapSize"],
         int,
@@ -188,6 +195,7 @@ def test_release_protocol_matches_section_18_3_counts():
         "cacheStates": ["cold", "warm"],
     }
     assert protocol["remount"] == {
+        "lifecycleMode": "bounded-suspend-resume",
         "discardedWarmupsPerSequence": 0,
         "independentSequences": 5,
         "cyclesPerSequence": 20,
@@ -280,7 +288,7 @@ def test_validator_fails_closed_for_missing_or_fabricated_evidence():
     fabricated_pool["samples"]["remountMemory"][0]["cycles"][-1][
         "lifecycle"
     ]["mounted"]["rendererPool"]["createdCount"] = 2
-    assert "remount_renderer_pool_reuse_invalid" in validate_raw_artifact(
+    assert "remount_renderer_pool_resume_invalid" in validate_raw_artifact(
         fabricated_pool
     )
 

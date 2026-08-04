@@ -122,7 +122,7 @@
   },
   "contrastAudit": "covered_by_automated_browser_audit",
   "criticalFindings": [],
-  "generatedAtUtc": "2026-08-04T15:32:53Z",
+  "generatedAtUtc": "2026-08-04T18:11:42Z",
   "manualKeyboardAudit": "covered_by_automated_browser_audit",
   "releaseGateMet": false,
   "releaseGateReason": "Automated browser evidence cannot clear the pending manual screen-reader audit.",
@@ -131,21 +131,21 @@
   "screenReaderAudit": "pending",
   "sourceArtifacts": [
     {
-      "byteLength": 264505,
+      "byteLength": 264533,
       "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-raw.json",
-      "sha256": "afceea1d4f03c1a757fbe04d99595f02b9b5d5514f66403cf71703439887ab3a"
+      "sha256": "63def7fd02fd70604fbfbb81bcfd5e45994d162eca95af262ede8e78f2cedcf0"
     },
     {
       "byteLength": 5404,
       "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-summary.json",
-      "sha256": "8e13b40867a9b9d656062303de4cbe57fa3b50d9e9465fdade8a6ca9cb7d7fe7"
+      "sha256": "75667dc60b061945b39f98ecf4560ccb2a19b7092863cc2ebd09436dd315c9d2"
     }
   ],
   "sourceBinding": {
     "aggregateMatches": true,
     "algorithmsMatch": true,
-    "capturedAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
-    "currentAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
+    "capturedAggregateSha256": "083bf780b8c3ae249281362977bcddbaee1d0405f190599c86f4b0359ea95d29",
+    "currentAggregateSha256": "083bf780b8c3ae249281362977bcddbaee1d0405f190599c86f4b0359ea95d29",
     "duplicatePaths": [],
     "matches": true,
     "missingPaths": [],

@@ -13,7 +13,6 @@
     "p11-webgl-offline-evidence.json"
   ],
   "blockers": [
-    "browser:budget_failed:memory-growth-after-20-remounts",
     "industrial_asset_redistribution_rights_unresolved",
     "manual_screen_reader_audit_pending",
     "minimum_hardware_release_benchmark_not_recorded",
@@ -22,11 +21,11 @@
     "python_distribution_inventory_gate_not_met",
     "python_distribution_legal_clearance_not_recorded",
     "python_distribution_machine_assessment_blocked",
-    "real_soak_not_started"
+    "real_soak_build_changed"
   ],
-  "evidenceGenerationPassed": false,
-  "generatedAtUtc": "2026-08-04T15:33:06Z",
-  "literalTimeBoundStatus": "not_started",
+  "evidenceGenerationPassed": true,
+  "generatedAtUtc": "2026-08-04T18:11:51Z",
+  "literalTimeBoundStatus": "build_changed",
   "releaseGateMet": false,
   "safetyDisclaimer": "InspectorPro assists industrial layout planning and validation. It does not replace required facility, safety, regulatory, or professional engineering approval.",
   "schemaVersion": "facility-layout-p11-release-evidence-v1",
@@ -51,8 +50,8 @@
     "featureFlags": "passed",
     "licensing": "blocked",
     "makerChecker": "passed",
-    "performance": "failed",
-    "realSoak": "not_started",
+    "performance": "standard_hardware_passed_minimum_pending",
+    "realSoak": "build_changed",
     "rollback": "passed",
     "securitySuites": "passed",
     "visual": "passed",

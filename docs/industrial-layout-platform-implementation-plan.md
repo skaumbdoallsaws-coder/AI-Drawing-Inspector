@@ -2363,7 +2363,8 @@ Work:
 - Load manifest, footprints, proxy, overview LOD, then detail.
 - Add instancing and stable picking identities.
 - Add demand-driven rendering.
-- Add complete lifecycle disposal.
+- Add bounded suspend/resume for workflow tab changes and complete disposal for
+  final teardown.
 - Add 2D-only degraded mode.
 - Synchronize selection across tree, plan, 3D, and properties.
 
@@ -2374,8 +2375,10 @@ Exit gate:
 - Repeated assets use instancing where eligible.
 - Fit changes camera only.
 - Context loss or unavailable WebGL preserves 2D operation.
-- Twenty remounts leave one canvas, no growing observers, and no orphan render
-  loops.
+- Twenty suspend/resume remounts reuse one initialized workspace, leave one
+  canvas when mounted, detach all workspace DOM while suspended, and leave no
+  growing observers or orphan render loops. Final disposal releases the
+  retained renderer and scene resources.
 
 ### P5 - Manual authoring alpha
 
@@ -2864,8 +2867,12 @@ Measurement counts:
 - Plan and 3D frame scenarios: five 60-second measured runs after a 10-second
   warm-up per run, with at least 3,000 measured frames in total.
 - Backend worker and route microbenchmarks: one warm-up plus 30 measured runs.
-- Remount memory: the required 20-cycle sequence repeated five times in a fresh
-  browser context.
+- Remount memory: the production workflow's bounded suspend/resume transition,
+  repeated for the required 20-cycle sequence in each of five fresh browser
+  contexts. Every suspended sample must show zero attached workspace DOM,
+  active resize observers, and pending animation frames. The same single
+  initialized workspace and renderer may remain retained until final disposal;
+  no discarded remount warm-up or baseline subtraction is permitted.
 
 Report median and p95 over the recorded raw samples using the pinned benchmark
 script. The artifact stores every sample as well as the summary. A pass cannot

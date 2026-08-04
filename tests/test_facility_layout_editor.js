@@ -126,12 +126,14 @@ class FakeResizeObserver {
     }
 
     observe(target) {
-        this.targets.add(target);
-        FakeResizeObserver.activeObservations += 1;
+        if (!this.targets.has(target)) {
+            this.targets.add(target);
+            FakeResizeObserver.activeObservations += 1;
+        }
+        this.disconnected = false;
     }
 
     disconnect() {
-        if (this.disconnected) return;
         FakeResizeObserver.activeObservations -= this.targets.size;
         this.targets.clear();
         this.disconnected = true;
@@ -254,17 +256,21 @@ function mockAdapter(id) {
         selections: [],
         fitCount: 0,
         disposed: false,
+        suspended: false,
         handler: null,
         setSelectionHandler(handler) { this.handler = handler; },
         setLayout(value) { this.layouts.push(value); },
         setSelection(value) { this.selections.push(value); },
         fit() { this.fitCount += 1; return { id: this.id }; },
+        suspend() { this.suspended = true; return true; },
+        resume() { this.suspended = false; return true; },
         dispose() { this.disposed = true; },
         getDiagnostics() {
             return {
                 id: this.id,
                 type: this.type,
-                mounted: !this.disposed,
+                mounted: !this.disposed && !this.suspended,
+                suspended: this.suspended,
                 observerCount: 0,
                 renderCount: this.layouts.length + this.selections.length,
                 selection: this.selections[this.selections.length - 1] || null,
@@ -464,6 +470,26 @@ check('twenty mount and dispose cycles leave no observers or DOM residue', () =>
     assert.strictEqual(FakeResizeObserver.instances.size, 20);
 });
 
+check('twenty suspend and resume cycles reuse one plan observer', () => {
+    FakeResizeObserver.reset();
+    const { host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        ResizeObserver: FakeResizeObserver,
+    });
+    adapter.setLayout(layout());
+    for (let index = 0; index < 20; index += 1) {
+        assert.strictEqual(adapter.suspend(), true);
+        assert.strictEqual(adapter.getDiagnostics().suspended, true);
+        assert.strictEqual(FakeResizeObserver.activeObservations, 0);
+        assert.strictEqual(adapter.resume(), true);
+        assert.strictEqual(adapter.getDiagnostics().suspended, false);
+        assert.strictEqual(FakeResizeObserver.activeObservations, 1);
+    }
+    assert.strictEqual(FakeResizeObserver.instances.size, 1);
+    adapter.dispose();
+    assert.strictEqual(FakeResizeObserver.activeObservations, 0);
+});
+
 check('degraded 2D-only mode operates without Three or WebGL', () => {
     FakeResizeObserver.reset();
     const { documentRef, host } = makeHost();
@@ -525,6 +551,25 @@ check('controller diagnostics report mounted views observers renders and selecti
     assert.strictEqual(disposed.disposed, true);
     assert.strictEqual(disposed.diagnostics.mountedViews, 0);
     assert.strictEqual(disposed.diagnostics.observerCount, 0);
+});
+
+check('controller suspension pauses every view and resumes without reconstruction', () => {
+    const first = mockAdapter('first');
+    const second = mockAdapter('second');
+    const controller = facility.createEditor({
+        layout: layout(),
+        adapters: [first, second],
+    });
+    assert.strictEqual(controller.suspend(), true);
+    assert.strictEqual(controller.suspend(), false);
+    assert.strictEqual(controller.getState().suspended, true);
+    assert.strictEqual(controller.getState().diagnostics.mountedViews, 0);
+    assert.deepStrictEqual(controller.fit(), []);
+    assert.strictEqual(controller.resume(), true);
+    assert.strictEqual(controller.resume(), false);
+    assert.strictEqual(controller.getState().suspended, false);
+    assert.strictEqual(controller.getState().diagnostics.mountedViews, 2);
+    controller.dispose();
 });
 
 check('controller drives Three-style scene and selection contracts by stable ID', () => {
@@ -610,6 +655,10 @@ check('plan authoring projection preserves world intent through pan zoom and lay
         adapter.fit();
 
         const intended = { x: 3, y: 0, z: 2 };
+        const machineElement = host.findByAttribute(
+            'data-placement-id',
+            'pl-machine'
+        )[0];
         const firstClient = adapter.worldToClient(intended);
         const firstRoundTrip = adapter.clientToWorld({
             clientX: firstClient.x,
@@ -619,12 +668,21 @@ check('plan authoring projection preserves world intent through pan zoom and lay
         assert(Math.abs(firstRoundTrip.z - intended.z) < 1e-9);
 
         adapter.panByPixels(87, -41);
+        assert.strictEqual(
+            host.findByAttribute('data-placement-id', 'pl-machine')[0],
+            machineElement
+        );
+        assert.ok(machineElement.parentNode.getAttribute('transform'));
         const pannedClient = adapter.worldToClient(intended);
         assert.notDeepStrictEqual(pannedClient, firstClient);
         adapter.zoomAt({
             clientX: pannedClient.x,
             clientY: pannedClient.y,
         }, 1.75);
+        assert.strictEqual(
+            host.findByAttribute('data-placement-id', 'pl-machine')[0],
+            machineElement
+        );
         const zoomRoundTrip = adapter.clientToWorld({
             clientX: pannedClient.x,
             clientY: pannedClient.y,

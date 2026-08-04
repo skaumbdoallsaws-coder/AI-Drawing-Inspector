@@ -783,6 +783,8 @@
         this.viewMode = 'plan';
         this.state = this.session.getState();
         this.destroyed = false;
+        this.suspended = false;
+        this.suspendedChildren = [];
         this.listeners = [];
         this.pending = Promise.resolve();
         this.lastError = null;
@@ -2752,6 +2754,7 @@
         return {
             apiVersion: API_VERSION,
             destroyed: this.destroyed,
+            suspended: this.suspended,
             toolMode: this.toolMode,
             viewMode: this.viewMode,
             gridSize: this.gridSize,
@@ -2761,6 +2764,68 @@
             polygonPointCount: this.polygonPoints.length,
             lastError: this.lastError,
         };
+    };
+
+    Workspace.prototype.suspend = function () {
+        if (this.destroyed || this.suspended) return false;
+        this._releasePointerCapture();
+        this._cancelAdvisoryRequest('Workspace suspended.');
+        if (this.controller && typeof this.controller.suspend === 'function') {
+            this.controller.suspend();
+        } else {
+            [this.topAdapter, this.threeAdapter].filter(Boolean).forEach(
+                function (adapter) {
+                    if (typeof adapter.suspend === 'function') adapter.suspend();
+                }
+            );
+        }
+        this.suspendedChildren = [
+            this.toolbar,
+            this.shell,
+            this.statusBar,
+        ].filter(function (child) {
+            return child && child.parentNode === this.root;
+        }, this);
+        this.suspendedChildren.forEach(function (child) {
+            this.root.removeChild(child);
+        }, this);
+        setClassToken(this.root, 'ip-flw-root', false);
+        this.root.removeAttribute('data-facility-workspace');
+        this.root.removeAttribute('data-tool-mode');
+        this.root.removeAttribute('data-view-mode');
+        this.root.removeAttribute('data-full-layout-preview');
+        this.suspended = true;
+        return true;
+    };
+
+    Workspace.prototype.resume = function (nextRoot) {
+        if (this.destroyed || !this.suspended) return false;
+        const target = nextRoot || this.root;
+        if (!target || target.ownerDocument !== this.document) {
+            throw new TypeError('workspace resume root must use the original document');
+        }
+        this.root = target;
+        clearElement(this.root);
+        setClassToken(this.root, 'ip-flw-root', true);
+        this.root.setAttribute('data-facility-workspace', '');
+        this.suspendedChildren.forEach(function (child) {
+            this.root.appendChild(child);
+        }, this);
+        this.suspendedChildren = [];
+        this.suspended = false;
+        if (this.controller && typeof this.controller.resume === 'function') {
+            this.controller.resume();
+        } else {
+            [this.topAdapter, this.threeAdapter].filter(Boolean).forEach(
+                function (adapter) {
+                    if (typeof adapter.resume === 'function') adapter.resume();
+                }
+            );
+        }
+        this._setToolMode(this.toolMode);
+        this._setViewMode(this.viewMode);
+        this._renderStatus();
+        return true;
     };
 
     Workspace.prototype.destroy = function () {
@@ -2793,6 +2858,8 @@
         }
         this._hideGhost();
         this.proposalFocusReturn = null;
+        this.suspended = false;
+        this.suspendedChildren = [];
         clearElement(this.root);
         setClassToken(this.root, 'ip-flw-root', false);
         this.root.removeAttribute('data-facility-workspace');

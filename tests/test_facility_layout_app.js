@@ -41,6 +41,8 @@ function fixture() {
     };
     const workspace = {
         getState: () => ({ viewMode: 'plan' }),
+        suspend: () => { calls.push('suspend'); return true; },
+        resume: root => { calls.push(['resume', root]); return true; },
         destroy: () => { calls.push('destroy'); },
     };
     const options = {
@@ -84,6 +86,27 @@ test('accepts an initial receipt without a read request', async () => {
     assert.deepStrictEqual(value.calls.map(item => (
         Array.isArray(item) ? item[0] : item
     )), ['load', 'workspace']);
+});
+
+test('suspend and resume preserve the loaded app until final destroy', async () => {
+    const value = fixture();
+    const nextRoot = rootElement();
+    nextRoot.marker = 'next-host';
+    const app = App.createFacilityLayoutApp(value.options);
+    await app.ready;
+    assert.strictEqual(app.suspend(), true);
+    assert.strictEqual(app.suspend(), false);
+    assert.strictEqual(app.getState().suspended, true);
+    assert.strictEqual(app.resume(nextRoot), true);
+    assert.strictEqual(app.resume(nextRoot), false);
+    assert.strictEqual(app.getState().suspended, false);
+    assert.ok(value.calls.includes('suspend'));
+    assert.deepStrictEqual(
+        value.calls.find(item => Array.isArray(item) && item[0] === 'resume'),
+        ['resume', nextRoot]
+    );
+    assert.strictEqual(app.destroy(), true);
+    assert.ok(value.calls.includes('destroy'));
 });
 
 test('destroy is idempotent and prevents late workspace mount', async () => {

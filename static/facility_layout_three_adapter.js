@@ -374,6 +374,7 @@
         const state = {
             host: null,
             mounted: false,
+            suspended: false,
             disposed: false,
             degraded: false,
             contextLost: false,
@@ -388,6 +389,7 @@
             raycaster: null,
             canvas: null,
             resizeObserver: null,
+            resizeObserverActive: false,
             resizeHandler: null,
             contextLostHandler: null,
             contextRestoredHandler: null,
@@ -420,6 +422,7 @@
             listenerCount: 0,
             lastFit: null,
             worldBounds: null,
+            reloadOnResume: false,
         };
 
         function notifyStatus(status, reason) {
@@ -528,7 +531,8 @@
         }
 
         function resize() {
-            if (!state.mounted || !state.renderer || !state.camera || !state.host) {
+            if (!state.mounted || state.suspended
+                    || !state.renderer || !state.camera || !state.host) {
                 return false;
             }
             let width = finite(state.host.clientWidth, 0);
@@ -560,7 +564,7 @@
         }
 
         function renderNow() {
-            if (!state.mounted || state.degraded
+            if (!state.mounted || state.suspended || state.degraded
                 || !state.renderer || !state.scene || !state.camera) {
                 return false;
             }
@@ -577,7 +581,8 @@
 
         function onAnimationFrame(generation) {
             state.frameId = null;
-            if (!state.mounted || generation !== state.mountGeneration) return;
+            if (!state.mounted || state.suspended
+                    || generation !== state.mountGeneration) return;
             if (!state.needsRender) return;
             state.needsRender = false;
             renderNow();
@@ -585,7 +590,8 @@
 
         function invalidate() {
             state.renderRequests += 1;
-            if (!state.mounted || state.degraded || !state.renderer) return false;
+            if (!state.mounted || state.suspended
+                    || state.degraded || !state.renderer) return false;
             state.needsRender = true;
             if (state.frameId !== null) return true;
             if (!requestFrame) {
@@ -683,11 +689,20 @@
                 addListener(state.controls, 'change', state.controlChangeHandler);
             }
 
-            if (typeof ResizeObserverType === 'function') {
-                state.resizeHandler = resize;
-                state.resizeObserver = new ResizeObserverType(state.resizeHandler);
-                state.resizeObserver.observe(state.host);
+            observeResize();
+        }
+
+        function observeResize() {
+            if (state.suspended || state.resizeObserverActive
+                    || typeof ResizeObserverType !== 'function') return;
+            state.resizeHandler = resize;
+            if (!state.resizeObserver) {
+                state.resizeObserver = new ResizeObserverType(
+                    state.resizeHandler
+                );
             }
+            state.resizeObserver.observe(state.host);
+            state.resizeObserverActive = true;
         }
 
         function disposeMaterial(material, seenMaterials, seenTextures) {
@@ -999,6 +1014,7 @@
                 state.resizeObserver.disconnect();
                 state.resizeObserver = null;
             }
+            state.resizeObserverActive = false;
             removeListener(
                 state.canvas,
                 'webglcontextlost',
@@ -1055,11 +1071,13 @@
             state.canvas = null;
             state.host = null;
             state.mounted = false;
+            state.suspended = false;
             state.degraded = false;
             state.contextLost = false;
             state.listenerCount = 0;
             state.teardownCount += 1;
             state.disposed = Boolean(finalDispose);
+            state.reloadOnResume = false;
             if (finalDispose) {
                 state.currentInput = null;
                 state.ghostInput = null;
@@ -1079,7 +1097,10 @@
             if (!host || typeof host.appendChild !== 'function') {
                 throw new TypeError('A DOM-like facility renderer host is required.');
             }
-            if (state.mounted && state.host === host) return api;
+            if (state.mounted && state.host === host) {
+                if (state.suspended) resume();
+                return api;
+            }
             const replayInput = state.currentInput ? {
                 layout: state.currentInput.layout,
                 assetCatalog: state.currentInput.assetCatalog,
@@ -1090,6 +1111,7 @@
             state.disposed = false;
             state.host = host;
             state.mounted = true;
+            state.suspended = false;
             state.mountGeneration += 1;
             state.mountCount += 1;
             notifyStatus('mounting', null);
@@ -1179,6 +1201,44 @@
                 enterDegraded('webgl_initialization_failed', false);
             }
             return api;
+        }
+
+        function suspend() {
+            if (!state.mounted || state.suspended || state.disposed) return false;
+            state.reloadOnResume = state.pendingLoads > 0;
+            if (state.reloadOnResume) abortLoading();
+            state.suspended = true;
+            state.mountGeneration += 1;
+            if (state.frameId !== null && cancelFrame) cancelFrame(state.frameId);
+            state.frameId = null;
+            state.needsRender = false;
+            if (state.resizeObserver) state.resizeObserver.disconnect();
+            state.resizeObserverActive = false;
+            notifyStatus('suspended', null);
+            return true;
+        }
+
+        function resume() {
+            if (!state.mounted || !state.suspended || state.disposed) return false;
+            state.suspended = false;
+            state.mountGeneration += 1;
+            observeResize();
+            if (state.degraded) {
+                notifyStatus('degraded', state.statusReason);
+                return true;
+            }
+            notifyStatus('ready', null);
+            resize();
+            if (state.reloadOnResume && state.currentInput) {
+                state.reloadOnResume = false;
+                Promise.resolve(setScene(state.currentInput)).catch(function (error) {
+                    reportError('scene_resume_failed', error);
+                });
+            } else {
+                state.reloadOnResume = false;
+                invalidate();
+            }
+            return true;
         }
 
         function initialize(host) {
@@ -1720,7 +1780,9 @@
             state.baseGroups = built.groups;
             state.worldBounds = computeWorldBounds();
 
-            if (!state.mounted || !state.modelRoot || state.degraded) {
+            if (!state.mounted || state.suspended
+                    || !state.modelRoot || state.degraded) {
+                if (state.suspended) state.reloadOnResume = true;
                 if (!state.mounted) notifyStatus('unmounted', null);
                 return getDiagnostics();
             }
@@ -2313,6 +2375,7 @@
                 status: state.status,
                 statusReason: state.statusReason,
                 mounted: state.mounted,
+                suspended: state.suspended,
                 disposed: state.disposed,
                 degraded: state.degraded,
                 contextLost: state.contextLost,
@@ -2341,7 +2404,7 @@
                 lifecycle: {
                     mountCount: state.mountCount,
                     teardownCount: state.teardownCount,
-                    observerActive: Boolean(state.resizeObserver),
+                    observerActive: state.resizeObserverActive,
                     listenerCount: state.listenerCount,
                     canvasCount: state.canvas && state.canvas.parentNode ? 1 : 0,
                 },
@@ -2382,6 +2445,8 @@
         const api = {
             mount: mount,
             initialize: initialize,
+            suspend: suspend,
+            resume: resume,
             setScene: setScene,
             setSelection: setSelection,
             setSelectionHandler: setSelectionHandler,

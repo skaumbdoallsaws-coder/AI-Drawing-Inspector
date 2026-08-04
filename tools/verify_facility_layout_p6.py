@@ -194,8 +194,12 @@ def verify(app_url: str, output: Path) -> dict[str, Any]:
                 await session.acceptPlacementAlternative();
                 const accepted = session.getState();
                 const operations = session.getOperations();
+                const acceptedOperation = operations[0];
                 const created = accepted.layout.placements.find(
-                    item => item.assetId === selected.assetId
+                    item => acceptedOperation
+                        && acceptedOperation.placement
+                        && item.placementId
+                            === acceptedOperation.placement.placementId
                 );
                 const saveResult = await session.save();
                 const saved = session.getState();

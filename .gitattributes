@@ -1,10 +1,17 @@
-# Generated Facility Layout evidence contains byte-level SHA-256 bindings.
-# Keep these outputs stable on Windows instead of applying core.autocrlf.
-tests/fixtures/facility_layout/performance/*-raw.json text eol=lf
-tests/fixtures/facility_layout/performance/*-summary.json text eol=lf
-tests/fixtures/facility_layout/performance/backend-release-microbenchmark-results.json text eol=lf
-tests/fixtures/facility_layout/performance/*-hardware-profile.json text eol=lf
-tests/fixtures/facility_layout/accessibility/*.json text eol=lf
-tests/fixtures/facility_layout/licensing/*.json text eol=lf
-tests/fixtures/facility_layout/release/*.json text eol=lf
-tests/fixtures/facility_layout/release/visual/*.json text eol=lf
+# Source-bound evidence contains byte-level SHA-256 bindings. Keep text bytes
+# stable across Windows worktrees instead of allowing core.autocrlf to rewrite
+# checked-out files. Binary CAD, image, archive, and GLB assets are unaffected.
+.gitattributes text eol=lf
+*.css text eol=lf
+*.csv text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.svg text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+LICENSE text eol=lf
+COPYING text eol=lf

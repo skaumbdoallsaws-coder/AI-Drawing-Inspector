@@ -1,10 +1,10 @@
 {
-  "appUrl": "http://127.0.0.1:8054/",
-  "bootstrapRevision": "1c13e36837bdcabba3859221f4c94d7ea2164e33c7d70df271b98bae61dc03f7",
+  "appUrl": "http://127.0.0.1:8029/",
+  "bootstrapRevision": "5108a5523c698186da63b26633008e98815b595e1eb1a519bffad53dddac1ff0",
   "passed": true,
   "records": [
     {
-      "byteLength": 175664,
+      "byteLength": 175722,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -24,8 +24,8 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-light.png",
-      "sampledColorCount": 921,
-      "sha256": "97bbd072604b66609e7ea6ed0d98ac2d9e754864b2df2af36af8fa4d6c5a516f",
+      "sampledColorCount": 931,
+      "sha256": "8c765437278926e3397926aa4acbfa29177aea71015030e0bf70b22fa1985639",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 1920,
@@ -54,7 +54,7 @@
       "width": 1920
     },
     {
-      "byteLength": 179330,
+      "byteLength": 179365,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -74,8 +74,8 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-dark.png",
-      "sampledColorCount": 1361,
-      "sha256": "04375fd85c433f6d0ed810ae56bddeedd4cbc8b026d2fee160d544df49c56882",
+      "sampledColorCount": 1375,
+      "sha256": "9ced03fa5be3eea1ab978f52fbf27828fece6d3f248317123ab70887e230a5c1",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 1920,
@@ -104,7 +104,7 @@
       "width": 1920
     },
     {
-      "byteLength": 159595,
+      "byteLength": 159630,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -124,8 +124,8 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-light.png",
-      "sampledColorCount": 1093,
-      "sha256": "a4407ae4b63cc21d829de32ded466ab15446e9d217ac0d7217c452a3628e12de",
+      "sampledColorCount": 1088,
+      "sha256": "6244f0bc94596e96ed87e2c3ddef091ab68620bd1ebbefe3b790316eba0f8e0c",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 1440,
@@ -154,7 +154,7 @@
       "width": 1440
     },
     {
-      "byteLength": 160820,
+      "byteLength": 160738,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -174,8 +174,8 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-dark.png",
-      "sampledColorCount": 1527,
-      "sha256": "34a21c3d056ce1d9d4b30dc102a1b63fd561b891cf4ac53e5e1e37d0acb2bc1a",
+      "sampledColorCount": 1539,
+      "sha256": "ed4a72917becf9720259901e98d5132f82f3f84e693a1e41a6a13db2626e42ad",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 1440,
@@ -204,7 +204,7 @@
       "width": 1440
     },
     {
-      "byteLength": 141902,
+      "byteLength": 142121,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -225,7 +225,7 @@
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-light.png",
       "sampledColorCount": 1227,
-      "sha256": "2bc36a1619bb5e7a367e64218dbb654f5657192ba3642b1252ed0eb57ba9955b",
+      "sha256": "d6683667bf85ada36acf972c988697a20032dfef46b89eec5852c5a1c1890c44",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 1366,
@@ -254,7 +254,7 @@
       "width": 1366
     },
     {
-      "byteLength": 140053,
+      "byteLength": 140059,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -274,8 +274,8 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-dark.png",
-      "sampledColorCount": 1647,
-      "sha256": "ac265f6960041b2d03c5f7a45a9bf9402b91c24887139516a51ede1c94ead461",
+      "sampledColorCount": 1645,
+      "sha256": "53eb92e110e61036bf9ec76095a64c4eae6163d95191ccd9424bcde1a5a82749",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 1366,
@@ -304,7 +304,7 @@
       "width": 1366
     },
     {
-      "byteLength": 39146,
+      "byteLength": 39222,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -324,8 +324,8 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-light.png",
-      "sampledColorCount": 1395,
-      "sha256": "726d7b72af41267c29c71b342ac3e9918adfc32780314543d5048f8be37e2842",
+      "sampledColorCount": 1396,
+      "sha256": "a5f842519fd2bc455ba1bebf68d4c9dfd7c5b7fa5272b926cc3c84296ebd930c",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 390,
@@ -354,7 +354,7 @@
       "width": 390
     },
     {
-      "byteLength": 39298,
+      "byteLength": 39355,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -374,8 +374,8 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-dark.png",
-      "sampledColorCount": 1638,
-      "sha256": "3a1ef95e916722614cd73bf3e1da5aa032ab79fb163d2bdd7309cdbf35b2ad11",
+      "sampledColorCount": 1640,
+      "sha256": "45de268a0e6d41d4ac9039c49987aabb207c705f6acbd645c9d9eb0624374941",
       "state": {
         "assetRows": 4,
         "documentClientWidth": 390,
@@ -407,7 +407,7 @@
   "schemaVersion": "facility-layout-p11-visual-capture-v2",
   "sourceBinding": {
     "aggregateAlgorithm": "sha256-canonical-json-v1",
-    "aggregateSha256": "c7afe4bcccd5a83a90e6b1b44d5034bc2824784f39122a321da594dc3977ec6a",
+    "aggregateSha256": "8dd45dd0b374c4a34300625bb11327fb08dc443fa681c00beb43eaaf7641f456",
     "algorithm": "sha256",
     "files": [
       {
@@ -436,9 +436,9 @@
         "sha256": "8213cea4565951c0a31954d12eb4e6a540d5f5c15ae1a2ae09ef4dac7ef04574"
       },
       {
-        "byteLength": 94154,
+        "byteLength": 99366,
         "path": "static/facility_layout_three_adapter.js",
-        "sha256": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e"
+        "sha256": "deaea5d9a25ec0ec53756d0ba743f54ec4f65a47bbee6da618c828431548d86b"
       },
       {
         "byteLength": 15430,
@@ -451,14 +451,14 @@
         "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
       },
       {
-        "byteLength": 113873,
+        "byteLength": 115114,
         "path": "static/facility_layout_workspace.js",
-        "sha256": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b"
+        "sha256": "d4aa7c4327949062068dbb9c1d665a81edd1688f406c04a05c6a6919d51b3709"
       },
       {
-        "byteLength": 2888567,
+        "byteLength": 2946930,
         "path": "static/index.html",
-        "sha256": "67b040e7e0dc70449ed4b79a6f0e41f70af5c161c9c01904bd61cf1a61fcc5d7"
+        "sha256": "4df687033d17298fcb46ab026b683ca4092bdf8e2b50df0cacf2e18ca611dc15"
       },
       {
         "byteLength": 603445,
@@ -504,12 +504,12 @@
     "passed": true,
     "restoredObserved": true,
     "screenshot": {
-      "byteLength": 161869,
+      "byteLength": 161980,
       "height": 960,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-webgl-restored.png",
-      "sampledColorCount": 1542,
-      "sha256": "e9add6ccbde00730a85dad5fd799016045857cb356c0d740f6d7002736c3647f",
+      "sampledColorCount": 1544,
+      "sha256": "e08738078159e790089e2d93f5efacc938b4b2f9fb1c7972fbdf545b2557158d",
       "width": 1440
     }
   }

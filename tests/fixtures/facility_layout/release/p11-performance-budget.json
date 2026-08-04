@@ -1,118 +1,634 @@
 {
-  "benchmarkScope": "Top-plan placement footprints only; excludes zones, routes, labels, clearances, picking, spatial queries, 3D, loading, context loss, and remount.",
+  "backendEvidence": {
+    "artifact": {
+      "byteLength": 26829,
+      "path": "tests/fixtures/facility_layout/performance/backend-release-microbenchmark-results.json",
+      "sha256": "d527553625117c0c3ef50b5e865f09aa1ee978bdd7f2ff1772047963c72ac7f0"
+    },
+    "artifactShapeValid": true,
+    "claimBoundary": {
+      "approvedClaims": [
+        "Single-process CPython latency for the named deterministic backend slices on the recorded host.",
+        "The generated primary fixture contains exactly 500 placements, 100 zones, and 200 persisted route records.",
+        "The moved-object and collision-clearance measurements use prebuilt production UniformGridSpatialIndex instances and public exact geometry predicates.",
+        "Candidate generation uses the production API with distinct result-cache-miss requests after one obstacle-scene warmup.",
+        "Full diagnostics uses the production diagnose_layout API over the complete generated primary fixture.",
+        "Forklift routing covers one unloaded, forward-only, 90-degree two-aisle scenario."
+      ],
+      "forbiddenClaims": [
+        "Browser advisory, rendering, picking, asset loading, network, GPU, or main-thread performance.",
+        "Cold-process startup, concurrent throughput, service, repository, HTTP, or authorization latency.",
+        "The 5000-placement extended warehouse fixture or maximum schema-scale performance.",
+        "Validation or routing performance for all 200 persisted route records.",
+        "All vehicle profiles, loads, obstacles, route shapes, facilities, operating systems, or hardware.",
+        "End-to-end Facility Layout release readiness."
+      ]
+    },
+    "sourceBinding": {
+      "checked": [
+        {
+          "byteLength": 42258,
+          "path": "tools/benchmark_facility_layout_backend_release.py",
+          "sha256": "37dad3c6395c6bbc69503619e8ed0de610c466c91379df22a9ee3fab421722ea"
+        },
+        {
+          "byteLength": 4218,
+          "path": "tests/fixtures/facility_layout/performance/backend-release-microbenchmark-spec-v1.json",
+          "sha256": "d4ac208fdfb8af2e1b686efb50d695e0cde59e9c1a7e66903e232dfac9f1b80d"
+        },
+        {
+          "byteLength": 6548,
+          "path": "static/contracts/facility-layout-spatial-contract-v1.json",
+          "sha256": "c9f478ecaec582cf97516e65f252d1b3db758884f856460097b89bbc418f1bb0"
+        },
+        {
+          "byteLength": 144661,
+          "path": "ai_inspector/facility_layout/spatial.py",
+          "sha256": "4ad74b6e0b256f46fb2f5517f4ed2c5c551e7912d0ada6ef04bb512243783afa"
+        },
+        {
+          "byteLength": 105621,
+          "path": "ai_inspector/facility_layout/routing.py",
+          "sha256": "7520d3381351546459ccc72fa24de9b5abc9908d6c3121c19e843b401c4d7ae9"
+        }
+      ],
+      "failures": [],
+      "matches": true
+    }
+  },
   "blockers": [
-    "minimum_reference_hardware_unresolved",
-    "benchmark_scope_is_placement_layer_only",
-    "asset_loading_latency_budgets_not_measured",
-    "pick_spatial_candidate_collision_route_budgets_not_all_measured",
-    "twenty_remount_memory_growth_not_measured",
-    "full_zone_route_clearance_label_layers_not_profiled"
+    "browser:budget_failed:memory-growth-after-20-remounts",
+    "minimum_hardware_release_benchmark_not_recorded",
+    "minimum_reference_hardware_unresolved"
   ],
-  "generatedAtUtc": "2026-07-30T04:03:57Z",
+  "browserEvidence": {
+    "artifactShapeValid": true,
+    "environment": {
+      "browser": {
+        "executable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "headless": true,
+        "launchArguments": [
+          "--enable-precise-memory-info",
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-backgrounding-occluded-windows"
+        ],
+        "name": "Microsoft Edge",
+        "runtime": {
+          "crossOriginIsolated": false,
+          "deviceMemoryGiB": 16,
+          "display": {
+            "availableHeight": 960,
+            "availableWidth": 1440,
+            "colorDepth": 24,
+            "height": 960,
+            "pixelDepth": 24,
+            "width": 1440
+          },
+          "hardwareConcurrency": 12,
+          "language": "en-US",
+          "platform": "Win32",
+          "preciseMemoryInfo": {
+            "capturedAtMs": 1320.5,
+            "jsHeapSizeLimit": 4395630592,
+            "source": "performance.memory",
+            "totalJSHeapSize": 68476516,
+            "usedJSHeapSize": 61330652
+          },
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+          "viewport": {
+            "devicePixelRatio": 1,
+            "height": 960,
+            "width": 1440
+          }
+        },
+        "version": "150.0.4078.105",
+        "webgl": {
+          "contextType": "webgl2",
+          "maxRenderbufferSize": 16384,
+          "maxTextureSize": 16384,
+          "renderer": "WebKit WebGL",
+          "shadingLanguageVersion": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+          "unmaskedRenderer": "ANGLE (Intel, Intel(R) UHD Graphics (0x0000A721) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+          "unmaskedVendor": "Google Inc. (Intel)",
+          "vendor": "WebKit",
+          "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+        }
+      },
+      "hardwareFingerprintSha256": "eb56efd52d3577ef639c0f2cf93a30747a99ecaef3bd20b09f32a7494c332e34",
+      "hardwareIdentity": {
+        "browser": {
+          "name": "Microsoft Edge",
+          "version": "150.0.4078.105"
+        },
+        "cpus": [
+          {
+            "cores": 10,
+            "logicalProcessors": 12,
+            "name": "13th Gen Intel(R) Core(TM) i7-1355U"
+          }
+        ],
+        "gpus": [
+          {
+            "adapterRam": 2147479552,
+            "driverVersion": "32.0.101.7077",
+            "name": "Intel(R) UHD Graphics"
+          }
+        ],
+        "logicalCpuCount": 12,
+        "machine": {
+          "manufacturer": "Dell Inc.",
+          "model": "Dell 15 DC15250"
+        },
+        "operatingSystem": {
+          "release": "11",
+          "system": "Windows",
+          "version": "10.0.26200"
+        },
+        "physicalMemoryBytes": 16849256448,
+        "schemaVersion": "facility-layout-benchmark-hardware-identity-v1"
+      },
+      "hostHardware": {
+        "display": {
+          "height": 864,
+          "width": 1536
+        },
+        "hostname": "MightyShad",
+        "logicalCpuCount": 12,
+        "machine": "AMD64",
+        "machineIdentity": {
+          "cpus": [
+            {
+              "cores": 10,
+              "logicalProcessors": 12,
+              "name": "13th Gen Intel(R) Core(TM) i7-1355U"
+            }
+          ],
+          "gpus": [
+            {
+              "adapterRam": 2147479552,
+              "driverVersion": "32.0.101.7077",
+              "name": "Intel(R) UHD Graphics"
+            }
+          ],
+          "manufacturer": "Dell Inc.",
+          "model": "Dell 15 DC15250"
+        },
+        "physicalMemoryBytes": 16849256448,
+        "processor": "Intel64 Family 6 Model 186 Stepping 3, GenuineIntel"
+      },
+      "operatingSystem": {
+        "platform": "Windows-11-10.0.26200-SP0",
+        "release": "11",
+        "system": "Windows",
+        "version": "10.0.26200"
+      },
+      "playwright": "1.56.0",
+      "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]"
+    },
+    "hardwareMatch": {
+      "blockers": [],
+      "expected": {
+        "browser": {
+          "name": "Microsoft Edge",
+          "version": "150.0.4078.105"
+        },
+        "cpu": {
+          "logicalProcessors": 12,
+          "name": "13th Gen Intel(R) Core(TM) i7-1355U",
+          "physicalCores": 10
+        },
+        "gpu": {
+          "adapterRamBytesReported": 2147479552,
+          "driverVersion": "32.0.101.7077",
+          "name": "Intel(R) UHD Graphics"
+        },
+        "machine": {
+          "manufacturer": "Dell Inc.",
+          "model": "Dell 15 DC15250"
+        },
+        "memory": {
+          "ramBytes": 16849256448
+        },
+        "operatingSystem": {
+          "version": "10.0.26200"
+        },
+        "schemaVersion": "facility-layout-reference-hardware-claim-v1"
+      },
+      "expectedFingerprintSha256": "4145c4a921c1749570a8cfcd6948e58919adb81c586af6a404ffe5b0bf7b9223",
+      "matches": true,
+      "observed": {
+        "browser": {
+          "name": "Microsoft Edge",
+          "version": "150.0.4078.105"
+        },
+        "cpu": {
+          "logicalProcessors": 12,
+          "name": "13th Gen Intel(R) Core(TM) i7-1355U",
+          "physicalCores": 10
+        },
+        "gpu": {
+          "adapterRamBytesReported": 2147479552,
+          "driverVersion": "32.0.101.7077",
+          "name": "Intel(R) UHD Graphics"
+        },
+        "machine": {
+          "manufacturer": "Dell Inc.",
+          "model": "Dell 15 DC15250"
+        },
+        "memory": {
+          "ramBytes": 16849256448
+        },
+        "operatingSystem": {
+          "version": "10.0.26200"
+        },
+        "schemaVersion": "facility-layout-reference-hardware-claim-v1"
+      },
+      "observedFingerprintSha256": "4145c4a921c1749570a8cfcd6948e58919adb81c586af6a404ffe5b0bf7b9223"
+    },
+    "protocol": {
+      "assetLoading": {
+        "cacheStates": [
+          "cold",
+          "warm"
+        ],
+        "discardedWarmupsPerCondition": 1,
+        "measuredIterationsPerCondition": 30,
+        "networkProfiles": [
+          "local",
+          "50mbps"
+        ]
+      },
+      "discrete": {
+        "discardedWarmups": 1,
+        "measuredIterations": 30
+      },
+      "frame": {
+        "measuredSecondsPerRun": 60.0,
+        "minimumMeasuredFramesTotal": 3000,
+        "runsPerScenario": 5,
+        "warmupSecondsPerRun": 10.0
+      },
+      "governingSection": "18.3",
+      "idleQuietWindowMs": 300,
+      "profile": "release",
+      "releaseEligible": true,
+      "remount": {
+        "cyclesPerSequence": 20,
+        "discardedWarmupsPerSequence": 0,
+        "explicitInitialMountBeforeBaseline": true,
+        "freshBrowserContextPerSequence": true,
+        "independentSequences": 5,
+        "quiescenceMsBeforeMemorySample": 1000
+      },
+      "smoke": false
+    },
+    "raw": {
+      "byteLength": 11132083,
+      "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-raw.json",
+      "sha256": "9c9d85e4d7524eb7b714acf3d3417a763c2aaf9770e91e86325da49c96cd0346"
+    },
+    "storedSummaryMatchesRaw": true,
+    "summary": {
+      "byteLength": 16104,
+      "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-summary.json",
+      "sha256": "63a533fc9a8da406192ad1d7a326b4a5edb15e642da3418bf66e1f895624334d"
+    },
+    "validationErrors": []
+  },
+  "generatedAtUtc": "2026-08-04T15:21:13Z",
   "observedBudgetChecks": [
     {
-      "budgetId": "plan-edit-500-p95-frame",
+      "applicable": true,
+      "available": true,
+      "budgetId": "plan-frame-p95-standard",
+      "evidenceSource": "browser_release_protocol",
+      "limit": 22,
+      "measured": 8.5,
+      "passed": true,
+      "unit": "ms"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "three-frame-p95-standard",
+      "evidenceSource": "browser_release_protocol",
       "limit": 22,
       "measured": 8.6,
       "passed": true,
       "unit": "ms"
     },
     {
-      "budgetId": "three-edit-500-p95-frame",
-      "limit": 22,
-      "measured": 8.8,
+      "applicable": true,
+      "available": true,
+      "budgetId": "three-picking-p95",
+      "evidenceSource": "browser_release_protocol",
+      "limit": 50,
+      "measured": 9.5,
       "passed": true,
       "unit": "ms"
     },
     {
-      "budgetId": "three-navigate-5000-p95-frame",
-      "limit": 22,
-      "measured": 8.7,
+      "applicable": true,
+      "available": true,
+      "budgetId": "idle-render-stop",
+      "evidenceSource": "browser_release_protocol",
+      "limit": 250,
+      "measured": 3.5,
       "passed": true,
       "unit": "ms"
     },
     {
-      "budgetId": "webgl-draw-calls",
-      "limit": 300,
-      "measured": 1,
-      "passed": true,
-      "unit": "draw_calls_per_frame"
+      "applicable": true,
+      "available": true,
+      "budgetId": "memory-growth-after-20-remounts",
+      "evidenceSource": "browser_release_protocol",
+      "limit": 10,
+      "measured": 25.659449408047415,
+      "passed": false,
+      "unit": "percent"
     },
     {
-      "budgetId": "webgl-triangles",
-      "limit": 2000000,
-      "measured": 10000,
-      "passed": true,
-      "unit": "triangles_per_frame"
-    },
-    {
+      "applicable": true,
+      "available": true,
       "budgetId": "javascript-heap",
+      "evidenceSource": "browser_release_protocol",
       "limit": 419430400,
-      "measured": 5610529,
+      "measured": 6402883,
       "passed": true,
       "unit": "bytes"
     },
     {
-      "budgetId": "measured-gpu-buffer",
+      "applicable": true,
+      "available": true,
+      "budgetId": "overview-draw-calls",
+      "evidenceSource": "browser_release_protocol",
+      "limit": 300,
+      "measured": 10,
+      "passed": true,
+      "unit": "draw_calls"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "visible-overview-triangles",
+      "evidenceSource": "browser_release_protocol",
+      "limit": 2000000,
+      "measured": 968880,
+      "passed": true,
+      "unit": "triangles"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "estimated-gpu-allocation",
+      "evidenceSource": "browser_release_protocol",
       "limit": 536870912,
-      "measured": 180048,
+      "measured": 13489248,
       "passed": true,
       "unit": "bytes"
     },
     {
-      "budgetId": "long-task",
+      "applicable": true,
+      "available": true,
+      "budgetId": "main-thread-long-task",
+      "evidenceSource": "browser_release_protocol",
       "limit": 100,
-      "measured": 0.0,
+      "measured": 0,
+      "passed": true,
+      "unit": "ms"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "backend-moved_object_spatial_query",
+      "evidenceSource": "backend_release_microbenchmark",
+      "limit": 20.0,
+      "measured": 0.005895,
+      "passed": true,
+      "unit": "ms"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "backend-candidate_generation",
+      "evidenceSource": "backend_release_microbenchmark",
+      "limit": 50.0,
+      "measured": 40.57336,
+      "passed": true,
+      "unit": "ms"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "backend-collision_clearance_query",
+      "evidenceSource": "backend_release_microbenchmark",
+      "limit": 16.0,
+      "measured": 0.071575,
+      "passed": true,
+      "unit": "ms"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "backend-full_diagnostics",
+      "evidenceSource": "backend_release_microbenchmark",
+      "limit": 250.0,
+      "measured": 97.004115,
+      "passed": true,
+      "unit": "ms"
+    },
+    {
+      "applicable": true,
+      "available": true,
+      "budgetId": "backend-forklift_routing",
+      "evidenceSource": "backend_release_microbenchmark",
+      "limit": 500.0,
+      "measured": 289.461305,
       "passed": true,
       "unit": "ms"
     }
   ],
-  "observedChecksPassed": true,
+  "observedChecksPassed": false,
   "protocol": {
-    "externalRequestsBlocked": true,
-    "headless": true,
-    "measuredSecondsPerRun": 60.0,
-    "rendererOrderRotatedByRun": true,
-    "renderers": [
-      "svg",
-      "canvas2d",
-      "webgl"
-    ],
-    "runs": 5,
-    "scenarios": [
-      "edit-500",
-      "navigate-5000"
-    ],
-    "warmupSecondsPerRun": 10.0
+    "backend": {
+      "measuredIterations": 30,
+      "operationOrder": [
+        "moved_object_spatial_query",
+        "candidate_generation",
+        "collision_clearance_query",
+        "full_diagnostics",
+        "forklift_routing"
+      ],
+      "percentile": 95,
+      "percentileMethod": "inclusive",
+      "rawSamplesRetained": true,
+      "singleProcess": true,
+      "timer": "time.perf_counter_ns",
+      "warmupIterations": 1
+    },
+    "browser": {
+      "assetLoading": {
+        "cacheStates": [
+          "cold",
+          "warm"
+        ],
+        "discardedWarmupsPerCondition": 1,
+        "measuredIterationsPerCondition": 30,
+        "networkProfiles": [
+          "local",
+          "50mbps"
+        ]
+      },
+      "discrete": {
+        "discardedWarmups": 1,
+        "measuredIterations": 30
+      },
+      "frame": {
+        "measuredSecondsPerRun": 60.0,
+        "minimumMeasuredFramesTotal": 3000,
+        "runsPerScenario": 5,
+        "warmupSecondsPerRun": 10.0
+      },
+      "governingSection": "18.3",
+      "idleQuietWindowMs": 300,
+      "profile": "release",
+      "releaseEligible": true,
+      "remount": {
+        "cyclesPerSequence": 20,
+        "discardedWarmupsPerSequence": 0,
+        "explicitInitialMountBeforeBaseline": true,
+        "freshBrowserContextPerSequence": true,
+        "independentSequences": 5,
+        "quiescenceMsBeforeMemorySample": 1000
+      },
+      "smoke": false
+    }
   },
   "referenceHardware": {
     "minimum": {
-      "releaseGateBlocked": true,
+      "blockers": [
+        "minimum_reference_hardware_unresolved"
+      ],
+      "releaseGateMet": false,
+      "role": "minimum",
       "status": "unresolved"
     },
+    "minimumBenchmark": {
+      "hardwareMatch": {
+        "blockers": [
+          "benchmark_hardware_profile_mismatch"
+        ],
+        "matches": false
+      },
+      "storedSummaryMatchesRaw": false,
+      "summary": {},
+      "valid": false,
+      "validationErrors": [
+        "benchmark_raw_or_summary_missing"
+      ]
+    },
+    "minimumBenchmarkRecorded": false,
     "standard": {
-      "browser": "Microsoft Edge 150.0.4078.99",
-      "cpu": "13th Gen Intel Core i7-1355U",
-      "display": "1920x1080@120Hz",
-      "gpu": "Intel UHD Graphics",
-      "machine": "Dell 15 DC15250",
-      "ramBytes": 16849256448,
-      "status": "named"
+      "artifact": {
+        "byteLength": 1334,
+        "path": "tests/fixtures/facility_layout/performance/standard-hardware-profile.json",
+        "sha256": "b2aaf0d69997eee288800cd170bac24d5a118893bbca6903ba3ae3dbc25fc9cc"
+      },
+      "blockers": [],
+      "capturedAtUtc": "2026-08-04T06:27:50.564615Z",
+      "machineLabel": "dell-15-dc15250-standard",
+      "measurement": {
+        "browser": {
+          "executable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+          "fileVersion": "150.0.4078.105",
+          "name": "Microsoft Edge",
+          "productVersion": "150.0.4078.105"
+        },
+        "cpu": {
+          "logicalProcessors": 12,
+          "maximumClockMHz": 1700,
+          "name": "13th Gen Intel(R) Core(TM) i7-1355U",
+          "physicalCores": 10
+        },
+        "display": {
+          "height": 1080,
+          "refreshHz": 120,
+          "width": 1920
+        },
+        "gpu": {
+          "adapterRamBytesReported": 2147479552,
+          "driverVersion": "32.0.101.7077",
+          "name": "Intel(R) UHD Graphics"
+        },
+        "machine": {
+          "manufacturer": "Dell Inc.",
+          "model": "Dell 15 DC15250"
+        },
+        "memory": {
+          "ramBytes": 16849256448
+        },
+        "operatingSystem": {
+          "buildNumber": "26200",
+          "caption": "Microsoft Windows 11 Home",
+          "version": "10.0.26200"
+        }
+      },
+      "releaseGateMet": true,
+      "role": "standard",
+      "schemaVersion": "facility-layout-reference-hardware-v1",
+      "source": {
+        "path": "tools/capture_facility_layout_hardware.py",
+        "sha256": "57d7da79d639a9a13c9df05a39311a3970dae1c767092ee5e78732488977488c"
+      },
+      "sourceBinding": {
+        "checked": [
+          {
+            "byteLength": 8184,
+            "path": "tools/capture_facility_layout_hardware.py",
+            "sha256": "57d7da79d639a9a13c9df05a39311a3970dae1c767092ee5e78732488977488c"
+          }
+        ],
+        "failures": [],
+        "matches": true
+      },
+      "status": "measured"
     }
   },
   "releaseGateMet": false,
-  "schemaVersion": "facility-layout-p11-performance-evidence-v1",
+  "schemaVersion": "facility-layout-p11-performance-evidence-v2",
   "sourceArtifacts": [
     {
-      "byteLength": 8909078,
-      "path": "tests/fixtures/facility_layout/rendering/renderer-benchmark-results.json",
-      "sha256": "d9e6b2490445df8ad0e85b8f0b672ed14c60d93c73262d81ac493eb213a7c9f6"
+      "byteLength": 11132083,
+      "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-raw.json",
+      "sha256": "9c9d85e4d7524eb7b714acf3d3417a763c2aaf9770e91e86325da49c96cd0346"
+    },
+    {
+      "byteLength": 16104,
+      "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-summary.json",
+      "sha256": "63a533fc9a8da406192ad1d7a326b4a5edb15e642da3418bf66e1f895624334d"
+    },
+    {
+      "byteLength": 26829,
+      "path": "tests/fixtures/facility_layout/performance/backend-release-microbenchmark-results.json",
+      "sha256": "d527553625117c0c3ef50b5e865f09aa1ee978bdd7f2ff1772047963c72ac7f0"
+    },
+    {
+      "byteLength": 1334,
+      "path": "tests/fixtures/facility_layout/performance/standard-hardware-profile.json",
+      "sha256": "b2aaf0d69997eee288800cd170bac24d5a118893bbca6903ba3ae3dbc25fc9cc"
     },
     {
       "byteLength": 5222,
       "path": "tests/fixtures/facility_layout/benchmark-fixture-manifest.json",
       "sha256": "a9d2adb7ca04f01c1c48851aad2d7326c2341512bff21fa0615cde69abaed68a"
+    },
+    {
+      "byteLength": 9241405,
+      "path": "tests/fixtures/facility_layout/rendering/renderer-benchmark-results.json",
+      "sha256": "35295888dc88ca7f611f90e4c47eddd5b8dcd671dc2918c97a97c3e1805dd8b2"
     }
   ],
-  "status": "partial"
+  "standardHardwareSlicePassed": false,
+  "status": "failed"
 }

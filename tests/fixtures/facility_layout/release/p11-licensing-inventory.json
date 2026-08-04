@@ -1,9 +1,12 @@
 {
   "blockers": [
     "industrial_asset_redistribution_rights_unresolved",
-    "python_distribution_dependency_review_pending"
+    "python_distribution_machine_assessment_blocked",
+    "python_distribution_human_legal_review_pending",
+    "python_distribution_legal_clearance_not_recorded",
+    "python_distribution_inventory_gate_not_met"
   ],
-  "generatedAtUtc": "2026-07-30T04:03:59Z",
+  "generatedAtUtc": "2026-08-04T15:21:20Z",
   "industrialAssetReadiness": {
     "assets": [
       {
@@ -48,13 +51,233 @@
     }
   },
   "pythonDistributionDependencyReview": {
-    "blockingConcern": "Review the exact packaged dependency set, including PyMuPDF distribution terms, before pilot distribution.",
-    "requirementsSource": {
-      "byteLength": 1230,
-      "path": "requirements.txt",
-      "sha256": "128637e534f4011bd9d5ac3b3ddbbbfdaf938d06a87ccc83aa339930a9e609f0"
+    "blockingConcern": "Resolve the exact dependency and license inventory, including the PyMuPDF distribution path, and retain qualified human approval for the packaged pilot.",
+    "humanLegalApproval": {
+      "approved": false,
+      "legalClearanceClaimed": false,
+      "required": true,
+      "statement": "Machine-observed metadata is evidence for review, not legal advice or approval. A qualified human must determine license obligations for the exact distributed artifact.",
+      "status": "not_performed"
     },
-    "status": "pending"
+    "inventoryArtifact": {
+      "byteLength": 540121,
+      "path": "tests/fixtures/facility_layout/licensing/python-direct-dependency-inventory.json",
+      "sha256": "837a847005c132e4d34b6a78083e2e42c79cdaf349a1a1f15422b4cd6263f00e"
+    },
+    "machineAssessment": {
+      "blockerCodes": [
+        "commercial_or_dual_license_review_required",
+        "direct_requirement_missing",
+        "direct_requirement_unpinned",
+        "installed_version_outside_declared_specifier",
+        "pymupdf_dual_agpl_commercial_review_required",
+        "strong_copyleft_review_required"
+      ],
+      "blockerCount": 29,
+      "blockers": [
+        {
+          "code": "commercial_or_dual_license_review_required",
+          "dependency": "numpy",
+          "lineNumber": 8,
+          "message": "Installed metadata contains commercial or dual-license terms: proprietary."
+        },
+        {
+          "code": "commercial_or_dual_license_review_required",
+          "dependency": "pymupdf",
+          "lineNumber": 22,
+          "message": "Installed metadata contains commercial or dual-license terms: commercial_license, dual_license."
+        },
+        {
+          "code": "commercial_or_dual_license_review_required",
+          "dependency": "scipy",
+          "lineNumber": 9,
+          "message": "Installed metadata contains commercial or dual-license terms: proprietary."
+        },
+        {
+          "code": "direct_requirement_missing",
+          "dependency": "faster-whisper",
+          "lineNumber": 23,
+          "message": "The active direct requirement is not installed."
+        },
+        {
+          "code": "direct_requirement_missing",
+          "dependency": "shapely",
+          "lineNumber": 11,
+          "message": "The active direct requirement is not installed."
+        },
+        {
+          "code": "direct_requirement_missing",
+          "dependency": "ultralytics",
+          "lineNumber": 4,
+          "message": "The active direct requirement is not installed."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "anthropic",
+          "lineNumber": 19,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "elevenlabs",
+          "lineNumber": 18,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "fastapi",
+          "lineNumber": 14,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "faster-whisper",
+          "lineNumber": 23,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "numpy",
+          "lineNumber": 8,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "openai",
+          "lineNumber": 20,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "pillow",
+          "lineNumber": 7,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "playwright",
+          "lineNumber": 17,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "pymupdf",
+          "lineNumber": 22,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "python-dotenv",
+          "lineNumber": 21,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "python-multipart",
+          "lineNumber": 16,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "pyyaml",
+          "lineNumber": 10,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "scipy",
+          "lineNumber": 9,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "shapely",
+          "lineNumber": 11,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "torch",
+          "lineNumber": 6,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "transformers",
+          "lineNumber": 5,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "ultralytics",
+          "lineNumber": 4,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "direct_requirement_unpinned",
+          "dependency": "uvicorn",
+          "lineNumber": 15,
+          "message": "The direct requirement is not bound to one exact version or a hash-bound direct URL."
+        },
+        {
+          "code": "installed_version_outside_declared_specifier",
+          "dependency": "transformers",
+          "lineNumber": 5,
+          "message": "Installed version 4.57.1 does not satisfy >=5.0.0."
+        },
+        {
+          "code": "pymupdf_dual_agpl_commercial_review_required",
+          "dependency": "pymupdf",
+          "lineNumber": 22,
+          "message": "PyMuPDF distribution requires explicit human review of its AGPL/commercial licensing path."
+        },
+        {
+          "code": "strong_copyleft_review_required",
+          "dependency": "numpy",
+          "lineNumber": 8,
+          "message": "Installed metadata contains strong-copyleft terms: gnu_affero, gnu_gpl, gpl."
+        },
+        {
+          "code": "strong_copyleft_review_required",
+          "dependency": "pymupdf",
+          "lineNumber": 22,
+          "message": "Installed metadata contains strong-copyleft terms: gnu_affero, gpl."
+        },
+        {
+          "code": "strong_copyleft_review_required",
+          "dependency": "scipy",
+          "lineNumber": 9,
+          "message": "Installed metadata contains strong-copyleft terms: gnu_affero, gnu_gpl, gpl."
+        }
+      ],
+      "gateMet": false,
+      "policy": {
+        "commercialOrDualLicenseTerm": "block_for_human_review",
+        "missingDependency": "block",
+        "pymupdf": "always_block_for_human_review",
+        "strongCopyleftTerm": "block_for_human_review",
+        "unknownLicenseMetadata": "block",
+        "unversionedOrRangeRequirement": "block"
+      },
+      "status": "blocked"
+    },
+    "sourceBinding": {
+      "checked": [
+        {
+          "byteLength": 1257,
+          "path": "requirements.txt",
+          "sha256": "351e2a9fe4d6fa1f7f9490f0293a9dba7dfddcd8f735dafb8a7e88828bae94d4"
+        },
+        {
+          "byteLength": 32953,
+          "path": "tools/inventory_facility_python_dependencies.py",
+          "sha256": "3bc0f9899d863a20245c143682cad44a8a26e80f6e2284bb3e7a42d18c2e69bb"
+        }
+      ],
+      "failures": [],
+      "matches": true
+    },
+    "status": "blocked"
   },
   "releaseGateMet": false,
   "schemaVersion": "facility-layout-p11-licensing-inventory-v1",

@@ -53,12 +53,36 @@ def _passing_raw(root: Path, source_paths: tuple[str, ...]) -> dict:
         runs.append(
             {
                 "theme": theme,
+                "keyboard": {
+                    "checks": {
+                        check: True
+                        for check in CATEGORY_CHECKS["keyboard"]
+                    },
+                    "liveEvents": [{"message": "Selection changed"}],
+                    "actionAnnouncements": [
+                        {"message": "Operation completed"}
+                    ],
+                },
+                "focusChecks": {
+                    check: True for check in CATEGORY_CHECKS["focus"]
+                },
+                "semanticsChecks": {
+                    check: True
+                    for check in CATEGORY_CHECKS["semantics"]
+                },
+                "semantics": {"liveRegions": [{"role": "status"}]},
+                "reducedMotionChecks": {
+                    check: True
+                    for check in CATEGORY_CHECKS["reducedMotion"]
+                },
                 "contrast": {
                     "textSamples": [_contrast_sample("text")],
                     "controlSamples": [_contrast_sample("control")],
                     "textFailures": [],
                     "controlFailures": [],
                 },
+                "network": {"externalCanaryBlocked": True},
+                "errors": {"page": [], "console": []},
             }
         )
     return {
@@ -66,7 +90,14 @@ def _passing_raw(root: Path, source_paths: tuple[str, ...]) -> dict:
         "screenReaderAudit": "not_performed",
         "sourceBinding": build_source_binding(root, source_paths),
         "sourceStableDuringAudit": True,
-        "network": {"externalResponses": []},
+        "network": {
+            "blockingPolicyInstalled": True,
+            "blockedExternalRequests": [
+                "https://facility-layout-a11y.invalid/network-block-canary"
+            ],
+            "sameOriginRequests": ["http://127.0.0.1/app"],
+            "externalResponses": [],
+        },
         "categories": categories,
         "runs": runs,
     }
@@ -212,6 +243,31 @@ def test_bad_contrast_and_external_response_cannot_be_hidden_by_pass_flags(
     assert "contrast_evidence_records_invalid" in summary["blockers"]
     assert "external_network_response_observed" in summary["blockers"]
     assert summary["automatedAuditPassed"] is False
+
+
+def test_detailed_run_failure_cannot_be_hidden_by_category_flags(
+    tmp_path: Path,
+):
+    raw, source_paths, checklist = _fixture(tmp_path)
+    for run in raw["runs"]:
+        run["keyboard"]["checks"]["shortcutActionWorks"] = False
+    assert raw["categories"]["keyboard"]["passed"] is True
+
+    summary = interpret_accessibility_evidence(
+        raw,
+        root=tmp_path,
+        source_paths=source_paths,
+        manual_checklist_path=checklist,
+    )
+
+    keyboard = summary["categoryStatus"]["keyboard"]
+    assert keyboard["passed"] is False
+    assert keyboard["observedChecks"]["shortcutActionWorks"] is False
+    assert keyboard["reportedCategoryMatchesDetailedEvidence"] is False
+    assert "automated_keyboard_audit_failed" in summary["blockers"]
+    assert "keyboard_reported_result_mismatch" in (
+        summary["integrityFindings"]
+    )
 
 
 def test_manual_checklist_must_exist_and_remain_explicitly_pending(

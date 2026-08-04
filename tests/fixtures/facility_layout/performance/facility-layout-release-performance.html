@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InspectorPro Facility Layout Release Performance</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/facility_layout_workspace.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #e7edf1;
+      --bg-panel: #ffffff;
+      --bg-secondary: #eef3f6;
+      --border-color: #bdc8d1;
+      --border-strong: #758696;
+      --text-primary: #162330;
+      --text-secondary: #596976;
+      --accent-primary: #0878d1;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body,
+    #facility-benchmark-root {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg-main);
+    }
+
+    .benchmark-error {
+      margin: 24px;
+      border: 1px solid #b91c1c;
+      padding: 12px;
+      color: #7f1d1d;
+      background: #fee2e2;
+      white-space: pre-wrap;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/static/vendor/three/0.184.0/build/three.module.min.js",
+        "three/addons/": "/static/vendor/three/0.184.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="/static/facility_layout_editor.js"></script>
+  <script src="/static/facility_layout_three_adapter.js"></script>
+  <script src="/static/facility_layout_session.js"></script>
+  <script src="/static/facility_layout_workspace.js"></script>
+</head>
+<body>
+  <div id="facility-benchmark-root"></div>
+  <script type="module" src="./facility-layout-release-performance.js"></script>
+</body>
+</html>

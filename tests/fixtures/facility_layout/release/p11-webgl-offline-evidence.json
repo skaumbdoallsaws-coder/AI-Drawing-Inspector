@@ -1,10 +1,10 @@
 {
-  "generatedAtUtc": "2026-07-30T04:03:59Z",
+  "generatedAtUtc": "2026-08-04T15:21:20Z",
   "offlineAndCorruptArtifacts": {
     "artifact": {
-      "byteLength": 1528,
+      "byteLength": 1577,
       "path": "tests/fixtures/facility_layout/rendering/three-offline-smoke-result.json",
-      "sha256": "d947c8b141ab9e740e818589cd12fff4eea31fe56b40e2a7e5d5a47615ac53b2"
+      "sha256": "35db643e1fc7121388a714b06b353027a05b408ef210995e0bdce7d22beceae8"
     },
     "checks": {
       "completed": true,
@@ -27,8 +27,8 @@
   "releaseGateMet": true,
   "schemaVersion": "facility-layout-p11-recovery-evidence-v1",
   "source": {
-    "static/facility_layout_three_adapter.js": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e",
-    "tests/test_facility_layout_three_adapter.js": "3de1cae56f80e72036b279ef2f6c29d7dcadfe49a64990e6a41077702497f23d"
+    "static/facility_layout_three_adapter.js": "deaea5d9a25ec0ec53756d0ba743f54ec4f65a47bbee6da618c828431548d86b",
+    "tests/test_facility_layout_three_adapter.js": "ab89052d74aecc87f631f0a3d40e1f8d175aa7b542db35762bfb26ada976f142"
   },
   "webglRecovery": {
     "behavioralSuiteStatus": "passed",

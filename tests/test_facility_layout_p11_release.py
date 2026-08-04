@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 from pathlib import Path
 
+import tools.verify_facility_layout_p11 as p11_verifier
 from tools.verify_facility_layout_p11 import (
     FEATURE_FLAGS,
     build_accessibility_evidence,
+    build_documentation_evidence,
     build_feature_flag_matrix,
     build_licensing_inventory,
     build_performance_evidence,
@@ -16,28 +20,154 @@ from tools.verify_facility_layout_p11 import (
 )
 
 
-def test_performance_evidence_passes_observed_slice_without_overclaiming():
+def test_performance_evidence_derives_observed_slice_without_overclaiming():
     evidence = build_performance_evidence()
-    assert evidence["observedChecksPassed"] is True
-    assert evidence["status"] == "partial"
+    checks_passed = all(
+        item["passed"] for item in evidence["observedBudgetChecks"]
+    )
+    browser_valid = evidence["browserEvidence"]["artifactShapeValid"]
+    backend_valid = evidence["backendEvidence"]["artifactShapeValid"]
+    assert evidence["observedChecksPassed"] is (
+        checks_passed and browser_valid and backend_valid
+    )
+    assert evidence["standardHardwareSlicePassed"] is (
+        evidence["observedChecksPassed"]
+        and evidence["browserEvidence"]["hardwareMatch"]["matches"]
+    )
     assert evidence["releaseGateMet"] is False
     assert "minimum_reference_hardware_unresolved" in evidence["blockers"]
-    assert "benchmark_scope_is_placement_layer_only" in evidence["blockers"]
-    assert evidence["protocol"]["measuredSecondsPerRun"] >= 60
-    assert (
-        "measurement_runs_are_10_seconds_not_required_60_seconds"
-        not in evidence["blockers"]
+    assert "minimum_hardware_release_benchmark_not_recorded" in (
+        evidence["blockers"]
     )
-    assert all(
-        item["passed"] for item in evidence["observedBudgetChecks"]
+    assert evidence["protocol"]["browser"]["frame"][
+        "measuredSecondsPerRun"
+    ] >= 60
+    memory = next(
+        item for item in evidence["observedBudgetChecks"]
+        if item["budgetId"] == "memory-growth-after-20-remounts"
+    )
+    if memory["passed"] is False:
+        assert (
+            "browser:budget_failed:memory-growth-after-20-remounts"
+            in evidence["blockers"]
+        )
+
+
+def test_performance_hardware_match_is_exact_and_source_derived():
+    profile = {
+        "measurement": {
+            "machine": {"manufacturer": "Acme", "model": "Reference"},
+            "cpu": {
+                "name": "CPU",
+                "physicalCores": 8,
+                "logicalProcessors": 16,
+            },
+            "gpu": {
+                "name": "GPU",
+                "adapterRamBytesReported": 8_000,
+                "driverVersion": "1.2.3",
+            },
+            "memory": {"ramBytes": 32_000},
+            "operatingSystem": {"version": "10.0.1"},
+            "browser": {
+                "name": "Microsoft Edge",
+                "productVersion": "150.0.0.0",
+            },
+        }
+    }
+    raw = {
+        "environment": {
+            "hardwareIdentity": {
+                "machine": {
+                    "manufacturer": "Acme",
+                    "model": "Reference",
+                },
+                "cpus": [
+                    {
+                        "name": "CPU",
+                        "cores": 8,
+                        "logicalProcessors": 16,
+                    }
+                ],
+                "gpus": [
+                    {
+                        "name": "GPU",
+                        "adapterRam": 8_000,
+                        "driverVersion": "1.2.3",
+                    }
+                ],
+                "physicalMemoryBytes": 32_000,
+                "operatingSystem": {"version": "10.0.1"},
+                "browser": {
+                    "name": "Microsoft Edge",
+                    "version": "150.0.0.0",
+                },
+            }
+        }
+    }
+
+    matched = p11_verifier._benchmark_matches_hardware_profile(raw, profile)
+    assert matched["matches"] is True
+    assert matched["expectedFingerprintSha256"] == (
+        matched["observedFingerprintSha256"]
+    )
+
+    raw["environment"]["hardwareIdentity"]["machine"]["model"] = (
+        "Unrelated"
+    )
+    mismatched = p11_verifier._benchmark_matches_hardware_profile(
+        raw,
+        profile,
+    )
+    assert mismatched["matches"] is False
+    assert mismatched["blockers"] == [
+        "benchmark_hardware_profile_mismatch"
+    ]
+
+
+def test_performance_benchmark_requires_raw_and_reproducible_summary(
+    tmp_path: Path,
+):
+    missing = p11_verifier._validated_browser_benchmark(
+        tmp_path / "minimum-raw.json",
+        tmp_path / "minimum-summary.json",
+        {},
+    )
+    assert missing["valid"] is False
+    assert missing["validationErrors"] == [
+        "benchmark_raw_or_summary_missing"
+    ]
+
+    raw_path = tmp_path / "raw.json"
+    summary_path = tmp_path / "summary.json"
+    raw_path.write_text("{}\n", encoding="ascii")
+    summary_path.write_text(
+        json.dumps({"releaseGateMet": True}) + "\n",
+        encoding="ascii",
+    )
+    fabricated = p11_verifier._validated_browser_benchmark(
+        raw_path,
+        summary_path,
+        {},
+    )
+    assert fabricated["valid"] is False
+    assert "browser_summary_not_reproducible_from_raw" in (
+        fabricated["validationErrors"]
     )
 
 
 def test_static_accessibility_and_visual_manifests_are_source_bound():
     accessibility = build_accessibility_evidence()
     assert accessibility["staticContractPassed"] is True
+    assert accessibility["automatedAuditPassed"] is True
     assert accessibility["criticalFindings"] == []
-    assert accessibility["manualKeyboardAudit"] == "pending"
+    assert accessibility["manualKeyboardAudit"] == (
+        "covered_by_automated_browser_audit"
+    )
+    assert accessibility["contrastAudit"] == (
+        "covered_by_automated_browser_audit"
+    )
+    assert accessibility["screenReaderAudit"] == "pending"
     assert accessibility["releaseGateMet"] is False
 
     visual = build_visual_manifest()
@@ -56,6 +186,26 @@ def test_static_accessibility_and_visual_manifests_are_source_bound():
     assert visual["webglContextRecovery"]["restoredObserved"] is True
     assert len(visual["artifacts"]) == 8
     assert all(len(item["sha256"]) == 64 for item in visual["artifacts"])
+
+
+def test_documentation_contracts_are_specific_and_fail_closed():
+    evidence = build_documentation_evidence()
+    assert evidence["pilotRunbookContainsSafetyDisclaimer"] is True
+    assert evidence["allDocumentContractsPassed"] is True
+    assert evidence["releaseGateMet"] is True
+    assert all(
+        record["contractPassed"]
+        and all(record["accuracyChecks"].values())
+        for record in evidence["documents"]
+    )
+
+    tampered = p11_verifier._documentation_contract_checks(
+        "release_gates",
+        "Evidence generation does not mean the pilot gate is met.",
+    )
+    assert tampered["evidenceGenerationIsNotReadiness"] is True
+    assert tampered["standardAndMinimumHardwareRequired"] is False
+    assert not all(tampered.values())
 
 
 def test_feature_flag_matrix_exercises_every_runtime_stage(tmp_path: Path):
@@ -90,12 +240,43 @@ def test_licensing_inventory_covers_vendored_javascript_and_blocks_assets():
     ]
     assert inventory["pythonDistributionDependencyReview"][
         "status"
-    ] == "pending"
+    ] == "blocked"
     assert (
-        "python_distribution_dependency_review_pending"
+        "python_distribution_machine_assessment_blocked"
+        in inventory["blockers"]
+    )
+    assert (
+        "python_distribution_human_legal_review_pending"
         in inventory["blockers"]
     )
     assert inventory["releaseGateMet"] is False
+
+
+def test_licensing_gate_requires_explicit_human_legal_clearance(
+):
+    source = deepcopy(
+        p11_verifier._read_json(
+            p11_verifier.PYTHON_DEPENDENCY_INVENTORY_SOURCE
+        )
+    )
+    source["machineAssessment"]["gateMet"] = True
+    source["humanLegalApproval"].update(
+        {
+            "status": "approved",
+            "approved": True,
+            "legalClearanceClaimed": False,
+        }
+    )
+    source["releaseGateMet"] = True
+    result = p11_verifier._python_distribution_release_gate(
+        source,
+        {"matches": True},
+    )
+
+    assert result["complete"] is False
+    assert "python_distribution_legal_clearance_not_recorded" in (
+        result["blockers"]
+    )
 
 
 def test_rollback_drill_preserves_all_bytes_and_exercises_flag_control(
@@ -155,4 +336,8 @@ def test_consolidated_verdict_is_derived_and_retains_external_gates(
     assert result["status"] == "blocked"
     assert "facility_layout_flags_not_runtime_wired" not in result["blockers"]
     assert "visual_viewport_theme_matrix_incomplete" not in result["blockers"]
-    assert "python_distribution_dependency_review_pending" in result["blockers"]
+    assert (
+        "python_distribution_machine_assessment_blocked"
+        in result["blockers"]
+    )
+    assert "real_soak_not_started" in result["blockers"]

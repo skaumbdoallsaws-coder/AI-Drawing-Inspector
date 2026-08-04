@@ -375,6 +375,11 @@ class FakeRenderer {
                 this.renderListsDisposed = true;
             },
         };
+        this.info = {
+            reset: () => {
+                this.infoResetCount = (this.infoResetCount || 0) + 1;
+            },
+        };
         FakeRenderer.instances.push(this);
     }
 
@@ -391,6 +396,14 @@ class FakeRenderer {
     render(scene, camera) {
         this.renderCount += 1;
         this.lastRender = { scene, camera };
+    }
+
+    setAnimationLoop(value) {
+        this.animationLoop = value;
+    }
+
+    setRenderTarget(value) {
+        this.renderTarget = value;
     }
 
     dispose() {
@@ -584,6 +597,7 @@ async function settleAsync(turns) {
 
 test('exports the classic UMD global, CommonJS API, and complete adapter contract', () => {
     assert.strictEqual(typeof runtime.createThreeAdapter, 'function');
+    assert.strictEqual(typeof runtime.createRendererPool, 'function');
     assert.deepStrictEqual(
         Array.from(runtime.RESOLUTION_STAGES),
         ['manifest', 'footprint', 'proxy', 'overview', 'detail']
@@ -618,6 +632,54 @@ test('exports the classic UMD global, CommonJS API, and complete adapter contrac
     ].forEach(method => {
         assert.strictEqual(typeof adapter[method], 'function', method);
     });
+});
+
+test('bounded renderer pool reuses one WebGL renderer across adapter remounts', () => {
+    const pool = runtime.createRendererPool({ maximumSize: 1 });
+    const first = fixture({ rendererPool: pool });
+    first.adapter.mount(first.host);
+    const renderer = FakeRenderer.instances.at(-1);
+    assert.strictEqual(first.adapter.dispose(), true);
+    assert.strictEqual(renderer.disposeCount, 0);
+    assert.strictEqual(renderer.forceContextLossCount, 0);
+    assert.strictEqual(pool.getDiagnostics().availableCount, 1);
+
+    const second = fixture({ rendererPool: pool });
+    second.adapter.mount(second.host);
+    assert.strictEqual(FakeRenderer.instances.length, 1);
+    assert.strictEqual(second.host.children[0], renderer.domElement);
+    assert.strictEqual(pool.getDiagnostics().reusedCount, 1);
+    assert.strictEqual(second.adapter.dispose(), true);
+    assert.strictEqual(pool.getDiagnostics().availableCount, 1);
+    assert.strictEqual(pool.dispose(), true);
+    assert.strictEqual(pool.dispose(), false);
+    assert.strictEqual(renderer.disposeCount, 1);
+    assert.strictEqual(renderer.forceContextLossCount, 1);
+});
+
+test('renderer pool capacity limits concurrent leases and factory calls', () => {
+    const pool = runtime.createRendererPool({ maximumSize: 1 });
+    let factoryCalls = 0;
+    const factory = () => {
+        factoryCalls += 1;
+        return new FakeRenderer();
+    };
+    const first = pool.acquire(factory);
+    assert.throws(
+        () => pool.acquire(factory),
+        /capacity is exhausted/
+    );
+    assert.strictEqual(factoryCalls, 1);
+    assert.deepStrictEqual(pool.getDiagnostics(), {
+        disposed: false,
+        maximumSize: 1,
+        availableCount: 0,
+        leasedCount: 1,
+        createdCount: 1,
+        reusedCount: 0,
+    });
+    assert.strictEqual(pool.release(first), true);
+    assert.strictEqual(pool.dispose(), true);
 });
 
 test('resolves every asset progressively in the required deterministic order', async () => {

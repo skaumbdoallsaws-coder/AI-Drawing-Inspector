@@ -432,7 +432,14 @@ class TransactionKernel:
             revision=result.revision,
             created_at=created_at,
             payload=result.payload,
+            approval_fingerprint=prepared.approval_fingerprint,
         )
+
+    @staticmethod
+    def _approval_fingerprint(approval: ApprovalRecord) -> str:
+        return hashlib.sha256(
+            canonical_json_bytes(approval.public_dict())
+        ).hexdigest()
 
     def _resolve_existing(
         self,
@@ -519,6 +526,7 @@ class TransactionKernel:
             request.approval_token,
             now=now,
         )
+        approval_fingerprint = self._approval_fingerprint(approval)
         self._assert_binding(request.binding, approval.binding)
         self._assert_principal(request.principal, approval.principal)
         if request.idempotency_key != approval.idempotency_key:
@@ -560,6 +568,7 @@ class TransactionKernel:
                 request_fingerprint=approval.request_fingerprint,
                 prepared_at=now,
                 recovery=plan.recovery,
+                approval_fingerprint=approval_fingerprint,
             )
             stored = self._receipts.prepare(prepared)
             if stored.state == "finalized":
@@ -581,6 +590,8 @@ class TransactionKernel:
                 or prepared.action != proposal.action
                 or prepared.binding != proposal.binding
                 or prepared.principal != approval.principal
+                or prepared.approval_fingerprint
+                != approval_fingerprint
             ):
                 raise TransactionIdempotencyConflictError(
                     "prepared_transaction_conflict",

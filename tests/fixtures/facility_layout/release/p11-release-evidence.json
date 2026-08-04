@@ -13,20 +13,20 @@
     "p11-webgl-offline-evidence.json"
   ],
   "blockers": [
-    "accessibility_manual_audit_pending",
-    "asset_loading_latency_budgets_not_measured",
-    "benchmark_scope_is_placement_layer_only",
-    "full_zone_route_clearance_label_layers_not_profiled",
+    "browser:budget_failed:memory-growth-after-20-remounts",
     "industrial_asset_redistribution_rights_unresolved",
+    "manual_screen_reader_audit_pending",
+    "minimum_hardware_release_benchmark_not_recorded",
     "minimum_reference_hardware_unresolved",
-    "pick_spatial_candidate_collision_route_budgets_not_all_measured",
-    "python_distribution_dependency_review_pending",
-    "real_soak_elapsed_duration_pending",
-    "twenty_remount_memory_growth_not_measured"
+    "python_distribution_human_legal_review_pending",
+    "python_distribution_inventory_gate_not_met",
+    "python_distribution_legal_clearance_not_recorded",
+    "python_distribution_machine_assessment_blocked",
+    "real_soak_not_started"
   ],
-  "evidenceGenerationPassed": true,
-  "generatedAtUtc": "2026-07-30T04:04:04Z",
-  "literalTimeBoundStatus": "elapsed_duration_pending",
+  "evidenceGenerationPassed": false,
+  "generatedAtUtc": "2026-08-04T15:21:30Z",
+  "literalTimeBoundStatus": "not_started",
   "releaseGateMet": false,
   "safetyDisclaimer": "InspectorPro assists industrial layout planning and validation. It does not replace required facility, safety, regulatory, or professional engineering approval.",
   "schemaVersion": "facility-layout-p11-release-evidence-v1",
@@ -51,8 +51,8 @@
     "featureFlags": "passed",
     "licensing": "blocked",
     "makerChecker": "passed",
-    "performance": "partial",
-    "realSoak": "elapsed_duration_pending",
+    "performance": "failed",
+    "realSoak": "not_started",
     "rollback": "passed",
     "securitySuites": "passed",
     "visual": "passed",
@@ -65,9 +65,9 @@
       "sha256": "ad6ab3b0e5427a2ba6239860bd9a078c23a27ca348e2781a3a67e40d7e0fa1c2"
     },
     "verifier": {
-      "byteLength": 91598,
+      "byteLength": 108471,
       "path": "tools/verify_facility_layout_p11.py",
-      "sha256": "8f20b8093a91f56a8d8c51876596767b9c0f9686ad45e30561d55995d1d90099"
+      "sha256": "8dd87d022fd8364b1652f6f9d8735a71b42062c3ee7f8bf6e78e7fa72c19eab9"
     }
   },
   "status": "blocked"

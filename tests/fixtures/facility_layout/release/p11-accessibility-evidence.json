@@ -1,31 +1,158 @@
 {
+  "automatedAuditPassed": true,
+  "blockers": [
+    "manual_screen_reader_audit_pending"
+  ],
   "checks": {
-    "asset_tree_role": true,
-    "asset_treeitem_role": true,
-    "busy_state": true,
-    "focus_visible": true,
-    "polite_live_region": true,
-    "pressed_state": true,
-    "reduced_motion": true,
-    "selected_state": true,
-    "tablist_role": true,
-    "tabpanel_role": true,
-    "toolbar_label": true,
-    "toolbar_role": true,
-    "workspace_label": true
+    "announcements": {
+      "missingChecks": [],
+      "observedChecks": {
+        "actionAnnouncementObserved": true,
+        "announcementsObserved": true,
+        "liveRegionsPresent": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "contrast": {
+      "missingChecks": [],
+      "observedChecks": {
+        "bothThemesMeasured": true,
+        "controlContrastPasses": true,
+        "controlSamplesPresent": true,
+        "textContrastPasses": true,
+        "textSamplesPresent": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "focus": {
+      "missingChecks": [],
+      "observedChecks": {
+        "allSamplesHaveVisibleIndicator": true,
+        "allSamplesUseFocusVisible": true,
+        "focusScreenshotsCaptured": true,
+        "samplesPresent": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "keyboard": {
+      "missingChecks": [],
+      "observedChecks": {
+        "assetActionWorks": true,
+        "enteredWorkspaceByTab": true,
+        "forwardTraversalProgresses": true,
+        "noKeyboardTrap": true,
+        "reverseTraversalExitsWorkspace": true,
+        "shortcutActionWorks": true,
+        "tabKeyboardActivationWorks": true,
+        "undoActionWorks": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "network": {
+      "missingChecks": [],
+      "observedChecks": {
+        "blockingPolicyInstalled": true,
+        "externalBlockCanaryObserved": true,
+        "noExternalResponses": true,
+        "sameOriginApplicationLoaded": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "reducedMotion": {
+      "missingChecks": [],
+      "observedChecks": {
+        "animationsSuppressed": true,
+        "mediaQueryMatched": true,
+        "transitionsSuppressed": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "runtime": {
+      "missingChecks": [],
+      "observedChecks": {
+        "auditCompleted": true,
+        "noConsoleErrors": true,
+        "noPageErrors": true,
+        "sourceStableDuringAudit": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    },
+    "semantics": {
+      "missingChecks": [],
+      "observedChecks": {
+        "ariaSnapshotCaptured": true,
+        "busyStatePresent": true,
+        "controlsNamed": true,
+        "duplicateIdsAbsent": true,
+        "panelsNamed": true,
+        "pressedStatePresent": true,
+        "tabStateValid": true,
+        "tabsNamed": true,
+        "toolbarNamed": true,
+        "treeItemsNamed": true,
+        "treeNamed": true,
+        "workspaceNamed": true
+      },
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
+      "reportedResultMatchesChecks": true
+    }
   },
-  "contrastAudit": "pending",
+  "contrastAudit": "covered_by_automated_browser_audit",
   "criticalFindings": [],
-  "generatedAtUtc": "2026-07-30T04:03:57Z",
-  "manualKeyboardAudit": "pending",
+  "generatedAtUtc": "2026-08-04T15:21:13Z",
+  "manualKeyboardAudit": "covered_by_automated_browser_audit",
   "releaseGateMet": false,
-  "releaseGateReason": "Static checks pass, but keyboard, screen-reader, and contrast audits remain human verification tasks.",
-  "schemaVersion": "facility-layout-p11-accessibility-evidence-v1",
-  "scope": "static_aria_and_css_contract",
+  "releaseGateReason": "Automated browser evidence cannot clear the pending manual screen-reader audit.",
+  "schemaVersion": "facility-layout-p11-accessibility-evidence-v2",
+  "scope": "Automated keyboard, focus, semantics, live-region, reduced-motion, contrast, network, and runtime checks in the real Facility Layout workspace.",
   "screenReaderAudit": "pending",
-  "source": {
-    "static/facility_layout_workspace.css": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2",
-    "static/facility_layout_workspace.js": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b"
+  "sourceArtifacts": [
+    {
+      "byteLength": 264505,
+      "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-raw.json",
+      "sha256": "afceea1d4f03c1a757fbe04d99595f02b9b5d5514f66403cf71703439887ab3a"
+    },
+    {
+      "byteLength": 5404,
+      "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-summary.json",
+      "sha256": "8e13b40867a9b9d656062303de4cbe57fa3b50d9e9465fdade8a6ca9cb7d7fe7"
+    }
+  ],
+  "sourceBinding": {
+    "aggregateMatches": true,
+    "algorithmsMatch": true,
+    "capturedAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
+    "currentAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
+    "duplicatePaths": [],
+    "matches": true,
+    "missingPaths": [],
+    "present": true,
+    "requiredInputsExact": true,
+    "stalePaths": [],
+    "unexpectedPaths": []
   },
   "staticContractPassed": true
 }

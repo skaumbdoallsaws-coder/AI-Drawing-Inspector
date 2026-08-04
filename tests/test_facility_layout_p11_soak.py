@@ -32,7 +32,7 @@ def test_accelerated_soak_proves_mechanics_but_not_elapsed_time(
     )
 
     literal = ledger["realElapsedSoak"]
-    assert literal["status"] == "elapsed_duration_pending"
-    assert literal["checks"]["elapsedDurationMet"] is False
+    assert literal["status"] == "not_started"
+    assert literal["checks"]["evidenceLedgerPresent"] is False
     assert literal["releaseGateMet"] is False
     assert ledger["releaseGateMet"] is False

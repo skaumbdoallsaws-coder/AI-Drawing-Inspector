@@ -1,0 +1,47 @@
+{
+  "capturedAtUtc": "2026-08-04T06:27:50.564615Z",
+  "machineLabel": "dell-15-dc15250-standard",
+  "measurement": {
+    "browser": {
+      "executable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      "fileVersion": "150.0.4078.105",
+      "name": "Microsoft Edge",
+      "productVersion": "150.0.4078.105"
+    },
+    "cpu": {
+      "logicalProcessors": 12,
+      "maximumClockMHz": 1700,
+      "name": "13th Gen Intel(R) Core(TM) i7-1355U",
+      "physicalCores": 10
+    },
+    "display": {
+      "height": 1080,
+      "refreshHz": 120,
+      "width": 1920
+    },
+    "gpu": {
+      "adapterRamBytesReported": 2147479552,
+      "driverVersion": "32.0.101.7077",
+      "name": "Intel(R) UHD Graphics"
+    },
+    "machine": {
+      "manufacturer": "Dell Inc.",
+      "model": "Dell 15 DC15250"
+    },
+    "memory": {
+      "ramBytes": 16849256448
+    },
+    "operatingSystem": {
+      "buildNumber": "26200",
+      "caption": "Microsoft Windows 11 Home",
+      "version": "10.0.26200"
+    }
+  },
+  "role": "standard",
+  "schemaVersion": "facility-layout-reference-hardware-v1",
+  "source": {
+    "path": "tools/capture_facility_layout_hardware.py",
+    "sha256": "57d7da79d639a9a13c9df05a39311a3970dae1c767092ee5e78732488977488c"
+  },
+  "status": "measured"
+}

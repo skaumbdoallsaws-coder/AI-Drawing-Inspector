@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -45,18 +45,76 @@ from ai_inspector.facility_layout.identity import (
     FacilityPrincipalResolver,
 )
 from ai_inspector.facility_layout.operations import create_layout_document
+from ai_inspector.facility_layout.soak_evidence import (
+    SOAK_REQUIREMENTS,
+    SoakEvidenceError,
+    facility_build_identity,
+    load_soak_events,
+    summarize_soak_events,
+)
 
 
 RELEASE_DIR = (
     ROOT / "tests" / "fixtures" / "facility_layout" / "release"
 )
-PERFORMANCE_SOURCE = (
+LEGACY_PERFORMANCE_SOURCE = (
     ROOT
     / "tests"
     / "fixtures"
     / "facility_layout"
     / "rendering"
     / "renderer-benchmark-results.json"
+)
+BROWSER_PERFORMANCE_RAW = (
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "facility_layout"
+    / "performance"
+    / "facility-layout-release-performance-raw.json"
+)
+BROWSER_PERFORMANCE_SUMMARY = BROWSER_PERFORMANCE_RAW.with_name(
+    "facility-layout-release-performance-summary.json"
+)
+MINIMUM_BROWSER_PERFORMANCE_SUMMARY = BROWSER_PERFORMANCE_RAW.with_name(
+    "facility-layout-release-performance-minimum-summary.json"
+)
+MINIMUM_BROWSER_PERFORMANCE_RAW = BROWSER_PERFORMANCE_RAW.with_name(
+    "facility-layout-release-performance-minimum-raw.json"
+)
+BACKEND_PERFORMANCE_SOURCE = BROWSER_PERFORMANCE_RAW.with_name(
+    "backend-release-microbenchmark-results.json"
+)
+STANDARD_HARDWARE_SOURCE = BROWSER_PERFORMANCE_RAW.with_name(
+    "standard-hardware-profile.json"
+)
+MINIMUM_HARDWARE_SOURCE = BROWSER_PERFORMANCE_RAW.with_name(
+    "minimum-hardware-profile.json"
+)
+ACCESSIBILITY_RAW_SOURCE = (
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "facility_layout"
+    / "accessibility"
+    / "facility-layout-accessibility-raw.json"
+)
+ACCESSIBILITY_SUMMARY_SOURCE = ACCESSIBILITY_RAW_SOURCE.with_name(
+    "facility-layout-accessibility-summary.json"
+)
+PYTHON_DEPENDENCY_INVENTORY_SOURCE = (
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "facility_layout"
+    / "licensing"
+    / "python-direct-dependency-inventory.json"
+)
+REAL_SOAK_EVENT_LEDGER = (
+    ROOT
+    / ".runtime"
+    / "facility_layout"
+    / "p11-real-soak-events.json"
 )
 BENCHMARK_MANIFEST = (
     ROOT
@@ -310,200 +368,444 @@ def _visual_source_binding_status(
     }
 
 
-def build_performance_evidence() -> dict[str, Any]:
-    benchmark = _read_json(PERFORMANCE_SOURCE)
-    fixture_manifest = _read_json(BENCHMARK_MANIFEST)
-    summary = benchmark["summary"]
-    svg_500 = summary["svg"]["edit-500"]
-    webgl_500 = summary["webgl"]["edit-500"]
-    webgl_5000 = summary["webgl"]["navigate-5000"]
-
-    maximum_heap = 0
-    maximum_gpu = 0
-    for run in benchmark.get("runs", []):
-        measurement = run.get("measurement", {})
-        for key in ("heapBefore", "heapAfter"):
-            heap = measurement.get(key, {})
-            maximum_heap = max(
-                maximum_heap,
-                int(heap.get("usedJSHeapSize") or 0),
+def _recorded_source_status(records: Any) -> dict[str, Any]:
+    failures = []
+    checked = []
+    if not isinstance(records, list) or not records:
+        return {
+            "matches": False,
+            "checked": [],
+            "failures": ["source_records_missing"],
+        }
+    for raw in records:
+        if not isinstance(raw, Mapping):
+            failures.append("source_record_invalid")
+            continue
+        relative = str(raw.get("path") or "")
+        path = (ROOT / relative).resolve()
+        try:
+            path.relative_to(ROOT.resolve())
+        except ValueError:
+            failures.append(f"source_path_outside_repository:{relative}")
+            continue
+        if not path.is_file():
+            failures.append(f"source_file_missing:{relative}")
+            continue
+        current = _artifact(path)
+        checked.append(current)
+        recorded_length = raw.get("byteLength")
+        if (
+            current["sha256"] != raw.get("sha256")
+            or (
+                recorded_length is not None
+                and current["byteLength"] != recorded_length
             )
-        renderer = measurement.get("rendererMetrics", {})
-        maximum_gpu = max(
-            maximum_gpu,
-            int(renderer.get("gpuBufferBytes") or 0),
-        )
-
-    checks = [
-        {
-            "budgetId": "plan-edit-500-p95-frame",
-            "measured": svg_500["frameIntervalMs"]["p95"],
-            "limit": 22,
-            "unit": "ms",
-            "passed": svg_500["frameIntervalMs"]["p95"] <= 22,
-        },
-        {
-            "budgetId": "three-edit-500-p95-frame",
-            "measured": webgl_500["frameIntervalMs"]["p95"],
-            "limit": 22,
-            "unit": "ms",
-            "passed": webgl_500["frameIntervalMs"]["p95"] <= 22,
-        },
-        {
-            "budgetId": "three-navigate-5000-p95-frame",
-            "measured": webgl_5000["frameIntervalMs"]["p95"],
-            "limit": 22,
-            "unit": "ms",
-            "passed": webgl_5000["frameIntervalMs"]["p95"] <= 22,
-        },
-        {
-            "budgetId": "webgl-draw-calls",
-            "measured": max(
-                webgl_500["rendererMetrics"]["drawCallsPerFrame"],
-                webgl_5000["rendererMetrics"]["drawCallsPerFrame"],
-            ),
-            "limit": 300,
-            "unit": "draw_calls_per_frame",
-            "passed": max(
-                webgl_500["rendererMetrics"]["drawCallsPerFrame"],
-                webgl_5000["rendererMetrics"]["drawCallsPerFrame"],
-            )
-            <= 300,
-        },
-        {
-            "budgetId": "webgl-triangles",
-            "measured": max(
-                webgl_500["rendererMetrics"]["trianglesPerFrame"],
-                webgl_5000["rendererMetrics"]["trianglesPerFrame"],
-            ),
-            "limit": 2_000_000,
-            "unit": "triangles_per_frame",
-            "passed": max(
-                webgl_500["rendererMetrics"]["trianglesPerFrame"],
-                webgl_5000["rendererMetrics"]["trianglesPerFrame"],
-            )
-            <= 2_000_000,
-        },
-        {
-            "budgetId": "javascript-heap",
-            "measured": maximum_heap,
-            "limit": 400 * 1024 * 1024,
-            "unit": "bytes",
-            "passed": maximum_heap <= 400 * 1024 * 1024,
-        },
-        {
-            "budgetId": "measured-gpu-buffer",
-            "measured": maximum_gpu,
-            "limit": 512 * 1024 * 1024,
-            "unit": "bytes",
-            "passed": maximum_gpu <= 512 * 1024 * 1024,
-        },
-        {
-            "budgetId": "long-task",
-            "measured": max(
-                svg_500["maxLongTaskMs"],
-                webgl_500["maxLongTaskMs"],
-                webgl_5000["maxLongTaskMs"],
-            ),
-            "limit": 100,
-            "unit": "ms",
-            "passed": max(
-                svg_500["maxLongTaskMs"],
-                webgl_500["maxLongTaskMs"],
-                webgl_5000["maxLongTaskMs"],
-            )
-            <= 100,
-        },
-    ]
-    protocol = benchmark["protocol"]
-    minimum = fixture_manifest["referenceHardware"]["minimum"]
-    blockers = [
-        "minimum_reference_hardware_unresolved",
-        "benchmark_scope_is_placement_layer_only",
-        "measurement_runs_are_10_seconds_not_required_60_seconds",
-        "asset_loading_latency_budgets_not_measured",
-        "pick_spatial_candidate_collision_route_budgets_not_all_measured",
-        "twenty_remount_memory_growth_not_measured",
-        "full_zone_route_clearance_label_layers_not_profiled",
-    ]
-    if minimum.get("status") != "unresolved":
-        blockers.remove("minimum_reference_hardware_unresolved")
-    if protocol.get("measuredSecondsPerRun") >= 60:
-        blockers.remove(
-            "measurement_runs_are_10_seconds_not_required_60_seconds"
-        )
-    release_gate_met = all(item["passed"] for item in checks) and not blockers
+        ):
+            failures.append(f"source_file_changed:{relative}")
     return {
-        "schemaVersion": "facility-layout-p11-performance-evidence-v1",
-        "generatedAtUtc": _utc_now(),
-        "status": "passed" if release_gate_met else "partial",
-        "observedBudgetChecks": checks,
-        "observedChecksPassed": all(item["passed"] for item in checks),
-        "benchmarkScope": benchmark["benchmarkScope"],
-        "protocol": deepcopy(protocol),
-        "referenceHardware": deepcopy(
-            fixture_manifest["referenceHardware"]
+        "matches": not failures and len(checked) == len(records),
+        "checked": checked,
+        "failures": sorted(set(failures)),
+    }
+
+
+def _hardware_profile(path: Path, role: str) -> dict[str, Any]:
+    if not path.is_file():
+        return {
+            "role": role,
+            "status": "unresolved",
+            "releaseGateMet": False,
+            "blockers": [f"{role}_reference_hardware_unresolved"],
+        }
+    profile = _read_json(path)
+    source = profile.get("source")
+    source_status = _recorded_source_status(
+        [source] if isinstance(source, Mapping) else []
+    )
+    valid = (
+        profile.get("schemaVersion")
+        == "facility-layout-reference-hardware-v1"
+        and profile.get("role") == role
+        and profile.get("status") == "measured"
+        and bool(profile.get("machineLabel"))
+        and isinstance(profile.get("measurement"), Mapping)
+        and source_status["matches"]
+    )
+    return {
+        **deepcopy(profile),
+        "artifact": _artifact(path),
+        "sourceBinding": source_status,
+        "releaseGateMet": valid,
+        "blockers": (
+            [] if valid else [f"{role}_reference_hardware_invalid"]
         ),
+    }
+
+
+def _hardware_claim_fingerprint(claim: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        claim,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _reference_hardware_claim(profile: Mapping[str, Any]) -> dict[str, Any]:
+    measurement = profile.get("measurement", {})
+    if not isinstance(measurement, Mapping):
+        measurement = {}
+    machine = measurement.get("machine", {})
+    cpu = measurement.get("cpu", {})
+    gpu = measurement.get("gpu", {})
+    memory = measurement.get("memory", {})
+    operating_system = measurement.get("operatingSystem", {})
+    browser = measurement.get("browser", {})
+    return {
+        "schemaVersion": "facility-layout-reference-hardware-claim-v1",
+        "machine": {
+            "manufacturer": machine.get("manufacturer"),
+            "model": machine.get("model"),
+        },
+        "cpu": {
+            "name": cpu.get("name"),
+            "physicalCores": cpu.get("physicalCores"),
+            "logicalProcessors": cpu.get("logicalProcessors"),
+        },
+        "gpu": {
+            "name": gpu.get("name"),
+            "adapterRamBytesReported": gpu.get("adapterRamBytesReported"),
+            "driverVersion": gpu.get("driverVersion"),
+        },
+        "memory": {"ramBytes": memory.get("ramBytes")},
+        "operatingSystem": {"version": operating_system.get("version")},
+        "browser": {
+            "name": browser.get("name"),
+            "version": browser.get("productVersion")
+            or browser.get("fileVersion"),
+        },
+    }
+
+
+def _benchmark_hardware_claim(raw: Mapping[str, Any]) -> dict[str, Any]:
+    environment = raw.get("environment", {})
+    if not isinstance(environment, Mapping):
+        environment = {}
+    identity = environment.get("hardwareIdentity", {})
+    if not isinstance(identity, Mapping):
+        identity = {}
+    cpus = identity.get("cpus", [])
+    gpus = identity.get("gpus", [])
+    cpu = cpus[0] if isinstance(cpus, list) and cpus else {}
+    gpu = gpus[0] if isinstance(gpus, list) and gpus else {}
+    machine = identity.get("machine", {})
+    operating_system = identity.get("operatingSystem", {})
+    browser = identity.get("browser", {})
+    return {
+        "schemaVersion": "facility-layout-reference-hardware-claim-v1",
+        "machine": {
+            "manufacturer": machine.get("manufacturer"),
+            "model": machine.get("model"),
+        },
+        "cpu": {
+            "name": cpu.get("name"),
+            "physicalCores": cpu.get("cores"),
+            "logicalProcessors": cpu.get("logicalProcessors"),
+        },
+        "gpu": {
+            "name": gpu.get("name"),
+            "adapterRamBytesReported": gpu.get("adapterRam"),
+            "driverVersion": gpu.get("driverVersion"),
+        },
+        "memory": {"ramBytes": identity.get("physicalMemoryBytes")},
+        "operatingSystem": {"version": operating_system.get("version")},
+        "browser": {
+            "name": browser.get("name"),
+            "version": browser.get("version"),
+        },
+    }
+
+
+def _benchmark_matches_hardware_profile(
+    raw: Mapping[str, Any],
+    profile: Mapping[str, Any],
+) -> dict[str, Any]:
+    expected = _reference_hardware_claim(profile)
+    observed = _benchmark_hardware_claim(raw)
+    expected_fingerprint = _hardware_claim_fingerprint(expected)
+    observed_fingerprint = _hardware_claim_fingerprint(observed)
+    matches = expected == observed
+    return {
+        "matches": matches,
+        "expectedFingerprintSha256": expected_fingerprint,
+        "observedFingerprintSha256": observed_fingerprint,
+        "expected": expected,
+        "observed": observed,
+        "blockers": [] if matches else ["benchmark_hardware_profile_mismatch"],
+    }
+
+
+def _validated_browser_benchmark(
+    raw_path: Path,
+    summary_path: Path,
+    hardware_profile: Mapping[str, Any],
+) -> dict[str, Any]:
+    from tools.benchmark_facility_layout_release_browser import (
+        build_summary,
+        validate_raw_artifact,
+    )
+
+    if not raw_path.is_file() or not summary_path.is_file():
+        return {
+            "valid": False,
+            "validationErrors": ["benchmark_raw_or_summary_missing"],
+            "summary": {},
+            "storedSummaryMatchesRaw": False,
+            "hardwareMatch": {
+                "matches": False,
+                "blockers": ["benchmark_hardware_profile_mismatch"],
+            },
+        }
+    raw = _read_json(raw_path)
+    stored_summary = _read_json(summary_path)
+    raw_errors = validate_raw_artifact(raw)
+    rebuilt_summary = build_summary(raw, raw_path=raw_path)
+    summary_matches = stored_summary == rebuilt_summary
+    hardware_match = _benchmark_matches_hardware_profile(
+        raw,
+        hardware_profile,
+    )
+    errors = list(raw_errors)
+    if not summary_matches:
+        errors.append("browser_summary_not_reproducible_from_raw")
+    errors.extend(hardware_match["blockers"])
+    valid = (
+        not errors
+        and rebuilt_summary.get("artifactShapeValid") is True
+        and rebuilt_summary.get("profile") == "release"
+        and rebuilt_summary.get("releaseEligible") is True
+    )
+    return {
+        "valid": valid,
+        "validationErrors": sorted(set(errors)),
+        "summary": rebuilt_summary,
+        "storedSummaryMatchesRaw": summary_matches,
+        "hardwareMatch": hardware_match,
+    }
+
+
+def build_performance_evidence() -> dict[str, Any]:
+    backend = _read_json(BACKEND_PERFORMANCE_SOURCE)
+    standard = _hardware_profile(STANDARD_HARDWARE_SOURCE, "standard")
+    minimum = _hardware_profile(MINIMUM_HARDWARE_SOURCE, "minimum")
+    standard_benchmark = _validated_browser_benchmark(
+        BROWSER_PERFORMANCE_RAW,
+        BROWSER_PERFORMANCE_SUMMARY,
+        standard,
+    )
+    browser_summary = standard_benchmark["summary"]
+    browser_validation = standard_benchmark["validationErrors"]
+    browser_evidence_valid = standard_benchmark["valid"]
+
+    backend_source = _recorded_source_status(
+        backend.get("source", {}).get("files")
+    )
+    backend_evidence_valid = (
+        backend.get("schemaVersion")
+        == "facility-layout-backend-release-microbenchmark-v1"
+        and backend.get("releaseEligible") is True
+        and backend.get("requiredOperationsAvailable") is True
+        and backend.get("determinismPassed") is True
+        and backend.get("provenanceComplete") is True
+        and backend_source["matches"]
+    )
+
+    checks = []
+    for item in browser_summary.get("budgetChecks", []):
+        check = deepcopy(item)
+        check["evidenceSource"] = "browser_release_protocol"
+        checks.append(check)
+    for operation in backend.get("operations", []):
+        if operation.get("required") is not True:
+            continue
+        budget = operation.get("budget", {})
+        checks.append(
+            {
+                "budgetId": f"backend-{operation.get('operationId')}",
+                "measured": budget.get("measured"),
+                "limit": budget.get("limit"),
+                "unit": budget.get("unit"),
+                "available": operation.get("availability") == "available",
+                "applicable": True,
+                "passed": (
+                    operation.get("availability") == "available"
+                    and budget.get("passed") is True
+                    and operation.get("determinism", {}).get("passed")
+                    is True
+                ),
+                "evidenceSource": "backend_release_microbenchmark",
+            }
+        )
+
+    minimum_benchmark = _validated_browser_benchmark(
+        MINIMUM_BROWSER_PERFORMANCE_RAW,
+        MINIMUM_BROWSER_PERFORMANCE_SUMMARY,
+        minimum,
+    )
+    minimum_benchmark_recorded = (
+        minimum["releaseGateMet"]
+        and minimum_benchmark["valid"]
+        and minimum_benchmark["summary"].get("releaseGateMet") is True
+    )
+    blockers = []
+    if not browser_evidence_valid:
+        blockers.append("browser_release_evidence_invalid")
+    blockers.extend(
+        f"browser:{item}"
+        for item in browser_summary.get("blockers", [])
+    )
+    if not backend_evidence_valid:
+        blockers.append("backend_release_evidence_invalid")
+    if backend.get("releaseSlicePassed") is not True:
+        blockers.append("backend_release_budgets_failed")
+    blockers.extend(standard["blockers"])
+    blockers.extend(minimum["blockers"])
+    if not minimum_benchmark_recorded:
+        blockers.append("minimum_hardware_release_benchmark_not_recorded")
+
+    observed_checks_passed = (
+        bool(checks)
+        and all(item.get("passed") is True for item in checks)
+        and browser_evidence_valid
+        and backend_evidence_valid
+    )
+    standard_slice_passed = (
+        observed_checks_passed
+        and browser_summary.get("releaseGateMet") is True
+        and backend.get("releaseSlicePassed") is True
+        and standard["releaseGateMet"]
+    )
+    release_gate_met = (
+        standard_slice_passed
+        and minimum["releaseGateMet"]
+        and minimum_benchmark_recorded
+        and not blockers
+    )
+    return {
+        "schemaVersion": "facility-layout-p11-performance-evidence-v2",
+        "generatedAtUtc": _utc_now(),
+        "status": (
+            "passed"
+            if release_gate_met
+            else "standard_hardware_passed_minimum_pending"
+            if standard_slice_passed
+            else "failed"
+        ),
+        "observedBudgetChecks": checks,
+        "observedChecksPassed": observed_checks_passed,
+        "standardHardwareSlicePassed": standard_slice_passed,
+        "browserEvidence": {
+            "artifactShapeValid": browser_evidence_valid,
+            "validationErrors": browser_validation,
+            "summary": _artifact(BROWSER_PERFORMANCE_SUMMARY),
+            "raw": _artifact(BROWSER_PERFORMANCE_RAW),
+            "protocol": deepcopy(browser_summary.get("protocol")),
+            "environment": deepcopy(browser_summary.get("environment")),
+            "storedSummaryMatchesRaw": standard_benchmark[
+                "storedSummaryMatchesRaw"
+            ],
+            "hardwareMatch": standard_benchmark["hardwareMatch"],
+        },
+        "backendEvidence": {
+            "artifactShapeValid": backend_evidence_valid,
+            "sourceBinding": backend_source,
+            "artifact": _artifact(BACKEND_PERFORMANCE_SOURCE),
+            "claimBoundary": deepcopy(backend.get("claimBoundary")),
+        },
+        "protocol": {
+            "browser": deepcopy(browser_summary.get("protocol")),
+            "backend": deepcopy(backend.get("protocol")),
+        },
+        "referenceHardware": {
+            "standard": standard,
+            "minimum": minimum,
+            "minimumBenchmarkRecorded": minimum_benchmark_recorded,
+            "minimumBenchmark": minimum_benchmark,
+        },
         "sourceArtifacts": [
-            _artifact(PERFORMANCE_SOURCE),
+            _artifact(BROWSER_PERFORMANCE_RAW),
+            _artifact(BROWSER_PERFORMANCE_SUMMARY),
+            _artifact(BACKEND_PERFORMANCE_SOURCE),
+            _artifact(STANDARD_HARDWARE_SOURCE),
             _artifact(BENCHMARK_MANIFEST),
+            _artifact(LEGACY_PERFORMANCE_SOURCE),
         ],
-        "blockers": blockers,
+        "blockers": sorted(set(blockers)),
         "releaseGateMet": release_gate_met,
     }
 
 
 def build_accessibility_evidence() -> dict[str, Any]:
-    workspace_path = ROOT / "static" / "facility_layout_workspace.js"
-    css_path = ROOT / "static" / "facility_layout_workspace.css"
-    workspace = workspace_path.read_text(encoding="utf-8")
-    css = css_path.read_text(encoding="utf-8")
-    expected = {
-        "workspace_label": "Facility layout workspace" in workspace,
-        "toolbar_role": "role: 'toolbar'" in workspace,
-        "toolbar_label": "Facility layout tools" in workspace,
-        "asset_tree_role": "role: 'tree'" in workspace,
-        "asset_treeitem_role": "role: 'treeitem'" in workspace,
-        "tablist_role": "role: 'tablist'" in workspace,
-        "tabpanel_role": "role: 'tabpanel'" in workspace,
-        "polite_live_region": "'aria-live': 'polite'" in workspace,
-        "busy_state": "'aria-busy'" in workspace,
-        "selected_state": "'aria-selected'" in workspace,
-        "pressed_state": "'aria-pressed'" in workspace,
-        "focus_visible": ":focus-visible" in css,
-        "reduced_motion": "prefers-reduced-motion: reduce" in css,
-    }
-    findings = [
-        {
-            "severity": "critical",
-            "code": f"missing_{name}",
-            "message": f"Required static accessibility token is absent: {name}.",
-        }
-        for name, passed in expected.items()
-        if not passed
-    ]
-    audits = {
-        "manualKeyboardAudit": "pending",
-        "screenReaderAudit": "pending",
-        "contrastAudit": "pending",
-    }
-    release_gate_met = (
-        not findings and all(value == "passed" for value in audits.values())
+    from tools.audit_facility_layout_accessibility import (
+        interpret_accessibility_evidence,
+    )
+
+    raw = _read_json(ACCESSIBILITY_RAW_SOURCE)
+    interpreted = interpret_accessibility_evidence(
+        raw,
+        raw_artifact_path=ACCESSIBILITY_RAW_SOURCE,
+    )
+    automated_passed = interpreted["automatedAuditPassed"] is True
+    automated_blockers = sorted(
+        item
+        for item in interpreted.get("blockers", [])
+        if item != "manual_screen_reader_audit_pending"
     )
     return {
-        "schemaVersion": "facility-layout-p11-accessibility-evidence-v1",
+        "schemaVersion": "facility-layout-p11-accessibility-evidence-v2",
         "generatedAtUtc": _utc_now(),
-        "scope": "static_aria_and_css_contract",
-        "checks": expected,
-        "criticalFindings": findings,
-        "staticContractPassed": not findings,
-        **audits,
-        "source": _source_hashes((workspace_path, css_path)),
-        "releaseGateMet": release_gate_met,
-        "releaseGateReason": (
-            "Static checks pass, but keyboard, screen-reader, and contrast "
-            "audits remain human verification tasks."
+        "scope": interpreted["scope"],
+        "checks": deepcopy(interpreted.get("categoryStatus")),
+        "criticalFindings": [
+            {
+                "severity": "critical",
+                "code": item,
+                "message": (
+                    "The source-bound automated accessibility audit failed."
+                ),
+            }
+            for item in automated_blockers
+        ],
+        "staticContractPassed": automated_passed,
+        "automatedAuditPassed": automated_passed,
+        "manualKeyboardAudit": (
+            "covered_by_automated_browser_audit"
+            if interpreted.get("categoryStatus", {})
+            .get("keyboard", {})
+            .get("passed")
+            is True
+            else "failed"
         ),
+        "screenReaderAudit": interpreted.get(
+            "manualScreenReaderAudit", {}
+        ).get("status", "pending"),
+        "contrastAudit": (
+            "covered_by_automated_browser_audit"
+            if interpreted.get("categoryStatus", {})
+            .get("contrast", {})
+            .get("passed")
+            is True
+            else "failed"
+        ),
+        "sourceBinding": deepcopy(interpreted.get("sourceBinding")),
+        "sourceArtifacts": [
+            _artifact(ACCESSIBILITY_RAW_SOURCE),
+            _artifact(ACCESSIBILITY_SUMMARY_SOURCE),
+        ],
+        "blockers": deepcopy(interpreted.get("blockers")),
+        "releaseGateMet": interpreted["releaseGateMet"] is True,
+        "releaseGateReason": interpreted["releaseGateReason"],
     }
 
 
@@ -1028,6 +1330,52 @@ def build_webgl_offline_evidence(
     }
 
 
+def _python_distribution_release_gate(
+    inventory: Mapping[str, Any],
+    source_binding: Mapping[str, Any],
+) -> dict[str, Any]:
+    machine_assessment = inventory.get("machineAssessment", {})
+    human_approval = inventory.get("humanLegalApproval", {})
+    blockers = [
+        *(
+            ["python_distribution_inventory_source_binding_invalid"]
+            if source_binding.get("matches") is not True
+            else []
+        ),
+        *(
+            ["python_distribution_machine_assessment_blocked"]
+            if machine_assessment.get("gateMet") is not True
+            else []
+        ),
+        *(
+            ["python_distribution_human_legal_review_pending"]
+            if human_approval.get("approved") is not True
+            else []
+        ),
+        *(
+            ["python_distribution_legal_clearance_not_recorded"]
+            if human_approval.get("legalClearanceClaimed") is not True
+            else []
+        ),
+        *(
+            ["python_distribution_inventory_gate_not_met"]
+            if inventory.get("releaseGateMet") is not True
+            else []
+        ),
+    ]
+    complete = (
+        inventory.get("schemaVersion")
+        == "facility-layout-python-dependency-inventory-v1"
+        and not blockers
+    )
+    return {
+        "complete": complete,
+        "blockers": blockers,
+        "machineAssessment": deepcopy(machine_assessment),
+        "humanLegalApproval": deepcopy(human_approval),
+    }
+
+
 def build_licensing_inventory() -> dict[str, Any]:
     vendor_root = ROOT / "static" / "vendor"
     packages = [
@@ -1123,7 +1471,18 @@ def build_licensing_inventory() -> dict[str, Any]:
         for item in industrial_assets
         if not item["publicReady"]
     )
-    python_review_complete = False
+    python_inventory = _read_json(PYTHON_DEPENDENCY_INVENTORY_SOURCE)
+    python_source_binding = _recorded_source_status(
+        [
+            python_inventory.get("sourceBinding", {}).get("requirements"),
+            python_inventory.get("sourceBinding", {}).get("generator"),
+        ]
+    )
+    python_gate = _python_distribution_release_gate(
+        python_inventory,
+        python_source_binding,
+    )
+    python_review_complete = python_gate["complete"]
     blockers = [
         *(
             ["vendored_browser_javascript_missing_license_record"]
@@ -1135,11 +1494,7 @@ def build_licensing_inventory() -> dict[str, Any]:
             if unlicensed_assets
             else []
         ),
-        *(
-            ["python_distribution_dependency_review_pending"]
-            if not python_review_complete
-            else []
-        ),
+        *python_gate["blockers"],
     ]
     release_gate_met = not blockers
     return {
@@ -1158,11 +1513,21 @@ def build_licensing_inventory() -> dict[str, Any]:
             "notPublicReadyAssetIds": unlicensed_assets,
         },
         "pythonDistributionDependencyReview": {
-            "status": "pending",
-            "requirementsSource": _artifact(ROOT / "requirements.txt"),
+            "status": "complete" if python_review_complete else "blocked",
+            "inventoryArtifact": _artifact(
+                PYTHON_DEPENDENCY_INVENTORY_SOURCE
+            ),
+            "sourceBinding": python_source_binding,
+            "machineAssessment": python_gate["machineAssessment"],
+            "humanLegalApproval": python_gate["humanLegalApproval"],
             "blockingConcern": (
-                "Review the exact packaged dependency set, including "
-                "PyMuPDF distribution terms, before pilot distribution."
+                None
+                if python_review_complete
+                else (
+                    "Resolve the exact dependency and license inventory, "
+                    "including the PyMuPDF distribution path, and retain "
+                    "qualified human approval for the packaged pilot."
+                )
             ),
         },
         "releaseGateMet": release_gate_met,
@@ -1282,14 +1647,31 @@ def run_suite_matrix(
     for suite in matrix["suites"]:
         started = time.monotonic()
         try:
-            completed = subprocess.run(
-                suite["command"],
-                cwd=ROOT,
-                capture_output=True,
-                check=False,
-                text=True,
-                timeout=timeout_seconds,
-            )
+            command = list(suite["command"])
+            with tempfile.TemporaryDirectory(
+                prefix=f"inspectorpro-p11-{suite['suiteId']}-",
+                # Windows can race pytest/plugin teardown while recursively
+                # removing a deeply nested basetemp. Cleanup must not replace
+                # the suite's actual return code with an unrelated WinError.
+                ignore_cleanup_errors=True,
+            ) as temporary_root:
+                if command[1:3] == ["-m", "pytest"]:
+                    command.extend(
+                        [
+                            "--basetemp",
+                            str(Path(temporary_root) / "pytest"),
+                            "-p",
+                            "no:cacheprovider",
+                        ]
+                    )
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                    timeout=timeout_seconds,
+                )
             output = "\n".join(
                 part
                 for part in (completed.stdout, completed.stderr)
@@ -1874,92 +2256,87 @@ def _zone_fixture(zone_type: str, zone_id: str) -> dict[str, Any]:
     return zone
 
 
-def _real_soak_state(
-    previous: Mapping[str, Any] | None,
+def build_real_soak_evidence(
+    ledger_path: Path = REAL_SOAK_EVENT_LEDGER,
 ) -> dict[str, Any]:
-    prior = (
-        deepcopy(dict(previous.get("realElapsedSoak", {})))
-        if isinstance(previous, Mapping)
-        else {}
-    )
-    started = str(prior.get("startedAtUtc") or _utc_now())
+    if not ledger_path.is_file():
+        return {
+            "startedAtUtc": None,
+            "lastEvaluatedAtUtc": _utc_now(),
+            "elapsedDays": 0,
+            "requirements": deepcopy(SOAK_REQUIREMENTS),
+            "observed": {
+                "layouts": 0,
+                "editingSessions": 0,
+                "agentPreviews": 0,
+                "approvedReceiptBackedApplies": 0,
+                "byteIdenticalDismissals": 0,
+                "rejectedStaleOrUnauthorizedAttempts": 0,
+                "reopenCyclesPerLayout": 0,
+                "canonicalReceiptIds": [],
+            },
+            "workflowsExercised": [],
+            "checks": {
+                "evidenceLedgerPresent": False,
+                "eventChainValid": False,
+                "buildIdentityMatchesCurrent": False,
+            },
+            "status": "not_started",
+            "releaseGateMet": False,
+            "blockers": ["real_soak_not_started"],
+            "note": (
+                "Real self-use is credited only from the source-bound, "
+                "append-only runtime evidence ledger."
+            ),
+        }
     try:
-        started_date = date.fromisoformat(started[:10])
-    except ValueError:
-        started = _utc_now()
-        started_date = date.fromisoformat(started[:10])
-    elapsed_days = max(0, (date.today() - started_date).days)
-    observed = prior.get("observed")
-    if not isinstance(observed, Mapping):
-        observed = {}
-    normalized_observed = {
-        "layouts": int(observed.get("layouts") or 0),
-        "editingSessions": int(observed.get("editingSessions") or 0),
-        "agentPreviews": int(observed.get("agentPreviews") or 0),
-        "approvedReceiptBackedApplies": int(
-            observed.get("approvedReceiptBackedApplies") or 0
-        ),
-        "byteIdenticalDismissals": int(
-            observed.get("byteIdenticalDismissals") or 0
-        ),
-        "rejectedStaleOrUnauthorizedAttempts": int(
-            observed.get("rejectedStaleOrUnauthorizedAttempts") or 0
-        ),
-        "reopenCyclesPerLayout": int(
-            observed.get("reopenCyclesPerLayout") or 0
-        ),
-        "canonicalReceiptIds": sorted(
-            {
-                str(item)
-                for item in observed.get("canonicalReceiptIds", [])
-                if item
-            }
-        ),
-    }
-    requirements = {
-        "elapsedDays": 14,
-        "layouts": 10,
-        "editingSessions": 50,
-        "agentPreviews": 20,
-        "approvedReceiptBackedApplies": 10,
-        "byteIdenticalDismissals": 5,
-        "rejectedStaleOrUnauthorizedAttempts": 5,
-        "reopenCyclesPerLayout": 5,
-    }
-    elapsed_met = elapsed_days >= requirements["elapsedDays"]
-    count_checks = {
-        key: normalized_observed[key] >= minimum
-        for key, minimum in requirements.items()
-        if key != "elapsedDays"
-    }
-    receipt_count_met = (
-        len(normalized_observed["canonicalReceiptIds"])
-        >= requirements["approvedReceiptBackedApplies"]
+        ledger = load_soak_events(ledger_path)
+        summary = summarize_soak_events(ledger)
+    except (SoakEvidenceError, OSError) as error:
+        return {
+            "startedAtUtc": None,
+            "lastEvaluatedAtUtc": _utc_now(),
+            "elapsedDays": 0,
+            "requirements": deepcopy(SOAK_REQUIREMENTS),
+            "observed": {},
+            "checks": {
+                "evidenceLedgerPresent": True,
+                "eventChainValid": False,
+                "buildIdentityMatchesCurrent": False,
+            },
+            "status": "evidence_invalid",
+            "releaseGateMet": False,
+            "blockers": ["real_soak_evidence_invalid"],
+            "error": str(error),
+            "artifact": _artifact(ledger_path),
+        }
+    current_identity = facility_build_identity(ROOT)
+    campaign_identity = ledger.get("campaign", {}).get("buildIdentity", {})
+    build_matches = (
+        campaign_identity.get("aggregateSha256")
+        == current_identity["aggregateSha256"]
     )
-    gate_met = elapsed_met and all(count_checks.values()) and receipt_count_met
-    if not elapsed_met:
-        status = "elapsed_duration_pending"
-    elif not all(count_checks.values()) or not receipt_count_met:
-        status = "activity_requirements_pending"
-    else:
-        status = "complete"
+    checks = {
+        **deepcopy(summary.get("checks", {})),
+        "evidenceLedgerPresent": True,
+        "buildIdentityMatchesCurrent": build_matches,
+    }
+    release_gate_met = summary["releaseGateMet"] is True and build_matches
+    status = summary["status"] if build_matches else "build_changed"
+    blockers = []
+    if not build_matches:
+        blockers.append("real_soak_build_changed")
+    if not release_gate_met and not blockers:
+        blockers.append(f"real_soak_{status}")
     return {
-        "startedAtUtc": started,
-        "lastEvaluatedAtUtc": _utc_now(),
-        "elapsedDays": elapsed_days,
-        "requirements": requirements,
-        "observed": normalized_observed,
-        "checks": {
-            "elapsedDurationMet": elapsed_met,
-            **count_checks,
-            "canonicalReceiptCountMet": receipt_count_met,
-        },
+        **summary,
+        "checks": checks,
         "status": status,
-        "releaseGateMet": gate_met,
-        "note": (
-            "Accelerated test activity is excluded from these literal-time "
-            "observations."
-        ),
+        "releaseGateMet": release_gate_met,
+        "blockers": blockers,
+        "artifact": _artifact(ledger_path),
+        "campaignBuildIdentity": deepcopy(campaign_identity),
+        "currentBuildIdentity": current_identity,
     }
 
 
@@ -1968,7 +2345,7 @@ def run_accelerated_soak(
     *,
     layout_count: int = 10,
     reopen_cycles: int = 5,
-    previous_ledger: Mapping[str, Any] | None = None,
+    real_soak_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if layout_count < 10:
         raise ValueError("P11 accelerated soak requires at least 10 layouts.")
@@ -2321,7 +2698,11 @@ def run_accelerated_soak(
             "It is not credited as elapsed self-use time."
         ),
     }
-    real_soak = _real_soak_state(previous_ledger)
+    real_soak = (
+        deepcopy(dict(real_soak_evidence))
+        if isinstance(real_soak_evidence, Mapping)
+        else build_real_soak_evidence()
+    )
     return {
         "schemaVersion": "facility-layout-p11-soak-ledger-v1",
         "generatedAtUtc": _utc_now(),
@@ -2342,34 +2723,143 @@ def run_accelerated_soak(
     }
 
 
+def _documentation_contract_checks(
+    document_id: str,
+    normalized_text: str,
+) -> dict[str, bool]:
+    text = normalized_text.lower()
+    contracts = {
+        "pilot_runbook": {
+            "controlledPilotBoundary": (
+                "controlled pilot preparation" in text
+                and "does not declare" in text
+                and "release-ready" in text
+            ),
+            "safetyAuthorityBoundary": SAFETY_DISCLAIMER.lower() in text,
+            "makerCheckerRequired": (
+                "require_distinct_approver=true" in text
+            ),
+            "rollbackPreservesData": (
+                "must not delete or convert layout documents" in text
+            ),
+        },
+        "release_gates": {
+            "evidenceGenerationIsNotReadiness": (
+                "does not mean the pilot gate is met" in text
+            ),
+            "standardAndMinimumHardwareRequired": (
+                "standard and minimum hardware" in text
+                and "hardware fingerprint" in text
+                and "rebuilt from raw observations" in text
+            ),
+            "manualScreenReaderRequired": (
+                "manual screen-reader" in text
+            ),
+            "licensingClearanceRequired": (
+                "cleared redistribution rights" in text
+                and "dependency license review" in text
+            ),
+            "exactSoakDurationRequired": (
+                "1,209,600 continuous elapsed seconds" in text
+            ),
+            "generatedSoakCannotIncrementCounts": (
+                "generated release json cannot increment its counts" in text
+            ),
+            "manualEvidenceEditsForbidden": (
+                "do not change an evidence file manually" in text
+            ),
+        },
+        "licensing": {
+            "noAutomatedLegalClearanceClaim": (
+                "without claiming legal clearance" in text
+            ),
+            "machineHumanAndLegalGatesRequired": (
+                "machine dependency assessment passes" in text
+                and "qualified human explicitly records approval" in text
+                and "explicitly claims legal clearance" in text
+            ),
+            "industrialAssetRightsRequired": (
+                "blocks public redistribution" in text
+            ),
+            "inventoryContradictionFailsClosed": (
+                "cannot clear the p11 licensing gate" in text
+            ),
+        },
+        "soak_procedure": {
+            "exactContinuousDuration": (
+                "1,209,600 continuous elapsed seconds" in text
+            ),
+            "campaignMetadataGenesisBound": (
+                "forms the genesis hash" in text
+            ),
+            "recursiveWriteSourceBound": (
+                "nested workflow modules" in text
+                and "recursive source identity" in text
+            ),
+            "generatedProjectionCannotChangeCounts": (
+                "editing it never changes soak counts" in text
+            ),
+            "realAndAcceleratedSeparated": (
+                "accelerated activity never increments" in text
+            ),
+        },
+    }
+    return contracts.get(document_id, {"knownDocument": False})
+
+
 def build_documentation_evidence() -> dict[str, Any]:
     paths = (
-        ROOT / "docs" / "facility-layout-p11-pilot-runbook.md",
-        ROOT / "docs" / "facility-layout-p11-release-gates.md",
-        ROOT / "docs" / "facility-layout-p11-licensing.md",
-        ROOT / "docs" / "facility-layout-p11-soak-procedure.md",
+        (
+            "pilot_runbook",
+            ROOT / "docs" / "facility-layout-p11-pilot-runbook.md",
+        ),
+        (
+            "release_gates",
+            ROOT / "docs" / "facility-layout-p11-release-gates.md",
+        ),
+        (
+            "licensing",
+            ROOT / "docs" / "facility-layout-p11-licensing.md",
+        ),
+        (
+            "soak_procedure",
+            ROOT / "docs" / "facility-layout-p11-soak-procedure.md",
+        ),
     )
     records = []
-    for path in paths:
+    for document_id, path in paths:
         text = path.read_text(encoding="ascii")
         normalized_text = " ".join(text.split())
+        checks = _documentation_contract_checks(
+            document_id,
+            normalized_text,
+        )
         records.append(
             {
+                "documentId": document_id,
                 **_artifact(path),
                 "containsSafetyDisclaimer": (
                     SAFETY_DISCLAIMER in normalized_text
                 ),
+                "accuracyChecks": checks,
+                "contractPassed": bool(checks) and all(checks.values()),
             }
         )
     runbook = records[0]
+    all_contracts_passed = all(
+        record["contractPassed"] for record in records
+    )
     return {
-        "schemaVersion": "facility-layout-p11-documentation-evidence-v1",
+        "schemaVersion": "facility-layout-p11-documentation-evidence-v2",
         "generatedAtUtc": _utc_now(),
         "documents": records,
         "pilotRunbookContainsSafetyDisclaimer": runbook[
             "containsSafetyDisclaimer"
         ],
-        "releaseGateMet": runbook["containsSafetyDisclaimer"],
+        "allDocumentContractsPassed": all_contracts_passed,
+        "releaseGateMet": (
+            runbook["containsSafetyDisclaimer"] and all_contracts_passed
+        ),
     }
 
 
@@ -2420,14 +2910,8 @@ def generate_release_evidence(
             rollback_root or Path(temporary)
         )
 
-    soak_path = output_dir / "p11-soak-ledger.json"
-    previous_ledger = (
-        _read_json(soak_path)
-        if soak_path.exists()
-        else None
-    )
+    real_soak = build_real_soak_evidence()
     if skip_soak:
-        real_soak = _real_soak_state(previous_ledger)
         soak = {
             "schemaVersion": "facility-layout-p11-soak-ledger-v1",
             "generatedAtUtc": _utc_now(),
@@ -2449,7 +2933,7 @@ def generate_release_evidence(
         ) as temporary:
             soak = run_accelerated_soak(
                 soak_root or Path(temporary),
-                previous_ledger=previous_ledger,
+                real_soak_evidence=real_soak,
             )
 
     artifacts = {
@@ -2492,22 +2976,14 @@ def generate_release_evidence(
             *performance["blockers"],
             *flags["blockers"],
             *licensing["blockers"],
-            *(
-                [f"real_soak_{real_soak['status']}"]
-                if not real_soak["releaseGateMet"]
-                else []
-            ),
+            *real_soak.get("blockers", []),
             *(
                 ["accelerated_deterministic_soak_not_green"]
                 if soak.get("acceleratedDeterministicSoak", {}).get("status")
                 != "passed"
                 else []
             ),
-            *(
-                ["accessibility_manual_audit_pending"]
-                if not accessibility["releaseGateMet"]
-                else []
-            ),
+            *accessibility.get("blockers", []),
             *(
                 ["visual_viewport_theme_matrix_incomplete"]
                 if not visuals["releaseGateMet"]

@@ -174,7 +174,7 @@ def test_committed_release_artifact_schema_budgets_and_determinism() -> None:
     assert artifact["releaseSlicePassed"] is expected_release_result
 
 
-def test_current_release_artifact_fails_closed_on_diagnostics_budget() -> None:
+def test_current_release_artifact_passes_all_required_backend_budgets() -> None:
     artifact = _load(DEFAULT_RESULT_PATH)
     operations = {
         item["operationId"]: item for item in artifact["operations"]
@@ -183,9 +183,9 @@ def test_current_release_artifact_fails_closed_on_diagnostics_budget() -> None:
     assert operations["candidate_generation"]["budget"]["passed"] is True
     assert operations["collision_clearance_query"]["budget"]["passed"] is True
     assert operations["forklift_routing"]["budget"]["passed"] is True
-    assert operations["full_diagnostics"]["budget"]["passed"] is False
-    assert artifact["budgetsPassed"] is False
-    assert artifact["releaseSlicePassed"] is False
+    assert operations["full_diagnostics"]["budget"]["passed"] is True
+    assert artifact["budgetsPassed"] is True
+    assert artifact["releaseSlicePassed"] is True
 
 
 def test_committed_artifact_is_bound_to_generated_fixtures_and_sources() -> None:

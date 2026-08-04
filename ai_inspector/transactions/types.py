@@ -628,6 +628,7 @@ class PreparedRecord:
     request_fingerprint: str
     prepared_at: float
     recovery: Mapping[str, Any] = field(default_factory=dict)
+    approval_fingerprint: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -671,6 +672,15 @@ class PreparedRecord:
             "recovery",
             copy_mapping(self.recovery, "preparedRecovery"),
         )
+        if self.approval_fingerprint is not None:
+            object.__setattr__(
+                self,
+                "approval_fingerprint",
+                validate_hash(
+                    self.approval_fingerprint,
+                    "approvalFingerprint",
+                ),
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -685,6 +695,8 @@ class PreparedRecord:
         }
         if self.recovery:
             result["recovery"] = deepcopy(dict(self.recovery))
+        if self.approval_fingerprint is not None:
+            result["approvalFingerprint"] = self.approval_fingerprint
         return result
 
     @classmethod
@@ -706,6 +718,7 @@ class PreparedRecord:
             request_fingerprint=value.get("requestFingerprint"),
             prepared_at=value.get("preparedAt"),
             recovery=value.get("recovery") or {},
+            approval_fingerprint=value.get("approvalFingerprint"),
         )
 
 
@@ -721,6 +734,7 @@ class TransactionReceipt:
     revision: str
     created_at: float
     payload: Mapping[str, Any] = field(default_factory=dict)
+    approval_fingerprint: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -769,9 +783,18 @@ class TransactionReceipt:
             "payload",
             copy_mapping(self.payload, "receiptPayload"),
         )
+        if self.approval_fingerprint is not None:
+            object.__setattr__(
+                self,
+                "approval_fingerprint",
+                validate_hash(
+                    self.approval_fingerprint,
+                    "approvalFingerprint",
+                ),
+            )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "receiptId": self.receipt_id,
             "proposalId": self.proposal_id,
             "action": self.action,
@@ -783,6 +806,9 @@ class TransactionReceipt:
             "createdAt": self.created_at,
             "payload": deepcopy(dict(self.payload)),
         }
+        if self.approval_fingerprint is not None:
+            result["approvalFingerprint"] = self.approval_fingerprint
+        return result
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "TransactionReceipt":
@@ -804,6 +830,7 @@ class TransactionReceipt:
             revision=value.get("revision"),
             created_at=value.get("createdAt"),
             payload=value.get("payload") or {},
+            approval_fingerprint=value.get("approvalFingerprint"),
         )
 
 

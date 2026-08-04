@@ -1926,6 +1926,50 @@ async function main() {
             noThree.workspace.destroy();
         });
 
+    await check('Plan and 3D tabs support manual-activation arrow navigation',
+        async () => {
+            const data = fixture();
+            data.workspace.planTab.focus();
+            const right = data.workspace.planTab.dispatch('keydown', {
+                key: 'ArrowRight',
+            });
+            assert.strictEqual(right.defaultPrevented, true);
+            assert.strictEqual(
+                data.workspace.planTab.ownerDocument.activeElement,
+                data.workspace.threeTab
+            );
+            assert.strictEqual(data.workspace.getState().viewMode, 'plan');
+            data.workspace.threeTab.dispatch('click');
+            assert.strictEqual(data.workspace.getState().viewMode, '3d');
+            data.workspace.threeTab.dispatch('keydown', { key: 'ArrowLeft' });
+            assert.strictEqual(
+                data.workspace.planTab.ownerDocument.activeElement,
+                data.workspace.planTab
+            );
+            data.workspace.planTab.dispatch('keydown', { key: 'End' });
+            assert.strictEqual(
+                data.workspace.planTab.ownerDocument.activeElement,
+                data.workspace.threeTab
+            );
+            data.workspace.threeTab.dispatch('keydown', { key: 'Home' });
+            assert.strictEqual(
+                data.workspace.planTab.ownerDocument.activeElement,
+                data.workspace.planTab
+            );
+            const noThree = fixture({ noThree: true });
+            noThree.workspace.planTab.focus();
+            const disabled = noThree.workspace.planTab.dispatch('keydown', {
+                key: 'ArrowRight',
+            });
+            assert.strictEqual(disabled.defaultPrevented, false);
+            assert.strictEqual(
+                noThree.workspace.planTab.ownerDocument.activeElement,
+                noThree.workspace.planTab
+            );
+            data.workspace.destroy();
+            noThree.workspace.destroy();
+        });
+
     await check('placement transform fields and zone dimensions delegate authoritative edits',
         async () => {
             const data = fixture();
@@ -2037,6 +2081,12 @@ async function main() {
             const baseline = FakeElement.listenerCount;
             const data = fixture();
             assert.ok(FakeElement.listenerCount > baseline);
+            assert.strictEqual(
+                data.root.className.split(/\s+/).filter(
+                    item => item === 'ip-flw-root'
+                ).length,
+                1
+            );
             const controller = data.controller;
             const subscriptionCount = data.session.listeners.size;
             assert.strictEqual(subscriptionCount, 1);
@@ -2045,6 +2095,7 @@ async function main() {
             assert.strictEqual(data.session.listeners.size, 0);
             assert.strictEqual(controller.disposeCount, 1);
             assert.strictEqual(data.root.children.length, 0);
+            assert.strictEqual(data.root.className.includes('ip-flw-root'), false);
             assert.strictEqual(FakeElement.listenerCount, baseline);
             data.session.select('pl-a');
             assert.strictEqual(controller.disposeCount, 1);

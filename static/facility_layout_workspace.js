@@ -153,6 +153,14 @@
         while (node && node.firstChild) node.removeChild(node.firstChild);
     }
 
+    function setClassToken(node, token, enabled) {
+        if (!node) return;
+        const classes = String(node.className || '').split(/\s+/).filter(Boolean);
+        const filtered = classes.filter(function (item) { return item !== token; });
+        if (enabled) filtered.push(token);
+        node.className = filtered.join(' ');
+    }
+
     function append(parent) {
         Array.prototype.slice.call(arguments, 1).forEach(function (child) {
             if (child) parent.appendChild(child);
@@ -834,10 +842,7 @@
 
     Workspace.prototype._build = function () {
         clearElement(this.root);
-        this.root.className = (
-            (this.root.className ? this.root.className + ' ' : '')
-            + 'ip-flw-root'
-        ).trim();
+        setClassToken(this.root, 'ip-flw-root', true);
         this.root.setAttribute('data-facility-workspace', '');
         this.root.setAttribute('aria-label', 'Facility layout workspace');
 
@@ -1159,6 +1164,11 @@
     Workspace.prototype._connectEvents = function () {
         this._listen(this.toolbar, 'click', this._handleToolbarClick.bind(this));
         this._listen(this.viewTabs, 'click', this._handleViewTabClick.bind(this));
+        this._listen(
+            this.viewTabs,
+            'keydown',
+            this._handleViewTabKeyDown.bind(this)
+        );
         this._listen(this.assetSearch, 'input', function () {
             this._renderAssetTree(this.assetSearch.value || '');
         }.bind(this));
@@ -2277,6 +2287,23 @@
         if (VIEW_MODES.includes(view)) this._setViewMode(view);
     };
 
+    Workspace.prototype._handleViewTabKeyDown = function (event) {
+        const key = String(event && event.key || '');
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return;
+        const tabs = [this.planTab, this.threeTab].filter(function (tab) {
+            return !tab.disabled;
+        });
+        const current = tabs.indexOf(event.target);
+        if (current < 0 || tabs.length < 2) return;
+        let next = current;
+        if (key === 'Home') next = 0;
+        else if (key === 'End') next = tabs.length - 1;
+        else if (key === 'ArrowRight') next = (current + 1) % tabs.length;
+        else next = (current - 1 + tabs.length) % tabs.length;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        tabs[next].focus();
+    };
+
     Workspace.prototype._setViewMode = function (mode) {
         if (!VIEW_MODES.includes(mode)) throw new TypeError('invalid view mode');
         if (mode === '3d' && !this.threeAdapter) mode = 'plan';
@@ -2767,6 +2794,7 @@
         this._hideGhost();
         this.proposalFocusReturn = null;
         clearElement(this.root);
+        setClassToken(this.root, 'ip-flw-root', false);
         this.root.removeAttribute('data-facility-workspace');
         this.root.removeAttribute('data-tool-mode');
         this.root.removeAttribute('data-view-mode');

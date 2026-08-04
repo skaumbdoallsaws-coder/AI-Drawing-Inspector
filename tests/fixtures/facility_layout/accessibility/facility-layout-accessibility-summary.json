@@ -1,7 +1,6 @@
 {
-  "automatedAuditPassed": false,
+  "automatedAuditPassed": true,
   "blockers": [
-    "automated_keyboard_audit_failed",
     "manual_screen_reader_audit_pending"
   ],
   "categoryStatus": {
@@ -13,6 +12,7 @@
         "liveRegionsPresent": true
       },
       "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
       "reportedPassed": true,
       "reportedResultMatchesChecks": true
     },
@@ -26,6 +26,7 @@
         "textSamplesPresent": true
       },
       "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
       "reportedPassed": true,
       "reportedResultMatchesChecks": true
     },
@@ -38,6 +39,7 @@
         "samplesPresent": true
       },
       "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
       "reportedPassed": true,
       "reportedResultMatchesChecks": true
     },
@@ -50,11 +52,12 @@
         "noKeyboardTrap": true,
         "reverseTraversalExitsWorkspace": true,
         "shortcutActionWorks": true,
-        "tabKeyboardActivationWorks": false,
+        "tabKeyboardActivationWorks": true,
         "undoActionWorks": true
       },
-      "passed": false,
-      "reportedPassed": false,
+      "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
+      "reportedPassed": true,
       "reportedResultMatchesChecks": true
     },
     "network": {
@@ -66,6 +69,7 @@
         "sameOriginApplicationLoaded": true
       },
       "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
       "reportedPassed": true,
       "reportedResultMatchesChecks": true
     },
@@ -77,6 +81,7 @@
         "transitionsSuppressed": true
       },
       "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
       "reportedPassed": true,
       "reportedResultMatchesChecks": true
     },
@@ -89,6 +94,7 @@
         "sourceStableDuringAudit": true
       },
       "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
       "reportedPassed": true,
       "reportedResultMatchesChecks": true
     },
@@ -109,6 +115,7 @@
         "workspaceNamed": true
       },
       "passed": true,
+      "reportedCategoryMatchesDetailedEvidence": true,
       "reportedPassed": true,
       "reportedResultMatchesChecks": true
     }
@@ -119,7 +126,7 @@
     "screenReaderSimulation": false
   },
   "contrastRecordsValid": true,
-  "generatedAtUtc": "2026-07-30T04:45:47Z",
+  "generatedAtUtc": "2026-08-04T14:56:27Z",
   "integrityFindings": [],
   "manualScreenReaderAudit": {
     "artifact": {
@@ -132,9 +139,9 @@
     "status": "pending"
   },
   "rawArtifact": {
-    "byteLength": 262088,
+    "byteLength": 264505,
     "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-raw.json",
-    "sha256": "fc499489be12d303fb6f113e0330913e1d843bd1d4872cb9b7a5b97d8e23353a"
+    "sha256": "afceea1d4f03c1a757fbe04d99595f02b9b5d5514f66403cf71703439887ab3a"
   },
   "releaseGateMet": false,
   "releaseGateReason": "Automated browser evidence cannot clear the pending manual screen-reader audit.",
@@ -143,8 +150,8 @@
   "sourceBinding": {
     "aggregateMatches": true,
     "algorithmsMatch": true,
-    "capturedAggregateSha256": "4ef1ab3e5e9efa8ff786d686f5de956f65dbc5adbb3a995ab2f710e839d13e2c",
-    "currentAggregateSha256": "4ef1ab3e5e9efa8ff786d686f5de956f65dbc5adbb3a995ab2f710e839d13e2c",
+    "capturedAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
+    "currentAggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
     "duplicatePaths": [],
     "matches": true,
     "missingPaths": [],
@@ -153,5 +160,5 @@
     "stalePaths": [],
     "unexpectedPaths": []
   },
-  "status": "automated_audit_failed"
+  "status": "automated_pass_manual_screen_reader_pending"
 }

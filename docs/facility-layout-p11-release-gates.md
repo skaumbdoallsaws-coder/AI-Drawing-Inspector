@@ -20,16 +20,16 @@ tests/fixtures/facility_layout/release/
 | Evidence | Purpose |
 | --- | --- |
 | `p11-release-evidence.json` | Consolidated verdict and blockers |
-| `p11-performance-budget.json` | Named-hardware metrics and missing budgets |
-| `p11-accessibility-evidence.json` | Static ARIA/CSS contract and manual audit status |
+| `p11-performance-budget.json` | Source-bound browser/backend budgets and named hardware |
+| `p11-accessibility-evidence.json` | Source-bound automated audit and manual screen-reader status |
 | `p11-visual-manifest.json` | Light/dark artifacts bound to exact frontend source hashes |
 | `p11-webgl-offline-evidence.json` | Context recovery, offline, and corrupt-artifact behavior |
 | `p11-feature-flag-matrix.json` | Seven planned flags and runtime wiring |
 | `p11-maker-checker-evidence.json` | Pilot-mode same-maker rejection and distinct-checker apply |
 | `p11-suite-matrix.json` | RBAC, IDOR, tool, stale, replay, WebGL, and accessibility suites |
 | `p11-rollback-drill.json` | Byte/revision preservation across rollback states |
-| `p11-licensing-inventory.json` | Vendored code and industrial asset readiness |
-| `p11-soak-ledger.json` | Accelerated mechanics plus literal elapsed soak |
+| `p11-licensing-inventory.json` | Vendored code, Python inventory, and industrial asset readiness |
+| `p11-soak-ledger.json` | Accelerated mechanics plus a projection of the append-only runtime soak ledger |
 | `p11-documentation-evidence.json` | Runbook and safety-document hashes |
 
 ## Release Interpretation
@@ -39,10 +39,13 @@ checks were internally consistent. It does not mean the pilot gate is met.
 
 `releaseGateMet: true` requires all of the following:
 
-- Full performance protocol on named standard and minimum hardware.
+- Full performance protocol on named standard and minimum hardware. Each raw
+  run must match the declared hardware fingerprint, and its summary is rebuilt
+  from raw observations rather than trusted as an independent claim.
 - Complete asset loading, runtime, route, spatial, remount, memory, and GPU
   budgets.
-- Manual keyboard, screen-reader, and contrast accessibility review.
+- Source-bound keyboard, focus, semantic, announcement, reduced-motion, and
+  contrast evidence, plus the manual screen-reader review.
 - Required light/dark screenshot matrix at all named viewports.
 - Exact SHA-256 binding to the facility shell, workspace, renderer, session,
   transport, Three.js runtime, and capture protocol that produced the matrix.
@@ -59,27 +62,54 @@ checks were internally consistent. It does not mean the pilot gate is met.
   keep this option disabled only when bound to loopback.
 - Data-preserving rollback controlled by the actual flags.
 - Cleared redistribution rights for pilot assets and dependency license review.
-- Fourteen real elapsed days and every self-use count in the soak ledger.
+- At least `14 * 24 hours` (1,209,600 continuous elapsed seconds) and every
+  self-use count in the campaign-metadata-bound soak ledger.
 - No severity-one defect, data loss, unapproved write, or stale apply.
+
+### Remount memory interpretation
+
+The 20-remount budget uses the raw, garbage-collected
+`performance.memory.usedJSHeapSize` delta from five fresh browser contexts.
+There are no discarded remount warmups and no subtraction for V8 executable
+code, browser-native caches, or one-time compilation. A result above 10
+percent blocks release even when heap diagnostics show that canvases,
+WebGL contexts, observers, and render loops are bounded.
+
+The production Facility Layout shell uses a renderer pool of maximum size one.
+The raw browser artifact must prove one renderer was created, released between
+workspaces, and reused for every measured remount. Heap snapshots and lifecycle
+diagnostics may explain a failure, but they cannot replace or override the raw
+release measurement.
 
 ## Current Non-Negotiable Blockers
 
 The verifier must report rather than conceal:
 
 - Minimum reference hardware is unresolved.
-- The renderer benchmark now completes five 60-second measured runs per
-  renderer/scenario, but it covers the placement layer rather than every
-  release layer.
+- The standard-hardware browser run completed the full Section 18.3 protocol
+  on 2026-08-04 with a structurally valid artifact. Nine of ten budgets passed,
+  but 20-remount JavaScript heap growth measured 25.66 percent against the
+  10-percent limit. Renderer-pool evidence remained bounded at one created
+  renderer across every measured sequence, so the release gate remains closed
+  on the raw total-heap measurement rather than a renewed WebGL-context leak.
+  The backend release microbenchmark passes every required deterministic
+  slice. A separate full run is still required on the named minimum-hardware
+  profile.
 - The seven Facility Layout flags are runtime-wired, default off, and the
   five-stage rollout matrix is exercised through the HTTP boundary.
 - The exact eight-artifact light/dark viewport matrix is complete and
   source-bound. Any bound frontend input change invalidates the matrix until
   the screenshots are recaptured.
-- Human accessibility audits are pending.
+- The automated browser accessibility audit is source-bound and green; the
+  manual screen-reader audit remains pending.
 - Industrial assets in the P2 pilot inventory are not public-ready.
-- The exact packaged Python dependency set, including PyMuPDF distribution
-  terms, still needs distribution review.
-- The real fourteen-day soak remains time-bound.
+- The direct Python dependency inventory is captured, but its machine
+  assessment and human legal review remain blocked, including the PyMuPDF
+  distribution path. Transitive packaged artifacts still require review.
+- The real fourteen-day soak uses
+  `.runtime/facility_layout/p11-real-soak-events.json`; generated release JSON
+  cannot increment its counts. The campaign genesis binds its start time,
+  requirements, and recursive write-capable source identity.
 
 Do not change an evidence file manually to clear a blocker. Change the
 underlying implementation or collect the missing measured evidence, then rerun

@@ -874,9 +874,57 @@ def interpret_accessibility_evidence(
     if raw_map.get("sourceStableDuringAudit") is not True:
         blockers.append("accessibility_source_changed_during_audit")
 
+    network = raw_map.get("network")
+    network_map = network if isinstance(network, Mapping) else {}
+    runs_value = raw_map.get("runs")
+    runs = (
+        [item for item in runs_value if isinstance(item, Mapping)]
+        if isinstance(runs_value, list)
+        else []
+    )
+    recomputed_categories = _aggregate_categories(
+        runs,
+        source_stable=raw_map.get("sourceStableDuringAudit") is True,
+        network=network_map,
+    )
+    reported_categories = raw_map.get("categories")
+    reported_map = (
+        reported_categories
+        if isinstance(reported_categories, Mapping)
+        else {}
+    )
     categories = {}
     for name, required in CATEGORY_CHECKS.items():
-        status = _category_status(raw_map.get("categories"), name, required)
+        detail_status = _category_status(
+            recomputed_categories,
+            name,
+            required,
+        )
+        reported_status = _category_status(
+            reported_map,
+            name,
+            required,
+        )
+        report_matches_details = (
+            reported_map.get(name) == recomputed_categories.get(name)
+        )
+        status = {
+            **detail_status,
+            "passed": (
+                detail_status["passed"]
+                and reported_status["passed"]
+                and report_matches_details
+            ),
+            "missingChecks": reported_status["missingChecks"],
+            "reportedPassed": reported_status["reportedPassed"],
+            "reportedResultMatchesChecks": (
+                reported_status["reportedResultMatchesChecks"]
+                and report_matches_details
+            ),
+            "reportedCategoryMatchesDetailedEvidence": (
+                report_matches_details
+            ),
+        }
         categories[name] = status
         if not status["passed"]:
             blockers.append(f"automated_{name}_audit_failed")
@@ -890,8 +938,6 @@ def interpret_accessibility_evidence(
         categories["contrast"]["passed"] = False
         blockers.append("contrast_evidence_records_invalid")
 
-    network = raw_map.get("network")
-    network_map = network if isinstance(network, Mapping) else {}
     external_responses = network_map.get("externalResponses")
     if not isinstance(external_responses, list) or external_responses:
         categories["network"]["passed"] = False

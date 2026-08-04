@@ -1,6 +1,6 @@
 {
-  "appUrl": "http://127.0.0.1:8056/",
-  "automatedChecksPassed": false,
+  "appUrl": "http://127.0.0.1:8029/",
+  "automatedChecksPassed": true,
   "categories": {
     "announcements": {
       "checks": {
@@ -37,10 +37,10 @@
         "noKeyboardTrap": true,
         "reverseTraversalExitsWorkspace": true,
         "shortcutActionWorks": true,
-        "tabKeyboardActivationWorks": false,
+        "tabKeyboardActivationWorks": true,
         "undoActionWorks": true
       },
-      "passed": false
+      "passed": true
     },
     "network": {
       "checks": {
@@ -92,16 +92,16 @@
   },
   "environment": {
     "browser": "Chromium 141.0.7390.37",
-    "elapsedSeconds": 7.117,
+    "elapsedSeconds": 16.336,
     "headed": false,
     "os": "Windows-11-10.0.26200-SP0",
     "playwright": "1.56.0",
     "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]"
   },
-  "generatedAtUtc": "2026-07-30T04:45:47Z",
+  "generatedAtUtc": "2026-08-04T14:56:26Z",
   "mode": "full",
   "network": {
-    "applicationOrigin": "http://127.0.0.1:8056",
+    "applicationOrigin": "http://127.0.0.1:8029",
     "blockedExternalRequests": [
       "https://facility-layout-a11y.invalid/network-block-canary"
     ],
@@ -109,54 +109,52 @@
     "externalResponses": [],
     "policy": "allow exact application origin; abort all other requests",
     "sameOriginRequests": [
-      "http://127.0.0.1:8056/",
-      "http://127.0.0.1:8056/api/bridge/status",
-      "http://127.0.0.1:8056/api/facility-layout-bootstrap",
-      "http://127.0.0.1:8056/api/facility-layouts/site-local/fl-main/preview",
-      "http://127.0.0.1:8056/api/profiles",
-      "http://127.0.0.1:8056/api/training/facility-layout/layout-analysis",
-      "http://127.0.0.1:8056/api/training/facility-layout/semantic",
-      "http://127.0.0.1:8056/static/annotations.js",
-      "http://127.0.0.1:8056/static/assembly_knowledge_review.js",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/bell.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/cursor.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/file.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/gear.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/home.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/printer.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/redo.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/save.png",
-      "http://127.0.0.1:8056/static/assets/global-toolbar-icons/undo.png",
-      "http://127.0.0.1:8056/static/assets/training-ribbon-icons/training-highlight.png",
-      "http://127.0.0.1:8056/static/assets/training-ribbon-icons/training-isolate.png",
-      "http://127.0.0.1:8056/static/assets/training-ribbon-icons/training-reset.png",
-      "http://127.0.0.1:8056/static/avatar_iris_realistic.png",
-      "http://127.0.0.1:8056/static/avatar_sage_realistic.png",
-      "http://127.0.0.1:8056/static/avatar_scout_realistic.png",
-      "http://127.0.0.1:8056/static/cad_feature_icon_registry.json",
-      "http://127.0.0.1:8056/static/chat_stream_runtime.js",
-      "http://127.0.0.1:8056/static/facility_layout_app.js",
-      "http://127.0.0.1:8056/static/facility_layout_editor.js",
-      "http://127.0.0.1:8056/static/facility_layout_session.js",
-      "http://127.0.0.1:8056/static/facility_layout_spatial_advisor.js",
-      "http://127.0.0.1:8056/static/facility_layout_spatial_worker.js",
-      "http://127.0.0.1:8056/static/facility_layout_three_adapter.js",
-      "http://127.0.0.1:8056/static/facility_layout_transport.js",
-      "http://127.0.0.1:8056/static/facility_layout_workspace.css",
-      "http://127.0.0.1:8056/static/facility_layout_workspace.js",
-      "http://127.0.0.1:8056/static/floating_surface.js",
-      "http://127.0.0.1:8056/static/process_map_editor.js",
-      "http://127.0.0.1:8056/static/process_map_spatial.js",
-      "http://127.0.0.1:8056/static/ui_action_runtime.js",
-      "http://127.0.0.1:8056/static/vendor/floating-ui/floating-ui.core.umd.min.js",
-      "http://127.0.0.1:8056/static/vendor/floating-ui/floating-ui.dom.umd.min.js",
-      "http://127.0.0.1:8056/static/vendor/three/0.128.0/build/three.min.js",
-      "http://127.0.0.1:8056/static/vendor/three/0.184.0/build/three.core.min.js",
-      "http://127.0.0.1:8056/static/vendor/three/0.184.0/build/three.module.min.js",
-      "http://127.0.0.1:8056/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js",
-      "http://127.0.0.1:8056/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js",
-      "http://127.0.0.1:8056/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js",
-      "http://127.0.0.1:8056/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+      "http://127.0.0.1:8029/",
+      "http://127.0.0.1:8029/api/bridge/status",
+      "http://127.0.0.1:8029/api/facility-layout-bootstrap",
+      "http://127.0.0.1:8029/api/facility-layouts/site-local/fl-main/preview",
+      "http://127.0.0.1:8029/api/profiles",
+      "http://127.0.0.1:8029/api/training/facility-layout/layout-analysis",
+      "http://127.0.0.1:8029/api/training/facility-layout/semantic",
+      "http://127.0.0.1:8029/static/annotations.js",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/bell.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/cursor.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/file.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/gear.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/home.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/printer.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/redo.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/save.png",
+      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/undo.png",
+      "http://127.0.0.1:8029/static/assets/training-ribbon-icons/training-highlight.png",
+      "http://127.0.0.1:8029/static/assets/training-ribbon-icons/training-isolate.png",
+      "http://127.0.0.1:8029/static/assets/training-ribbon-icons/training-reset.png",
+      "http://127.0.0.1:8029/static/avatar_iris_realistic.png",
+      "http://127.0.0.1:8029/static/avatar_sage_realistic.png",
+      "http://127.0.0.1:8029/static/avatar_scout_realistic.png",
+      "http://127.0.0.1:8029/static/cad_feature_icon_registry.json",
+      "http://127.0.0.1:8029/static/chat_stream_runtime.js",
+      "http://127.0.0.1:8029/static/facility_layout_app.js",
+      "http://127.0.0.1:8029/static/facility_layout_editor.js",
+      "http://127.0.0.1:8029/static/facility_layout_session.js",
+      "http://127.0.0.1:8029/static/facility_layout_spatial_advisor.js",
+      "http://127.0.0.1:8029/static/facility_layout_spatial_worker.js",
+      "http://127.0.0.1:8029/static/facility_layout_three_adapter.js",
+      "http://127.0.0.1:8029/static/facility_layout_transport.js",
+      "http://127.0.0.1:8029/static/facility_layout_workspace.css",
+      "http://127.0.0.1:8029/static/facility_layout_workspace.js",
+      "http://127.0.0.1:8029/static/floating_surface.js",
+      "http://127.0.0.1:8029/static/process_map_editor.js",
+      "http://127.0.0.1:8029/static/ui_action_runtime.js",
+      "http://127.0.0.1:8029/static/vendor/floating-ui/floating-ui.core.umd.min.js",
+      "http://127.0.0.1:8029/static/vendor/floating-ui/floating-ui.dom.umd.min.js",
+      "http://127.0.0.1:8029/static/vendor/three/0.128.0/build/three.min.js",
+      "http://127.0.0.1:8029/static/vendor/three/0.184.0/build/three.core.min.js",
+      "http://127.0.0.1:8029/static/vendor/three/0.184.0/build/three.module.min.js",
+      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js",
+      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js",
+      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js",
+      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
     ]
   },
   "protocol": {
@@ -171,7 +169,7 @@
   },
   "runs": [
     {
-      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\":\n      - button \"CNC Milling Machine\"\n      - button \"asset-forklift\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
+      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\":\n      - button \"CNC Milling Machine\"\n      - button \"asset-forklift\"\n      - button \"Assembly Workbench\"\n      - button \"Electric Forklift\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
       "contrast": {
         "controlFailures": [],
         "controlSampleLimitReached": false,
@@ -1649,72 +1647,72 @@
         "samplesPresent": true
       },
       "focusScreenshot": {
-        "byteLength": 154076,
+        "byteLength": 154191,
         "path": "tests/fixtures/facility_layout/accessibility/facility-layout-focus-light.png",
-        "sha256": "0ef499d687b051641f523492bc984181360f3f62b213aa920432468ebcf09c7a"
+        "sha256": "f0d6f0a4820c8db6c834478129cdace08cd6bafae30c3dfd3a2804de363c7360"
       },
       "keyboard": {
         "actionAnnouncements": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1818.2999999970198,
+            "recordedAtMs": 4665.299999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1828.5,
+            "recordedAtMs": 4685.599999964237,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1905.0999999940395,
+            "recordedAtMs": 4934.5,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1915.2000000029802,
+            "recordedAtMs": 5198.799999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2530.0999999940395,
+            "recordedAtMs": 6434.599999964237,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2531.7000000029802,
+            "recordedAtMs": 6437.399999976158,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2573.2999999970198,
+            "recordedAtMs": 6515.299999952316,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2613.2999999970198,
+            "recordedAtMs": 6575.399999976158,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2653.5,
+            "recordedAtMs": 6661.299999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
@@ -1722,15 +1720,15 @@
         "assetAction": {
           "afterAction": {
             "dirty": true,
-            "placements": 3,
+            "placements": 5,
             "selection": [
-              "pl-86831ab69004dfba6f1d9d0f"
+              "pl-8cc99aecdd69a21cbe37703f"
             ],
             "status": "Unsaved changes | 1 selected | Plan view | select"
           },
           "afterUndo": {
             "dirty": false,
-            "placements": 2,
+            "placements": 4,
             "selection": [],
             "status": "Saved | 0 selected | Plan view | select"
           },
@@ -1740,7 +1738,7 @@
           "safeWorldPoint": {
             "x": 35.0,
             "y": 0.0,
-            "z": 25.0
+            "z": 5.0
           },
           "selectionUpdated": true,
           "sequence": [
@@ -1770,6 +1768,26 @@
               "id": null,
               "insideWorkspace": true,
               "name": "asset-forklift",
+              "role": "button",
+              "tag": "polygon",
+              "view": null
+            },
+            {
+              "assetId": "asset-workbench",
+              "command": null,
+              "id": null,
+              "insideWorkspace": true,
+              "name": "Assembly Workbench",
+              "role": "button",
+              "tag": "polygon",
+              "view": null
+            },
+            {
+              "assetId": "asset-forklift",
+              "command": null,
+              "id": null,
+              "insideWorkspace": true,
+              "name": "Electric Forklift",
               "role": "button",
               "tag": "polygon",
               "view": null
@@ -2705,10 +2723,10 @@
           "noKeyboardTrap": true,
           "reverseTraversalExitsWorkspace": true,
           "shortcutActionWorks": true,
-          "tabKeyboardActivationWorks": false,
+          "tabKeyboardActivationWorks": true,
           "undoActionWorks": true
         },
-        "distinctWorkspaceFocusCount": 18,
+        "distinctWorkspaceFocusCount": 20,
         "entry": {
           "focus": {
             "assetId": null,
@@ -2755,7 +2773,7 @@
             }
           ]
         },
-        "focusableCount": 20,
+        "focusableCount": 22,
         "forwardTraversal": [
           {
             "assetId": null,
@@ -2898,6 +2916,26 @@
             "view": null
           },
           {
+            "assetId": "asset-workbench",
+            "command": null,
+            "id": null,
+            "insideWorkspace": true,
+            "name": "Assembly Workbench",
+            "role": "button",
+            "tag": "polygon",
+            "view": null
+          },
+          {
+            "assetId": "asset-forklift",
+            "command": null,
+            "id": null,
+            "insideWorkspace": true,
+            "name": "Electric Forklift",
+            "role": "button",
+            "tag": "polygon",
+            "view": null
+          },
+          {
             "assetId": null,
             "command": null,
             "id": null,
@@ -2950,82 +2988,82 @@
         ],
         "initial": {
           "dirty": false,
-          "placements": 2,
+          "placements": 4,
           "toolMode": "select"
         },
         "liveEvents": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1818.2999999970198,
+            "recordedAtMs": 4665.299999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1828.5,
+            "recordedAtMs": 4685.599999964237,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1905.0999999940395,
+            "recordedAtMs": 4934.5,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1915.2000000029802,
+            "recordedAtMs": 5198.799999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 0,
             "live": "polite",
-            "recordedAtMs": 2530.0999999940395,
+            "recordedAtMs": 6434.599999964237,
             "role": "status",
             "text": "Placement advisory will be confirmed by the server."
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2530.0999999940395,
+            "recordedAtMs": 6434.599999964237,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2531.7000000029802,
+            "recordedAtMs": 6437.399999976158,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2573.2999999970198,
+            "recordedAtMs": 6515.299999952316,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2613.2999999970198,
+            "recordedAtMs": 6575.399999976158,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2653.5,
+            "recordedAtMs": 6661.299999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
         ],
-        "passed": false,
+        "passed": true,
         "reverseTraversalExitsWorkspace": true,
         "reverseTraversalStart": {
           "command": "select",
@@ -3839,9 +3877,9 @@
           ]
         },
         "tabs": {
-          "arrowMovedFocusTo3d": false,
+          "arrowMovedFocusTo3d": true,
           "directFocusEnterActivated3dDiagnostic": true,
-          "enterActivated3d": false,
+          "enterActivated3d": true,
           "planReachedByTab": true,
           "sequence": [
             {
@@ -3962,7 +4000,7 @@
         "externalCanaryUrl": "https://facility-layout-a11y.invalid/network-block-canary",
         "externalResponses": [],
         "requestFailures": [],
-        "sameOriginResponseCount": 50
+        "sameOriginResponseCount": 49
       },
       "reducedMotion": {
         "animationOffenders": [],
@@ -4315,7 +4353,7 @@
       "theme": "light"
     },
     {
-      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\":\n      - button \"CNC Milling Machine\"\n      - button \"asset-forklift\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
+      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\":\n      - button \"CNC Milling Machine\"\n      - button \"asset-forklift\"\n      - button \"Assembly Workbench\"\n      - button \"Electric Forklift\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
       "contrast": {
         "controlFailures": [],
         "controlSampleLimitReached": false,
@@ -5793,72 +5831,72 @@
         "samplesPresent": true
       },
       "focusScreenshot": {
-        "byteLength": 163149,
+        "byteLength": 163442,
         "path": "tests/fixtures/facility_layout/accessibility/facility-layout-focus-dark.png",
-        "sha256": "5b3fde878b217f21b6683a161ffb803a1e7817efc1d6ad4b564cfb1ff0aeefde"
+        "sha256": "45502b88e6aefc32dd67341e10293efbbb86a32f74c41be2ad5734f82ba8e817"
       },
       "keyboard": {
         "actionAnnouncements": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1796.2999999970198,
+            "recordedAtMs": 4965.099999964237,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1805,
+            "recordedAtMs": 4979.299999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1880.2000000029802,
+            "recordedAtMs": 5203.799999952316,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1904.9000000059605,
+            "recordedAtMs": 5417.199999988079,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2512.7999999970198,
+            "recordedAtMs": 7597.5,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2514.4000000059605,
+            "recordedAtMs": 7601,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2559.5,
+            "recordedAtMs": 7698.299999952316,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2590.5999999940395,
+            "recordedAtMs": 7752.099999964237,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2648.5999999940395,
+            "recordedAtMs": 7884.399999976158,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
@@ -5866,15 +5904,15 @@
         "assetAction": {
           "afterAction": {
             "dirty": true,
-            "placements": 3,
+            "placements": 5,
             "selection": [
-              "pl-86831ab69004dfba6f1d9d0f"
+              "pl-8cc99aecdd69a21cbe37703f"
             ],
             "status": "Unsaved changes | 1 selected | Plan view | select"
           },
           "afterUndo": {
             "dirty": false,
-            "placements": 2,
+            "placements": 4,
             "selection": [],
             "status": "Saved | 0 selected | Plan view | select"
           },
@@ -5884,7 +5922,7 @@
           "safeWorldPoint": {
             "x": 35.0,
             "y": 0.0,
-            "z": 25.0
+            "z": 5.0
           },
           "selectionUpdated": true,
           "sequence": [
@@ -5914,6 +5952,26 @@
               "id": null,
               "insideWorkspace": true,
               "name": "asset-forklift",
+              "role": "button",
+              "tag": "polygon",
+              "view": null
+            },
+            {
+              "assetId": "asset-workbench",
+              "command": null,
+              "id": null,
+              "insideWorkspace": true,
+              "name": "Assembly Workbench",
+              "role": "button",
+              "tag": "polygon",
+              "view": null
+            },
+            {
+              "assetId": "asset-forklift",
+              "command": null,
+              "id": null,
+              "insideWorkspace": true,
+              "name": "Electric Forklift",
               "role": "button",
               "tag": "polygon",
               "view": null
@@ -6849,10 +6907,10 @@
           "noKeyboardTrap": true,
           "reverseTraversalExitsWorkspace": true,
           "shortcutActionWorks": true,
-          "tabKeyboardActivationWorks": false,
+          "tabKeyboardActivationWorks": true,
           "undoActionWorks": true
         },
-        "distinctWorkspaceFocusCount": 18,
+        "distinctWorkspaceFocusCount": 20,
         "entry": {
           "focus": {
             "assetId": null,
@@ -6899,7 +6957,7 @@
             }
           ]
         },
-        "focusableCount": 20,
+        "focusableCount": 22,
         "forwardTraversal": [
           {
             "assetId": null,
@@ -7042,6 +7100,26 @@
             "view": null
           },
           {
+            "assetId": "asset-workbench",
+            "command": null,
+            "id": null,
+            "insideWorkspace": true,
+            "name": "Assembly Workbench",
+            "role": "button",
+            "tag": "polygon",
+            "view": null
+          },
+          {
+            "assetId": "asset-forklift",
+            "command": null,
+            "id": null,
+            "insideWorkspace": true,
+            "name": "Electric Forklift",
+            "role": "button",
+            "tag": "polygon",
+            "view": null
+          },
+          {
             "assetId": null,
             "command": null,
             "id": null,
@@ -7094,82 +7172,82 @@
         ],
         "initial": {
           "dirty": false,
-          "placements": 2,
+          "placements": 4,
           "toolMode": "select"
         },
         "liveEvents": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1796.2999999970198,
+            "recordedAtMs": 4965.099999964237,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1805,
+            "recordedAtMs": 4979.299999952316,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1880.2000000029802,
+            "recordedAtMs": 5203.799999952316,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 1904.9000000059605,
+            "recordedAtMs": 5417.199999988079,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 0,
             "live": "polite",
-            "recordedAtMs": 2512.7999999970198,
+            "recordedAtMs": 7597.5,
             "role": "status",
             "text": "Placement advisory will be confirmed by the server."
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2512.7999999970198,
+            "recordedAtMs": 7597.5,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2514.4000000059605,
+            "recordedAtMs": 7601,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2559.5,
+            "recordedAtMs": 7698.299999952316,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2590.5999999940395,
+            "recordedAtMs": 7752.099999964237,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2648.5999999940395,
+            "recordedAtMs": 7884.399999976158,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
         ],
-        "passed": false,
+        "passed": true,
         "reverseTraversalExitsWorkspace": true,
         "reverseTraversalStart": {
           "command": "select",
@@ -7983,9 +8061,9 @@
           ]
         },
         "tabs": {
-          "arrowMovedFocusTo3d": false,
+          "arrowMovedFocusTo3d": true,
           "directFocusEnterActivated3dDiagnostic": true,
-          "enterActivated3d": false,
+          "enterActivated3d": true,
           "planReachedByTab": true,
           "sequence": [
             {
@@ -8106,7 +8184,7 @@
         "externalCanaryUrl": "https://facility-layout-a11y.invalid/network-block-canary",
         "externalResponses": [],
         "requestFailures": [],
-        "sameOriginResponseCount": 50
+        "sameOriginResponseCount": 49
       },
       "reducedMotion": {
         "animationOffenders": [],
@@ -8464,7 +8542,7 @@
   "screenReaderAudit": "not_performed",
   "sourceBinding": {
     "aggregateAlgorithm": "sha256-canonical-json-v1",
-    "aggregateSha256": "4ef1ab3e5e9efa8ff786d686f5de956f65dbc5adbb3a995ab2f710e839d13e2c",
+    "aggregateSha256": "0319db96e77bf8af0d9fcd197b8541c83600f8dedf54b7ec0751694cf9ddff0f",
     "algorithm": "sha256",
     "files": [
       {
@@ -8483,9 +8561,9 @@
         "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a"
       },
       {
-        "byteLength": 94154,
+        "byteLength": 99366,
         "path": "static/facility_layout_three_adapter.js",
-        "sha256": "8ed6c6cda657eb24503c98c22e09bae78f29bc2d7eaaa8de853af35008c1cb7e"
+        "sha256": "deaea5d9a25ec0ec53756d0ba743f54ec4f65a47bbee6da618c828431548d86b"
       },
       {
         "byteLength": 15430,
@@ -8498,19 +8576,19 @@
         "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
       },
       {
-        "byteLength": 113873,
+        "byteLength": 115114,
         "path": "static/facility_layout_workspace.js",
-        "sha256": "af7873c4f9246ef4049dcab15e2a690be3e33cce7e3890d8aedf4a6a2b28177b"
+        "sha256": "d4aa7c4327949062068dbb9c1d665a81edd1688f406c04a05c6a6919d51b3709"
       },
       {
-        "byteLength": 3001661,
+        "byteLength": 2946930,
         "path": "static/index.html",
-        "sha256": "bde3e110a69abff41630a463ee6cfcdaebf919e0a382c4b6b0da5d8ad78670a7"
+        "sha256": "4df687033d17298fcb46ab026b683ca4092bdf8e2b50df0cacf2e18ca611dc15"
       },
       {
-        "byteLength": 69914,
+        "byteLength": 71354,
         "path": "tools/audit_facility_layout_accessibility.py",
-        "sha256": "8389556c1989ad750f3b31b61cb1f8f4db71bb0f83ef827c0095d4c888178e01"
+        "sha256": "58cede7f344770bffdad9bb4dd3216502632b73f28af2c3540ac3b2c43d842eb"
       }
     ]
   },

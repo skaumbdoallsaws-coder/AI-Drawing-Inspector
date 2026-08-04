@@ -23,6 +23,117 @@
 
     function noop() {}
 
+    function destroyRenderer(renderer) {
+        if (!renderer) return;
+        if (typeof renderer.setAnimationLoop === 'function') {
+            renderer.setAnimationLoop(null);
+        }
+        if (renderer.renderLists
+                && typeof renderer.renderLists.dispose === 'function') {
+            renderer.renderLists.dispose();
+        }
+        if (typeof renderer.dispose === 'function') renderer.dispose();
+        if (typeof renderer.forceContextLoss === 'function') {
+            renderer.forceContextLoss();
+        }
+        const canvas = renderer.domElement;
+        if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    }
+
+    function prepareRendererForPool(renderer) {
+        if (!renderer) return;
+        if (typeof renderer.setAnimationLoop === 'function') {
+            renderer.setAnimationLoop(null);
+        }
+        if (typeof renderer.setRenderTarget === 'function') {
+            renderer.setRenderTarget(null);
+        }
+        if (renderer.renderLists
+                && typeof renderer.renderLists.dispose === 'function') {
+            renderer.renderLists.dispose();
+        }
+        if (renderer.info && typeof renderer.info.reset === 'function') {
+            renderer.info.reset();
+        }
+        const canvas = renderer.domElement;
+        if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    }
+
+    function createRendererPool(inputOptions) {
+        const poolOptions = inputOptions || {};
+        const maximumSize = Math.max(
+            1,
+            Math.floor(finite(poolOptions.maximumSize, 1))
+        );
+        const available = [];
+        const leased = new Set();
+        let disposed = false;
+        let createdCount = 0;
+        let reusedCount = 0;
+
+        function acquire(factory, context) {
+            if (disposed) throw new Error('Facility renderer pool is disposed.');
+            if (typeof factory !== 'function') {
+                throw new TypeError('Facility renderer factory is required.');
+            }
+            let renderer = available.pop() || null;
+            if (renderer) {
+                reusedCount += 1;
+            } else {
+                if (leased.size >= maximumSize) {
+                    throw new Error(
+                        'Facility renderer pool capacity is exhausted.'
+                    );
+                }
+                renderer = factory(context || {});
+                createdCount += 1;
+            }
+            if (!renderer || !renderer.domElement) {
+                throw new TypeError('Facility renderer factory returned no canvas.');
+            }
+            leased.add(renderer);
+            return renderer;
+        }
+
+        function release(renderer, releaseOptions) {
+            if (!leased.delete(renderer)) return false;
+            const discard = disposed
+                || Boolean(releaseOptions && releaseOptions.discard)
+                || available.length >= maximumSize;
+            if (discard) destroyRenderer(renderer);
+            else {
+                prepareRendererForPool(renderer);
+                available.push(renderer);
+            }
+            return true;
+        }
+
+        function dispose() {
+            if (disposed) return false;
+            disposed = true;
+            available.splice(0).forEach(destroyRenderer);
+            return true;
+        }
+
+        function getDiagnostics() {
+            return {
+                disposed: disposed,
+                maximumSize: maximumSize,
+                availableCount: available.length,
+                leasedCount: leased.size,
+                createdCount: createdCount,
+                reusedCount: reusedCount,
+            };
+        }
+
+        return Object.freeze({
+            acquire: acquire,
+            release: release,
+            dispose: dispose,
+            getDiagnostics: getDiagnostics,
+        });
+    }
+
     function finite(value, fallback) {
         const number = Number(value);
         return Number.isFinite(number) ? number : fallback;
@@ -269,6 +380,7 @@
             status: 'unmounted',
             statusReason: null,
             renderer: null,
+            rendererFromPool: false,
             scene: null,
             modelRoot: null,
             camera: null,
@@ -920,22 +1032,21 @@
             if (state.controls && typeof state.controls.dispose === 'function') {
                 state.controls.dispose();
             }
-            if (state.renderer) {
-                if (state.renderer.renderLists
-                    && typeof state.renderer.renderLists.dispose === 'function') {
-                    state.renderer.renderLists.dispose();
-                }
-                if (typeof state.renderer.dispose === 'function') {
-                    state.renderer.dispose();
-                }
-                if (typeof state.renderer.forceContextLoss === 'function'
-                    && !state.contextLost) {
-                    state.renderer.forceContextLoss();
+            const renderer = state.renderer;
+            removeCanvas();
+            if (renderer) {
+                if (state.rendererFromPool && options.rendererPool
+                        && typeof options.rendererPool.release === 'function') {
+                    options.rendererPool.release(renderer, {
+                        discard: state.contextLost,
+                    });
+                } else {
+                    destroyRenderer(renderer);
                 }
             }
-            removeCanvas();
 
             state.renderer = null;
+            state.rendererFromPool = false;
             state.scene = null;
             state.modelRoot = null;
             state.camera = null;
@@ -950,8 +1061,16 @@
             state.teardownCount += 1;
             state.disposed = Boolean(finalDispose);
             if (finalDispose) {
+                state.currentInput = null;
                 state.ghostInput = null;
                 state.proposalInput = null;
+                state.placements = [];
+                state.baseGroups.clear();
+                state.selectedIds.clear();
+                state.loadTrace = [];
+                state.warnings = [];
+                state.lastFit = null;
+                state.worldBounds = null;
             }
             notifyStatus(finalDispose ? 'disposed' : 'unmounted', null);
         }
@@ -989,13 +1108,29 @@
             }
 
             try {
-                state.renderer = typeof options.rendererFactory === 'function'
-                    ? options.rendererFactory({ THREE: THREE, host: host })
-                    : new THREE.WebGLRenderer({
-                        antialias: true,
-                        alpha: true,
-                        powerPreference: 'high-performance',
-                    });
+                const rendererFactory = function (context) {
+                    return typeof options.rendererFactory === 'function'
+                        ? options.rendererFactory(context)
+                        : new THREE.WebGLRenderer({
+                            antialias: true,
+                            alpha: true,
+                            powerPreference: 'high-performance',
+                        });
+                };
+                if (options.rendererPool
+                        && typeof options.rendererPool.acquire === 'function') {
+                    state.renderer = options.rendererPool.acquire(
+                        rendererFactory,
+                        { THREE: THREE, host: host }
+                    );
+                    state.rendererFromPool = true;
+                } else {
+                    state.renderer = rendererFactory({ THREE: THREE, host: host });
+                    state.rendererFromPool = false;
+                }
+                if (typeof options.onRendererReady === 'function') {
+                    options.onRendererReady(state.renderer);
+                }
                 state.canvas = state.renderer.domElement;
                 appendCanvas(host, state.canvas);
                 if (typeof state.renderer.setPixelRatio === 'function') {
@@ -1026,11 +1161,15 @@
                 }
             } catch (error) {
                 reportError('webgl_initialization_failed', error);
-                if (state.renderer && typeof state.renderer.dispose === 'function') {
-                    state.renderer.dispose();
+                if (state.rendererFromPool && options.rendererPool
+                        && typeof options.rendererPool.release === 'function') {
+                    options.rendererPool.release(state.renderer, { discard: true });
+                } else {
+                    destroyRenderer(state.renderer);
                 }
                 removeCanvas();
                 state.renderer = null;
+                state.rendererFromPool = false;
                 state.canvas = null;
                 state.scene = null;
                 state.modelRoot = null;
@@ -2261,6 +2400,7 @@
 
     return Object.freeze({
         RESOLUTION_STAGES: RESOLUTION_STAGES,
+        createRendererPool: createRendererPool,
         createThreeAdapter: createThreeAdapter,
     });
 }));

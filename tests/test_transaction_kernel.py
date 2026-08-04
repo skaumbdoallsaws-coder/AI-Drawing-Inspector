@@ -411,13 +411,19 @@ def test_domain_adapter_must_regenerate_the_exact_approved_diff():
 
 def test_in_memory_store_rejects_exact_replay_for_process_map_compatibility():
     kernel = _kernel(receipt_store=InMemoryReceiptStore())
-    _, _, request = _approve(kernel)
+    _, approval, request = _approve(kernel)
     adapter = RecordingAdapter()
 
     first = kernel.apply(request, adapter)
     assert first.replayed is False
     assert first.recovered is False
     assert first.receipt.revision == _hash("e")
+    assert first.receipt.approval_fingerprint == hashlib.sha256(
+        canonical_json_bytes(approval.public_dict())
+    ).hexdigest()
+    assert first.receipt.to_dict()["approvalFingerprint"] == (
+        first.receipt.approval_fingerprint
+    )
     assert len(adapter.commit_calls) == 1
 
     with pytest.raises(TransactionReplayError) as error:

@@ -2,14 +2,21 @@
 
 ## Scope
 
-The executable inventory covers locally vendored browser JavaScript and the
-current industrial asset readiness manifest. It records package versions,
-license artifacts, file hashes, and uncovered artifacts.
+The executable inventory covers locally vendored browser JavaScript, the
+current industrial asset readiness manifest, and machine-observed metadata for
+the direct Python requirements. It records versions, license metadata, source
+hashes, and uncovered artifacts without claiming legal clearance.
 
 Generate it with:
 
 ```powershell
 python tools/verify_facility_layout_p11.py --skip-accelerated-soak
+```
+
+Refresh the direct Python evidence and draft notice with:
+
+```powershell
+python tools/inventory_facility_python_dependencies.py
 ```
 
 ## Vendored Browser Packages
@@ -38,14 +45,29 @@ redistribution.
 
 Before distributing a pilot build:
 
-1. Produce the Python dependency inventory for the exact packaged build.
-2. Record each dependency's version, source, license, and required notices.
-3. Confirm fonts, icons, images, CAD models, fixtures, and sample datasets.
-4. Confirm customer-provided assets remain within the customer's authorized
+1. Resolve the machine blockers in the direct Python inventory.
+2. Inventory the exact packaged transitive dependencies and required notices.
+3. Obtain qualified human review of each governing license path, especially
+   PyMuPDF's AGPL/commercial alternatives.
+4. Confirm fonts, icons, images, CAD models, fixtures, and sample datasets.
+5. Confirm customer-provided assets remain within the customer's authorized
    scope.
-5. Preserve license and notice files in the distributed package.
+6. Preserve license and notice files in the distributed package.
 
 The generated P11 inventory remains blocked until industrial asset rights and
 the packaged Python dependency review are complete. This is a distribution
 gate, not a browser-runtime uncertainty: the vendored Floating UI and Three.js
 artifacts are already hash-bound to retained MIT license texts.
+
+The aggregate verifier fails closed unless all of these independent facts are
+true in the source-bound Python inventory:
+
+- The machine dependency assessment passes.
+- A qualified human explicitly records approval.
+- That approval explicitly claims legal clearance for the reviewed
+  distribution.
+- The inventory's own release gate is true.
+
+An `approved` field without `legalClearanceClaimed: true`, or a legal approval
+that disagrees with the inventory release gate, cannot clear the P11 licensing
+gate.

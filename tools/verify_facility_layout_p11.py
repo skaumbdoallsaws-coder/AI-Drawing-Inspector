@@ -198,6 +198,7 @@ def _write_json(path: Path, value: Any) -> None:
         )
         + "\n",
         encoding="ascii",
+        newline="\n",
     )
 
 

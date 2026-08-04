@@ -340,6 +340,7 @@ def verify(app_url: str, output: Path) -> dict[str, Any]:
         )
         + "\n",
         encoding="ascii",
+        newline="\n",
     )
     for name, passed in checks.items():
         print(("PASS" if passed else "FAIL") + "\t" + name)

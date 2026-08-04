@@ -354,6 +354,7 @@ def verify(app_url: str, output: Path) -> dict[str, Any]:
     output.write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="ascii",
+        newline="\n",
     )
     return result
 

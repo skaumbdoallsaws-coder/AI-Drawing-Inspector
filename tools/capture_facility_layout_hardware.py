@@ -243,6 +243,7 @@ def main() -> int:
     output.write_text(
         json.dumps(profile, indent=2, sort_keys=True) + "\n",
         encoding="ascii",
+        newline="\n",
     )
     print(output)
     return 0

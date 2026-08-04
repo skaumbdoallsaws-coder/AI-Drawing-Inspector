@@ -908,10 +908,12 @@ def write_inventory_outputs(
         )
         + "\n",
         encoding="ascii",
+        newline="\n",
     )
     notice_path.write_text(
         render_notice_draft(inventory),
         encoding="ascii",
+        newline="\n",
     )
 
 

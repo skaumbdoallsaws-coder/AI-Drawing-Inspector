@@ -1070,6 +1070,7 @@ def main() -> int:
     args.output.write_text(
         json.dumps(result, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
         encoding="ascii",
+        newline="\n",
     )
     for name, passed in checks.items():
         print(f"{'PASS' if passed else 'FAIL'}\t{name}")

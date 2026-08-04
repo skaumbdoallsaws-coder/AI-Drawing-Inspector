@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
+from heapq import nsmallest
 import json
 import math
 from threading import RLock
@@ -3048,6 +3049,7 @@ def _family_seed_candidates(
     enabled_families: frozenset[str],
     prepared_zones: _PreparedZoneScene | None = None,
     local_footprints: tuple[tuple[Point2, ...], ...] | None = None,
+    maximum_candidates: int = 64,
 ) -> list[tuple[str, Point2, dict[str, Any] | None]]:
     seeds: list[tuple[str, Point2, dict[str, Any] | None]] = []
     zone_entries = (
@@ -3086,9 +3088,13 @@ def _family_seed_candidates(
         for polygon in footprints
         for point in polygon
     ) + 0.01
+    boundary_seeds: list[
+        tuple[str, Point2, dict[str, Any] | None]
+    ] = []
     for zone, boundary, _ in zone_entries:
         zone_id = str(zone.get("zoneId") or "")
         if "boundary" in enabled_families:
+            orientation = 1.0 if polygon_area(boundary) > 0 else -1.0
             for edge_index, start in enumerate(boundary):
                 end = boundary[(edge_index + 1) % len(boundary)]
                 nearest = _nearest_point_on_segment(requested, start, end)
@@ -3097,7 +3103,6 @@ def _family_seed_candidates(
                 edge_length = math.hypot(edge_x, edge_z)
                 if edge_length <= GEOMETRY_EPSILON:
                     continue
-                orientation = 1.0 if polygon_area(boundary) > 0 else -1.0
                 normal = (
                     orientation * -edge_z / edge_length,
                     orientation * edge_x / edge_length,
@@ -3112,7 +3117,7 @@ def _family_seed_candidates(
                     nearest[0] + inset * normal[0],
                     nearest[1] + inset * normal[1],
                 )
-                seeds.append(
+                boundary_seeds.append(
                     (
                         "boundary",
                         position,
@@ -3158,6 +3163,29 @@ def _family_seed_candidates(
                     )
                 )
 
+    seed_budget = max(
+        len(enabled_families),
+        min(64, maximum_candidates),
+    )
+    seeds.extend(
+        nsmallest(
+            seed_budget,
+            boundary_seeds,
+            key=lambda item: (
+                _rounded(
+                    math.hypot(
+                        item[1][0] - requested[0],
+                        item[1][1] - requested[1],
+                    )
+                ),
+                _rounded(item[1][1]),
+                _rounded(item[1][0]),
+                int((item[2] or {}).get("edgeIndex", 0)),
+                str((item[2] or {}).get("zoneId") or ""),
+            ),
+        )
+    )
+
     placements = sorted(
         (
             placement
@@ -3183,7 +3211,8 @@ def _family_seed_candidates(
         if z_key not in alignment_z or z_candidate < alignment_z[z_key]:
             alignment_z[z_key] = z_candidate
 
-    nearest_x = sorted(
+    nearest_x = nsmallest(
+        4,
         alignment_x.items(),
         key=lambda item: (
             _rounded(abs(item[0] - requested[0])),
@@ -3191,8 +3220,9 @@ def _family_seed_candidates(
             item[0],
             item[1][1],
         ),
-    )[:4]
-    nearest_z = sorted(
+    )
+    nearest_z = nsmallest(
+        4,
         alignment_z.items(),
         key=lambda item: (
             _rounded(abs(item[0] - requested[1])),
@@ -3200,7 +3230,7 @@ def _family_seed_candidates(
             item[0],
             item[1][1],
         ),
-    )[:4]
+    )
     if "alignment" in enabled_families:
         for x_value, (_, placement_id) in nearest_x:
             seeds.append(
@@ -3906,6 +3936,7 @@ def generate_placement_candidates(
         enabled_families=family_set,
         prepared_zones=candidate_zone_scene,
         local_footprints=candidate_footprints,
+        maximum_candidates=maximum_candidates,
     )
     selected_seeds, seed_count = _candidate_seed_budget(
         seeds,

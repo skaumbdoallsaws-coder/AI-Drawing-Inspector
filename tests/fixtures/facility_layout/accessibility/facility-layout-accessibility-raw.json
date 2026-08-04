@@ -1,5 +1,5 @@
 {
-  "appUrl": "http://127.0.0.1:8029/",
+  "appUrl": "http://127.0.0.1:8031/",
   "automatedChecksPassed": true,
   "categories": {
     "announcements": {
@@ -92,16 +92,16 @@
   },
   "environment": {
     "browser": "Chromium 141.0.7390.37",
-    "elapsedSeconds": 10.1,
+    "elapsedSeconds": 12.192,
     "headed": false,
     "os": "Windows-11-10.0.26200-SP0",
     "playwright": "1.56.0",
     "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]"
   },
-  "generatedAtUtc": "2026-08-04T18:11:02Z",
+  "generatedAtUtc": "2026-08-04T18:57:47Z",
   "mode": "full",
   "network": {
-    "applicationOrigin": "http://127.0.0.1:8029",
+    "applicationOrigin": "http://127.0.0.1:8031",
     "blockedExternalRequests": [
       "https://facility-layout-a11y.invalid/network-block-canary"
     ],
@@ -109,52 +109,50 @@
     "externalResponses": [],
     "policy": "allow exact application origin; abort all other requests",
     "sameOriginRequests": [
-      "http://127.0.0.1:8029/",
-      "http://127.0.0.1:8029/api/bridge/status",
-      "http://127.0.0.1:8029/api/facility-layout-bootstrap",
-      "http://127.0.0.1:8029/api/facility-layouts/site-local/fl-main/preview",
-      "http://127.0.0.1:8029/api/profiles",
-      "http://127.0.0.1:8029/api/training/facility-layout/layout-analysis",
-      "http://127.0.0.1:8029/api/training/facility-layout/semantic",
-      "http://127.0.0.1:8029/static/annotations.js",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/bell.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/cursor.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/file.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/gear.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/home.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/printer.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/redo.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/save.png",
-      "http://127.0.0.1:8029/static/assets/global-toolbar-icons/undo.png",
-      "http://127.0.0.1:8029/static/assets/training-ribbon-icons/training-highlight.png",
-      "http://127.0.0.1:8029/static/assets/training-ribbon-icons/training-isolate.png",
-      "http://127.0.0.1:8029/static/assets/training-ribbon-icons/training-reset.png",
-      "http://127.0.0.1:8029/static/avatar_iris_realistic.png",
-      "http://127.0.0.1:8029/static/avatar_sage_realistic.png",
-      "http://127.0.0.1:8029/static/avatar_scout_realistic.png",
-      "http://127.0.0.1:8029/static/cad_feature_icon_registry.json",
-      "http://127.0.0.1:8029/static/chat_stream_runtime.js",
-      "http://127.0.0.1:8029/static/facility_layout_app.js",
-      "http://127.0.0.1:8029/static/facility_layout_editor.js",
-      "http://127.0.0.1:8029/static/facility_layout_session.js",
-      "http://127.0.0.1:8029/static/facility_layout_spatial_advisor.js",
-      "http://127.0.0.1:8029/static/facility_layout_spatial_worker.js",
-      "http://127.0.0.1:8029/static/facility_layout_three_adapter.js",
-      "http://127.0.0.1:8029/static/facility_layout_transport.js",
-      "http://127.0.0.1:8029/static/facility_layout_workspace.css",
-      "http://127.0.0.1:8029/static/facility_layout_workspace.js",
-      "http://127.0.0.1:8029/static/floating_surface.js",
-      "http://127.0.0.1:8029/static/process_map_editor.js",
-      "http://127.0.0.1:8029/static/ui_action_runtime.js",
-      "http://127.0.0.1:8029/static/vendor/floating-ui/floating-ui.core.umd.min.js",
-      "http://127.0.0.1:8029/static/vendor/floating-ui/floating-ui.dom.umd.min.js",
-      "http://127.0.0.1:8029/static/vendor/three/0.128.0/build/three.min.js",
-      "http://127.0.0.1:8029/static/vendor/three/0.184.0/build/three.core.min.js",
-      "http://127.0.0.1:8029/static/vendor/three/0.184.0/build/three.module.min.js",
-      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js",
-      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js",
-      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js",
-      "http://127.0.0.1:8029/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
+      "http://127.0.0.1:8031/",
+      "http://127.0.0.1:8031/api/bridge/status",
+      "http://127.0.0.1:8031/api/facility-layout-bootstrap",
+      "http://127.0.0.1:8031/api/facility-layouts/site-local/fl-main/preview",
+      "http://127.0.0.1:8031/api/profiles",
+      "http://127.0.0.1:8031/static/annotations.js",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/bell.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/cursor.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/file.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/gear.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/home.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/printer.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/redo.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/save.png",
+      "http://127.0.0.1:8031/static/assets/global-toolbar-icons/undo.png",
+      "http://127.0.0.1:8031/static/assets/training-ribbon-icons/training-highlight.png",
+      "http://127.0.0.1:8031/static/assets/training-ribbon-icons/training-isolate.png",
+      "http://127.0.0.1:8031/static/assets/training-ribbon-icons/training-reset.png",
+      "http://127.0.0.1:8031/static/avatar_iris_realistic.png",
+      "http://127.0.0.1:8031/static/avatar_sage_realistic.png",
+      "http://127.0.0.1:8031/static/avatar_scout_realistic.png",
+      "http://127.0.0.1:8031/static/cad_feature_icon_registry.json",
+      "http://127.0.0.1:8031/static/chat_stream_runtime.js",
+      "http://127.0.0.1:8031/static/facility_layout_app.js",
+      "http://127.0.0.1:8031/static/facility_layout_editor.js",
+      "http://127.0.0.1:8031/static/facility_layout_session.js",
+      "http://127.0.0.1:8031/static/facility_layout_spatial_advisor.js",
+      "http://127.0.0.1:8031/static/facility_layout_spatial_worker.js",
+      "http://127.0.0.1:8031/static/facility_layout_three_adapter.js",
+      "http://127.0.0.1:8031/static/facility_layout_transport.js",
+      "http://127.0.0.1:8031/static/facility_layout_workspace.css",
+      "http://127.0.0.1:8031/static/facility_layout_workspace.js",
+      "http://127.0.0.1:8031/static/floating_surface.js",
+      "http://127.0.0.1:8031/static/process_map_editor.js",
+      "http://127.0.0.1:8031/static/ui_action_runtime.js",
+      "http://127.0.0.1:8031/static/vendor/floating-ui/floating-ui.core.umd.min.js",
+      "http://127.0.0.1:8031/static/vendor/floating-ui/floating-ui.dom.umd.min.js",
+      "http://127.0.0.1:8031/static/vendor/three/0.128.0/build/three.min.js",
+      "http://127.0.0.1:8031/static/vendor/three/0.184.0/build/three.core.min.js",
+      "http://127.0.0.1:8031/static/vendor/three/0.184.0/build/three.module.min.js",
+      "http://127.0.0.1:8031/static/vendor/three/0.184.0/examples/jsm/controls/OrbitControls.js",
+      "http://127.0.0.1:8031/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js",
+      "http://127.0.0.1:8031/static/vendor/three/0.184.0/examples/jsm/utils/BufferGeometryUtils.js",
+      "http://127.0.0.1:8031/static/vendor/three/0.184.0/examples/jsm/utils/SkeletonUtils.js"
     ]
   },
   "protocol": {
@@ -169,7 +167,7 @@
   },
   "runs": [
     {
-      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\":\n      - button \"CNC Milling Machine\"\n      - button \"asset-forklift\"\n      - button \"Assembly Workbench\"\n      - button \"Electric Forklift\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
+      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
       "contrast": {
         "controlFailures": [],
         "controlSampleLimitReached": false,
@@ -1024,16 +1022,6 @@
           {
             "assetId": null,
             "command": null,
-            "id": "dropdownList",
-            "insideWorkspace": false,
-            "name": "100001 \u2014 Four Cylinder Engine Assembly100002 \u2014 Lower Engine Block100003 \u2014 Crankshaft100004 \u2014 Connecting Rod100005 \u2014 Connecting Rod Cap100006 \u2014 Piston100007 \u2014 Pi",
-            "role": null,
-            "tag": "div",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
             "id": "openIntakeWizardBtn",
             "insideWorkspace": false,
             "name": "+ Add to Library",
@@ -1236,326 +1224,6 @@
             "command": null,
             "id": null,
             "insideWorkspace": false,
-            "name": "Filter rack rows or forklifts",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Grid On",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Show 3D Layout",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-            "role": null,
-            "tag": "select",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-            "role": null,
-            "tag": "select",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Find Route",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "24",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "18",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "12",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "1",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "inftmmcmm",
-            "role": null,
-            "tag": "select",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Calculate Capacity",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Show 3D Layout",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
             "name": "",
             "role": null,
             "tag": "input",
@@ -1647,72 +1315,72 @@
         "samplesPresent": true
       },
       "focusScreenshot": {
-        "byteLength": 154191,
+        "byteLength": 152423,
         "path": "tests/fixtures/facility_layout/accessibility/facility-layout-focus-light.png",
-        "sha256": "a3dd61b21b6075bd63832bc1d595b4af016d79f74d578dca7ef5ebbaec22fc8d"
+        "sha256": "7fc1caa1f2988fdff695651f78af9780ffaebb624434d63e41530dbac5101544"
       },
       "keyboard": {
         "actionAnnouncements": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2772,
+            "recordedAtMs": 3411.899999976158,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2786.699999988079,
+            "recordedAtMs": 3427.800000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2961.199999988079,
+            "recordedAtMs": 3596.199999988079,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 3133.600000023842,
+            "recordedAtMs": 3687.399999976158,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4160.800000011921,
+            "recordedAtMs": 4765.699999988079,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4174.399999976158,
+            "recordedAtMs": 4781.399999976158,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4240.300000011921,
+            "recordedAtMs": 4912.600000023842,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4290.899999976158,
+            "recordedAtMs": 4967.199999988079,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4374.399999976158,
+            "recordedAtMs": 5066.800000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
@@ -1720,15 +1388,15 @@
         "assetAction": {
           "afterAction": {
             "dirty": true,
-            "placements": 5,
+            "placements": 1,
             "selection": [
-              "pl-8cc99aecdd69a21cbe37703f"
+              "pl-dd4d1a116528d783849b00ea"
             ],
             "status": "Unsaved changes | 1 selected | Plan view | select"
           },
           "afterUndo": {
             "dirty": false,
-            "placements": 4,
+            "placements": 0,
             "selection": [],
             "status": "Saved | 0 selected | Plan view | select"
           },
@@ -1738,7 +1406,7 @@
           "safeWorldPoint": {
             "x": 35.0,
             "y": 0.0,
-            "z": 5.0
+            "z": 25.0
           },
           "selectionUpdated": true,
           "sequence": [
@@ -1750,46 +1418,6 @@
               "name": "Plan view",
               "role": "tabpanel",
               "tag": "div",
-              "view": null
-            },
-            {
-              "assetId": "asset-cnc-mill",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "CNC Milling Machine",
-              "role": "button",
-              "tag": "polygon",
-              "view": null
-            },
-            {
-              "assetId": "asset-forklift",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "asset-forklift",
-              "role": "button",
-              "tag": "polygon",
-              "view": null
-            },
-            {
-              "assetId": "asset-workbench",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "Assembly Workbench",
-              "role": "button",
-              "tag": "polygon",
-              "view": null
-            },
-            {
-              "assetId": "asset-forklift",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "Electric Forklift",
-              "role": "button",
-              "tag": "polygon",
               "view": null
             },
             {
@@ -2055,16 +1683,6 @@
             {
               "assetId": null,
               "command": null,
-              "id": "dropdownList",
-              "insideWorkspace": false,
-              "name": "100001 \u2014 Four Cylinder Engine Assembly100002 \u2014 Lower Engine Block100003 \u2014 Crankshaft100004 \u2014 Connecting Rod100005 \u2014 Connecting Rod Cap100006 \u2014 Piston100007 \u2014 Pi",
-              "role": null,
-              "tag": "div",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
               "id": "openIntakeWizardBtn",
               "insideWorkspace": false,
               "name": "+ Add to Library",
@@ -2267,326 +1885,6 @@
               "command": null,
               "id": null,
               "insideWorkspace": false,
-              "name": "Filter rack rows or forklifts",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Grid On",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Find Route",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "24",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "18",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "12",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "1",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "inftmmcmm",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Calculate Capacity",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
               "name": "",
               "role": null,
               "tag": "input",
@@ -2726,7 +2024,7 @@
           "tabKeyboardActivationWorks": true,
           "undoActionWorks": true
         },
-        "distinctWorkspaceFocusCount": 20,
+        "distinctWorkspaceFocusCount": 16,
         "entry": {
           "focus": {
             "assetId": null,
@@ -2773,7 +2071,7 @@
             }
           ]
         },
-        "focusableCount": 22,
+        "focusableCount": 18,
         "forwardTraversal": [
           {
             "assetId": null,
@@ -2896,46 +2194,6 @@
             "view": null
           },
           {
-            "assetId": "asset-cnc-mill",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "CNC Milling Machine",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
-            "assetId": "asset-forklift",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "asset-forklift",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
-            "assetId": "asset-workbench",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "Assembly Workbench",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
-            "assetId": "asset-forklift",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "Electric Forklift",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
             "assetId": null,
             "command": null,
             "id": null,
@@ -2988,77 +2246,77 @@
         ],
         "initial": {
           "dirty": false,
-          "placements": 4,
+          "placements": 0,
           "toolMode": "select"
         },
         "liveEvents": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2772,
+            "recordedAtMs": 3411.899999976158,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2786.699999988079,
+            "recordedAtMs": 3427.800000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2961.199999988079,
+            "recordedAtMs": 3596.199999988079,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 3133.600000023842,
+            "recordedAtMs": 3687.399999976158,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 0,
             "live": "polite",
-            "recordedAtMs": 4160.800000011921,
+            "recordedAtMs": 4765.699999988079,
             "role": "status",
             "text": "Placement advisory will be confirmed by the server."
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4160.800000011921,
+            "recordedAtMs": 4765.699999988079,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4174.399999976158,
+            "recordedAtMs": 4781.399999976158,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4240.300000011921,
+            "recordedAtMs": 4912.600000023842,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4290.899999976158,
+            "recordedAtMs": 4967.199999988079,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4374.399999976158,
+            "recordedAtMs": 5066.800000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
@@ -3287,16 +2545,6 @@
             {
               "assetId": null,
               "command": null,
-              "id": "dropdownList",
-              "insideWorkspace": false,
-              "name": "100001 \u2014 Four Cylinder Engine Assembly100002 \u2014 Lower Engine Block100003 \u2014 Crankshaft100004 \u2014 Connecting Rod100005 \u2014 Connecting Rod Cap100006 \u2014 Piston100007 \u2014 Pi",
-              "role": null,
-              "tag": "div",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
               "id": "openIntakeWizardBtn",
               "insideWorkspace": false,
               "name": "+ Add to Library",
@@ -3499,326 +2747,6 @@
               "command": null,
               "id": null,
               "insideWorkspace": false,
-              "name": "Filter rack rows or forklifts",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Grid On",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Find Route",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "24",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "18",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "12",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "1",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "inftmmcmm",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Calculate Capacity",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
               "name": "",
               "role": null,
               "tag": "input",
@@ -4000,7 +2928,7 @@
         "externalCanaryUrl": "https://facility-layout-a11y.invalid/network-block-canary",
         "externalResponses": [],
         "requestFailures": [],
-        "sameOriginResponseCount": 48
+        "sameOriginResponseCount": 45
       },
       "reducedMotion": {
         "animationOffenders": [],
@@ -4353,7 +3281,7 @@
       "theme": "light"
     },
     {
-      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\":\n      - button \"CNC Milling Machine\"\n      - button \"asset-forklift\"\n      - button \"Assembly Workbench\"\n      - button \"Electric Forklift\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
+      "ariaSnapshot": "- toolbar \"Facility layout tools\":\n  - button \"Select\" [pressed]\n  - button \"Pan\"\n  - button \"Rectangle zone\"\n  - button \"Polygon zone\"\n  - button \"Rotate 90\" [disabled]\n  - button \"Duplicate\" [disabled]\n  - button \"Delete\" [disabled]\n  - button \"Lock\" [disabled]\n  - button \"Undo\" [disabled]\n  - button \"Redo\" [disabled]\n  - button \"Fit\"\n  - button \"Auto Arrange\"\n  - button \"Save\" [disabled]\n- complementary \"Asset catalog\":\n  - heading \"Assets\" [level=2]\n  - text: Search assets\n  - searchbox \"Search assets\"\n  - tree \"Available facility assets\":\n    - group \"Machines\":\n      - heading \"Machines\" [level=3]\n      - treeitem \"Place CNC Milling Machine\":\n        - strong: CNC Milling Machine\n        - text: asset-cnc-mill\n    - group \"Material Handling\":\n      - heading \"Material Handling\" [level=3]\n      - treeitem \"Place Electric Forklift\":\n        - strong: Electric Forklift\n        - text: asset-forklift\n    - group \"Storage\":\n      - heading \"Storage\" [level=3]\n      - treeitem \"Place Pallet Rack\":\n        - strong: Pallet Rack\n        - text: asset-pallet-rack\n    - group \"Workstations\":\n      - heading \"Workstations\" [level=3]\n      - treeitem \"Place Assembly Workbench\":\n        - strong: Assembly Workbench\n        - text: asset-workbench\n- main:\n  - tablist \"Facility layout view\":\n    - tab \"Plan\" [selected]\n    - tab \"3D\"\n  - tabpanel \"Plan view\":\n    - img \"Facility top plan\"\n  - status\n  - note:\n    - text: Browser overlap feedback is advisory. The server validates every accepted placement.\n    - group \"Authoritative placement alternatives\":\n      - status\n      - button \"Previous placement alternative\": Previous\n      - button \"Next placement alternative\": Next\n      - button \"Accept placement alternative\": Accept\n      - button \"Dismiss placement alternatives\": Dismiss\n- complementary \"Selection properties\":\n  - heading \"Properties\" [level=2]\n  - paragraph: Select an asset or zone.\n- status: Saved | 0 selected | Plan view | select\n- text: X 0.00 Z 0.00",
       "contrast": {
         "controlFailures": [],
         "controlSampleLimitReached": false,
@@ -5208,16 +4136,6 @@
           {
             "assetId": null,
             "command": null,
-            "id": "dropdownList",
-            "insideWorkspace": false,
-            "name": "100001 \u2014 Four Cylinder Engine Assembly100002 \u2014 Lower Engine Block100003 \u2014 Crankshaft100004 \u2014 Connecting Rod100005 \u2014 Connecting Rod Cap100006 \u2014 Piston100007 \u2014 Pi",
-            "role": null,
-            "tag": "div",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
             "id": "openIntakeWizardBtn",
             "insideWorkspace": false,
             "name": "+ Add to Library",
@@ -5420,326 +4338,6 @@
             "command": null,
             "id": null,
             "insideWorkspace": false,
-            "name": "Filter rack rows or forklifts",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Grid On",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Show 3D Layout",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-            "role": null,
-            "tag": "select",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-            "role": null,
-            "tag": "select",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Find Route",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "24",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "18",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "12",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "1",
-            "role": null,
-            "tag": "input",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "inftmmcmm",
-            "role": null,
-            "tag": "select",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Calculate Capacity",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
-            "name": "Show 3D Layout",
-            "role": null,
-            "tag": "button",
-            "view": null
-          },
-          {
-            "assetId": null,
-            "command": null,
-            "id": null,
-            "insideWorkspace": false,
             "name": "",
             "role": null,
             "tag": "input",
@@ -5831,72 +4429,72 @@
         "samplesPresent": true
       },
       "focusScreenshot": {
-        "byteLength": 163452,
+        "byteLength": 148504,
         "path": "tests/fixtures/facility_layout/accessibility/facility-layout-focus-dark.png",
-        "sha256": "8a37982f02b517fcbb625e71602b7921957adb203f536d42e00f39abe8bd8f69"
+        "sha256": "711c36665213fa6ebb6e612d83e4a11851ba40d37c15f66fc5e0ce1a75cbb9d1"
       },
       "keyboard": {
         "actionAnnouncements": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2844.199999988079,
+            "recordedAtMs": 2861.600000023842,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2868.400000035763,
+            "recordedAtMs": 2873.199999988079,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 3003.400000035763,
+            "recordedAtMs": 3074.399999976158,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 3128.199999988079,
+            "recordedAtMs": 3155.300000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4230.199999988079,
+            "recordedAtMs": 4254,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4233.400000035763,
+            "recordedAtMs": 4258.100000023842,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4304.300000011921,
+            "recordedAtMs": 4373.899999976158,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4353.300000011921,
+            "recordedAtMs": 4443.899999976158,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4439,
+            "recordedAtMs": 4544.300000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
@@ -5904,15 +4502,15 @@
         "assetAction": {
           "afterAction": {
             "dirty": true,
-            "placements": 5,
+            "placements": 1,
             "selection": [
-              "pl-8cc99aecdd69a21cbe37703f"
+              "pl-dd4d1a116528d783849b00ea"
             ],
             "status": "Unsaved changes | 1 selected | Plan view | select"
           },
           "afterUndo": {
             "dirty": false,
-            "placements": 4,
+            "placements": 0,
             "selection": [],
             "status": "Saved | 0 selected | Plan view | select"
           },
@@ -5922,7 +4520,7 @@
           "safeWorldPoint": {
             "x": 35.0,
             "y": 0.0,
-            "z": 5.0
+            "z": 25.0
           },
           "selectionUpdated": true,
           "sequence": [
@@ -5934,46 +4532,6 @@
               "name": "Plan view",
               "role": "tabpanel",
               "tag": "div",
-              "view": null
-            },
-            {
-              "assetId": "asset-cnc-mill",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "CNC Milling Machine",
-              "role": "button",
-              "tag": "polygon",
-              "view": null
-            },
-            {
-              "assetId": "asset-forklift",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "asset-forklift",
-              "role": "button",
-              "tag": "polygon",
-              "view": null
-            },
-            {
-              "assetId": "asset-workbench",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "Assembly Workbench",
-              "role": "button",
-              "tag": "polygon",
-              "view": null
-            },
-            {
-              "assetId": "asset-forklift",
-              "command": null,
-              "id": null,
-              "insideWorkspace": true,
-              "name": "Electric Forklift",
-              "role": "button",
-              "tag": "polygon",
               "view": null
             },
             {
@@ -6239,16 +4797,6 @@
             {
               "assetId": null,
               "command": null,
-              "id": "dropdownList",
-              "insideWorkspace": false,
-              "name": "100001 \u2014 Four Cylinder Engine Assembly100002 \u2014 Lower Engine Block100003 \u2014 Crankshaft100004 \u2014 Connecting Rod100005 \u2014 Connecting Rod Cap100006 \u2014 Piston100007 \u2014 Pi",
-              "role": null,
-              "tag": "div",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
               "id": "openIntakeWizardBtn",
               "insideWorkspace": false,
               "name": "+ Add to Library",
@@ -6451,326 +4999,6 @@
               "command": null,
               "id": null,
               "insideWorkspace": false,
-              "name": "Filter rack rows or forklifts",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Grid On",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Find Route",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "24",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "18",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "12",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "1",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "inftmmcmm",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Calculate Capacity",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
               "name": "",
               "role": null,
               "tag": "input",
@@ -6910,7 +5138,7 @@
           "tabKeyboardActivationWorks": true,
           "undoActionWorks": true
         },
-        "distinctWorkspaceFocusCount": 20,
+        "distinctWorkspaceFocusCount": 16,
         "entry": {
           "focus": {
             "assetId": null,
@@ -6957,7 +5185,7 @@
             }
           ]
         },
-        "focusableCount": 22,
+        "focusableCount": 18,
         "forwardTraversal": [
           {
             "assetId": null,
@@ -7080,46 +5308,6 @@
             "view": null
           },
           {
-            "assetId": "asset-cnc-mill",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "CNC Milling Machine",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
-            "assetId": "asset-forklift",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "asset-forklift",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
-            "assetId": "asset-workbench",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "Assembly Workbench",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
-            "assetId": "asset-forklift",
-            "command": null,
-            "id": null,
-            "insideWorkspace": true,
-            "name": "Electric Forklift",
-            "role": "button",
-            "tag": "polygon",
-            "view": null
-          },
-          {
             "assetId": null,
             "command": null,
             "id": null,
@@ -7172,77 +5360,77 @@
         ],
         "initial": {
           "dirty": false,
-          "placements": 4,
+          "placements": 0,
           "toolMode": "select"
         },
         "liveEvents": [
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2844.199999988079,
+            "recordedAtMs": 2861.600000023842,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | pan"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 2868.400000035763,
+            "recordedAtMs": 2873.199999988079,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 3003.400000035763,
+            "recordedAtMs": 3074.399999976158,
             "role": "status",
             "text": "Saved | 0 selected | 3D view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 3128.199999988079,
+            "recordedAtMs": 3155.300000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 0,
             "live": "polite",
-            "recordedAtMs": 4230.199999988079,
+            "recordedAtMs": 4254,
             "role": "status",
             "text": "Placement advisory will be confirmed by the server."
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4230.199999988079,
+            "recordedAtMs": 4254,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4233.400000035763,
+            "recordedAtMs": 4258.100000023842,
             "role": "status",
             "text": "Working | 0 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4304.300000011921,
+            "recordedAtMs": 4373.899999976158,
             "role": "status",
             "text": "Unsaved changes | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4353.300000011921,
+            "recordedAtMs": 4443.899999976158,
             "role": "status",
             "text": "Working | 1 selected | Plan view | select"
           },
           {
             "index": 2,
             "live": "polite",
-            "recordedAtMs": 4439,
+            "recordedAtMs": 4544.300000011921,
             "role": "status",
             "text": "Saved | 0 selected | Plan view | select"
           }
@@ -7471,16 +5659,6 @@
             {
               "assetId": null,
               "command": null,
-              "id": "dropdownList",
-              "insideWorkspace": false,
-              "name": "100001 \u2014 Four Cylinder Engine Assembly100002 \u2014 Lower Engine Block100003 \u2014 Crankshaft100004 \u2014 Connecting Rod100005 \u2014 Connecting Rod Cap100006 \u2014 Piston100007 \u2014 Pi",
-              "role": null,
-              "tag": "div",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
               "id": "openIntakeWizardBtn",
               "insideWorkspace": false,
               "name": "+ Add to Library",
@@ -7683,326 +5861,6 @@
               "command": null,
               "id": null,
               "insideWorkspace": false,
-              "name": "Filter rack rows or forklifts",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Grid On",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "01 West Aisle02 North Aisle03 Center Aisle04 Southwest Aisle05 Southeast AisleA North WallB Upper MiddleC Lower MiddleD South WallE West Wall",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Find Route",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "24",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "18",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "12",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "1",
-              "role": null,
-              "tag": "input",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "inftmmcmm",
-              "role": null,
-              "tag": "select",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Calculate Capacity",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
-              "name": "Show 3D Layout",
-              "role": null,
-              "tag": "button",
-              "view": null
-            },
-            {
-              "assetId": null,
-              "command": null,
-              "id": null,
-              "insideWorkspace": false,
               "name": "",
               "role": null,
               "tag": "input",
@@ -8184,7 +6042,7 @@
         "externalCanaryUrl": "https://facility-layout-a11y.invalid/network-block-canary",
         "externalResponses": [],
         "requestFailures": [],
-        "sameOriginResponseCount": 48
+        "sameOriginResponseCount": 45
       },
       "reducedMotion": {
         "animationOffenders": [],
@@ -8542,53 +6400,53 @@
   "screenReaderAudit": "not_performed",
   "sourceBinding": {
     "aggregateAlgorithm": "sha256-canonical-json-v1",
-    "aggregateSha256": "083bf780b8c3ae249281362977bcddbaee1d0405f190599c86f4b0359ea95d29",
+    "aggregateSha256": "2d932f223aa3ff36dceeda3162fc0493c2c669df9637e7b9163ecf02f16363f8",
     "algorithm": "sha256",
     "files": [
       {
-        "byteLength": 9447,
+        "byteLength": 9694,
         "path": "static/facility_layout_app.js",
-        "sha256": "9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de"
+        "sha256": "fd2ce6810c12921d55c65812eb2c3884d843f5766689c626fbc6ef642428a01a"
       },
       {
-        "byteLength": 54235,
+        "byteLength": 55603,
         "path": "static/facility_layout_editor.js",
-        "sha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24"
+        "sha256": "9289ef6e817692ed8263e3c6fc418fbb9280816876d5f9c41d4c16a862001f0b"
       },
       {
-        "byteLength": 76935,
+        "byteLength": 78951,
         "path": "static/facility_layout_session.js",
-        "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a"
+        "sha256": "f3e3138aefe8c9212470ba5d96edfb1e9e4083c8542c1d3c240300b87ed37c34"
       },
       {
-        "byteLength": 101827,
+        "byteLength": 104298,
         "path": "static/facility_layout_three_adapter.js",
-        "sha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639"
+        "sha256": "3e96bee4be252449702ee4a52ed928eda7ddcd806da3402d91b95d9ec3eef731"
       },
       {
-        "byteLength": 15430,
+        "byteLength": 15831,
         "path": "static/facility_layout_transport.js",
-        "sha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6"
+        "sha256": "9f8c2511fb1b074fabeb9bd73fcaf114ac75f3768ac1c10049b2473657388741"
       },
       {
-        "byteLength": 16296,
+        "byteLength": 17028,
         "path": "static/facility_layout_workspace.css",
-        "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
+        "sha256": "0481a0ebbb17b2c124c073ee5248f3e5c953714c333d7eb7febc0d3191288f3c"
       },
       {
-        "byteLength": 117766,
+        "byteLength": 120660,
         "path": "static/facility_layout_workspace.js",
-        "sha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878"
+        "sha256": "0334bdc75a63c47a18541d2290de18d33108afa98cbb3c55adcd9f54786b38b1"
       },
       {
-        "byteLength": 2947711,
+        "byteLength": 2948300,
         "path": "static/index.html",
-        "sha256": "41d15a8fdbe767c5373cdd3e3471b704394f3ebe91a2b233c3395796ff64bffe"
+        "sha256": "be006926a405e7a406ad9b488d3d8b7ac7504ef3209521ae15f6614c26490d09"
       },
       {
-        "byteLength": 71354,
+        "byteLength": 73530,
         "path": "tools/audit_facility_layout_accessibility.py",
-        "sha256": "58cede7f344770bffdad9bb4dd3216502632b73f28af2c3540ac3b2c43d842eb"
+        "sha256": "f6fde1db8d921a8a43257d0139895d76ca2d4bb39885ce84f8a8e0ea45ad92af"
       }
     ]
   },

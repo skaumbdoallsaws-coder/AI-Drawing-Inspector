@@ -126,22 +126,22 @@
     "screenReaderSimulation": false
   },
   "contrastRecordsValid": true,
-  "generatedAtUtc": "2026-08-04T18:11:02Z",
+  "generatedAtUtc": "2026-08-04T18:57:47Z",
   "integrityFindings": [],
   "manualScreenReaderAudit": {
     "artifact": {
-      "byteLength": 3156,
+      "byteLength": 3236,
       "path": "docs/facility-layout-manual-screen-reader-checklist.md",
-      "sha256": "dd5e283f3052803741a989184f98cc4250bdfa1d664f715edb14d9eb98d2017c"
+      "sha256": "6ed4f749758613a3e38d282d08025cda05dc58ee179145be472b1180027f5454"
     },
     "pendingMarkerPresent": true,
     "present": true,
     "status": "pending"
   },
   "rawArtifact": {
-    "byteLength": 264533,
+    "byteLength": 201931,
     "path": "tests/fixtures/facility_layout/accessibility/facility-layout-accessibility-raw.json",
-    "sha256": "63def7fd02fd70604fbfbb81bcfd5e45994d162eca95af262ede8e78f2cedcf0"
+    "sha256": "d53e45e894184cf5de911310aaff22bb9465f0809b184bd3f1931efbf28528bb"
   },
   "releaseGateMet": false,
   "releaseGateReason": "Automated browser evidence cannot clear the pending manual screen-reader audit.",
@@ -150,8 +150,8 @@
   "sourceBinding": {
     "aggregateMatches": true,
     "algorithmsMatch": true,
-    "capturedAggregateSha256": "083bf780b8c3ae249281362977bcddbaee1d0405f190599c86f4b0359ea95d29",
-    "currentAggregateSha256": "083bf780b8c3ae249281362977bcddbaee1d0405f190599c86f4b0359ea95d29",
+    "capturedAggregateSha256": "2d932f223aa3ff36dceeda3162fc0493c2c669df9637e7b9163ecf02f16363f8",
+    "currentAggregateSha256": "2d932f223aa3ff36dceeda3162fc0493c2c669df9637e7b9163ecf02f16363f8",
     "duplicatePaths": [],
     "matches": true,
     "missingPaths": [],

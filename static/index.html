@@ -22829,7 +22829,9 @@
             // Render the current step into the playback panel (if any)
             _trainRenderPlaybackPanel();
             if (_trainIsFacilityLayoutMode()) {
-                _trainEnsureFacilityLayoutLoaded();
+                if (!_trainFacilityAuthoringRuntimesReady()) {
+                    _trainEnsureFacilityLayoutLoaded();
+                }
             } else {
                 _trainEnsureProcessMapLoaded();
             }
@@ -23967,7 +23969,9 @@
                 }
                 trainingState.viewportMode = 'facility_layout';
                 try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
-                try { _trainEnsureFacilityLayoutLoaded(); } catch (_) {}
+                if (!_trainFacilityAuthoringRuntimesReady()) {
+                    try { _trainEnsureFacilityLayoutLoaded(); } catch (_) {}
+                }
                 try { _trainRenderFacilityLayoutViewer(); } catch (_) {}
             } else if (trainingState.type === 'assembly') {
                 trainingState.viewportMode = 'process_flow';
@@ -24536,7 +24540,9 @@
             copy.textContent = 'Rack rows, forklifts, aisles, and storage capacity are loaded from the SolidWorks facility semantic JSON.';
             wrap.appendChild(copy);
 
-            if (!trainingState.facilityLayoutData && !trainingState.facilityLayoutError) {
+            if (!trainingState.facilityLayoutData
+                    && !trainingState.facilityLayoutError
+                    && !_trainFacilityAuthoringRuntimesReady()) {
                 const loading = document.createElement('div');
                 loading.className = 'train-process-empty';
                 loading.textContent = 'Loading facility layout semantics...';

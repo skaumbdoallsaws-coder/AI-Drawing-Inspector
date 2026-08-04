@@ -89,6 +89,28 @@ check('V2 authoring does not depend on the legacy semantic fixture', () => {
         '_trainEnsureFacilityLayoutLoaded()'
     ));
 
+    const trainingStart = index.indexOf('function _renderTrainingTab()');
+    const trainingEnd = index.indexOf(
+        'function _trainBuildLeftRail()',
+        trainingStart
+    );
+    assert.ok(trainingStart >= 0 && trainingEnd > trainingStart);
+    assert.ok(index.slice(trainingStart, trainingEnd).includes(
+        'if (!_trainFacilityAuthoringRuntimesReady())'
+    ));
+
+    const panelStart = index.indexOf(
+        'function _trainAppendFacilityLayoutPanel(body)'
+    );
+    const panelEnd = index.indexOf(
+        'function _trainAppendFacilityLayoutPanelRefresh()',
+        panelStart
+    );
+    assert.ok(panelStart >= 0 && panelEnd > panelStart);
+    assert.ok(index.slice(panelStart, panelEnd).includes(
+        '&& !_trainFacilityAuthoringRuntimesReady()'
+    ));
+
     const legacyStart = index.indexOf(
         'function _trainMountLegacyFacilityLayoutViewer()'
     );

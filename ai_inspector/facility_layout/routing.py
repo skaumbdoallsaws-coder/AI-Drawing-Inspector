@@ -2037,6 +2037,32 @@ def _inside_union(
     if not traversable:
         return False
 
+    def convex(boundary: Sequence[tuple[float, float]]) -> bool:
+        direction = 0
+        for index, current in enumerate(boundary):
+            following = boundary[(index + 1) % len(boundary)]
+            after = boundary[(index + 2) % len(boundary)]
+            cross = (
+                (following[0] - current[0]) * (after[1] - following[1])
+                - (following[1] - current[1]) * (after[0] - following[0])
+            )
+            if abs(cross) <= EPSILON:
+                continue
+            current_direction = 1 if cross > 0 else -1
+            if direction and current_direction != direction:
+                return False
+            direction = current_direction
+        return direction != 0
+
+    # A convex polygon contains every segment between its contained points.
+    # This exact fast path handles ordinary rectangular aisles without
+    # constructing the more expensive general polygon-union sample set.
+    for boundary in traversable:
+        if convex(boundary) and all(
+            _point_in_polygon(point, boundary) for point in polygon
+        ):
+            return True
+
     def covered(point: tuple[float, float]) -> bool:
         return any(
             _point_in_polygon(point, boundary)

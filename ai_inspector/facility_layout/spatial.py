@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -77,6 +77,12 @@ _SUPPORTED_POLICY_RULE_TYPES = frozenset(
 
 Point2 = tuple[float, float]
 Bounds2 = tuple[float, float, float, float]
+PreparedZone = tuple[Mapping[str, Any], tuple[Point2, ...], Bounds2]
+PreparedSurface = tuple[
+    Mapping[str, Any],
+    str,
+    tuple[Point2, ...] | None,
+]
 CancelCheck = Callable[[], None]
 PreparedTransform = tuple[
     tuple[float, float, float],
@@ -271,6 +277,33 @@ def _cross(origin: Point2, left: Point2, right: Point2) -> float:
     )
 
 
+def _polygon_is_convex(polygon: Sequence[Point2]) -> bool:
+    direction = 0
+    for index, current in enumerate(polygon):
+        following = polygon[(index + 1) % len(polygon)]
+        after = polygon[(index + 2) % len(polygon)]
+        cross = _cross(current, following, after)
+        if abs(cross) <= GEOMETRY_EPSILON:
+            continue
+        current_direction = 1 if cross > 0 else -1
+        if direction and current_direction != direction:
+            return False
+        direction = current_direction
+    return direction != 0
+
+
+def _polygon_is_axis_aligned_rectangle(polygon: Sequence[Point2]) -> bool:
+    if len(polygon) != 4 or abs(polygon_area(polygon)) <= GEOMETRY_EPSILON:
+        return False
+    for index, current in enumerate(polygon):
+        following = polygon[(index + 1) % len(polygon)]
+        horizontal = abs(current[1] - following[1]) <= GEOMETRY_EPSILON
+        vertical = abs(current[0] - following[0]) <= GEOMETRY_EPSILON
+        if horizontal == vertical:
+            return False
+    return True
+
+
 def _point_on_segment(point: Point2, start: Point2, end: Point2) -> bool:
     if abs(_cross(start, end, point)) > GEOMETRY_EPSILON:
         return False
@@ -347,8 +380,19 @@ def polygon_contains_polygon(
     container: Sequence[Point2],
     subject: Sequence[Point2],
 ) -> bool:
+    if _polygon_is_axis_aligned_rectangle(container):
+        container_bounds = polygon_bounds(container)
+        subject_bounds = polygon_bounds(subject)
+        return (
+            subject_bounds[0] + GEOMETRY_EPSILON >= container_bounds[0]
+            and subject_bounds[1] + GEOMETRY_EPSILON >= container_bounds[1]
+            and subject_bounds[2] <= container_bounds[2] + GEOMETRY_EPSILON
+            and subject_bounds[3] <= container_bounds[3] + GEOMETRY_EPSILON
+        )
     if not all(point_in_polygon(point, container) for point in subject):
         return False
+    if _polygon_is_convex(container):
+        return True
     for index, start in enumerate(subject):
         end = subject[(index + 1) % len(subject)]
         for boundary_index, boundary_start in enumerate(container):
@@ -707,10 +751,14 @@ class SpatialRecord:
     enforcement: str | None = None
     evidence_status: str = "unknown"
     authoritative: bool = False
+    _bounds: Bounds2 = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_bounds", polygon_bounds(self.polygon))
 
     @property
     def bounds(self) -> Bounds2:
-        return polygon_bounds(self.polygon)
+        return self._bounds
 
     @property
     def interval(self) -> tuple[float, float]:
@@ -1178,6 +1226,13 @@ class UniformGridSpatialIndex:
 
 
 @dataclass(frozen=True)
+class _PreparedZoneScene:
+    zones: tuple[PreparedZone, ...]
+    zones_by_record_id: Mapping[str, PreparedZone]
+    index: UniformGridSpatialIndex | None
+
+
+@dataclass(frozen=True)
 class _CandidateObstacleScene:
     physical_index: UniformGridSpatialIndex | None
     clearance_index: UniformGridSpatialIndex | None
@@ -1216,11 +1271,15 @@ def _finding(
 ) -> dict[str, Any]:
     refs = sorted({str(item) for item in subject_refs if item})
     normalized_details = _canonical_value(dict(details or {}))
+    finding_payload = {
+        "code": str(code),
+        "details": normalized_details,
+        "subjectRefs": refs,
+        "spatialEngineVersion": SPATIAL_ENGINE_VERSION,
+    }
     return {
-        "findingId": stable_finding_id(
-            code,
-            subject_refs=refs,
-            details=normalized_details,
+        "findingId": (
+            f"fsf-{_validated_document_fingerprint(finding_payload)[:24]}"
         ),
         "findingType": "facility_spatial",
         "severity": severity,
@@ -1258,6 +1317,10 @@ def _layout_placement_records(
     placements = layout.get("placements")
     if not isinstance(placements, list):
         return records, findings
+    templates_by_asset: dict[
+        tuple[str, str],
+        tuple[tuple[tuple[Point2, ...], ...], tuple[float, float]],
+    ] = {}
     for placement in sorted(
         (item for item in placements if isinstance(item, Mapping)),
         key=lambda item: str(item.get("placementId") or ""),
@@ -1278,7 +1341,24 @@ def _layout_placement_records(
             )
             continue
         try:
-            records[placement_id] = placement_spatial_records(placement, asset)
+            key = (asset_id, revision)
+            templates = templates_by_asset.get(key)
+            if templates is None:
+                templates = (
+                    _local_footprints(asset),
+                    _local_height_interval(asset),
+                )
+                templates_by_asset[key] = templates
+            transform = placement.get("transform")
+            if not isinstance(transform, Mapping):
+                raise ValueError("placement transform is missing")
+            records[placement_id] = _placement_spatial_records_from_template(
+                placement,
+                asset_id,
+                templates[0],
+                templates[1],
+                prepared_transform=_prepare_transform(transform),
+            )
         except (TypeError, ValueError) as exc:
             findings.append(
                 _finding(
@@ -1372,6 +1452,8 @@ def _shell_obstacle_collisions(
 def _placement_polygon(
     records: Sequence[SpatialRecord],
 ) -> tuple[Point2, ...]:
+    if len(records) == 1:
+        return records[0].polygon
     points = [point for record in records for point in record.polygon]
     return _convex_hull(points)
 
@@ -1386,24 +1468,10 @@ def _zone_candidates(layout: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     )
 
 
-def _zone_checks(
-    layout: Mapping[str, Any],
-    placement: Mapping[str, Any],
-    asset: Mapping[str, Any],
-    records: Sequence[SpatialRecord],
-) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
-    zones = _zone_candidates(layout)
-    if not zones:
-        return [], ()
-    placement_id = str(placement.get("placementId") or "")
-    category = str(_asset_field(asset, "category", "") or "")
-    subject = _placement_polygon(records)
-    minimum_y = min(record.minimum_y for record in records)
-    maximum_y = max(record.maximum_y for record in records)
-    parsed: list[tuple[Mapping[str, Any], tuple[Point2, ...]]] = []
-    prohibited: list[Mapping[str, Any]] = []
-    operational: list[tuple[Mapping[str, Any], tuple[Point2, ...]]] = []
-    for zone in zones:
+def _prepare_zones(layout: Mapping[str, Any]) -> _PreparedZoneScene:
+    prepared = []
+    records = []
+    for zone in _zone_candidates(layout):
         try:
             boundary = _polygon(
                 zone.get("boundary"),
@@ -1411,13 +1479,69 @@ def _zone_checks(
             )
         except (TypeError, ValueError):
             continue
-        parsed.append((zone, boundary))
+        item = (zone, boundary, polygon_bounds(boundary))
+        record_id = f"zone:{len(prepared):06d}"
+        prepared.append(item)
+        records.append(
+            SpatialRecord(
+                record_id=record_id,
+                owner_id=record_id,
+                asset_id="",
+                polygon=boundary,
+                minimum_y=0.0,
+                maximum_y=0.0,
+                record_kind="zone",
+            )
+        )
+    zones = tuple(prepared)
+    return _PreparedZoneScene(
+        zones=zones,
+        zones_by_record_id={
+            record.record_id: item
+            for record, item in zip(records, zones)
+        },
+        index=UniformGridSpatialIndex(records) if records else None,
+    )
+
+
+def _zone_checks(
+    layout: Mapping[str, Any],
+    placement: Mapping[str, Any],
+    asset: Mapping[str, Any],
+    records: Sequence[SpatialRecord],
+    *,
+    prepared_zones: _PreparedZoneScene | None = None,
+) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
+    scene = prepared_zones or _prepare_zones(layout)
+    zones = scene.zones
+    if not zones:
+        return [], ()
+    placement_id = str(placement.get("placementId") or "")
+    category = str(_asset_field(asset, "category", "") or "")
+    subject = _placement_polygon(records)
+    subject_bounds = polygon_bounds(subject)
+    candidate_zones = (
+        tuple(
+            scene.zones_by_record_id[record_id]
+            for record_id in scene.index.query(subject_bounds)
+        )
+        if scene.index is not None
+        else ()
+    )
+    minimum_y = min(record.minimum_y for record in records)
+    maximum_y = max(record.maximum_y for record in records)
+    prohibited: list[Mapping[str, Any]] = []
+    operational: list[PreparedZone] = []
+    for zone, boundary, boundary_bounds in candidate_zones:
         zone_type = str(zone.get("zoneType") or "")
         if zone_type in _NON_PLACEMENT_ZONE_TYPES:
-            if polygons_intersect(boundary, subject):
+            if (
+                bounds_intersect(boundary_bounds, subject_bounds)
+                and polygons_intersect(boundary, subject)
+            ):
                 prohibited.append(zone)
             continue
-        operational.append((zone, boundary))
+        operational.append((zone, boundary, boundary_bounds))
     if prohibited:
         return [
             _finding(
@@ -1445,11 +1569,17 @@ def _zone_checks(
         ], ()
     # Non-placement zones constrain occupancy but are never fallback
     # containment zones for equipment.
-    if not operational:
+    if not any(
+        str(zone.get("zoneType") or "") not in _NON_PLACEMENT_ZONE_TYPES
+        for zone, _, _ in zones
+    ):
         return [], ()
     contained: list[Mapping[str, Any]] = []
-    for zone, boundary in operational:
-        if polygon_contains_polygon(boundary, subject):
+    for zone, boundary, boundary_bounds in operational:
+        if (
+            bounds_intersect(boundary_bounds, subject_bounds)
+            and polygon_contains_polygon(boundary, subject)
+        ):
             setback_values = zone.get("edgeSetbacks")
             setback = (
                 max(
@@ -1577,11 +1707,32 @@ def _surface_boundary(feature: Mapping[str, Any]) -> tuple[Point2, ...] | None:
         return None
 
 
+def _prepare_mounting_surfaces(
+    shell: Mapping[str, Any] | None,
+) -> tuple[PreparedSurface, ...]:
+    if not isinstance(shell, Mapping):
+        return ()
+    features = shell.get("features")
+    if not isinstance(features, list):
+        return ()
+    return tuple(
+        (
+            feature,
+            _surface_kind(feature),
+            _surface_boundary(feature),
+        )
+        for feature in features
+        if isinstance(feature, Mapping)
+    )
+
+
 def _mounting_checks(
     placement: Mapping[str, Any],
     asset: Mapping[str, Any],
     records: Sequence[SpatialRecord],
     shell: Mapping[str, Any] | None,
+    *,
+    prepared_surfaces: Sequence[PreparedSurface] | None = None,
 ) -> list[dict[str, Any]]:
     placement_id = str(placement.get("placementId") or "")
     reference = _mounting_reference(placement)
@@ -1615,14 +1766,15 @@ def _mounting_checks(
                 details={"requestedSurfaceKind": requested_kind},
             )
         ]
-    features = shell.get("features")
-    if not isinstance(features, list):
-        features = []
+    surfaces = (
+        tuple(prepared_surfaces)
+        if prepared_surfaces is not None
+        else _prepare_mounting_surfaces(shell)
+    )
     matching = [
-        feature
-        for feature in features
-        if isinstance(feature, Mapping)
-        and _surface_kind(feature) == requested_kind
+        (feature, boundary)
+        for feature, surface_kind, boundary in surfaces
+        if surface_kind == requested_kind
         and (
             reference["featureId"] is None
             or feature.get("featureId") == reference["featureId"]
@@ -1644,8 +1796,8 @@ def _mounting_checks(
     footprint = _placement_polygon(records)
     containing = [
         feature
-        for feature in matching
-        if (boundary := _surface_boundary(feature)) is not None
+        for feature, boundary in matching
+        if boundary is not None
         and polygon_contains_polygon(boundary, footprint)
     ]
     if not containing:
@@ -1847,13 +1999,16 @@ def _floor_load_checks(
     containing_zone_ids: Sequence[str],
     layout: Mapping[str, Any],
     evidence_authority: Mapping[str, Any],
+    *,
+    zone_by_id: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     placement_id = str(placement.get("placementId") or "")
-    zone_by_id = {
-        str(zone.get("zoneId")): zone
-        for zone in _zone_candidates(layout)
-        if zone.get("zoneId")
-    }
+    if zone_by_id is None:
+        zone_by_id = {
+            str(zone.get("zoneId")): zone
+            for zone in _zone_candidates(layout)
+            if zone.get("zoneId")
+        }
     applicable = [
         zone_by_id[zone_id]
         for zone_id in containing_zone_ids
@@ -2004,12 +2159,6 @@ def _clearance_checks(
     records_by_placement: Mapping[str, tuple[SpatialRecord, ...]],
     evidence_authority: Mapping[str, str],
 ) -> tuple[list[dict[str, Any]], int]:
-    physical = tuple(
-        record
-        for records in records_by_placement.values()
-        for record in records
-    )
-    index = UniformGridSpatialIndex(physical)
     placement_by_id = {
         str(item.get("placementId")): item
         for item in layout.get("placements", [])
@@ -2017,23 +2166,84 @@ def _clearance_checks(
     }
     findings: list[dict[str, Any]] = []
     conflict_count = 0
+    templates_by_asset: dict[
+        tuple[str, str],
+        tuple[
+            tuple[
+                str,
+                tuple[Point2, ...],
+                tuple[float, float],
+                str,
+                str,
+                str,
+                bool,
+            ],
+            ...,
+        ],
+    ] = {}
+    prepared = []
     for placement_id in sorted(placement_by_id):
         placement = placement_by_id[placement_id]
+        asset_id = str(placement.get("assetId") or "")
+        revision = str(placement.get("assetDefinitionRevision") or "")
         asset = _catalog_asset(
             catalog,
-            str(placement.get("assetId") or ""),
-            str(placement.get("assetDefinitionRevision") or ""),
+            asset_id,
+            revision,
         )
         if asset is None:
             continue
         raw_clearances = _asset_field(asset, "clearances", [])
         if isinstance(raw_clearances, Mapping):
             raw_clearances = raw_clearances.get("items", [])
-        clearance_records = _placement_clearance_records(
-            placement,
-            asset,
-            evidence_authority,
+        key = (asset_id, revision)
+        templates = templates_by_asset.get(key)
+        if templates is None:
+            templates = _clearance_templates(asset, evidence_authority)
+            templates_by_asset[key] = templates
+        defined_count = (
+            len(raw_clearances) if isinstance(raw_clearances, list) else 0
         )
+        prepared.append(
+            (
+                placement_id,
+                placement,
+                asset_id,
+                templates,
+                defined_count,
+            )
+        )
+    if prepared and not any(item[3] for item in prepared):
+        return [
+            _finding(
+                "clearance_rule_unavailable",
+                "unverified",
+                "Authoritative safety-clearance evidence is unavailable.",
+                subject_refs=(placement_id,),
+                details={"definedClearanceCount": defined_count},
+            )
+            for placement_id, _, _, _, defined_count in prepared
+        ], 0
+
+    physical = tuple(
+        record
+        for records in records_by_placement.values()
+        for record in records
+    )
+    index = UniformGridSpatialIndex(physical)
+    for placement_id, placement, asset_id, templates, defined_count in prepared:
+        if templates:
+            transform = placement.get("transform")
+            if not isinstance(transform, Mapping):
+                raise ValueError("placement transform is missing")
+            clearance_records = _placement_clearance_records_from_templates(
+                placement,
+                asset_id,
+                templates,
+                prepared_transform=_prepare_transform(transform),
+            )
+        else:
+            clearance_records = ()
         safety_records = tuple(
             record
             for record in clearance_records
@@ -2049,11 +2259,7 @@ def _clearance_checks(
                     "unverified",
                     "Authoritative safety-clearance evidence is unavailable.",
                     subject_refs=(placement_id,),
-                    details={
-                        "definedClearanceCount": (
-                            len(raw_clearances) if isinstance(raw_clearances, list) else 0
-                        )
-                    },
+                    details={"definedClearanceCount": defined_count},
                 )
             )
         for clearance in clearance_records:
@@ -2205,6 +2411,17 @@ def _policy_checks(
         for item in policy_set.get("deterministicRules", [])
         if isinstance(item, Mapping)
     ]
+    if not rules:
+        return [
+            _finding(
+                "policy_rule_unavailable",
+                "unverified",
+                "No supported authoritative policy rule applies to this placement.",
+                subject_refs=(placement_id,),
+                details={"reason": "applicable_policy_missing"},
+            )
+            for placement_id in sorted(records_by_placement)
+        ]
     zones = {
         str(item.get("zoneId")): item
         for item in layout.get("zones", [])
@@ -2470,6 +2687,8 @@ def diagnose_layout(
     policy_set: Mapping[str, Any] | None = None,
     evidence_authority: Mapping[str, Any] | Iterable[str] | None = None,
     cancel_check: CancelCheck | None = None,
+    _prepared_zones: _PreparedZoneScene | None = None,
+    _prepared_surfaces: Sequence[PreparedSurface] | None = None,
 ) -> dict[str, Any]:
     """Return authoritative deterministic spatial findings for a layout."""
 
@@ -2489,6 +2708,17 @@ def diagnose_layout(
         for item in layout.get("placements", [])
         if isinstance(item, Mapping) and item.get("placementId")
     }
+    prepared_zones = _prepared_zones or _prepare_zones(layout)
+    zone_by_id = {
+        str(zone.get("zoneId")): zone
+        for zone, _, _ in prepared_zones.zones
+        if zone.get("zoneId")
+    }
+    prepared_surfaces = (
+        tuple(_prepared_surfaces)
+        if _prepared_surfaces is not None
+        else _prepare_mounting_surfaces(shell)
+    )
     zone_membership: dict[str, tuple[str, ...]] = {}
     for placement_id in sorted(records_by_placement):
         _check_cancel(cancel_check)
@@ -2505,6 +2735,7 @@ def diagnose_layout(
             placement,
             asset,
             records_by_placement[placement_id],
+            prepared_zones=prepared_zones,
         )
         findings.extend(zone_findings)
         zone_membership[placement_id] = zone_ids
@@ -2514,6 +2745,7 @@ def diagnose_layout(
                 asset,
                 records_by_placement[placement_id],
                 shell,
+                prepared_surfaces=prepared_surfaces,
             )
         )
         findings.extend(
@@ -2523,6 +2755,7 @@ def diagnose_layout(
                 zone_ids,
                 layout,
                 authority,
+                zone_by_id=zone_by_id,
             )
         )
     clearance_findings, clearance_count = _clearance_checks(
@@ -3634,6 +3867,14 @@ def generate_placement_candidates(
     evaluated = []
     rejection_counts: dict[str, int] = {}
     baseline_metrics: dict[str, Any] | None = None
+    candidate_zone_scene = _prepare_zones(candidate_context)
+    candidate_surfaces = _prepare_mounting_surfaces(shell)
+    candidate_footprints = _local_footprints(asset_definition)
+    candidate_height_interval = _local_height_interval(asset_definition)
+    candidate_clearance_templates = _clearance_templates(
+        asset_definition,
+        authority,
+    )
     for family, position, relationship in selected_seeds:
         _check_cancel(cancel_check)
         candidate_y = (
@@ -3672,6 +3913,8 @@ def generate_placement_candidates(
             policy_set=policy_set,
             evidence_authority=evidence_authority,
             cancel_check=cancel_check,
+            _prepared_zones=candidate_zone_scene,
+            _prepared_surfaces=candidate_surfaces,
         )
         candidate_transform = placement.get("transform")
         if not isinstance(candidate_transform, Mapping):
@@ -3680,14 +3923,14 @@ def generate_placement_candidates(
         candidate_records = _placement_spatial_records_from_template(
             placement,
             asset_id,
-            _local_footprints(asset_definition),
-            _local_height_interval(asset_definition),
+            candidate_footprints,
+            candidate_height_interval,
             prepared_transform=prepared_candidate_transform,
         )
         candidate_clearances = _placement_clearance_records_from_templates(
             placement,
             asset_id,
-            _clearance_templates(asset_definition, authority),
+            candidate_clearance_templates,
             prepared_transform=prepared_candidate_transform,
         )
         findings = list(diagnostics.get("findings", []))

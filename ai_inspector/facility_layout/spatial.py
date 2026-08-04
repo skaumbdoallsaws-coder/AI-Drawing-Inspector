@@ -26,6 +26,7 @@ DEFAULT_GRID_SPACING_METERS = 0.25
 GEOMETRY_EPSILON = 1.0e-9
 _CANDIDATE_OBSTACLE_CACHE_LIMIT = 8
 _CANDIDATE_RESULT_CACHE_LIMIT = 32
+_CANDIDATE_ZONE_CACHE_LIMIT = 16
 
 _EVIDENCE_STATES = frozenset({"authored", "derived", "inferred", "unknown"})
 _AUTHORITATIVE_EVIDENCE_STATES = frozenset({"authored", "derived"})
@@ -1245,6 +1246,8 @@ _CANDIDATE_OBSTACLE_CACHE: OrderedDict[
 _CANDIDATE_OBSTACLE_CACHE_LOCK = RLock()
 _CANDIDATE_RESULT_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _CANDIDATE_RESULT_CACHE_LOCK = RLock()
+_CANDIDATE_ZONE_CACHE: OrderedDict[str, _PreparedZoneScene] = OrderedDict()
+_CANDIDATE_ZONE_CACHE_LOCK = RLock()
 
 
 def brute_force_query(
@@ -1502,6 +1505,33 @@ def _prepare_zones(layout: Mapping[str, Any]) -> _PreparedZoneScene:
         },
         index=UniformGridSpatialIndex(records) if records else None,
     )
+
+
+def _candidate_zone_scene(
+    layout: Mapping[str, Any],
+    *,
+    layout_fingerprint: str,
+) -> _PreparedZoneScene:
+    with _CANDIDATE_ZONE_CACHE_LOCK:
+        cached = _CANDIDATE_ZONE_CACHE.get(layout_fingerprint)
+        if cached is not None:
+            _CANDIDATE_ZONE_CACHE.move_to_end(layout_fingerprint)
+            return cached
+    # The cache owns a canonical copy so later caller mutation cannot alter a
+    # scene retained under an earlier fingerprint.
+    compiled = _prepare_zones(
+        {"zones": _canonical_value(layout.get("zones", []))}
+    )
+    with _CANDIDATE_ZONE_CACHE_LOCK:
+        existing = _CANDIDATE_ZONE_CACHE.get(layout_fingerprint)
+        if existing is not None:
+            _CANDIDATE_ZONE_CACHE.move_to_end(layout_fingerprint)
+            return existing
+        _CANDIDATE_ZONE_CACHE[layout_fingerprint] = compiled
+        _CANDIDATE_ZONE_CACHE.move_to_end(layout_fingerprint)
+        while len(_CANDIDATE_ZONE_CACHE) > _CANDIDATE_ZONE_CACHE_LIMIT:
+            _CANDIDATE_ZONE_CACHE.popitem(last=False)
+    return compiled
 
 
 def _zone_checks(
@@ -3016,12 +3046,18 @@ def _family_seed_candidates(
     *,
     shell: Mapping[str, Any] | None,
     enabled_families: frozenset[str],
+    prepared_zones: _PreparedZoneScene | None = None,
+    local_footprints: tuple[tuple[Point2, ...], ...] | None = None,
 ) -> list[tuple[str, Point2, dict[str, Any] | None]]:
     seeds: list[tuple[str, Point2, dict[str, Any] | None]] = []
-    zones = _zone_candidates(layout)
+    zone_entries = (
+        prepared_zones.zones
+        if prepared_zones is not None
+        else _prepare_zones(layout).zones
+    )
     grid_values = [
         _number(zone.get("gridSpacing"), "zone.gridSpacing")
-        for zone in zones
+        for zone, _, _ in zone_entries
         if zone.get("gridSpacing") is not None
     ]
     grid = min(grid_values) if grid_values else DEFAULT_GRID_SPACING_METERS
@@ -3037,8 +3073,9 @@ def _family_seed_candidates(
             )
         )
 
+    footprints = local_footprints or _local_footprints(asset)
     local_bounds = bounds_union(
-        [polygon_bounds(polygon) for polygon in _local_footprints(asset)]
+        [polygon_bounds(polygon) for polygon in footprints]
     )
     local_center = (
         (local_bounds[0] + local_bounds[2]) / 2.0,
@@ -3046,15 +3083,11 @@ def _family_seed_candidates(
     )
     inset = max(
         math.hypot(point[0] - local_center[0], point[1] - local_center[1])
-        for polygon in _local_footprints(asset)
+        for polygon in footprints
         for point in polygon
     ) + 0.01
-    for zone in zones:
+    for zone, boundary, _ in zone_entries:
         zone_id = str(zone.get("zoneId") or "")
-        try:
-            boundary = _polygon(zone.get("boundary"), f"zone[{zone_id}].boundary")
-        except (TypeError, ValueError):
-            continue
         if "boundary" in enabled_families:
             for edge_index, start in enumerate(boundary):
                 end = boundary[(edge_index + 1) % len(boundary)]
@@ -3287,9 +3320,27 @@ def _candidate_seed_budget(
     values: Sequence[tuple[str, Point2, dict[str, Any] | None]],
     requested: Point2,
     maximum_candidates: int,
-) -> tuple[tuple[str, Point2, dict[str, Any] | None], ...]:
-    decorated = [
-        (
+) -> tuple[
+    tuple[tuple[str, Point2, dict[str, Any] | None], ...],
+    int,
+]:
+    deduplicated: dict[
+        tuple[str, float, float, bytes],
+        tuple[
+            tuple[str, Point2, dict[str, Any] | None],
+            float,
+            bytes,
+        ],
+    ] = {}
+    for item in values:
+        encoded = canonical_spatial_bytes(item[2])
+        key = (
+            item[0],
+            _rounded(item[1][0]),
+            _rounded(item[1][1]),
+            encoded,
+        )
+        deduplicated[key] = (
             item,
             _rounded(
                 math.hypot(
@@ -3297,10 +3348,9 @@ def _candidate_seed_budget(
                     item[1][1] - requested[1],
                 )
             ),
-            canonical_spatial_bytes(item[2]),
+            encoded,
         )
-        for item in values
-    ]
+    decorated = list(deduplicated.values())
     ordered = [
         item
         for item, _, _ in sorted(
@@ -3327,7 +3377,7 @@ def _candidate_seed_budget(
         ),
     )
     if len(ordered) <= budget:
-        return tuple(ordered)
+        return tuple(ordered), len(decorated)
     selected: list[tuple[str, Point2, dict[str, Any] | None]] = []
     selected_keys: set[tuple[str, float, float, bytes]] = set()
     for family in sorted(
@@ -3366,7 +3416,7 @@ def _candidate_seed_budget(
         selected_keys.add(key)
         if len(selected) >= budget:
             break
-    return tuple(selected)
+    return tuple(selected), len(decorated)
 
 
 def _candidate_cross_findings(
@@ -3843,33 +3893,29 @@ def generate_placement_candidates(
     )
     base_physical_index = obstacle_scene.physical_index
     base_clearance_index = obstacle_scene.clearance_index
+    candidate_zone_scene = _candidate_zone_scene(
+        candidate_context,
+        layout_fingerprint=base_layout_fingerprint,
+    )
+    candidate_footprints = _local_footprints(asset_definition)
     seeds = _family_seed_candidates(
         layout,
         asset_definition,
         requested,
         shell=shell,
         enabled_families=family_set,
+        prepared_zones=candidate_zone_scene,
+        local_footprints=candidate_footprints,
     )
-    deduplicated: dict[tuple[str, float, float, bytes], tuple[str, Point2, dict[str, Any] | None]] = {}
-    for family, position, relationship in seeds:
-        key = (
-            family,
-            _rounded(position[0]),
-            _rounded(position[1]),
-            canonical_spatial_bytes(relationship),
-        )
-        deduplicated[key] = (family, position, relationship)
-    selected_seeds = _candidate_seed_budget(
-        tuple(deduplicated.values()),
+    selected_seeds, seed_count = _candidate_seed_budget(
+        seeds,
         requested,
         maximum_candidates,
     )
     evaluated = []
     rejection_counts: dict[str, int] = {}
     baseline_metrics: dict[str, Any] | None = None
-    candidate_zone_scene = _prepare_zones(candidate_context)
     candidate_surfaces = _prepare_mounting_surfaces(shell)
-    candidate_footprints = _local_footprints(asset_definition)
     candidate_height_interval = _local_height_interval(asset_definition)
     candidate_clearance_templates = _clearance_templates(
         asset_definition,
@@ -4025,7 +4071,7 @@ def generate_placement_candidates(
             family_set,
             key=lambda item: _CANDIDATE_FAMILY_ORDER[item],
         ),
-        "seedCount": len(deduplicated),
+        "seedCount": seed_count,
         "evaluatedCount": len(selected_seeds),
         "rejectionCounts": {
             key: rejection_counts[key] for key in sorted(rejection_counts)

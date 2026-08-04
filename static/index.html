@@ -23131,6 +23131,7 @@
         function _trainEnsureFacilityLayoutLoaded() {
             if (trainingState.facilityLayoutData) return Promise.resolve(trainingState.facilityLayoutData);
             if (trainingState.facilityLayoutLoadPromise) return trainingState.facilityLayoutLoadPromise;
+            if (trainingState.facilityLayoutError) return Promise.resolve(null);
             trainingState.facilityLayoutError = null;
             trainingState.facilityLayoutLoadPromise = fetch(trainingState.facilityLayoutSemanticUrl, { cache: 'no-store' })
                 .then(res => {
@@ -27512,9 +27513,6 @@
             if (!host) return false;
             if (!_trainIsFacilityLayoutMode()) return false;
             trainingState.viewportMode = 'facility_layout';
-            if (!trainingState.facilityLayoutData && !trainingState.facilityLayoutLoadPromise) {
-                _trainEnsureFacilityLayoutLoaded();
-            }
             return _trainMountFacilityLayoutViewer();
         }
 
@@ -27522,6 +27520,16 @@
         let _trainFacilityLayoutMountGeneration = 0;
         let _trainFacilityThreeRuntimePromise = null;
         let _trainFacilityRendererPool = null;
+
+        function _trainFacilityAuthoringRuntimesReady() {
+            return !!(
+                window.InspectorProFacilityApp
+                && window.InspectorProFacilityTransport
+                && window.InspectorProFacilitySession
+                && window.InspectorProFacilityWorkspace
+                && window.InspectorProFacilityLayout
+            );
+        }
 
         function _trainLoadFacilityThreeRuntime() {
             if (_trainFacilityThreeRuntimePromise) {
@@ -27558,11 +27566,7 @@
         async function _trainMountFacilityLayoutViewer() {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
-            const runtimesReady = window.InspectorProFacilityApp
-                && window.InspectorProFacilityTransport
-                && window.InspectorProFacilitySession
-                && window.InspectorProFacilityWorkspace
-                && window.InspectorProFacilityLayout;
+            const runtimesReady = _trainFacilityAuthoringRuntimesReady();
             if (!runtimesReady) return _trainMountLegacyFacilityLayoutViewer();
             if (_trainFacilityLayoutAuthoringApp) {
                 const appState = _trainFacilityLayoutAuthoringApp.getState();
@@ -27671,6 +27675,11 @@
         function _trainMountLegacyFacilityLayoutViewer() {
             const host = document.getElementById('trainViewportHost');
             if (!host) return false;
+            if (!trainingState.facilityLayoutData
+                    && !trainingState.facilityLayoutLoadPromise
+                    && !trainingState.facilityLayoutError) {
+                _trainEnsureFacilityLayoutLoaded();
+            }
             const desiredViewerId = '__facility_layout_assem3__';
             const existing = document.getElementById('assy-3d-container');
             state._assyAutoRotate = false;

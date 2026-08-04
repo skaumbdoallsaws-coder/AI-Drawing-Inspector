@@ -68,6 +68,36 @@ check('behavioral recovery and corrupt-asset tests remain present', () => {
     ));
 });
 
+check('V2 authoring does not depend on the legacy semantic fixture', () => {
+    const index = source('static/index.html');
+    assert.ok(index.includes(
+        'if (trainingState.facilityLayoutError) return Promise.resolve(null);'
+    ));
+    assert.ok(index.includes(
+        'const runtimesReady = _trainFacilityAuthoringRuntimesReady();'
+    ));
+
+    const renderStart = index.indexOf(
+        'function _trainRenderFacilityLayoutViewer()'
+    );
+    const renderEnd = index.indexOf(
+        'let _trainFacilityLayoutAuthoringApp',
+        renderStart
+    );
+    assert.ok(renderStart >= 0 && renderEnd > renderStart);
+    assert.ok(!index.slice(renderStart, renderEnd).includes(
+        '_trainEnsureFacilityLayoutLoaded()'
+    ));
+
+    const legacyStart = index.indexOf(
+        'function _trainMountLegacyFacilityLayoutViewer()'
+    );
+    assert.ok(legacyStart >= 0);
+    assert.ok(index.slice(legacyStart, legacyStart + 600).includes(
+        '_trainEnsureFacilityLayoutLoaded()'
+    ));
+});
+
 check('pilot runbook carries the mandatory safety disclaimer', () => {
     const runbook = source('docs/facility-layout-p11-pilot-runbook.md');
     const disclaimer = [
@@ -78,4 +108,4 @@ check('pilot runbook carries the mandatory safety disclaimer', () => {
     assert.ok(runbook.replace(/\r?\n/g, ' ').includes(disclaimer));
 });
 
-console.log(`${passed}/4 facility layout P11 contract checks passed`);
+console.log(`${passed}/5 facility layout P11 contract checks passed`);

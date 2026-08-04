@@ -3200,7 +3200,7 @@
     "pythonImplementation": "CPython",
     "pythonVersion": "3.14.0"
   },
-  "generatedAtUtc": "2026-07-30T04:28:53Z",
+  "generatedAtUtc": "2026-08-04T19:42:14Z",
   "humanLegalApproval": {
     "approved": false,
     "legalClearanceClaimed": false,
@@ -3417,11 +3417,11 @@
   "schemaVersion": "facility-layout-python-dependency-inventory-v1",
   "sourceBinding": {
     "algorithm": "sha256",
-    "combinedSha256": "e77215c95ab770c12389604053c221af3f416d90c5fecc4f779a689cf195325c",
+    "combinedSha256": "0b4a4f4f8e177bb96cde9f2ede9e809fed36de5d2f19c1fee6e78275a501c9b3",
     "generator": {
-      "byteLength": 32953,
+      "byteLength": 33921,
       "path": "tools/inventory_facility_python_dependencies.py",
-      "sha256": "3bc0f9899d863a20245c143682cad44a8a26e80f6e2284bb3e7a42d18c2e69bb"
+      "sha256": "b73a5d0c855a34f07aa171ab192e5c3dccb47eb497461c794621f7534463c026"
     },
     "requirements": {
       "byteLength": 1257,

@@ -21,11 +21,11 @@
     "python_distribution_inventory_gate_not_met",
     "python_distribution_legal_clearance_not_recorded",
     "python_distribution_machine_assessment_blocked",
-    "real_soak_build_changed"
+    "real_soak_not_started"
   ],
   "evidenceGenerationPassed": true,
-  "generatedAtUtc": "2026-08-04T18:11:51Z",
-  "literalTimeBoundStatus": "build_changed",
+  "generatedAtUtc": "2026-08-04T19:44:07Z",
+  "literalTimeBoundStatus": "not_started",
   "releaseGateMet": false,
   "safetyDisclaimer": "InspectorPro assists industrial layout planning and validation. It does not replace required facility, safety, regulatory, or professional engineering approval.",
   "schemaVersion": "facility-layout-p11-release-evidence-v1",
@@ -51,7 +51,7 @@
     "licensing": "blocked",
     "makerChecker": "passed",
     "performance": "standard_hardware_passed_minimum_pending",
-    "realSoak": "build_changed",
+    "realSoak": "not_started",
     "rollback": "passed",
     "securitySuites": "passed",
     "visual": "passed",
@@ -59,14 +59,14 @@
   },
   "source": {
     "authorizationContract": {
-      "byteLength": 6101,
+      "byteLength": 6358,
       "path": "static/contracts/facility-layout-authorization-v1.json",
-      "sha256": "ad6ab3b0e5427a2ba6239860bd9a078c23a27ca348e2781a3a67e40d7e0fa1c2"
+      "sha256": "e154abe514a2c913b106644b715d86e4d9267d3b1a048732cfbb3e2ed1fb10b9"
     },
     "verifier": {
-      "byteLength": 108471,
+      "byteLength": 111622,
       "path": "tools/verify_facility_layout_p11.py",
-      "sha256": "8dd87d022fd8364b1652f6f9d8735a71b42062c3ee7f8bf6e78e7fa72c19eab9"
+      "sha256": "d2d2db756fe19efdec049c1c3a63f616eebbbf89814cd5c9bfea912bcff2fb57"
     }
   },
   "status": "blocked"

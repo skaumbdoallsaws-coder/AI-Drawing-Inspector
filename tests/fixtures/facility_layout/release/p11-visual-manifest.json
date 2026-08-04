@@ -1,15 +1,15 @@
 {
   "artifacts": [
     {
-      "byteLength": 175713,
+      "byteLength": 161994,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 1080,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-light.png",
-      "sampledColorCount": 931,
+      "sampledColorCount": 889,
       "scope": "facility_layout_workspace",
-      "sha256": "cb12ba0b43041ac588a50d1fc434b7b9579dc63dddd04c367337c2a496917481",
+      "sha256": "009456255359408f975190cd6323d88c2d68ccee07db87aeb33a929bb62b61ff",
       "sourceMatchesArtifact": true,
       "theme": "light",
       "viewport": {
@@ -19,15 +19,15 @@
       "width": 1920
     },
     {
-      "byteLength": 179342,
+      "byteLength": 157345,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 1080,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-dark.png",
-      "sampledColorCount": 1374,
+      "sampledColorCount": 1305,
       "scope": "facility_layout_workspace",
-      "sha256": "b97e75cd67e34ee91fbd6a2bc0d7106c2783bb2f073cc362293d74c822ad5496",
+      "sha256": "13caf69603f412425ee755ee7bfdc1b6fe343cc3c2cfd2b701084feb4239e9d5",
       "sourceMatchesArtifact": true,
       "theme": "dark",
       "viewport": {
@@ -37,15 +37,15 @@
       "width": 1920
     },
     {
-      "byteLength": 159608,
+      "byteLength": 153359,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 960,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-light.png",
-      "sampledColorCount": 1087,
+      "sampledColorCount": 1091,
       "scope": "facility_layout_workspace",
-      "sha256": "c8568ede0524ebf78900ffb67076c733d763d826d2c37b2e224029f32b97bfea",
+      "sha256": "9e47e3a6ae59e96c671e02cb6e5f09a48f3b5e2a2d61716486244023177b36f7",
       "sourceMatchesArtifact": true,
       "theme": "light",
       "viewport": {
@@ -55,15 +55,15 @@
       "width": 1440
     },
     {
-      "byteLength": 160738,
+      "byteLength": 149307,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 960,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-dark.png",
-      "sampledColorCount": 1539,
+      "sampledColorCount": 1493,
       "scope": "facility_layout_workspace",
-      "sha256": "ed4a72917becf9720259901e98d5132f82f3f84e693a1e41a6a13db2626e42ad",
+      "sha256": "28113e92c733410b91ed9b4a62538758c308b5461545049275446309dcc21507",
       "sourceMatchesArtifact": true,
       "theme": "dark",
       "viewport": {
@@ -73,15 +73,15 @@
       "width": 1440
     },
     {
-      "byteLength": 142092,
+      "byteLength": 140102,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 768,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-light.png",
-      "sampledColorCount": 1227,
+      "sampledColorCount": 1210,
       "scope": "facility_layout_workspace",
-      "sha256": "4b94597674ea7966a25728321ee28f42e92248cb09ef55663fbe33814f639aa7",
+      "sha256": "09c6367f90c420a8f04073ee6d823f162496dffc383677b123cea768bc15ea4d",
       "sourceMatchesArtifact": true,
       "theme": "light",
       "viewport": {
@@ -91,15 +91,15 @@
       "width": 1366
     },
     {
-      "byteLength": 140038,
+      "byteLength": 137696,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 768,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-dark.png",
-      "sampledColorCount": 1645,
+      "sampledColorCount": 1644,
       "scope": "facility_layout_workspace",
-      "sha256": "8bb0b4acc43f9bf6682fdd2fdbc6f9af5210becbe2cdae92f5c1e1a6291c8271",
+      "sha256": "a1ef2abc31aae5f9775e6aaf08361583a967bd62eb72721811bc2421122c07c4",
       "sourceMatchesArtifact": true,
       "theme": "dark",
       "viewport": {
@@ -109,15 +109,15 @@
       "width": 1366
     },
     {
-      "byteLength": 39227,
+      "byteLength": 39112,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 844,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-light.png",
-      "sampledColorCount": 1396,
+      "sampledColorCount": 1395,
       "scope": "facility_layout_workspace",
-      "sha256": "4572da4b36a75d2ea94cc884d38f65562f56cfb5b4a2f88f2e8707bb65580418",
+      "sha256": "68fe259b35f6cce7c200ee3c839e5e03f9e24ec6f229b530d94d32514af6a506",
       "sourceMatchesArtifact": true,
       "theme": "light",
       "viewport": {
@@ -127,15 +127,15 @@
       "width": 390
     },
     {
-      "byteLength": 39349,
+      "byteLength": 39269,
       "captureChecksPassed": true,
       "capturePassed": true,
       "height": 844,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-dark.png",
-      "sampledColorCount": 1640,
+      "sampledColorCount": 1648,
       "scope": "facility_layout_workspace",
-      "sha256": "ad7ba66c08794bc94c27f0b09f4bf834a75b33a07b3775cfe8093335735f8bbf",
+      "sha256": "b6e262597d0fdc6b047a8ccea11fd98a5cc13f6783f1cc219e4b5ba6d630fc86",
       "sourceMatchesArtifact": true,
       "theme": "dark",
       "viewport": {
@@ -148,9 +148,9 @@
   "captureSource": {
     "byteLength": 14695,
     "path": "tests/fixtures/facility_layout/release/visual/p11-visual-capture.json",
-    "sha256": "f1ef8ca6a913d4bddaa73007fa127840f19b6280a48e751eaa2726f4a08114ee"
+    "sha256": "cdcc783ef98573858677c3e5457f3b1762fe7d8c8fa8ea1037eb8d2c25056f5e"
   },
-  "generatedAtUtc": "2026-08-04T18:11:42Z",
+  "generatedAtUtc": "2026-08-04T19:43:55Z",
   "lightDarkArtifactRequirementMet": true,
   "manifestValid": true,
   "missingExactCoverage": [],
@@ -179,68 +179,68 @@
   "sourceBinding": {
     "aggregateMatches": true,
     "algorithmsMatch": true,
-    "capturedAggregateSha256": "ddf5047a0f9e10263159e06bc3008b048a341dad4ad6f664b954a835bd5a983e",
-    "currentAggregateSha256": "ddf5047a0f9e10263159e06bc3008b048a341dad4ad6f664b954a835bd5a983e",
+    "capturedAggregateSha256": "df084a4e10c6e76caafd43a38c0ccd6592d4deed148b16c28ff80c6b2c8edc4f",
+    "currentAggregateSha256": "df084a4e10c6e76caafd43a38c0ccd6592d4deed148b16c28ff80c6b2c8edc4f",
     "currentFiles": [
       {
-        "byteLength": 9447,
+        "byteLength": 9694,
         "path": "static/facility_layout_app.js",
-        "sha256": "9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de"
+        "sha256": "fd2ce6810c12921d55c65812eb2c3884d843f5766689c626fbc6ef642428a01a"
       },
       {
-        "byteLength": 54235,
+        "byteLength": 55603,
         "path": "static/facility_layout_editor.js",
-        "sha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24"
+        "sha256": "9289ef6e817692ed8263e3c6fc418fbb9280816876d5f9c41d4c16a862001f0b"
       },
       {
-        "byteLength": 76935,
+        "byteLength": 78951,
         "path": "static/facility_layout_session.js",
-        "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a"
+        "sha256": "f3e3138aefe8c9212470ba5d96edfb1e9e4083c8542c1d3c240300b87ed37c34"
       },
       {
-        "byteLength": 7417,
+        "byteLength": 7616,
         "path": "static/facility_layout_spatial_advisor.js",
-        "sha256": "9d12f579932964a175aa63deea2f029b66d27727ff51a79a1e0accf9b0068e73"
+        "sha256": "4ecf232accb495d2a498ce239d7d48b93f1cb37bee7e943eb9b7e56d5c34d38b"
       },
       {
-        "byteLength": 18021,
+        "byteLength": 18489,
         "path": "static/facility_layout_spatial_worker.js",
-        "sha256": "8213cea4565951c0a31954d12eb4e6a540d5f5c15ae1a2ae09ef4dac7ef04574"
+        "sha256": "c0c059964295bbe9d7435d63c320be6ebebab76f94462309cec0c4f7d76d960a"
       },
       {
-        "byteLength": 101827,
+        "byteLength": 104298,
         "path": "static/facility_layout_three_adapter.js",
-        "sha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639"
+        "sha256": "3e96bee4be252449702ee4a52ed928eda7ddcd806da3402d91b95d9ec3eef731"
       },
       {
-        "byteLength": 15430,
+        "byteLength": 15831,
         "path": "static/facility_layout_transport.js",
-        "sha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6"
+        "sha256": "9f8c2511fb1b074fabeb9bd73fcaf114ac75f3768ac1c10049b2473657388741"
       },
       {
-        "byteLength": 16296,
+        "byteLength": 17028,
         "path": "static/facility_layout_workspace.css",
-        "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
+        "sha256": "0481a0ebbb17b2c124c073ee5248f3e5c953714c333d7eb7febc0d3191288f3c"
       },
       {
-        "byteLength": 117766,
+        "byteLength": 120660,
         "path": "static/facility_layout_workspace.js",
-        "sha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878"
+        "sha256": "0334bdc75a63c47a18541d2290de18d33108afa98cbb3c55adcd9f54786b38b1"
       },
       {
-        "byteLength": 2947711,
+        "byteLength": 2948300,
         "path": "static/index.html",
-        "sha256": "41d15a8fdbe767c5373cdd3e3471b704394f3ebe91a2b233c3395796ff64bffe"
+        "sha256": "be006926a405e7a406ad9b488d3d8b7ac7504ef3209521ae15f6614c26490d09"
       },
       {
-        "byteLength": 603445,
+        "byteLength": 603451,
         "path": "static/vendor/three/0.128.0/build/three.min.js",
-        "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+        "sha256": "7ae04663bb431808bc025280122162029ea3a354efc5fcca8bd8f95d1a1933e9"
       },
       {
-        "byteLength": 19774,
+        "byteLength": 20332,
         "path": "tools/capture_facility_layout_p11_visuals.py",
-        "sha256": "baa95b7cae7e9ab103f33833b91b8e0d3fcf198994bfc9bd5fefa244f08e18e5"
+        "sha256": "2403ae4285b859dca597cb8af5fdc0d2561a047cc6e2fcfe54dddd1b2ee56b45"
       }
     ],
     "duplicatePaths": [],
@@ -289,21 +289,21 @@
     "passed": true,
     "restoredObserved": true,
     "screenshot": {
-      "byteLength": 161967,
+      "byteLength": 150518,
       "height": 960,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-webgl-restored.png",
-      "sampledColorCount": 1543,
-      "sha256": "f40ef2b48d129592895c1a2e6dfc554e06d785816fc58d88c180d06ec2f286a2",
+      "sampledColorCount": 1506,
+      "sha256": "8254b256b56f8f363a2ed23067c3ea23b1b8f8a347aafcdd62f8c5847f817784",
       "width": 1440
     },
     "verified": true,
     "verifiedScreenshot": {
-      "byteLength": 161967,
+      "byteLength": 150518,
       "height": 960,
       "nonempty": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-webgl-restored.png",
-      "sha256": "f40ef2b48d129592895c1a2e6dfc554e06d785816fc58d88c180d06ec2f286a2",
+      "sha256": "8254b256b56f8f363a2ed23067c3ea23b1b8f8a347aafcdd62f8c5847f817784",
       "width": 1440
     }
   }

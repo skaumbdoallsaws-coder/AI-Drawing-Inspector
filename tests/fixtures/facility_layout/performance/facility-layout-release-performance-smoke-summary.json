@@ -1,6 +1,6 @@
 {
   "artifactShapeValid": true,
-  "benchmarkId": "55cd4792-f926-47a4-9306-da39f4b5b06a",
+  "benchmarkId": "0c588ef0-d120-4a5d-bacb-0f7331af2c9a",
   "blockers": [
     "smoke_profile_not_release_eligible"
   ],
@@ -19,7 +19,7 @@
       "available": true,
       "budgetId": "three-frame-p95-standard",
       "limit": 22,
-      "measured": 8.5,
+      "measured": 8.54,
       "passed": null,
       "unit": "ms"
     },
@@ -28,7 +28,7 @@
       "available": true,
       "budgetId": "three-picking-p95",
       "limit": 50,
-      "measured": 3.300000011920929,
+      "measured": 2.5,
       "passed": null,
       "unit": "ms"
     },
@@ -37,7 +37,7 @@
       "available": true,
       "budgetId": "idle-render-stop",
       "limit": 250,
-      "measured": 0.699999988079071,
+      "measured": 0.7000000476837158,
       "passed": null,
       "unit": "ms"
     },
@@ -46,7 +46,7 @@
       "available": true,
       "budgetId": "memory-growth-after-20-remounts",
       "limit": 10,
-      "measured": 2.1116194255210017,
+      "measured": 2.1038986918438294,
       "passed": null,
       "unit": "percent"
     },
@@ -55,7 +55,7 @@
       "available": true,
       "budgetId": "javascript-heap",
       "limit": 419430400,
-      "measured": 5217819,
+      "measured": 5236571,
       "passed": null,
       "unit": "bytes"
     },
@@ -122,11 +122,11 @@
         "language": "en-US",
         "platform": "Win32",
         "preciseMemoryInfo": {
-          "capturedAtMs": 868.6999999880791,
+          "capturedAtMs": 859.4000000357628,
           "jsHeapSizeLimit": 4395630592,
           "source": "performance.memory",
-          "totalJSHeapSize": 65883283,
-          "usedJSHeapSize": 60710011
+          "totalJSHeapSize": 68504620,
+          "usedJSHeapSize": 61364060
         },
         "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
         "viewport": {
@@ -248,7 +248,7 @@
     },
     "zoneCount": 1
   },
-  "generatedAtUtc": "2026-08-04T17:49:05Z",
+  "generatedAtUtc": "2026-08-04T19:41:57Z",
   "network": {
     "attemptedExternalRequestCount": 0,
     "externalRequestsBlocked": true,
@@ -292,9 +292,9 @@
     "smoke": true
   },
   "rawArtifact": {
-    "byteLength": 263368,
+    "byteLength": 263270,
     "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-smoke-raw.json",
-    "sha256": "7019b7d2db1cd5ee49de24f1f7938d6c8771978d7d3a3e0604a3d566d461e9a8"
+    "sha256": "c1210c8175c678c202fdddc63e6dab7f81df7db4555b0578a0e68a1577c817b5"
   },
   "releaseEligible": false,
   "releaseGateMet": false,
@@ -311,46 +311,46 @@
         "networkProfile": "local",
         "stages": {
           "detail": {
-            "maximumMs": 121.8,
-            "medianMs": 121.8,
-            "p95Ms": 121.8,
-            "p99Ms": 121.8,
+            "maximumMs": 144.3,
+            "medianMs": 144.3,
+            "p95Ms": 144.3,
+            "p99Ms": 144.3,
             "sampleCount": 1
           },
           "footprint": {
-            "maximumMs": 0.1,
-            "medianMs": 0.1,
-            "p95Ms": 0.1,
-            "p99Ms": 0.1,
+            "maximumMs": 0.2,
+            "medianMs": 0.2,
+            "p95Ms": 0.2,
+            "p99Ms": 0.2,
             "sampleCount": 1
           },
           "manifest": {
-            "maximumMs": 2.2,
-            "medianMs": 2.2,
-            "p95Ms": 2.2,
-            "p99Ms": 2.2,
+            "maximumMs": 1.7,
+            "medianMs": 1.7,
+            "p95Ms": 1.7,
+            "p99Ms": 1.7,
             "sampleCount": 1
           },
           "overview": {
-            "maximumMs": 16.6,
-            "medianMs": 16.6,
-            "p95Ms": 16.6,
-            "p99Ms": 16.6,
+            "maximumMs": 51.8,
+            "medianMs": 51.8,
+            "p95Ms": 51.8,
+            "p99Ms": 51.8,
             "sampleCount": 1
           },
           "proxy": {
-            "maximumMs": 24.5,
-            "medianMs": 24.5,
-            "p95Ms": 24.5,
-            "p99Ms": 24.5,
+            "maximumMs": 37.7,
+            "medianMs": 37.7,
+            "p95Ms": 37.7,
+            "p99Ms": 37.7,
             "sampleCount": 1
           }
         },
         "total": {
-          "maximumMs": 290.3,
-          "medianMs": 290.3,
-          "p95Ms": 290.3,
-          "p99Ms": 290.3,
+          "maximumMs": 357.7,
+          "medianMs": 357.7,
+          "p95Ms": 357.7,
+          "p99Ms": 357.7,
           "sampleCount": 1
         },
         "transferredBytes": {
@@ -367,47 +367,47 @@
       "sampleCount": 1
     },
     "picking": {
-      "maximumMs": 3.3,
-      "medianMs": 3.3,
-      "p95Ms": 3.3,
-      "p99Ms": 3.3,
+      "maximumMs": 2.5,
+      "medianMs": 2.5,
+      "p95Ms": 2.5,
+      "p99Ms": 2.5,
       "sampleCount": 1
     },
     "planFrames": {
       "callbackDurations": {
-        "maximumMs": 1.4,
+        "maximumMs": 1.2,
         "medianMs": 0.1,
-        "p95Ms": 0.8,
-        "p99Ms": 1.34,
-        "sampleCount": 61
+        "p95Ms": 0.705,
+        "p99Ms": 1.023,
+        "sampleCount": 60
       },
-      "effectiveFps": 118.4366,
+      "effectiveFps": 116.3479,
       "frameIntervals": {
-        "maximumMs": 8.7,
+        "maximumMs": 16.4,
         "medianMs": 8.3,
         "p95Ms": 8.6,
-        "p99Ms": 8.641,
-        "sampleCount": 60
+        "p99Ms": 11.876,
+        "sampleCount": 59
       },
       "framesOver22Ms": 0,
       "framesOver33Ms": 0,
       "longTaskCount": 0,
       "maximumLongTaskMs": 0.0,
-      "measuredWallDurationMs": 506.6,
+      "measuredWallDurationMs": 507.1,
       "runCount": 1
     },
     "planRenderLatency": {
-      "maximumMs": 0.3,
-      "medianMs": 0.3,
-      "p95Ms": 0.3,
-      "p99Ms": 0.3,
+      "maximumMs": 0.6,
+      "medianMs": 0.6,
+      "p95Ms": 0.6,
+      "p99Ms": 0.6,
       "sampleCount": 1
     },
     "remountMemoryGrowthPercent": {
-      "maximumMs": 2.1116,
-      "medianMs": 2.1116,
-      "p95Ms": 2.1116,
-      "p99Ms": 2.1116,
+      "maximumMs": 2.1039,
+      "medianMs": 2.1039,
+      "p95Ms": 2.1039,
+      "p99Ms": 2.1039,
       "sampleCount": 1
     },
     "threeFrames": {
@@ -418,19 +418,19 @@
         "p99Ms": null,
         "sampleCount": 0
       },
-      "effectiveFps": 64.0,
+      "effectiveFps": 54.2307,
       "frameIntervals": {
-        "maximumMs": 499.1,
+        "maximumMs": 748.7,
         "medianMs": 8.3,
-        "p95Ms": 8.5,
-        "p99Ms": 170.867,
-        "sampleCount": 68
+        "p95Ms": 8.54,
+        "p99Ms": 215.828,
+        "sampleCount": 73
       },
       "framesOver22Ms": 1,
       "framesOver33Ms": 1,
       "longTaskCount": 0,
       "maximumLongTaskMs": 0.0,
-      "measuredWallDurationMs": 1062.5,
+      "measuredWallDurationMs": 1346.1,
       "runCount": 1
     }
   },

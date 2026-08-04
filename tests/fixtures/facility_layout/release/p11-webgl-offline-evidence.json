@@ -1,5 +1,5 @@
 {
-  "generatedAtUtc": "2026-08-04T18:11:44Z",
+  "generatedAtUtc": "2026-08-04T19:43:58Z",
   "offlineAndCorruptArtifacts": {
     "artifact": {
       "byteLength": 1577,
@@ -27,8 +27,8 @@
   "releaseGateMet": true,
   "schemaVersion": "facility-layout-p11-recovery-evidence-v1",
   "source": {
-    "static/facility_layout_three_adapter.js": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639",
-    "tests/test_facility_layout_three_adapter.js": "ae1280977ba92cf069f15869698aee5ddc89d004acc62f6d26e161c588849316"
+    "static/facility_layout_three_adapter.js": "3e96bee4be252449702ee4a52ed928eda7ddcd806da3402d91b95d9ec3eef731",
+    "tests/test_facility_layout_three_adapter.js": "7e7b9ffd03a9ba7f8e1b5734969aa289a8499eb133929a8c56606720abdd9d83"
   },
   "webglRecovery": {
     "behavioralSuiteStatus": "passed",

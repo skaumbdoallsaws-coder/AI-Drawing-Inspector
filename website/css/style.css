@@ -3,7 +3,7 @@
 /* ===== RESET ===== */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-[id] { scroll-margin-top: 88px; } /* offset for fixed header (76px + 12px padding) */
+[id] { scroll-margin-top: 80px; } /* offset for the fixed 64px header + 16px breathing room */
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: radial-gradient(ellipse at 50% 60%, #ffffff 0%, #f0f2f5 40%, #e4e8ed 100%);
@@ -58,27 +58,17 @@ img { max-width: 100%; display: block; }
   display: flex;
   flex-direction: column;
 }
-.header-top {
-  height: 36px;
-  background: rgba(200, 214, 230, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  border-bottom: 1px solid rgba(0,0,0,0.08);
-}
-.header-bottom {
-  height: 40px;
-  background: rgba(10, 14, 24, 0.75);
+/* Single consolidated bar: logo, nav, and access CTA on one row. */
+.header-bar {
+  height: 64px;
+  background: rgba(12, 17, 28, 0.82);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
   display: flex;
   align-items: center;
-  padding: 0 24px;
-  gap: 28px;
+  gap: 30px;
+  padding: 0 32px;
 }
 .header-logo {
   display: flex;
@@ -87,21 +77,23 @@ img { max-width: 100%; display: block; }
 }
 .header-logo img { height: 30px; }
 .logo-text { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
-.logo-text .w { color: #2d3436; }
-.logo-text .c { color: #1565c0; }
+.logo-text .w { color: #fff; }
+.logo-text .c { color: #4fc3f7; }
 
 .header-nav {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 30px;
+  margin-left: auto;
 }
 .nav-link {
-  color: rgba(255,255,255,0.5);
+  color: rgba(255,255,255,0.68);
   font-size: 14px;
   font-weight: 500;
   letter-spacing: -0.2px;
 }
 .nav-link:hover { color: #fff; }
+.header-cta { white-space: nowrap; }
 
 .mobile-menu-btn {
   display: none;
@@ -115,7 +107,7 @@ img { max-width: 100%; display: block; }
 .mobile-nav {
   display: none;
   position: fixed;
-  top: 76px; left: 0; right: 0;
+  top: 64px; left: 0; right: 0;
   background: rgba(10, 10, 18, 0.98);
   border-bottom: 1px solid rgba(255,255,255,0.05);
   padding: 16px 24px;
@@ -133,20 +125,26 @@ img { max-width: 100%; display: block; }
 
 /* ===== HERO ===== */
 .hero {
-  min-height: 100vh;
+  /* The light/dark divide is pinned to the bottom of the copy block rather than
+     to 50% of the viewport, so the CTAs always sit on the light half no matter
+     how tall the band grows. Everything below the line belongs to the steps. */
+  --hero-split: 620px;
+  min-height: max(100vh, 880px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 88px 24px 22px;
   position: relative;
-  overflow: hidden;
+  /* visible so the monitor stand can hang past the hero into the next section;
+     every decorative layer below is inset, so nothing else escapes */
+  overflow: visible;
   background: #0a0a12;
 }
 /* Top half: CAD exploded view with diagonal gradient overlay */
 .hero-bg-top {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 50%;
+  height: var(--hero-split);
   background: url('../assets/images/demo13_exploded.png') center 30% / cover no-repeat;
   pointer-events: none;
   z-index: 0;
@@ -154,7 +152,7 @@ img { max-width: 100%; display: block; }
 .hero-overlay-top {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 50%;
+  height: var(--hero-split);
   background:
     linear-gradient(to top right,
       rgba(210, 220, 232, 0.95) 0%,
@@ -169,7 +167,7 @@ img { max-width: 100%; display: block; }
 /* Bottom half: engineer photo with dark overlay */
 .hero-bg-bottom {
   position: absolute;
-  top: 50%; left: 0; right: 0;
+  top: var(--hero-split); left: 0; right: 0;
   bottom: 0;
   background: url('../assets/images/hero_engineer.jpg') center center / cover no-repeat;
   pointer-events: none;
@@ -177,7 +175,7 @@ img { max-width: 100%; display: block; }
 }
 .hero-overlay-bottom {
   position: absolute;
-  top: 50%; left: 0; right: 0;
+  top: var(--hero-split); left: 0; right: 0;
   bottom: 0;
   background: rgba(10, 14, 24, 0.85);
   pointer-events: none;
@@ -211,7 +209,7 @@ img { max-width: 100%; display: block; }
 }
 .hero-band {
   width: min(100%, 1400px);
-  min-height: 360px;
+  min-height: 520px;
   padding: 18px 18px 0 58px;
   display: flex;
   align-items: center;
@@ -232,8 +230,8 @@ img { max-width: 100%; display: block; }
   z-index: 2;
 }
 .hero-text {
-  flex: 0 1 700px;
-  max-width: 700px;
+  flex: 0 1 620px;
+  max-width: 620px;
   padding-left: 0;
 }
 .hero-badge {
@@ -261,15 +259,22 @@ img { max-width: 100%; display: block; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
+.hero-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #1565c0;
+  margin-bottom: 14px;
+}
 .hero-title {
   font-family: 'Exo 2', 'Inter', sans-serif;
-  font-size: clamp(31px, 2.85vw, 38px);
+  font-size: clamp(46px, 4vw, 60px);
   font-weight: 600;
-  line-height: 1.1;
-  letter-spacing: 0;
-  margin-bottom: 14px;
+  line-height: 1.06;
+  letter-spacing: -1px;
+  margin-bottom: 18px;
   color: #2d3436;
-  white-space: nowrap;
 }
 .hero-title .accent { color: #2d3436; }
 .hero-title .green { color: #2d3436; }
@@ -280,40 +285,68 @@ img { max-width: 100%; display: block; }
   margin-bottom: 24px;
   max-width: 430px;
 }
-.hero-buttons { display: flex; gap: 14px; }
+.hero-buttons { display: flex; gap: 14px; flex-wrap: wrap; }
 .hero-buttons .btn-primary {
-  background: #c0392b;
-  padding: 14px 32px;
+  background: #1565c0;
+  padding: 14px 30px;
   font-size: 15px;
   font-weight: 700;
-  border-radius: 4px;
-  letter-spacing: 0.2px;
+  border-radius: 6px;
+  letter-spacing: 0.1px;
 }
 .hero-buttons .btn-primary:hover {
-  background: #e74c3c;
-  box-shadow: 0 4px 20px rgba(192, 57, 43, 0.4);
+  background: #1976d2;
+  box-shadow: 0 6px 22px rgba(21, 101, 192, 0.35);
 }
+/* Secondary sits on the light upper half of the hero, so the cyan outline used
+   elsewhere on dark sections would not hold contrast here. */
 .hero-buttons .btn-outline {
-  background: #1565c0;
-  color: #fff;
-  border: none;
-  padding: 14px 32px;
+  background: transparent;
+  color: #1565c0;
+  border: 1.5px solid rgba(21, 101, 192, 0.45);
+  padding: 14px 30px;
   font-size: 15px;
   font-weight: 700;
-  border-radius: 4px;
-  letter-spacing: 0.2px;
+  border-radius: 6px;
+  letter-spacing: 0.1px;
 }
 .hero-buttons .btn-outline:hover {
-  background: #1976d2;
-  box-shadow: 0 4px 20px rgba(21, 101, 192, 0.4);
+  background: rgba(21, 101, 192, 0.08);
+  border-color: #1565c0;
 }
 .hero-image {
-  flex: 0 1 720px;
-  width: min(50vw, 720px);
-  max-width: none;
+  /* Fixed visual width so bezel, stand and base keep true monitor proportions.
+     The stand is allowed to hang ~24px past the hero into the section below. */
+  flex: 0 0 auto;
+  width: clamp(480px, 34vw, 600px);
+  max-width: 100%;
   margin-left: auto;
-  transform: translate(34px, 4px);
+  margin-bottom: -24px;
+  transform: translate(-32px, 0);
+  position: relative;
+  z-index: 4;
 }
+/* Thin-bezel 16:10 workstation panel. The clip is 16:9, so it is letterboxed
+   into the taller screen rather than stretched - no scaleX on the asset. */
+.hero-image .monitor-frame img,
+.hero-image .monitor-frame video {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+  background: #05070a;
+  border-radius: 2px;
+}
+.hero-image .monitor-frame {
+  border-radius: 12px;
+  padding: 8px 8px 26px;   /* thin top/sides, slightly deeper chin */
+}
+/* The webcam dot has to clear the screen entirely now. It used to overhang the
+   panel by ~3px, which was invisible against the old clip's black letterbox but
+   sits right on the title bar of a screen that fills the bezel. */
+.hero-image .monitor-frame::before { top: 1.5px; width: 4px; height: 4px; }
+.hero-image .monitor-frame::after { bottom: 6px; width: 11px; height: 11px; }
 .monitor-frame {
   position: relative;
   background: linear-gradient(180deg, #17191e 0%, #08090b 100%);
@@ -352,11 +385,15 @@ img { max-width: 100%; display: block; }
     inset 0 1px 1px rgba(255,255,255,0.2),
     0 0 0 1px rgba(0,0,0,0.35);
 }
-.monitor-frame img {
+.monitor-frame img,
+.monitor-frame video,
+.monitor-frame .hero-ui {
   width: 100%;
   border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
 }
+/* video is inline by default, which leaves a baseline gap inside the bezel */
+.monitor-frame video { display: block; }
 .monitor-stand {
   width: 92px;
   height: 48px;
@@ -388,10 +425,174 @@ img { max-width: 100%; display: block; }
   transform: perspective(260px) rotateX(58deg) translateY(-8px);
 }
 
+/* ===== HERO CONTEXT FLOW =====
+   The hero panel: connected inputs -> one manufacturing context -> the
+   workflows that context powers. Drawn as a single 640x400 SVG rather than
+   HTML cards with an overlay, because the wires have to terminate exactly on
+   the card edges and the hub arc. One viewBox means the only responsive
+   behaviour is uniform scaling, which cannot reflow or clip. */
+.hero-ui {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: #03070f;
+}
+.hero-flow {
+  display: block;
+  width: 100%;
+  height: 100%;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+/* Font sizes here are CSS px inside the SVG user space, so they scale with the
+   viewBox rather than with the viewport. */
+.hf-card rect {
+  fill: rgba(21, 101, 192, 0.10);
+  stroke: rgba(79, 195, 247, 0.22);
+  stroke-width: 1;
+}
+.hf-cin  { color: #4fc3f7; }
+.hf-cout { color: #00E676; }
+.hf-cout rect {
+  fill: rgba(0, 230, 118, 0.07);
+  stroke: rgba(0, 230, 118, 0.22);
+}
+.hf-card use {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hf-l1, .hf-l2 { fill: #dbe9f8; font-weight: 500; }
+.hf-l1 { font-size: 12.5px; }
+.hf-l2 { font-size: 11.5px; }
+.hf-head {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  fill: #4fc3f7;
+}
+.hf-head-r { text-anchor: end; fill: #00E676; }
+/* 11px/0.3 is the largest setting where MANUFACTURING - the longest line -
+   still clears the core circle's chord at its baseline. */
+.hf-hub-t {
+  text-anchor: middle;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  fill: #eaf4ff;
+}
+.hf-tag {
+  text-anchor: middle;
+  font-size: 11px;
+  font-weight: 700;
+  fill: #4fc3f7;
+}
+/* The travelling pulse: the dash pattern's period equals the normalised path
+   length plus the dash, so exactly one packet is in flight per branch. The
+   pattern sits at -offset along the path, so the offset has to run negative
+   for the packet to move from the card toward the hub. */
+.hf-flow path {
+  animation: hfFlow 2.7s linear infinite;
+  animation-delay: var(--d, 0s);
+}
+@keyframes hfFlow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -113; }
+}
+.hf-card {
+  animation: hfIn 0.55s ease both;
+  animation-delay: var(--d, 0s);
+}
+@keyframes hfIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.hf-ring {
+  transform-box: view-box;
+  transform-origin: 320px 180px;
+  animation: hfRing 5s ease-in-out infinite;
+}
+@keyframes hfRing {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.035); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hf-card, .hf-ring { animation: none; opacity: 1; transform: none; }
+  /* the static wires still carry the diagram without the packets */
+  .hf-flow { display: none; }
+}
+
+/* ===== TEAMS FLOW =====
+   The "interface of teams" figure in the connected-knowledge section. It shares
+   the hero panel's geometry language and its .hf-flow pulse animation, but not
+   its palette: the hero is dark because it sits inside a monitor bezel, where
+   darkness reads as a screen. This figure has no such frame, and a dark slab
+   was the only dark block in a long light run - it read as pasted in. So the
+   cards here take the same values as the .knowledge-item chips directly above,
+   which makes the diagram look like an extension of them rather than a foreign
+   object. Shape and motion carry the family resemblance; colour is contextual. */
+.teams-flow {
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.10);
+}
+.teams-flow svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+/* same fill and border as .knowledge-item, so the two rhyme */
+.teams-flow .hf-card rect {
+  fill: rgba(21, 101, 192, 0.05);
+  stroke: rgba(21, 101, 192, 0.22);
+}
+.teams-flow .hf-card { color: #1565c0; }
+.tf-title { font-size: 13px; font-weight: 700; fill: #1a1d24; }
+.tf-desc  { font-size: 10.5px; fill: rgba(0, 0, 0, 0.5); }
+.tf-hub-name {
+  text-anchor: middle;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  fill: #ffffff;
+}
+.tf-hub-sub {
+  text-anchor: middle;
+  font-size: 10px;
+  fill: rgba(255, 255, 255, 0.78);
+}
+.tf-foot-t {
+  text-anchor: middle;
+  font-size: 12px;
+  font-weight: 600;
+  fill: #1565c0;
+}
+/* the shared .hf-ring rule pivots on the hero's hub; this one sits elsewhere */
+.tf-ring { transform-origin: 410px 274px; }
+
+/* Eight described nodes around a hub cannot stay legible on a phone - at 390px
+   the figure renders at about 0.48x, which would put the descriptions near 5px.
+   Below 700px the cards drop to name-only at a much larger type size, and the
+   closing bar gives way to the figcaption, which already says the same thing.
+   Scoped to .teams-flow so the hero panel keeps its icons. */
+@media (max-width: 700px) {
+  .teams-flow .tf-desc,
+  .teams-flow .tf-hub-sub,
+  .teams-flow .tf-foot,
+  .teams-flow .hf-card use { display: none; }
+  /* 20px is set by the widest label, "Manufacturing", against the 180-wide card */
+  .teams-flow .tf-title { font-size: 20px; transform: translate(-24px, 14px); }
+  .teams-flow .tf-hub-name { font-size: 26px; transform: translateY(6px); }
+}
+
 /* ===== HERO ACTIONS STRIP ===== */
 .hero-actions {
   position: absolute;
-  top: 50%; left: 0; right: 0;
+  top: var(--hero-split); left: 0; right: 0;
   bottom: 0;
   z-index: 3;
   display: flex;
@@ -414,6 +615,7 @@ img { max-width: 100%; display: block; }
   display: flex;
   justify-content: space-evenly;
   width: 100%;
+  position: relative;
 }
 .hero-action-item {
   display: flex;
@@ -421,7 +623,22 @@ img { max-width: 100%; display: block; }
   align-items: center;
   gap: 12px;
   flex: 1;
+  position: relative;
 }
+/* Connector drawn from each item to the next. Items are equal-width flex
+   children, so centre-to-centre is exactly one item width; 56px clears the
+   50px icon radius at both ends without any percentage guesswork. */
+.hero-action-item::after {
+  content: '';
+  position: absolute;
+  top: 50px;
+  left: calc(50% + 56px);
+  width: calc(100% - 112px);
+  height: 1px;
+  background: linear-gradient(90deg, rgba(79,195,247,0.05), rgba(79,195,247,0.45), rgba(79,195,247,0.05));
+  pointer-events: none;
+}
+.hero-action-item:last-child::after { content: none; }
 .hero-action-icon {
   width: 100px;
   height: 100px;
@@ -431,15 +648,17 @@ img { max-width: 100%; display: block; }
   height: 100%;
 }
 .hero-action-title {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   color: #fff;
-  letter-spacing: -0.2px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
 }
 .hero-action-desc {
-  font-size: 13px;
-  color: rgba(255,255,255,0.4);
-  line-height: 1.5;
+  font-size: 14px;
+  color: rgba(255,255,255,0.72);
+  line-height: 1.55;
+  max-width: 260px;
 }
 
 /* ===== SOCIAL PROOF ===== */
@@ -595,6 +814,27 @@ img { max-width: 100%; display: block; }
   line-height: 1.75;
   margin-bottom: 24px;
 }
+/* Supporting capability line - the four things the agent can actually drive.
+   Each capability is its own unbreakable item, so when the column is too narrow
+   the line wraps between capabilities and never inside one.
+   Selector must out-specify `.feature-text p` (0,1,1) or the body paragraph
+   rule wins and this renders as 15px grey body copy. */
+.feature-text p.feature-caps {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #1565c0;
+  margin-bottom: 0;
+  line-height: 1.7;
+}
+/* The separators are surrounded by real whitespace in the markup - without it
+   the whole line is one unbreakable run and overflows the page on a phone. */
+.feature-caps b { font-weight: 700; white-space: nowrap; }
+.feature-caps span { color: rgba(21, 101, 192, 0.4); padding: 0 3px; }
+/* This row carries two paragraphs plus the capability line where the others
+   carry one, so the body gaps tighten to keep the row no taller than its
+   monitor graphic. */
+.feature-text:has(.feature-caps) p { margin-bottom: 14px; }
 .feature-image, .feature-media { flex: 1; max-width: 520px; }
 .feature-image img, .feature-media > .media-placeholder img, .feature-media video {
   width: 100%;
@@ -612,7 +852,8 @@ img { max-width: 100%; display: block; }
   transform: none;
   width: 100%;
 }
-.feature-media .monitor-frame img {
+.feature-media .monitor-frame img,
+.feature-media .monitor-frame video {
   border: none;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
 }
@@ -733,18 +974,33 @@ img { max-width: 100%; display: block; }
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 900px) {
-  .site-header { padding: 0 20px; }
-  .header-nav .nav-link { display: none; }
-  .mobile-menu-btn { display: block; }
+  .header-bar { padding: 0 20px; gap: 16px; }
+  .header-bar .nav-link { display: none; }
+  .header-cta { display: none; }
+  .mobile-menu-btn { display: block; margin-left: auto; }
 
   .hero {
     min-height: auto;
-    padding: 112px 20px 36px;
+    height: auto;
+    padding: 96px 20px 0;   /* the steps strip supplies its own bottom padding */
+    /* .hero is a flex row on desktop, where the steps strip is absolute and so
+       never a flex item. Once the strip rejoins flow it would sit BESIDE the
+       hero band, so the axis has to turn vertical here. */
+    flex-direction: column;
+    align-items: center;
   }
+  /* The two-tone split and the absolutely-positioned steps strip below only
+     work in the side-by-side desktop composition. Once the hero stacks, the
+     strip must rejoin normal flow or it lands on top of the monitor. */
+  .hero-bg-bottom,
+  .hero-overlay-bottom { display: none; }
+  .hero-bg-top,
+  .hero-overlay-top { height: 100%; }
   .hero-band {
     min-height: auto;
     padding: 0;
   }
+  /* Stack the monitor beneath the copy and let it size to the column. */
   .hero-content {
     flex-direction: column;
     text-align: center;
@@ -756,16 +1012,18 @@ img { max-width: 100%; display: block; }
     padding-left: 0;
     transform: none;
   }
+  .hero-eyebrow { text-align: center; }
   .hero-title {
-    font-size: 38px;
+    font-size: clamp(34px, 6vw, 44px);
     letter-spacing: -1px;
-    white-space: normal;
   }
   .hero-subtitle { margin: 0 auto 32px; }
   .hero-buttons { justify-content: center; flex-wrap: wrap; }
   .hero-image {
-    width: 100%;
+    width: min(100%, 560px);
     max-width: 100%;
+    margin: 0 auto;
+    margin-bottom: 0;
     transform: none;
   }
 
@@ -783,12 +1041,87 @@ img { max-width: 100%; display: block; }
   .section-header h2 { font-size: 28px; }
   .cta-section h2 { font-size: 30px; }
 
-  .hero-actions { padding: 24px 24px 32px; }
-  .hero-actions-grid { gap: 32px; flex-wrap: wrap; }
-  .hero-action-icon { width: 56px; height: 56px; }
+  /* Connect / Ask / Trace: back into document flow, stacked one per row, and
+     full-bleed via the 100vw trick so it does not depend on the hero padding. */
+  .hero-actions {
+    position: static;
+    width: 100vw;
+    margin: 44px 0 0 calc(50% - 50vw);
+    padding: 46px 24px 48px;
+    background: rgba(10, 14, 24, 0.92);
+  }
+  .hero-actions-grid {
+    flex-direction: column;
+    align-items: center;
+    gap: 38px;
+  }
+  .hero-action-item { max-width: 420px; }
+  .hero-action-icon { width: 72px; height: 72px; }
+  /* the connector only makes sense across a horizontal row */
+  .hero-action-item::after { content: none; }
 
   .form-row { flex-direction: column; }
   .site-footer { flex-direction: column; gap: 16px; text-align: center; }
+}
+
+/* ----- Phones: normal document flow, nothing layered or transformed ----- */
+@media (max-width: 768px) {
+  /* decorative 800px glow would otherwise widen the document on a phone */
+  .cta-section { overflow: hidden; }
+  .secondary-workflows { padding-left: 20px; padding-right: 20px; }
+
+  .hero { padding: 88px 16px 0; }
+  .hero-content { gap: 32px; }
+
+  .hero-eyebrow { font-size: 11px; letter-spacing: 1.4px; }
+  .hero-title {
+    font-size: clamp(2rem, 8.5vw, 2.75rem);
+    line-height: 1.06;
+    margin: 0 0 16px;
+  }
+  .hero-subtitle { font-size: 1rem; line-height: 1.55; margin: 0 auto 28px; }
+
+  /* Full-width stacked CTAs with a comfortable tap target. */
+  .hero-buttons {
+    flex-direction: column;
+    width: 100%;
+    max-width: 360px;
+    margin: 0 auto;
+    gap: 12px;
+  }
+  .hero-buttons .btn-primary,
+  .hero-buttons .btn-outline {
+    width: 100%;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 20px;
+  }
+
+  /* Monitor sits in flow, above the steps - never behind them. */
+  .hero-image {
+    /* 100% of the already-padded column, not vw: vw includes the scrollbar
+       width, which pushes the monitor past the content box and creates a
+       few px of horizontal scroll. This lands at the same visual size. */
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+    position: static;
+    transform: none;
+    inset: auto;
+  }
+  .hero-image .monitor-frame { padding: 6px 6px 18px; border-radius: 10px; }
+  .monitor-stand { width: 68px; height: 34px; }
+  .monitor-base { width: 140px; height: 18px; }
+
+  .hero-actions { margin-top: 40px; padding: 42px 20px 44px; }
+  .hero-action-title { font-size: 17px; }
+  .hero-action-desc { font-size: 14px; max-width: 340px; }
+
+  /* Full-width drawer under the bar. */
+  .mobile-nav { padding: 12px 20px 20px; }
+  .mobile-nav a { display: block; padding: 14px 0; }
 }
 
 @media (max-width: 480px) {
@@ -799,4 +1132,222 @@ img { max-width: 100%; display: block; }
   .hero-subtitle { font-size: 16px; }
   .stats-grid { gap: 24px; }
   .stat-number { font-size: 32px; }
+}
+
+/* ===== CONNECTED WORKFLOWS SHOWCASE =====
+   One monitor, many workflows. The stage keeps the screen in a fixed place
+   while the workflow changes around it, which is the whole point of the
+   section: these are not disconnected tools.
+   Colors/radii/typography are the existing site tokens - #1565c0 accent,
+   #1a1d24 headings, rgba(0,0,0,0.5) body, white cards on the light body
+   gradient. No new design system. */
+
+.wf-anchor { display: block; height: 0; overflow: hidden; }
+
+.wf-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #1565c0;
+  margin-bottom: 12px;
+}
+
+/* ---- workflow tabs ---- */
+.wf-tabs {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 44px;
+}
+.wf-tab {
+  appearance: none;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: rgba(0,0,0,0.55);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .2s, border-color .2s, background .2s, box-shadow .2s;
+}
+.wf-tab:hover { color: #1a1d24; border-color: rgba(21,101,192,0.35); }
+.wf-tab[aria-selected="true"] {
+  background: #1565c0;
+  border-color: #1565c0;
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(21,101,192,0.32);
+}
+.wf-tab:focus-visible { outline: 2px solid #1565c0; outline-offset: 3px; }
+
+/* ---- two-column stage ---- */
+.wf-stage {
+  display: grid;
+  /* the monitor is the centerpiece, so it takes the larger share */
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  gap: 64px;
+  align-items: center;
+}
+
+.wf-copy { min-width: 0; }
+.wf-copy .feature-label { display: flex; align-items: center; flex-wrap: wrap; }
+.wf-copy h3 {
+  font-size: 30px;
+  font-weight: 800;
+  color: #1a1d24;
+  margin-bottom: 16px;
+  line-height: 1.16;
+  letter-spacing: -1px;
+}
+.wf-copy p {
+  font-size: 15px;
+  color: rgba(0,0,0,0.5);
+  line-height: 1.75;
+  margin-bottom: 18px;
+}
+.wf-copy p.feature-caps { margin-bottom: 0; }
+
+/* the swap itself - subtle, never aggressive */
+.wf-fade { opacity: 1; transition: opacity .22s ease; }
+.wf-fade.is-swapping { opacity: 0; }
+
+/* ---- monitor column ---- */
+.wf-monitor-col { min-width: 0; }
+.wf-screen {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0b0d11;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+}
+.wf-screen video,
+.wf-screen img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* a demo whose recording has not landed yet - honest placeholder rather than
+   showing another workflow's clip under the wrong label */
+.wf-pending {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(21,101,192,0.20) 0%, rgba(11,13,17,0) 62%),
+    linear-gradient(180deg, #11151c 0%, #0b0d11 100%);
+}
+.wf-pending-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #4fc3f7;
+  border: 1px solid rgba(79,195,247,0.35);
+  border-radius: 999px;
+  padding: 5px 14px;
+}
+.wf-pending-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.62);
+  line-height: 1.6;
+  max-width: 340px;
+}
+
+/* ---- secondary demo nav ---- */
+.wf-demo-nav {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 22px;
+}
+.wf-demo-nav:empty { display: none; }
+.wf-demo {
+  appearance: none;
+  background: transparent;
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  color: rgba(0,0,0,0.5);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.wf-demo:hover { color: #1a1d24; border-color: rgba(21,101,192,0.35); }
+.wf-demo[aria-selected="true"] {
+  color: #1565c0;
+  border-color: rgba(21,101,192,0.45);
+  background: rgba(21,101,192,0.07);
+}
+.wf-demo:focus-visible { outline: 2px solid #1565c0; outline-offset: 2px; }
+
+.wf-caption {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: rgba(0,0,0,0.45);
+  max-width: 620px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---- no-JS fallback: the copy still ships in the page ---- */
+.wf-noscript { margin-top: 32px; }
+.wf-noscript li { margin-bottom: 18px; list-style: none; }
+.wf-noscript h3 { font-size: 18px; color: #1a1d24; margin-bottom: 6px; }
+.wf-noscript p { font-size: 14px; color: rgba(0,0,0,0.5); line-height: 1.7; }
+
+/* ---- responsive ---- */
+@media (max-width: 1040px) {
+  .wf-stage { grid-template-columns: 1fr; gap: 36px; }
+  .wf-copy { max-width: 720px; }
+}
+@media (max-width: 900px) {
+  /* scroll the tab rows rather than squeezing or wrapping into a block */
+  .wf-tabs,
+  .wf-demo-nav {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    /* full-bleed scroller inside the padded section, without letting the
+       page itself scroll sideways */
+    margin-left: -24px;
+    margin-right: -24px;
+    padding: 2px 24px;
+  }
+  .wf-tabs::-webkit-scrollbar,
+  .wf-demo-nav::-webkit-scrollbar { display: none; }
+  .wf-tabs { margin-bottom: 32px; }
+  .wf-copy h3 { font-size: 26px; }
+}
+@media (max-width: 480px) {
+  .wf-tab { font-size: 12.5px; padding: 8px 15px; }
+  .wf-copy h3 { font-size: 23px; }
+  .wf-caption { font-size: 12.5px; }
 }

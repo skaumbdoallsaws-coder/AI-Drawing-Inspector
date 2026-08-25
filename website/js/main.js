@@ -282,6 +282,28 @@
           poster: "assets/images/workflow_operations_manual_v1.jpg",
           caption: "Thirty-three pages with every claim cited to a source - and controlled release stays blocked until an engineer clears the open items.",
           alt: "Generating an operations and maintenance manual in InspectorPro: Sage compiles the MMLE-50D Electric Mobile Lift operations and maintenance manual, captures the technical figures from the assembly, cites each claim to a registered source, and marks the document DRAFT while controlled release remains blocked"
+        },
+        /* The three below are awaiting recordings. When a clip lands, replace
+           `pending: true` with `media`, `poster` and `alt` - nothing else
+           changes. Keep the two shipped demos first so the workflow always
+           opens on a real video rather than a placeholder. */
+        {
+          id: "specification-sheet",
+          title: "Specification Sheet",
+          pending: true,
+          caption: "A production specification sheet built from the model and product data, with each published value traced back to where it came from."
+        },
+        {
+          id: "work-instructions",
+          title: "Work Instructions",
+          pending: true,
+          caption: "Assembly work instructions staged step by step from the build sequence - numbered callouts identifying the parts handled at each stage, with station, completion check and open items named."
+        },
+        {
+          id: "inspection-sheet",
+          title: "Inspection Sheet",
+          pending: true,
+          caption: "An inspection sheet ballooned straight from the drawing: every controlled characteristic numbered, ready for measured values and tolerances entered by the inspector."
         }
       ]
     },

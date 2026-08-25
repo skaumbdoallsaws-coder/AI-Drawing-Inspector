@@ -290,8 +290,10 @@
         {
           id: "specification-sheet",
           title: "Specification Sheet",
-          pending: true,
-          caption: "A production specification sheet built from the model and product data, with each published value traced back to where it came from."
+          media: "assets/videos/workflow_specification_sheet_v1.mp4",
+          poster: "assets/images/workflow_specification_sheet_v1.jpg",
+          caption: "One page, nine approved product claims - each cited to a source: the manufacturer product page, the CAD extraction, and the reviewed assembly registry.",
+          alt: "Generating a product specification sheet in InspectorPro: Sage builds a one-page MMLE-50D Electric Mobile Lift specification with a fresh assembled-product capture, a rated capacity and travel table, and nine approved product claims, then reports the three sources cited and confirms no source CAD geometry was changed"
         },
         {
           id: "work-instructions",

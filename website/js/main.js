@@ -253,6 +253,40 @@
 
      Keep every string ASCII - this file has been through a mojibake repair. */
 
+  /* ---- workflow + document-type icons ----
+
+     Inlined rather than <img> on purpose: every glyph is drawn in
+     currentColor, so an inline node inherits the tab or card text color
+     and the active/inactive states need no second asset. 24x24 viewBox,
+     sized by CSS. Source: InspectorPro_Web_Tab_Icons, icon-map.json. */
+
+  var WF_ICONS = {
+    "Documentation":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <rect x="5" y="3" width="12" height="16" rx="2.4" fill="currentColor" opacity=".10"/> <path d="M8 3.8h7.2L19 7.6V19a2 2 0 0 1-2 2H8a3 3 0 0 1-3-3V6.8a3 3 0 0 1 3-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="M15 4v4h4M8.3 11h7.4M8.3 14.5h7.4M8.3 18h4.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/> </svg>',
+    "Vendor Response":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M4.2 6.2h5.1l2.1 2.2h8.4v8.4a2 2 0 0 1-2 2H6.2a2 2 0 0 1-2-2V6.2Z" fill="currentColor" opacity=".09"/> <path d="M3.5 6h5l2.2 2.3h9.8v8.4a2.3 2.3 0 0 1-2.3 2.3H5.8a2.3 2.3 0 0 1-2.3-2.3V6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="m8.1 14.2 2.1 2.1 5.3-5.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/> </svg>',
+    "Training":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="m12 3 9 4.6-9 4.6L3 7.6 12 3Z" fill="currentColor" opacity=".10"/> <path d="m12 3 9 4.6-9 4.6L3 7.6 12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="M6.4 9.5v5.1c0 2 2.6 3.7 5.6 3.7s5.6-1.7 5.6-3.7V9.5M21 8v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/> <circle cx="21" cy="14.8" r="1" fill="currentColor"/> </svg>',
+    "Process Maps":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <circle cx="5" cy="6" r="2.3" fill="currentColor" opacity=".12"/> <circle cx="19" cy="12" r="2.3" fill="currentColor" opacity=".12"/> <circle cx="7" cy="19" r="2.3" fill="currentColor" opacity=".12"/> <circle cx="5" cy="6" r="2.3" stroke="currentColor" stroke-width="1.7"/> <circle cx="19" cy="12" r="2.3" stroke="currentColor" stroke-width="1.7"/> <circle cx="7" cy="19" r="2.3" stroke="currentColor" stroke-width="1.7"/> <path d="M7.2 6.5c4.5.4 5.3 3.7 9.5 4.9M17 13.5c-2.4 2.8-4.8 4.5-7.8 5.1M5.5 8.3c-.2 3 .1 5.3.8 8.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/> </svg>',
+    "Facility Layout":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <rect x="3.5" y="4" width="17" height="16" rx="2.2" fill="currentColor" opacity=".08"/> <rect x="3.5" y="4" width="17" height="16" rx="2.2" stroke="currentColor" stroke-width="1.7"/> <path d="M8 4v6h5V4M13 10v4h7.5M3.5 14H9v6" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="M15.7 16.8h2.1M15.7 18.7h2.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/> </svg>',
+    "Drawing Release":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M6 3.5h8l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 20V5a1.5 1.5 0 0 1 1-1.5Z" fill="currentColor" opacity=".09"/> <path d="M6 3.5h8l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 20V5A1.5 1.5 0 0 1 6 3.5ZM14 3.8v4h4" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="m8.4 14.6 2.1 2.1 4.9-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/> </svg>',
+    "Revision Compare":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M6 4.5v15M18 4.5v15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity=".45"/> <path d="M9 7h6.8l-2-2M15.8 7l-2 2M15 17H8.2l2 2M8.2 17l2-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/> <circle cx="6" cy="7" r="2" fill="currentColor" opacity=".12"/> <circle cx="18" cy="17" r="2" fill="currentColor" opacity=".12"/> <circle cx="6" cy="7" r="2" stroke="currentColor" stroke-width="1.7"/> <circle cx="18" cy="17" r="2" stroke="currentColor" stroke-width="1.7"/> </svg>',
+    "Parts Manual":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M4.2 5.5A2.5 2.5 0 0 1 6.7 3H11v16H6.7a2.5 2.5 0 0 0-2.5 2.5v-16Z" fill="currentColor" opacity=".11"/> <path d="M19.8 5.5A2.5 2.5 0 0 0 17.3 3H13v16h4.3a2.5 2.5 0 0 1 2.5 2.5v-16Z" fill="currentColor" opacity=".06"/> <path d="M4.2 5.5A2.5 2.5 0 0 1 6.7 3H11v16H6.7a2.5 2.5 0 0 0-2.5 2.5v-16ZM19.8 5.5A2.5 2.5 0 0 0 17.3 3H13v16h4.3a2.5 2.5 0 0 1 2.5 2.5v-16Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="M6.7 7h1.9M6.7 10h1.9M15.4 7h1.9M15.4 10h1.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/> </svg>',
+    "Operations Manual":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M5 4h9a2 2 0 0 1 2 2v12H7a2 2 0 0 0-2 2V4Z" fill="currentColor" opacity=".08"/> <path d="M5 4h9a2 2 0 0 1 2 2v12H7a2 2 0 0 0-2 2V4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="M16.8 10.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" fill="currentColor" opacity=".12"/> <path d="M16.8 10.2v-1.4M16.8 19.2v-1.4M12.3 14h-1.4M22.7 14h-2.1M13.6 10.8l-1-1M20 17.2l1 1M20 10.8l1-1M13.6 17.2l-1 1" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/> <circle cx="16.8" cy="14" r="1.55" stroke="currentColor" stroke-width="1.6"/> </svg>',
+    "Specification Sheet":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <rect x="5" y="4" width="14" height="17" rx="2" fill="currentColor" opacity=".08"/> <rect x="5" y="4" width="14" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/> <path d="M9 4V2.8h6V4M8.5 9h7M8.5 13h2.2M13.3 13h2.2M8.5 17h2.2M13.3 17h2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/> </svg>',
+    "Work Instructions":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M13.8 5.2a4.2 4.2 0 0 0-5.5 5.4L3.7 15.2a2.5 2.5 0 1 0 3.5 3.5l4.6-4.6a4.2 4.2 0 0 0 5.5-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.1-3.1Z" fill="currentColor" opacity=".10"/> <path d="M13.8 5.2a4.2 4.2 0 0 0-5.5 5.4L3.7 15.2a2.5 2.5 0 1 0 3.5 3.5l4.6-4.6a4.2 4.2 0 0 0 5.5-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.1-3.1Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/> <path d="M15.5 17h5M15.5 20h3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/> </svg>',
+    "Inspection Sheet":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <rect x="5" y="4" width="14" height="17" rx="2" fill="currentColor" opacity=".08"/> <rect x="5" y="4" width="14" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/> <path d="M9 4V2.8h6V4M8.2 10.2l1.2 1.2 2.2-2.3M13.7 10.4h2.3M8.2 15.4l1.2 1.2 2.2-2.3M13.7 15.6h2.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/> </svg>'
+  };
+
   var WORKFLOWS = [
     {
       id: "documentation",
@@ -454,6 +488,7 @@
     var copyEl = root.querySelector("[data-wf-copy]");
     var screenEl = root.querySelector("[data-wf-screen]");
     var demosEl = root.querySelector("[data-wf-demos]");
+    var pickerEl = root.querySelector("[data-wf-picker]");
     var captionEl = root.querySelector("[data-wf-caption]");
     if (!tabsEl || !stageEl || !copyEl || !screenEl || !demosEl || !captionEl) return;
 
@@ -469,6 +504,18 @@
       var node = document.createElement(tag);
       if (cls) node.className = cls;
       if (text != null) node.textContent = text;
+      return node;
+    }
+
+    /* The glyph is trusted markup from the bundled icon set, never user or
+       model input, so innerHTML is safe here. A missing label yields no icon
+       rather than an empty box. */
+    function iconFor(label, cls) {
+      var markup = WF_ICONS[label];
+      if (!markup) return null;
+      var node = el("span", cls);
+      node.setAttribute("aria-hidden", "true");
+      node.innerHTML = markup;
       return node;
     }
 
@@ -546,15 +593,21 @@
     function renderDemos() {
       var wf = WORKFLOWS[activeWorkflow];
       demosEl.innerHTML = "";
-      /* a single-demo workflow gets no chooser - :empty hides the row */
+      /* One output means there is nothing to choose between, so the whole
+         picker - heading included - stays out of the page. */
+      if (pickerEl) pickerEl.hidden = wf.demos.length < 2;
       if (wf.demos.length < 2) return;
 
       for (var i = 0; i < wf.demos.length; i++) {
         (function (index) {
-          var btn = el("button", "wf-demo", wf.demos[index].title);
+          var demo = wf.demos[index];
+          var btn = el("button", "wf-doc");
           btn.type = "button";
           btn.setAttribute("role", "tab");
           btn.setAttribute("aria-selected", index === activeDemo ? "true" : "false");
+          var docIcon = iconFor(demo.title, "wf-doc-icon");
+          if (docIcon) btn.appendChild(docIcon);
+          btn.appendChild(el("span", "wf-doc-text", demo.title));
           btn.addEventListener("click", function () { selectDemo(index); });
           demosEl.appendChild(btn);
         })(i);
@@ -576,7 +629,7 @@
     function selectDemo(index) {
       if (index === activeDemo) return;
       activeDemo = index;
-      var demoButtons = demosEl.querySelectorAll(".wf-demo");
+      var demoButtons = demosEl.querySelectorAll(".wf-doc");
       for (var i = 0; i < demoButtons.length; i++) {
         demoButtons[i].setAttribute("aria-selected", i === activeDemo ? "true" : "false");
       }
@@ -604,7 +657,10 @@
     function buildTabs() {
       for (var i = 0; i < WORKFLOWS.length; i++) {
         (function (index) {
-          var btn = el("button", "wf-tab", WORKFLOWS[index].title);
+          var btn = el("button", "wf-tab");
+          var tabIcon = iconFor(WORKFLOWS[index].title, "wf-tab-icon");
+          if (tabIcon) btn.appendChild(tabIcon);
+          btn.appendChild(el("span", "wf-tab-text", WORKFLOWS[index].title));
           btn.type = "button";
           btn.setAttribute("role", "tab");
           btn.id = "wf-tab-" + WORKFLOWS[index].id;

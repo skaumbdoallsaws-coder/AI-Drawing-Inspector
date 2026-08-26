@@ -13,7 +13,7 @@
   <meta property="og:url" content="https://inspectorpro.io">
   <link rel="canonical" href="https://inspectorpro.io">
   <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/style.css?v=d5db8ddba1">
+  <link rel="stylesheet" href="css/style.css?v=e7275609ee">
   <style>
     /* Fade-in animation */
     .fade-in {
@@ -688,6 +688,7 @@
        to add here. Hidden until the script takes over so the fallback below
        is what a no-JS visitor reads. -->
   <div class="wf-showcase fade-in" data-wf-showcase hidden>
+    <p class="wf-picker-label wf-tabs-label">Explore workflows</p>
     <div class="wf-tabs" role="tablist" aria-label="Workflows" data-wf-tabs></div>
 
     <div class="wf-stage wf-fade">
@@ -701,7 +702,12 @@
           <div class="monitor-stand"></div>
           <div class="monitor-base"></div>
         </div>
-        <div class="wf-demo-nav" role="tablist" aria-label="Demos in this workflow" data-wf-demos></div>
+        <!-- Hidden by the script whenever the active workflow has a single
+             output, so the heading never sits above an empty row. -->
+        <div class="wf-doc-picker" data-wf-picker hidden>
+          <p class="wf-picker-label">Choose a document type</p>
+          <div class="wf-doc-nav" role="tablist" aria-label="Document types" data-wf-demos></div>
+        </div>
         <p class="wf-caption" data-wf-caption></p>
       </div>
     </div>
@@ -819,7 +825,7 @@
   <div>&copy; 2026 InspectorPro. All rights reserved.</div>
 </footer>
 
-<script src="js/main.js?v=dac961c13a"></script>
+<script src="js/main.js?v=e20ef28e5c"></script>
 </body>
 </html>
 
